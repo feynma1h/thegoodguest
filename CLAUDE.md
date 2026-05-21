@@ -55,11 +55,13 @@ outputs/                          gitignored; generated artifacts
 - The capture-bundle contract is defined, generated, and tested. `python tools/build_test_bundle.py && python tools/inspect_bundle.py outputs/test_bundle/bundle.pb` runs clean end-to-end.
 - The photo-upload pipeline (`perception-obj`, `perception-geom`) is deployed and produces per-object splats from photo uploads. It's the old path; we're keeping it alive but not iterating on it.
 - 25 schema + math tests, all passing. Don't break them.
+- Bundle ingester at `services/api/`: `POST /ingest` accepts a CaptureBundle by GCS URI, validates it (schema version, quaternion norms, tier-vs-depth consistency, relative GCS paths), and returns a structured summary or 400 error. 7 tests passing. Not yet deployed; no perception dispatch yet.
 
 ## What does NOT work / what we're deliberately not doing
 
 - **No iOS app exists yet.** The bundle synthesizer is the only thing that writes bundles.
-- **No backend bundle ingester exists yet.** Nothing reads bundles in production. `tools/inspect_bundle.py` is the closest thing.
+- **Ingester is not deployed.** No Dockerfile, no `infra/deploy_api.sh`, no Cloud Run service. Runs locally only.
+- **Ingester does not dispatch perception work.** `POST /ingest` validates and acknowledges; it does not trigger `perception-obj` or `perception-geom`.
 - **No web app yet.**
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
@@ -108,13 +110,18 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-Three options live as of end of last session (May 2026):
+Two parallel tracks as of end of session (May 2026):
 
-1. **iOS capture app prototype** — Swift + ARKit, emits the bundle. Highest-value because it's the half of the contract that doesn't exist.
-2. **Backend bundle ingester** — FastAPI route that ingests bundles, validates, dispatches to perception services. Unblocks option 3.
-3. **Adapt `_compose_scene` to consume CaptureBundle** — with ARKit poses/gravity/intrinsics in hand, most of the gravity/up-axis machinery deletes. Depends on option 2.
+**Track A — backend (sequential within this track)**
 
-Recommended order: 2 → (1 in parallel) → 3. Option 2 is testable here against the existing `outputs/test_bundle/bundle.pb`. Option 1 derisks the contract from the side the backend can't verify. Option 3 is where the photo-upload pain actually goes away.
+1. **Deploy the ingester** — Dockerfile + `infra/deploy_api.sh` for `services/api/`. CPU-only Cloud Run, `--allow-unauthenticated` for now.
+2. **Wire perception dispatch** — after validation passes, `POST /ingest` triggers `perception-obj`/`perception-geom`. Before building: Chat session on sync vs. async dispatch.
+
+**Track B — iOS (independent)**
+
+- **iOS capture app prototype** — Swift + ARKit, emits the bundle. Derisks the contract from the side the backend can't verify.
+
+Tracks A and B can proceed in parallel. Track A step 2 is blocked on step 1 and on the dispatch architecture decision.
 
 ## Session-end housekeeping (Claude Code: do this before ending any session)
 
