@@ -1,0 +1,530 @@
+{
+  "schema_version": "0.1.0",
+  "perception_image_id": "synthetic_living_room_001",
+
+  "structural": {
+    "nodes": [
+      {"id": "node_obj_sofa", "kind": "object", "object_ref": "obj_sofa"},
+      {"id": "node_obj_coffee_table", "kind": "object", "object_ref": "obj_coffee_table"},
+      {"id": "node_obj_tv", "kind": "object", "object_ref": "obj_tv"},
+      {"id": "node_obj_desk", "kind": "object", "object_ref": "obj_desk"},
+      {"id": "node_obj_office_chair", "kind": "object", "object_ref": "obj_office_chair"},
+      {"id": "node_obj_armchair", "kind": "object", "object_ref": "obj_armchair"},
+      {"id": "node_obj_bookshelf", "kind": "object", "object_ref": "obj_bookshelf"},
+      {"id": "node_obj_window_north", "kind": "object", "object_ref": "obj_window_north"},
+      {"id": "node_obj_door_south", "kind": "object", "object_ref": "obj_door_south"},
+      {"id": "node_obj_doorway_east", "kind": "object", "object_ref": "obj_doorway_east"},
+      {"id": "node_obj_rug", "kind": "object", "object_ref": "obj_rug"},
+      {"id": "node_obj_floor_lamp", "kind": "object", "object_ref": "obj_floor_lamp"},
+
+      {
+        "id": "node_zone_seating",
+        "kind": "zone",
+        "zone_kind": "seating",
+        "zone_polygon": [
+          {"x": -0.20, "y": -0.10}, {"x": 0.20, "y": -0.10},
+          {"x": 0.20, "y": 0.45}, {"x": -0.20, "y": 0.45}
+        ],
+        "zone_member_object_ids": ["obj_sofa", "obj_coffee_table", "obj_rug"],
+        "zone_area_normalized": 0.22
+      },
+      {
+        "id": "node_zone_work",
+        "kind": "zone",
+        "zone_kind": "work",
+        "zone_polygon": [
+          {"x": 0.18, "y": -0.05}, {"x": 0.42, "y": -0.05},
+          {"x": 0.42, "y": 0.30}, {"x": 0.18, "y": 0.30}
+        ],
+        "zone_member_object_ids": ["obj_desk", "obj_office_chair"],
+        "zone_area_normalized": 0.084
+      },
+      {
+        "id": "node_zone_storage",
+        "kind": "zone",
+        "zone_kind": "storage",
+        "zone_polygon": [
+          {"x": -0.42, "y": 0.12}, {"x": -0.30, "y": 0.12},
+          {"x": -0.30, "y": 0.68}, {"x": -0.42, "y": 0.68}
+        ],
+        "zone_member_object_ids": ["obj_bookshelf"],
+        "zone_area_normalized": 0.067
+      },
+      {
+        "id": "node_zone_dead_corner",
+        "kind": "zone",
+        "zone_kind": "dead_zone",
+        "zone_polygon": [
+          {"x": -0.42, "y": -0.45}, {"x": -0.20, "y": -0.45},
+          {"x": -0.20, "y": -0.15}, {"x": -0.42, "y": -0.15}
+        ],
+        "zone_member_object_ids": [],
+        "zone_area_normalized": 0.066
+      },
+      {
+        "id": "node_zone_circulation",
+        "kind": "zone",
+        "zone_kind": "circulation",
+        "zone_polygon": [
+          {"x": -0.32, "y": -0.45}, {"x": 0.43, "y": -0.45},
+          {"x": 0.43, "y": 0.10}, {"x": -0.32, "y": 0.10}
+        ],
+        "zone_member_object_ids": [],
+        "zone_area_normalized": 0.41
+      },
+
+      {
+        "id": "node_focal_window",
+        "kind": "focal_point",
+        "focal_kind": "window_light",
+        "focal_position": {"x": 0.0, "y": 0.50, "z": 0.50},
+        "focal_strength": 0.78,
+        "focal_anchor_object_id": "obj_window_north"
+      },
+      {
+        "id": "node_focal_tv",
+        "kind": "focal_point",
+        "focal_kind": "tv_or_screen",
+        "focal_position": {"x": 0.0, "y": 0.55, "z": -0.48},
+        "focal_strength": 0.62,
+        "focal_anchor_object_id": "obj_tv"
+      },
+      {
+        "id": "node_focal_bookshelf",
+        "kind": "focal_point",
+        "focal_kind": "architectural",
+        "focal_position": {"x": -0.41, "y": 0.40, "z": 0.0},
+        "focal_strength": 0.70,
+        "focal_anchor_object_id": "obj_bookshelf"
+      },
+      {
+        "id": "node_focal_intended",
+        "kind": "focal_point",
+        "focal_kind": "intended_focal",
+        "focal_position": {"x": 0.0, "y": 0.55, "z": -0.48},
+        "focal_strength": 0.50,
+        "focal_anchor_object_id": "obj_tv"
+      }
+    ],
+
+    "facing_relations": [
+      {
+        "from_node_id": "node_obj_sofa",
+        "to_node_id": "node_focal_tv",
+        "angle_offset_radians": 0.0,
+        "is_primary": true
+      },
+      {
+        "from_node_id": "node_obj_desk",
+        "to_node_id": "node_obj_doorway_east",
+        "angle_offset_radians": 0.3,
+        "is_primary": true
+      },
+      {
+        "from_node_id": "node_obj_armchair",
+        "to_node_id": "node_obj_sofa",
+        "angle_offset_radians": 1.5,
+        "is_primary": false
+      },
+      {
+        "from_node_id": "node_obj_bookshelf",
+        "to_node_id": "node_zone_seating",
+        "angle_offset_radians": 0.2,
+        "is_primary": true
+      }
+    ],
+
+    "adjacency_relations": [
+      {
+        "a_node_id": "node_obj_sofa",
+        "b_node_id": "node_obj_coffee_table",
+        "separation_normalized": 0.13,
+        "is_against_same_wall": false,
+        "relationship_kind": "near"
+      },
+      {
+        "a_node_id": "node_obj_sofa",
+        "b_node_id": "node_obj_window_north",
+        "separation_normalized": 0.02,
+        "is_against_same_wall": false,
+        "relationship_kind": "touching"
+      },
+      {
+        "a_node_id": "node_obj_desk",
+        "b_node_id": "node_obj_office_chair",
+        "separation_normalized": 0.05,
+        "is_against_same_wall": false,
+        "relationship_kind": "near"
+      },
+      {
+        "a_node_id": "node_obj_desk",
+        "b_node_id": "node_obj_armchair",
+        "separation_normalized": 0.08,
+        "is_against_same_wall": false,
+        "relationship_kind": "near"
+      },
+      {
+        "a_node_id": "node_obj_coffee_table",
+        "b_node_id": "node_obj_rug",
+        "separation_normalized": 0.0,
+        "is_against_same_wall": false,
+        "relationship_kind": "touching"
+      }
+    ],
+
+    "blocking_relations": [
+      {
+        "blocker_node_id": "node_obj_sofa",
+        "blocked_node_id": "node_focal_window",
+        "blocking_kind": "light_path",
+        "severity": 0.65
+      },
+      {
+        "blocker_node_id": "node_obj_armchair",
+        "blocked_node_id": "node_zone_circulation",
+        "blocking_kind": "traffic_path",
+        "severity": 0.45
+      },
+      {
+        "blocker_node_id": "node_obj_coffee_table",
+        "blocked_node_id": "node_zone_circulation",
+        "blocking_kind": "traffic_path",
+        "severity": 0.30
+      }
+    ],
+
+    "complementary_relations": [
+      {
+        "a_node_id": "node_obj_sofa",
+        "b_node_id": "node_obj_coffee_table",
+        "complement_kind": "set"
+      },
+      {
+        "a_node_id": "node_obj_rug",
+        "b_node_id": "node_zone_seating",
+        "complement_kind": "anchored_to"
+      },
+      {
+        "a_node_id": "node_obj_desk",
+        "b_node_id": "node_obj_office_chair",
+        "complement_kind": "set"
+      }
+    ],
+
+    "competing_relations": [
+      {
+        "a_node_id": "node_focal_tv",
+        "b_node_id": "node_focal_bookshelf",
+        "competing_for": "focal_attention",
+        "severity": 0.55
+      },
+      {
+        "a_node_id": "node_zone_seating",
+        "b_node_id": "node_zone_work",
+        "competing_for": "traffic_space",
+        "severity": 0.40
+      }
+    ]
+  },
+
+  "issues": [
+    {
+      "id": "issue_001",
+      "kind": "seating_back_to_primary_light",
+      "severity": "significant",
+      "involved_node_ids": ["node_obj_sofa", "node_focal_window"],
+      "measurement": {
+        "sofa_facing_direction_z": -1.0,
+        "window_direction_z": 1.0,
+        "angle_between_radians": 3.14159,
+        "window_intensity_relative": 0.85
+      },
+      "description": "The sofa is placed directly under the north window and faces away from it, putting natural light behind anyone seated. Reading or working from the sofa creates harsh contrast; the room's only strong daylight is wasted on the back of the sofa.",
+      "confidence": 0.92
+    },
+    {
+      "id": "issue_002",
+      "kind": "seating_faces_blank_wall",
+      "severity": "significant",
+      "involved_node_ids": ["node_obj_desk", "node_obj_office_chair"],
+      "measurement": {
+        "desk_facing_target": "wall_index_2",
+        "distance_to_wall_normalized": 0.12,
+        "nearest_focal_in_facing_direction": null
+      },
+      "description": "The desk is pushed into the southeast corner with the user facing the east wall, back to the rest of the room. There is no focal point or visual relief in the user's line of sight, and the position is socially closed-off from the room.",
+      "confidence": 0.88
+    },
+    {
+      "id": "issue_003",
+      "kind": "blocked_traffic_path",
+      "severity": "significant",
+      "involved_node_ids": [
+        "node_obj_armchair", "node_obj_coffee_table", "node_zone_circulation",
+        "node_obj_door_south", "node_obj_doorway_east"
+      ],
+      "measurement": {
+        "circulation_path_min_width_normalized": 0.18,
+        "convention_min_width_normalized": 0.21,
+        "objects_intersecting_path": 2,
+        "primary_route": "south_door_to_east_doorway"
+      },
+      "description": "The path from the south door (entry from hall) to the east doorway (to kitchen) is the room's main circulation. It currently passes through the seating zone with two encroaching objects (armchair, coffee table) narrowing it below conventional minimum clearance.",
+      "confidence": 0.85
+    },
+    {
+      "id": "issue_004",
+      "kind": "competing_focal_points",
+      "severity": "minor",
+      "involved_node_ids": ["node_focal_tv", "node_focal_bookshelf"],
+      "measurement": {
+        "tv_strength": 0.62,
+        "bookshelf_strength": 0.70,
+        "angle_between_radians": 1.5708,
+        "seating_orientation_committed_to": "tv"
+      },
+      "description": "The TV (south wall) and the bookshelf (west wall) are both significant visual masses, but seating commits to the TV axis. The bookshelf becomes peripheral despite being the heaviest piece in the room.",
+      "confidence": 0.70
+    },
+    {
+      "id": "issue_005",
+      "kind": "large_dead_zone",
+      "severity": "minor",
+      "involved_node_ids": ["node_zone_dead_corner"],
+      "measurement": {
+        "dead_zone_area_normalized": 0.066,
+        "total_free_floor_area_normalized": 0.38,
+        "dead_zone_fraction_of_free_floor": 0.17,
+        "location": "southwest_corner_near_south_door"
+      },
+      "description": "The southwest corner near the south door is unused floor space — too small for a major function, too large to ignore. It's adjacent to the bookshelf's wall but unrelated to it.",
+      "confidence": 0.75
+    },
+    {
+      "id": "issue_006",
+      "kind": "undersized_furniture",
+      "severity": "minor",
+      "involved_node_ids": ["node_obj_coffee_table", "node_obj_sofa"],
+      "measurement": {
+        "sofa_width_normalized": 0.55,
+        "coffee_table_width_normalized": 0.18,
+        "ratio": 0.327,
+        "convention_ratio_min": 0.50
+      },
+      "description": "The coffee table is roughly one-third the sofa's width; convention places it at two-thirds. It visually under-anchors the seating group and is reachable from only the middle seat.",
+      "confidence": 0.72
+    },
+    {
+      "id": "issue_007",
+      "kind": "zone_conflict",
+      "severity": "minor",
+      "involved_node_ids": ["node_zone_seating", "node_zone_work"],
+      "measurement": {
+        "shared_boundary_length_normalized": 0.35,
+        "separation_gap_normalized": 0.0,
+        "user_stated_dual_function": true
+      },
+      "description": "The seating zone and the work zone share a boundary with no separation. The user has stated they work from this room a couple of days a week, which means leisure and work occupy overlapping space — the room never visually 'resets' between modes.",
+      "confidence": 0.78
+    }
+  ],
+
+  "observations": [
+    {
+      "id": "obs_001",
+      "kind": "primary_light_direction",
+      "involved_node_ids": ["node_focal_window"],
+      "payload": {
+        "direction": {"x": 0.0, "y": -0.3, "z": -0.95},
+        "cardinal": "north",
+        "quality": "cool_daylight",
+        "intensity_relative": 0.85
+      },
+      "description": "The room's dominant light enters from the north window, casting cool, even, indirect light. No direct sun reaches the interior at any time of year."
+    },
+    {
+      "id": "obs_002",
+      "kind": "primary_sight_line",
+      "involved_node_ids": ["node_obj_sofa", "node_focal_tv"],
+      "payload": {
+        "from": "obj_sofa",
+        "to": "obj_tv",
+        "distance_normalized": 0.82,
+        "obstacles": ["obj_coffee_table"],
+        "obstacle_blocks": false
+      },
+      "description": "The primary sight line runs sofa-to-TV across the room's full length. The coffee table is in the path but below seated-eye-level. Viewing distance is long relative to typical TV-to-seating conventions."
+    },
+    {
+      "id": "obs_003",
+      "kind": "wasted_sight_line",
+      "involved_node_ids": ["node_obj_bookshelf", "node_zone_seating"],
+      "payload": {
+        "from": "obj_bookshelf",
+        "potential_target": "seating_zone",
+        "actual_attention_committed_to": "tv"
+      },
+      "description": "The bookshelf has the visual presence to anchor a room but is on a perpendicular axis to the committed seating-TV line. Its mass is unused as a focal point."
+    },
+    {
+      "id": "obs_004",
+      "kind": "ceiling_height_character",
+      "involved_node_ids": [],
+      "payload": {
+        "height_m": 2.7,
+        "ratio_to_longest_floor_dimension": 0.643,
+        "character": "standard"
+      },
+      "description": "Ceiling is standard residential height — no architectural drama up or down. Designs that rely on verticality (tall plants, high art) are available; designs that need loftiness are not."
+    },
+    {
+      "id": "obs_005",
+      "kind": "visual_density",
+      "involved_node_ids": [],
+      "payload": {
+        "total_footprint_fraction": 0.42,
+        "free_floor_fraction": 0.38,
+        "circulation_fraction": 0.20,
+        "density_class": "high"
+      },
+      "description": "The room is densely furnished — roughly 42% of floor area is occupied, with circulation eating another 20%. Adding new pieces is constrained; subtraction is more available than addition."
+    },
+    {
+      "id": "obs_006",
+      "kind": "color_temperature_tilt",
+      "involved_node_ids": [],
+      "payload": {
+        "lab_b_aggregate": 9.8,
+        "tilt": "slightly_warm",
+        "dominant_surface_materials": ["wood_light", "fabric_soft", "wood_dark"]
+      },
+      "description": "Material palette tilts slightly warm (light woods, mid-tone fabrics) but the dominant light source is cool. There is a tension between palette warmth and ambient coolness."
+    },
+    {
+      "id": "obs_007",
+      "kind": "heaviest_fixed_element",
+      "involved_node_ids": ["node_obj_bookshelf"],
+      "payload": {
+        "object_id": "obj_bookshelf",
+        "object_class": "bookshelf",
+        "bbox_volume_normalized": 0.0116,
+        "is_actually_fixed": false,
+        "rationale": "heavy_movable, against full west wall"
+      },
+      "description": "The bookshelf is the room's heaviest visual element. It is technically movable but realistically a fixed constraint to design around."
+    },
+    {
+      "id": "obs_008",
+      "kind": "material_palette_summary",
+      "involved_node_ids": [],
+      "payload": {
+        "dominant_materials": [
+          {"material": "fabric_soft", "weight": 0.35},
+          {"material": "wood_light", "weight": 0.22},
+          {"material": "wood_dark", "weight": 0.18},
+          {"material": "fabric_structured", "weight": 0.15},
+          {"material": "metal", "weight": 0.05},
+          {"material": "glass", "weight": 0.05}
+        ],
+        "diversity_index": 0.74
+      },
+      "description": "Palette is moderately diverse with no single dominant material. Two wood tones (light and dark) coexist without intentional bridging."
+    }
+  ],
+
+  "functional_zones": [
+    {
+      "zone_node_id": "node_zone_seating",
+      "zone_kind": "seating",
+      "is_complete": true,
+      "missing_typical_members": [],
+      "coherence": 0.65
+    },
+    {
+      "zone_node_id": "node_zone_work",
+      "zone_kind": "work",
+      "is_complete": true,
+      "missing_typical_members": [],
+      "coherence": 0.50
+    },
+    {
+      "zone_node_id": "node_zone_storage",
+      "zone_kind": "storage",
+      "is_complete": true,
+      "missing_typical_members": [],
+      "coherence": 0.85
+    }
+  ],
+
+  "focal_point_ranking": [
+    {
+      "focal_node_id": "node_focal_window",
+      "focal_kind": "window_light",
+      "rank": 1,
+      "strength": 0.78,
+      "is_oriented_toward": []
+    },
+    {
+      "focal_node_id": "node_focal_bookshelf",
+      "focal_kind": "architectural",
+      "rank": 2,
+      "strength": 0.70,
+      "is_oriented_toward": []
+    },
+    {
+      "focal_node_id": "node_focal_tv",
+      "focal_kind": "tv_or_screen",
+      "rank": 3,
+      "strength": 0.62,
+      "is_oriented_toward": ["node_obj_sofa"]
+    }
+  ],
+
+  "traffic_analysis": {
+    "primary_path_polyline": [
+      {"x": -0.32, "y": -0.42},
+      {"x": -0.10, "y": -0.20},
+      {"x": 0.15, "y": -0.05},
+      {"x": 0.35, "y": 0.05},
+      {"x": 0.43, "y": 0.10}
+    ],
+    "primary_path_min_width_normalized": 0.18,
+    "primary_path_min_width_meets_convention": false,
+    "secondary_paths": [],
+    "pinch_points": [
+      {
+        "position": {"x": 0.10, "y": -0.05},
+        "width_normalized": 0.18,
+        "caused_by_object_ids": ["obj_armchair", "obj_coffee_table"]
+      }
+    ]
+  },
+
+  "light_analysis": {
+    "primary_light_direction": {"x": 0.0, "y": -0.3, "z": -0.95},
+    "primary_source_node_id": "node_obj_window_north",
+    "illumination_grid_resolution": 4,
+    "illumination_grid": [
+      [0.92, 0.95, 0.95, 0.88],
+      [0.70, 0.75, 0.70, 0.55],
+      [0.50, 0.55, 0.45, 0.35],
+      [0.32, 0.40, 0.38, 0.30]
+    ],
+    "dark_zone_polygons": [
+      [
+        {"x": -0.42, "y": -0.45}, {"x": -0.10, "y": -0.45},
+        {"x": -0.10, "y": -0.20}, {"x": -0.42, "y": -0.20}
+      ]
+    ]
+  },
+
+  "perception_had_metric_scale": true,
+  "perception_had_orientation": true,
+  "perception_had_complete_floor_coverage": true,
+
+  "light_analysis_reliable": true,
+  "traffic_analysis_reliable": true,
+  "focal_ranking_reliable": true,
+
+  "overall_graph_confidence": 0.82
+}

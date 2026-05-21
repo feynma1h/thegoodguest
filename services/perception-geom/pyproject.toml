@@ -1,0 +1,22 @@
+[project]
+name = "roomstudio-perception-geom"
+version = "0.0.1"
+description = "VGGT-only scene-level geometric reconstruction service"
+requires-python = ">=3.11"
+
+# Runtime deps are installed in the Dockerfile (not via this file) because
+# they include heavy ML packages (torch, etc.) that need explicit version
+# pinning matched to the CUDA base image. This file exists for editor
+# tooling and to mark this as a Python project for monorepo navigation.
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "huggingface_hub",
+    "trimesh",
+    "pillow",
+    "pillow-heif",
+    "numpy<2",
+    "einops",
+    "safetensors",
+]

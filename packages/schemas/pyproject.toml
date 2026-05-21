@@ -1,0 +1,27 @@
+[project]
+name = "roomstudio-schemas"
+version = "0.1.0"
+description = "roomstudio capture-bundle schemas (proto + generated Python)"
+requires-python = ">=3.11"
+dependencies = [
+    "protobuf>=4.25",
+]
+
+# The proto source of truth is packages/schemas/capture_bundle.proto.
+# Generated Python lives in packages/schemas/roomstudio_schemas/.
+# Regenerate after edits with: ./tools/gen_proto.sh
+#
+# Install editable during dev:
+#   pip install -e packages/schemas
+#
+# This package supersedes the older pydantic-based room_perception /
+# spatial_graph schemas, which described the photo-upload pipeline's
+# Layer 1/2 outputs. Those are retained for the web fallback path; the
+# capture bundle is the new entry point for the iOS path.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["roomstudio_schemas*"]

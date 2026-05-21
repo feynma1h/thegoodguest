@@ -1,0 +1,26 @@
+# Exclude from the Cloud Build upload context.
+# Same idea as .gitignore but enforced at upload time.
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.python-version
+*.egg-info/
+.eggs/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Local outputs (none expected here, but safe)
+outputs/
+*.glb
+*.ply
+
+# Docs don't need to ship to build context
+README.md

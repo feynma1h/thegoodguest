@@ -1,0 +1,89 @@
+# One-time build of the pytorch3d wheel pinned by SAM 3D Objects.
+#
+# Run via: ./infra/build_pytorch3d_wheel.sh
+# Output:  gs://${PROJECT_ID}-build-cache/wheels/pytorch3d-<commit>-cp311-cu121.whl
+#
+# Reasoning: SAM 3D pins pytorch3d to a git commit (no prebuilt wheel exists),
+# and compiling pytorch3d inside the main perception-obj build pushes total
+# build time over Cloud Build's 60-minute global timeout. We compile the wheel
+# once, cache it in GCS, and download-and-install it in the main Dockerfile.
+#
+# Rebuild this only when SAM 3D's pinned pytorch3d commit changes. The pinned
+# commit is hardcoded below; keep it in sync with requirements.p3d.txt in
+# SAM 3D's repo.
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        export DOCKER_BUILDKIT=1
+        docker build -f - -t pytorch3d-builder . <<'EOF'
+        # Build pytorch3d in the SAME environment shape as perception-obj's runtime
+        # (mambaforge + Meta's default.yml). This ensures the resulting wheel is
+        # glibc/ABI-compatible with the runtime container — otherwise we hit
+        # GLIBC version mismatches at import time.
+        FROM condaforge/mambaforge:24.7.1-0
+
+        ENV PIP_NO_CACHE_DIR=1 \
+            DEBIAN_FRONTEND=noninteractive
+
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+                git build-essential ninja-build \
+            && rm -rf /var/lib/apt/lists/*
+
+        # Clone SAM 3D and create the same conda env the runtime uses.
+        RUN git clone --depth 1 https://github.com/facebookresearch/sam-3d-objects.git /opt/sam3d \
+            && mamba env create -f /opt/sam3d/environments/default.yml \
+            && mamba clean -afy
+
+        ENV PATH=/opt/conda/envs/sam3d-objects/bin:/opt/conda/bin:$$PATH \
+            CUDA_HOME=/opt/conda/envs/sam3d-objects \
+            CPATH=/opt/conda/envs/sam3d-objects/targets/x86_64-linux/include \
+            TORCH_CUDA_ARCH_LIST="8.6;8.9;9.0" \
+            MAX_JOBS=4 \
+            NVCC_THREADS=1
+
+        # Install torch from cu121 index — pytorch3d needs torch to build against.
+        # Matches what Meta's [dev] install brings in at runtime (torch==2.5.1+cu121).
+        RUN pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
+                torch==2.5.1 torchvision==0.20.1
+
+        # Build pytorch3d wheel from SAM 3D's pinned commit.
+        RUN pip wheel \
+                --extra-index-url https://download.pytorch.org/whl/cu121 \
+                -w /wheels \
+                "pytorch3d @ git+https://github.com/facebookresearch/pytorch3d.git@75ebeeaea0908c5527e7b1e305fbc7681382db47"
+        EOF
+        # Copy the wheel out of the image to /workspace so the next step can
+        # upload it.
+        id=$(docker create pytorch3d-builder)
+        docker cp "${id}:/wheels" /workspace/wheels
+        docker rm "${id}"
+        ls -la /workspace/wheels
+
+  - name: 'gcr.io/cloud-builders/gsutil'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        # Ensure the bucket exists (idempotent).
+        if ! gsutil ls -b "gs://${_BUCKET}" >/dev/null 2>&1; then
+            gsutil mb -l "${_REGION}" -p "${PROJECT_ID}" "gs://${_BUCKET}"
+        fi
+        gsutil cp /workspace/wheels/pytorch3d-*.whl "gs://${_BUCKET}/wheels/"
+        echo "Uploaded:"
+        gsutil ls -l "gs://${_BUCKET}/wheels/pytorch3d-*.whl"
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: 100
+
+timeout: 5400s
+
+substitutions:
+  _BUCKET: 'roomstudio-build-cache'
+  _REGION: 'asia-southeast1'

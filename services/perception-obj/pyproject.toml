@@ -1,0 +1,23 @@
+[project]
+name = "roomstudio-perception-obj"
+version = "0.0.1"
+description = "Per-object segmentation (SAM 3) + Gaussian splat reconstruction (SAM 3D Objects)"
+requires-python = ">=3.11"
+
+# Runtime deps are installed in the Dockerfile (not via this file) because
+# they include heavy ML packages (torch, etc.) that need explicit version
+# pinning matched to the CUDA base image. This file exists for editor
+# tooling and to mark this as a Python project for monorepo navigation.
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "transformers",
+    "huggingface_hub",
+    "trimesh",
+    "pillow",
+    "pillow-heif",
+    "numpy<2",
+    "einops",
+    "safetensors",
+]
