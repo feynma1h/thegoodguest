@@ -1,0 +1,20 @@
+[project]
+name = "roomstudio"
+version = "0.0.1"
+description = "Spatial intelligence platform"
+requires-python = ">=3.11"
+
+# This root project doesn't ship as a package. It exists to coordinate
+# dev tooling across the workspace (linters, formatters, type checkers).
+# Each service and package has its own pyproject.toml for runtime deps.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.pytest.ini_options]
+testpaths = ["services", "packages", "tools"]

@@ -1,0 +1,61 @@
+# Generated artifacts
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test + coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+__MACOSX/
+
+# Secrets / config
+.env
+.env.local
+.env.*.local
+*.pem
+service-account*.json
+
+# Claude Code local state (NOT CLAUDE.md, NOT .claude/WORKFLOW.md — those are committed)
+.claude/cache/
+.claude/projects/
+.claude/*.session.json
+.claude/local/
+
+# Build artifacts that live next to the proto
+*.pb
+!outputs/**/*.pb  # already covered by outputs/, listed for clarity
+
+# iOS (when the iOS app arrives)
+ios/**/build/
+ios/**/DerivedData/
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+ios/**/Pods/

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>roomstudio point cloud viewer</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #111;
+    color: #ddd;
+    font-family: -apple-system, system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #canvas-host { width: 100vw; height: 100vh; }
+  #ui {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 14px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.55;
+    user-select: none;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    min-width: 220px;
+  }
+  #ui label { display: block; margin-top: 8px; }
+  #ui input[type=range] { width: 100%; }
+  #drop-target {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #888;
+    pointer-events: none;
+  }
+  #status { margin-top: 10px; color: #9c9; font-size: 12px; }
+  #help { margin-top: 10px; color: #888; font-size: 11px; }
+  kbd {
+    background: #333;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: ui-monospace, monospace;
+  }
+</style>
+</head>
+<body>
+<div id="canvas-host"></div>
+<div id="drop-target">Drop a .glb point cloud here, or use file input below</div>
+
+<div id="ui">
+  <div><strong>roomstudio viewer</strong></div>
+  <label>
+    <input type="file" id="file-input" accept=".glb,.gltf" />
+  </label>
+  <label>
+    Point size: <span id="size-val">3.0</span>
+    <input type="range" id="point-size" min="0.5" max="10" step="0.1" value="3" />
+  </label>
+  <label>
+    <input type="checkbox" id="show-axes" checked />
+    Show axes (R=x, G=y, B=z)
+  </label>
+  <label>
+    <input type="checkbox" id="show-grid" />
+    Show ground grid
+  </label>
+  <div id="status">No file loaded.</div>
+  <div id="help">
+    <kbd>drag</kbd> orbit ·
+    <kbd>scroll</kbd> zoom ·
+    <kbd>right-drag</kbd> pan ·
+    <kbd>F</kbd> fit
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three":        "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader }    from "three/addons/loaders/GLTFLoader.js";
+
+// --- Scene setup ---
+const host = document.getElementById("canvas-host");
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x111111);
+
+const camera = new THREE.PerspectiveCamera(
+  60, window.innerWidth / window.innerHeight, 0.001, 10000
+);
+camera.position.set(2, 1.5, 3);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+host.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+// Axes + grid helpers
+const axes = new THREE.AxesHelper(1);
+scene.add(axes);
+const grid = new THREE.GridHelper(10, 20, 0x444444, 0x222222);
+grid.visible = false;
+scene.add(grid);
+
+// State
+let currentPoints = null;
+const sizeSlider = document.getElementById("point-size");
+const sizeLabel = document.getElementById("size-val");
+const statusEl = document.getElementById("status");
+
+// --- Loader ---
+const loader = new GLTFLoader();
+
+function loadFromArrayBuffer(buf, name = "(dropped)") {
+  loader.parse(buf, "", (gltf) => {
+    // Remove any previous point cloud
+    if (currentPoints) {
+      scene.remove(currentPoints);
+      currentPoints.geometry.dispose();
+      currentPoints.material.dispose();
+      currentPoints = null;
+    }
+
+    // Walk the GLTF scene and find Points / Mesh primitives.
+    // VGGT-style point clouds are exported as Points; we hunt for them.
+    let found = null;
+    gltf.scene.traverse((node) => {
+      if (node.isPoints) found = node;
+      else if (!found && node.isMesh && node.geometry.attributes.position) {
+        // Some exporters package points as Mesh — convert.
+        found = node;
+      }
+    });
+
+    if (!found) {
+      statusEl.textContent = `No point/mesh data in ${name}`;
+      statusEl.style.color = "#c99";
+      return;
+    }
+
+    const geom = found.geometry;
+    const nPoints = geom.attributes.position.count;
+    const hasColor = !!geom.attributes.color;
+
+    // Build a fresh PointsMaterial we control (don't trust glTF's material).
+    const material = new THREE.PointsMaterial({
+      size: parseFloat(sizeSlider.value) * 0.001,
+      vertexColors: hasColor,
+      color: hasColor ? 0xffffff : 0xcccccc,
+      sizeAttenuation: true,
+    });
+
+    currentPoints = new THREE.Points(geom, material);
+    scene.add(currentPoints);
+
+    // Fit camera to point cloud bounds.
+    geom.computeBoundingBox();
+    const box = geom.boundingBox;
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const dist = maxDim * 2.2;
+    camera.position.set(center.x + dist, center.y + dist * 0.7, center.z + dist);
+    controls.target.copy(center);
+    controls.update();
+
+    statusEl.innerHTML = `Loaded ${nPoints.toLocaleString()} points` +
+      (hasColor ? " (with color)" : " (no color)") +
+      `<br>extents: ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)}`;
+    statusEl.style.color = "#9c9";
+  }, (err) => {
+    console.error(err);
+    statusEl.textContent = "Error parsing GLB: " + err.message;
+    statusEl.style.color = "#c99";
+  });
+}
+
+// --- Drag and drop ---
+const dropTarget = document.getElementById("drop-target");
+let dragDepth = 0;
+
+window.addEventListener("dragenter", (e) => {
+  e.preventDefault();
+  dragDepth++;
+  dropTarget.style.background = "rgba(50, 100, 150, 0.2)";
+});
+window.addEventListener("dragleave", (e) => {
+  dragDepth--;
+  if (dragDepth <= 0) {
+    dropTarget.style.background = "";
+    dragDepth = 0;
+  }
+});
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  dropTarget.style.background = "";
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const buf = await file.arrayBuffer();
+  loadFromArrayBuffer(buf, file.name);
+  dropTarget.style.display = "none";
+});
+
+// --- File input ---
+document.getElementById("file-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const buf = await file.arrayBuffer();
+  loadFromArrayBuffer(buf, file.name);
+  dropTarget.style.display = "none";
+});
+
+// --- UI controls ---
+sizeSlider.addEventListener("input", () => {
+  const val = parseFloat(sizeSlider.value);
+  sizeLabel.textContent = val.toFixed(1);
+  if (currentPoints) currentPoints.material.size = val * 0.001;
+});
+document.getElementById("show-axes").addEventListener("change", (e) => {
+  axes.visible = e.target.checked;
+});
+document.getElementById("show-grid").addEventListener("change", (e) => {
+  grid.visible = e.target.checked;
+});
+
+// Keyboard: F to fit
+window.addEventListener("keydown", (e) => {
+  if (e.key.toLowerCase() === "f" && currentPoints) {
+    const box = currentPoints.geometry.boundingBox;
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const dist = maxDim * 2.2;
+    camera.position.set(center.x + dist, center.y + dist * 0.7, center.z + dist);
+    controls.target.copy(center);
+    controls.update();
+  }
+});
+
+// --- Resize ---
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// --- Render loop ---
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>

@@ -1,0 +1,474 @@
+{
+  "schema_version": "0.2.0",
+  "primary_image_id": "synthetic_living_room_001",
+  "primary_image_width_px": 4032,
+  "primary_image_height_px": 3024,
+
+  "geometry": {
+    "dimensions": {
+      "width_normalized": 0.857,
+      "length_normalized": 1.0,
+      "height_normalized": 0.643,
+      "longest_dimension_axis": "length",
+      "has_metric_scale": true,
+      "scale_factor_m": 4.2,
+      "scale_factor_provenance": {
+        "source": "user_provided",
+        "confidence": 0.95
+      }
+    },
+    "floor_plane_normal": {"x": 0.0, "y": 1.0, "z": 0.02},
+    "primary_view_direction": {"x": 0.0, "y": -0.1, "z": -1.0},
+    "wall_planes": [
+      {"x": 0.0, "y": 0.0, "z": 1.0},
+      {"x": 0.0, "y": 0.0, "z": -1.0},
+      {"x": 1.0, "y": 0.0, "z": 0.0},
+      {"x": -1.0, "y": 0.0, "z": 0.0}
+    ],
+    "wall_count_estimate": 4,
+    "ceiling_detected": true,
+    "ceiling_height_confidence": 0.88,
+
+    "doorways": [
+      {
+        "id": "doorway_001",
+        "object_ref": "obj_door_south",
+        "floor_position": {"x": 0.15, "y": -0.45},
+        "width_normalized": 0.20,
+        "wall_index": 1,
+        "leads_to_visible_space": true,
+        "provenance": {"source": "sam2_segmentation", "confidence": 0.92}
+      },
+      {
+        "id": "doorway_002",
+        "object_ref": "obj_doorway_east",
+        "floor_position": {"x": 0.43, "y": 0.10},
+        "width_normalized": 0.18,
+        "wall_index": 2,
+        "leads_to_visible_space": true,
+        "provenance": {"source": "sam2_segmentation", "confidence": 0.88}
+      }
+    ],
+
+    "free_floor_polygons": [
+      {
+        "vertices": [
+          {"x": -0.30, "y": -0.30}, {"x": 0.10, "y": -0.30},
+          {"x": 0.10, "y": -0.05}, {"x": -0.30, "y": -0.05}
+        ],
+        "area_normalized": 0.20,
+        "is_near_window": false,
+        "is_near_doorway": true,
+        "is_traffic_path": true
+      },
+      {
+        "vertices": [
+          {"x": -0.42, "y": 0.05}, {"x": -0.20, "y": 0.05},
+          {"x": -0.20, "y": 0.30}, {"x": -0.42, "y": 0.30}
+        ],
+        "area_normalized": 0.12,
+        "is_near_window": true,
+        "is_near_doorway": false,
+        "is_traffic_path": false
+      }
+    ],
+
+    "raw_sight_lines": [
+      {
+        "from_object_id": "obj_sofa",
+        "ray_endpoint": {"x": 0.0, "y": -0.50},
+        "hits_object_id": "obj_tv",
+        "hits_wall_index": null,
+        "distance_to_hit_normalized": 0.82,
+        "intermediate_object_ids": ["obj_coffee_table"],
+        "is_geometrically_blocked": false
+      },
+      {
+        "from_object_id": "obj_desk",
+        "ray_endpoint": {"x": 0.50, "y": 0.30},
+        "hits_object_id": null,
+        "hits_wall_index": 2,
+        "distance_to_hit_normalized": 0.12,
+        "intermediate_object_ids": [],
+        "is_geometrically_blocked": false
+      },
+      {
+        "from_object_id": "obj_armchair",
+        "ray_endpoint": {"x": 0.20, "y": -0.10},
+        "hits_object_id": null,
+        "hits_wall_index": 1,
+        "distance_to_hit_normalized": 0.45,
+        "intermediate_object_ids": [],
+        "is_geometrically_blocked": false
+      }
+    ],
+
+    "north_direction": {"x": 0.0, "y": 0.0, "z": 1.0},
+    "orientation_source": "user",
+    "orientation_confidence": 1.0
+  },
+
+  "objects": [
+    {
+      "id": "obj_sofa",
+      "object_class": "sofa",
+      "classification_confidence": 0.97,
+      "class_refined_by_vlm": true,
+      "bbox_2d": {"x_min": 800, "y_min": 1100, "x_max": 3400, "y_max": 2200},
+      "bbox_3d": {
+        "center": {"x": 0.0, "y": 0.18, "z": 0.38},
+        "size": {"x": 0.55, "y": 0.18, "z": 0.22},
+        "yaw_radians": 3.14159,
+        "yaw_confidence": 0.92,
+        "yaw_refined_by_vlm": true
+      },
+      "distance_to_nearest_wall_normalized": 0.02,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.9},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": false,
+      "movability": "movable",
+      "surface_material": {
+        "material": "fabric_soft",
+        "material_confidence": 0.85,
+        "dominant_colors": [
+          {"lab_l": 35, "lab_a": 2, "lab_b": -5, "coverage": 0.78}
+        ]
+      },
+      "facing_direction": {"x": 0.0, "y": 0.0, "z": -1.0},
+      "facing_confidence": 0.92
+    },
+    {
+      "id": "obj_coffee_table",
+      "object_class": "coffee_table",
+      "classification_confidence": 0.93,
+      "class_refined_by_vlm": false,
+      "bbox_2d": {"x_min": 1500, "y_min": 1900, "x_max": 2600, "y_max": 2400},
+      "bbox_3d": {
+        "center": {"x": 0.02, "y": 0.05, "z": 0.08},
+        "size": {"x": 0.18, "y": 0.07, "z": 0.10},
+        "yaw_radians": 0.0,
+        "yaw_confidence": 0.0,
+        "yaw_refined_by_vlm": false
+      },
+      "distance_to_nearest_wall_normalized": 0.28,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.85},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": false,
+      "movability": "movable",
+      "surface_material": {
+        "material": "wood_light",
+        "material_confidence": 0.78,
+        "dominant_colors": [
+          {"lab_l": 70, "lab_a": 8, "lab_b": 22, "coverage": 0.65}
+        ]
+      }
+    },
+    {
+      "id": "obj_tv",
+      "object_class": "tv_stand",
+      "classification_confidence": 0.89,
+      "class_refined_by_vlm": true,
+      "bbox_2d": {"x_min": 1700, "y_min": 600, "x_max": 2400, "y_max": 1000},
+      "bbox_3d": {
+        "center": {"x": 0.0, "y": 0.55, "z": -0.48},
+        "size": {"x": 0.30, "y": 0.18, "z": 0.04},
+        "yaw_radians": 0.0,
+        "yaw_confidence": 0.95,
+        "yaw_refined_by_vlm": true
+      },
+      "distance_to_nearest_wall_normalized": 0.01,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.95},
+      "height_above_floor_normalized": 0.55,
+      "is_partially_occluded": false,
+      "movability": "fixed",
+      "surface_material": {
+        "material": "plastic",
+        "material_confidence": 0.65,
+        "dominant_colors": [
+          {"lab_l": 10, "lab_a": 0, "lab_b": 0, "coverage": 0.95}
+        ]
+      },
+      "facing_direction": {"x": 0.0, "y": 0.0, "z": 1.0},
+      "facing_confidence": 0.95
+    },
+    {
+      "id": "obj_desk",
+      "object_class": "desk",
+      "classification_confidence": 0.91,
+      "class_refined_by_vlm": true,
+      "bbox_2d": {"x_min": 2900, "y_min": 1400, "x_max": 3900, "y_max": 2100},
+      "bbox_3d": {
+        "center": {"x": 0.38, "y": 0.20, "z": -0.10},
+        "size": {"x": 0.25, "y": 0.20, "z": 0.13},
+        "yaw_radians": 1.5708,
+        "yaw_confidence": 0.85,
+        "yaw_refined_by_vlm": true
+      },
+      "distance_to_nearest_wall_normalized": 0.02,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.9},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": true,
+      "occlusion_reason": "image_boundary",
+      "movability": "movable",
+      "surface_material": {
+        "material": "wood_light",
+        "material_confidence": 0.72,
+        "dominant_colors": [
+          {"lab_l": 72, "lab_a": 6, "lab_b": 18, "coverage": 0.70}
+        ]
+      },
+      "facing_direction": {"x": 1.0, "y": 0.0, "z": 0.0},
+      "facing_confidence": 0.85
+    },
+    {
+      "id": "obj_office_chair",
+      "object_class": "office_chair",
+      "classification_confidence": 0.88,
+      "class_refined_by_vlm": false,
+      "bbox_2d": {"x_min": 2700, "y_min": 1800, "x_max": 3100, "y_max": 2400},
+      "bbox_3d": {
+        "center": {"x": 0.25, "y": 0.15, "z": -0.10},
+        "size": {"x": 0.10, "y": 0.18, "z": 0.10},
+        "yaw_radians": 1.5708,
+        "yaw_confidence": 0.72,
+        "yaw_refined_by_vlm": true
+      },
+      "distance_to_nearest_wall_normalized": 0.10,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.85},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": false,
+      "movability": "movable",
+      "surface_material": {
+        "material": "fabric_structured",
+        "material_confidence": 0.65,
+        "dominant_colors": [
+          {"lab_l": 25, "lab_a": 0, "lab_b": -2, "coverage": 0.85}
+        ]
+      },
+      "facing_direction": {"x": 1.0, "y": 0.0, "z": 0.0},
+      "facing_confidence": 0.72
+    },
+    {
+      "id": "obj_armchair",
+      "object_class": "armchair",
+      "classification_confidence": 0.94,
+      "class_refined_by_vlm": true,
+      "bbox_2d": {"x_min": 2500, "y_min": 1500, "x_max": 3000, "y_max": 2200},
+      "bbox_3d": {
+        "center": {"x": 0.22, "y": 0.18, "z": -0.25},
+        "size": {"x": 0.13, "y": 0.18, "z": 0.13},
+        "yaw_radians": 2.0944,
+        "yaw_confidence": 0.78,
+        "yaw_refined_by_vlm": true
+      },
+      "distance_to_nearest_wall_normalized": 0.06,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.82},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": false,
+      "movability": "movable",
+      "surface_material": {
+        "material": "fabric_soft",
+        "material_confidence": 0.80,
+        "dominant_colors": [
+          {"lab_l": 60, "lab_a": -2, "lab_b": 8, "coverage": 0.75}
+        ]
+      },
+      "facing_direction": {"x": -0.5, "y": 0.0, "z": 0.87},
+      "facing_confidence": 0.78
+    },
+    {
+      "id": "obj_bookshelf",
+      "object_class": "bookshelf",
+      "classification_confidence": 0.96,
+      "class_refined_by_vlm": true,
+      "bbox_2d": {"x_min": 50, "y_min": 200, "x_max": 700, "y_max": 2900},
+      "bbox_3d": {
+        "center": {"x": -0.41, "y": 0.40, "z": 0.0},
+        "size": {"x": 0.05, "y": 0.55, "z": 0.42},
+        "yaw_radians": 1.5708,
+        "yaw_confidence": 0.92,
+        "yaw_refined_by_vlm": true
+      },
+      "distance_to_nearest_wall_normalized": 0.01,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.95},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": false,
+      "movability": "heavy_movable",
+      "surface_material": {
+        "material": "wood_dark",
+        "material_confidence": 0.82,
+        "dominant_colors": [
+          {"lab_l": 28, "lab_a": 8, "lab_b": 15, "coverage": 0.68}
+        ]
+      },
+      "facing_direction": {"x": 1.0, "y": 0.0, "z": 0.0},
+      "facing_confidence": 0.92
+    },
+    {
+      "id": "obj_window_north",
+      "object_class": "window",
+      "classification_confidence": 0.98,
+      "class_refined_by_vlm": false,
+      "bbox_2d": {"x_min": 1200, "y_min": 300, "x_max": 2800, "y_max": 1100},
+      "bbox_3d": {
+        "center": {"x": 0.0, "y": 0.50, "z": 0.50},
+        "size": {"x": 0.32, "y": 0.32, "z": 0.0},
+        "yaw_radians": 0.0,
+        "yaw_confidence": 0.98,
+        "yaw_refined_by_vlm": false
+      },
+      "distance_to_nearest_wall_normalized": 0.0,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.98},
+      "height_above_floor_normalized": 0.35,
+      "is_partially_occluded": false,
+      "movability": "fixed",
+      "surface_material": {
+        "material": "glass",
+        "material_confidence": 0.95,
+        "dominant_colors": []
+      },
+      "facing_direction": {"x": 0.0, "y": 0.0, "z": -1.0},
+      "facing_confidence": 0.98
+    },
+    {
+      "id": "obj_door_south",
+      "object_class": "door",
+      "classification_confidence": 0.94,
+      "class_refined_by_vlm": false,
+      "bbox_2d": {"x_min": 600, "y_min": 900, "x_max": 1100, "y_max": 2400},
+      "bbox_3d": {
+        "center": {"x": -0.32, "y": 0.32, "z": -0.50},
+        "size": {"x": 0.18, "y": 0.65, "z": 0.0},
+        "yaw_radians": 0.0,
+        "yaw_confidence": 0.95,
+        "yaw_refined_by_vlm": false
+      },
+      "distance_to_nearest_wall_normalized": 0.0,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.98},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": false,
+      "movability": "fixed",
+      "surface_material": {
+        "material": "wood_dark",
+        "material_confidence": 0.75,
+        "dominant_colors": []
+      },
+      "facing_direction": {"x": 0.0, "y": 0.0, "z": 1.0},
+      "facing_confidence": 0.95
+    },
+    {
+      "id": "obj_doorway_east",
+      "object_class": "doorway",
+      "classification_confidence": 0.85,
+      "class_refined_by_vlm": false,
+      "bbox_2d": {"x_min": 3500, "y_min": 800, "x_max": 4000, "y_max": 2400},
+      "bbox_3d": {
+        "center": {"x": 0.43, "y": 0.32, "z": 0.10},
+        "size": {"x": 0.0, "y": 0.65, "z": 0.18},
+        "yaw_radians": 0.0,
+        "yaw_confidence": 0.0,
+        "yaw_refined_by_vlm": false
+      },
+      "distance_to_nearest_wall_normalized": 0.0,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.95},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": true,
+      "occlusion_reason": "image_boundary",
+      "movability": "fixed",
+      "surface_material": {
+        "material": "unknown",
+        "material_confidence": 0.0,
+        "dominant_colors": []
+      }
+    },
+    {
+      "id": "obj_rug",
+      "object_class": "rug",
+      "classification_confidence": 0.90,
+      "class_refined_by_vlm": false,
+      "bbox_2d": {"x_min": 1100, "y_min": 1800, "x_max": 3000, "y_max": 2700},
+      "bbox_3d": {
+        "center": {"x": -0.02, "y": 0.0, "z": 0.10},
+        "size": {"x": 0.38, "y": 0.0, "z": 0.20},
+        "yaw_radians": 0.0,
+        "yaw_confidence": 0.0,
+        "yaw_refined_by_vlm": false
+      },
+      "distance_to_nearest_wall_normalized": 0.10,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.80},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": false,
+      "movability": "soft_furnishing",
+      "surface_material": {
+        "material": "fabric_structured",
+        "material_confidence": 0.78,
+        "dominant_colors": [
+          {"lab_l": 55, "lab_a": 4, "lab_b": 12, "coverage": 0.82}
+        ]
+      }
+    },
+    {
+      "id": "obj_floor_lamp",
+      "object_class": "floor_lamp",
+      "classification_confidence": 0.86,
+      "class_refined_by_vlm": false,
+      "bbox_2d": {"x_min": 350, "y_min": 600, "x_max": 580, "y_max": 2100},
+      "bbox_3d": {
+        "center": {"x": -0.35, "y": 0.32, "z": 0.30},
+        "size": {"x": 0.05, "y": 0.55, "z": 0.05},
+        "yaw_radians": 0.0,
+        "yaw_confidence": 0.0,
+        "yaw_refined_by_vlm": false
+      },
+      "distance_to_nearest_wall_normalized": 0.05,
+      "distance_to_nearest_wall_provenance": {"source": "geometric_heuristic", "confidence": 0.85},
+      "height_above_floor_normalized": 0.0,
+      "is_partially_occluded": false,
+      "movability": "movable",
+      "surface_material": {
+        "material": "metal",
+        "material_confidence": 0.72,
+        "dominant_colors": [
+          {"lab_l": 40, "lab_a": 0, "lab_b": 2, "coverage": 0.60}
+        ]
+      }
+    }
+  ],
+
+  "light_sources": [
+    {
+      "id": "light_001",
+      "kind": "window",
+      "direction_estimate": {"x": 0.0, "y": -0.3, "z": -0.95},
+      "direction_confidence": 0.90,
+      "intensity_relative": 0.85,
+      "quality": "cool_daylight",
+      "quality_confidence": 0.82,
+      "is_natural": true
+    },
+    {
+      "id": "light_002",
+      "kind": "lamp_fixture",
+      "direction_estimate": {"x": 0.0, "y": -1.0, "z": 0.0},
+      "direction_confidence": 0.60,
+      "intensity_relative": 0.30,
+      "quality": "golden_warm",
+      "quality_confidence": 0.55,
+      "is_natural": false
+    }
+  ],
+  "overall_light_quality": "cool_daylight",
+
+  "supplementary_views": [],
+
+  "overall_perception_confidence": 0.84,
+  "has_metric_scale": true,
+  "has_orientation": true,
+  "has_complete_floor_coverage": true,
+
+  "inferred_purpose": "living_room",
+  "inferred_purpose_confidence": 0.96,
+
+  "user_provided_room_purpose": "living room, also where I work from home a couple days a week",
+  "user_provided_reference_dimension": {"object": "room_length", "length_m": 4.2}
+}
