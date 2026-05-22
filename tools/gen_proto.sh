@@ -9,7 +9,7 @@
 #   ios/RoomStudioCapture/Generated/CaptureBundle.pb.swift        (Swift, if protoc-gen-swift present)
 #
 # Tooling:
-#   - protoc (3.21+):   brew install protobuf
+#   - protoc 7.35.0:    brew install protobuf   (current generated code requires runtime >=7.35.0)
 #   - Swift plugin:     brew install swift-protobuf
 #   - Python stubs:     pip install mypy-protobuf
 #

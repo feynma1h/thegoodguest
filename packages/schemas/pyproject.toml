@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "roomstudio capture-bundle schemas (proto + generated Python)"
 requires-python = ">=3.11"
 dependencies = [
-    "protobuf>=4.25",
+    # Generated code (capture_bundle_pb2.py) calls ValidateProtobufRuntimeVersion
+    # requiring runtime >=7.35.0 (gencode version from protoc 7.35.0 via Homebrew).
+    # Bump this floor when regenerating with a newer protoc.
+    "protobuf>=7.35.0",
 ]
 
 # The proto source of truth is packages/schemas/capture_bundle.proto.
