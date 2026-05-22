@@ -2,11 +2,14 @@
 perception-obj server.
 
 Runs SAM 3 (open-vocabulary segmentation) and SAM 3D Objects (per-object Gaussian
-splat reconstruction). Two endpoints:
+splat reconstruction). Endpoints:
 
   POST /segment   — SAM 3 only. Returns object metadata + packed masks as .npz.
   POST /objects   — Full SAM 3 + SAM 3D. Returns a zip archive: manifest.json +
                     per-object splat PLYs + packed masks.
+  POST /process   — Cloud Tasks receiver. Accepts {scene_id, bundle_uri}, runs
+                    the full pipeline, updates Firestore Scene state, fires FCM.
+                    See process_receiver.py and docs/decisions/0004.
 
 This service does NOT know about VGGT. Splat placement into the scene's
 coordinate frame is the client's job (see tools/call_perception.py), using
@@ -28,7 +31,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from PIL import Image
 
@@ -178,6 +181,51 @@ async def lifespan(app: FastAPI):
 # FastAPI app
 # -----------------------------------------------------------------------------
 app = FastAPI(title="roomstudio-perception-obj", lifespan=lifespan)
+
+# Lazy-initialized singletons for the /process endpoint. In tests, replace via
+# patch.object(server, "_receiver_repo", ...) etc.
+_receiver_repo = None
+_fcm_notifier = None
+_oidc_verifier = None
+
+
+def _get_receiver_repo():
+    global _receiver_repo
+    if _receiver_repo is None:
+        from process_receiver import RECEIVER_URL, CLOUD_TASKS_INVOKER_SA
+        from receiver_repo import FirestoreReceiverRepository, InMemoryReceiverRepository
+        project = os.environ.get("FIRESTORE_PROJECT")
+        if project:
+            _receiver_repo = FirestoreReceiverRepository(project=project)
+        else:
+            _receiver_repo = InMemoryReceiverRepository()
+    return _receiver_repo
+
+
+def _get_fcm_notifier():
+    global _fcm_notifier
+    if _fcm_notifier is None:
+        from fcm import FirebaseFcmNotifier, NullFcmNotifier
+        if os.environ.get("FIRESTORE_PROJECT"):
+            _fcm_notifier = FirebaseFcmNotifier()
+        else:
+            _fcm_notifier = NullFcmNotifier()
+    return _fcm_notifier
+
+
+def _get_oidc_verifier():
+    global _oidc_verifier
+    if _oidc_verifier is None:
+        from process_receiver import RECEIVER_URL, CLOUD_TASKS_INVOKER_SA
+        from oidc import OIDCVerifier
+        if CLOUD_TASKS_INVOKER_SA:
+            _oidc_verifier = OIDCVerifier(
+                audience=RECEIVER_URL + "/process",
+                allowed_email=CLOUD_TASKS_INVOKER_SA,
+            )
+        # If CLOUD_TASKS_INVOKER_SA is unset (local dev), verifier stays None
+        # and the endpoint skips auth (see handle_process oidc_verifier=None path).
+    return _oidc_verifier
 
 
 @app.get("/")
@@ -418,6 +466,57 @@ async def objects(
         flush=True,
     )
     return JSONResponse(manifest)
+
+
+# -----------------------------------------------------------------------------
+# Cloud Tasks receiver
+# -----------------------------------------------------------------------------
+
+@app.post(
+    "/process",
+    summary="Cloud Tasks perception receiver",
+    responses={
+        200: {"description": "Processing complete (ready or poison-drained)"},
+        401: {"description": "OIDC token missing or invalid"},
+        422: {"description": "Malformed payload (natural poison drain)"},
+        500: {"description": "Environmental failure; Cloud Tasks will retry"},
+        503: {"description": "Models not yet loaded; Cloud Tasks will retry"},
+    },
+)
+async def process(
+    request: Request,
+    req: "ProcessRequest",
+) -> JSONResponse:
+    """Cloud Tasks perception receiver.
+
+    Accepts {scene_id, bundle_uri}, claims the scene atomically (with
+    lease-TTL crash recovery), runs SAM 3 + SAM 3D Objects on all frames,
+    writes outputs to GCS, and updates Scene state in Firestore.
+
+    Cloud Run config: concurrency=1, request-timeout=600s.
+    Returns 5xx on environmental failures so Cloud Tasks retries. Returns 2xx
+    on all success and poison paths so the task is drained from the queue.
+    """
+    from process_receiver import ProcessRequest, handle_process
+
+    _require_ready()
+
+    return await handle_process(
+        request,
+        req,
+        oidc_verifier=_get_oidc_verifier(),
+        receiver_repo=_get_receiver_repo(),
+        fcm_notifier=_get_fcm_notifier(),
+        outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
+        sam3_model=sam3,
+        sam3d_model=sam3d,
+        object_prompt=DEFAULT_OBJECT_PROMPT,
+    )
+
+
+# Import here so FastAPI can resolve the ProcessRequest type annotation above
+# without a circular import (server imports process_receiver, not vice versa).
+from process_receiver import ProcessRequest  # noqa: E402
 
 
 # -----------------------------------------------------------------------------
