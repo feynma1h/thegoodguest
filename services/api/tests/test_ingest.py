@@ -1,9 +1,11 @@
 """Integration tests for POST /ingest.
 
 Tests are structured around the four validation checks in validation.py,
-plus a happy path for each supported tier:
-  - valid ARKIT_ONLY bundle → 200 + correct summary
-  - valid LIDAR_ARKIT bundle with depth → 200 + correct summary
+plus happy paths and dispatch integration:
+  - valid ARKIT_ONLY bundle → 200 + {scene_id, status: "queued"}
+  - valid LIDAR_ARKIT bundle with depth → 200 + {scene_id, status: "queued"}
+  - dispatch happy path — Scene created in repo, task enqueued with correct shape
+  - dispatch failure mode — dispatcher raises → 500, Scene marked failed
   - unsupported schema_version → 400 unsupported_schema_version
   - non-unit quaternion → 400 quaternion_norm_out_of_range
   - depth frame on ARKIT_ONLY tier → 400 depth_requires_lidar_tier
@@ -29,6 +31,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import MagicMock
 
 # Make services/api/ and packages/schemas importable regardless of where
 # pytest is invoked from. Mirrors the sys.path approach used in the schema
@@ -47,6 +50,9 @@ from roomstudio_schemas import (  # noqa: E402
 )
 
 import server  # the service module  # noqa: E402
+from repository import InMemorySceneRepository  # noqa: E402
+from dispatcher import InMemoryTaskDispatcher  # noqa: E402
+from scene import SceneStatus  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -135,36 +141,105 @@ def _make_bundle(
 # ---------------------------------------------------------------------------
 
 def test_valid_arkit_bundle_returns_200(client: TestClient) -> None:
-    """Well-formed ARKIT_ONLY bundle → 200 with correct summary fields."""
+    """Well-formed ARKIT_ONLY bundle → 200 with {scene_id, status: queued}."""
     bundle_bytes = _make_bundle(frame_count=3)
-    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes):
+    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+         patch.object(server, "_scene_repo", InMemorySceneRepository()), \
+         patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()):
         resp = client.post(
             "/ingest",
             json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
         )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["schema_version"] == SCHEMA_VERSION
-    assert body["tier"] == "ARKIT_ONLY"
-    assert body["tier_value"] == 1  # CaptureTier.ARKIT_ONLY — pinned per enum stability test
-    assert body["frame_count"] == 3
-    assert body["depth_frame_count"] == 0
-    assert body["has_room_plan"] is False
-    assert body["user_id"] == "test-user"
+    assert isinstance(body["scene_id"], str) and body["scene_id"]
+    assert body["status"] == "queued"
 
 
 def test_valid_lidar_bundle_returns_200(client: TestClient) -> None:
     """Well-formed LIDAR_ARKIT bundle with depth on every frame → 200."""
     bundle_bytes = _make_bundle(frame_count=2, add_depth=True)
-    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes):
+    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+         patch.object(server, "_scene_repo", InMemorySceneRepository()), \
+         patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()):
         resp = client.post(
             "/ingest",
             json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
         )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["tier"] == "LIDAR_ARKIT"
-    assert body["depth_frame_count"] == 2
+    assert isinstance(body["scene_id"], str) and body["scene_id"]
+    assert body["status"] == "queued"
+
+
+# ---------------------------------------------------------------------------
+# Dispatch integration
+# ---------------------------------------------------------------------------
+
+_BUNDLE_URI = "gs://test-bucket/captures/test/bundle.pb"
+
+
+def test_dispatch_happy_path_scene_and_task_created(client: TestClient) -> None:
+    """On a valid bundle: Scene is created with status=queued and exactly one
+    task is enqueued with task_name==scene_id and the correct payload shape."""
+    bundle_bytes = _make_bundle(frame_count=2)
+    repo = InMemorySceneRepository()
+    dispatcher = InMemoryTaskDispatcher()
+
+    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+         patch.object(server, "_scene_repo", repo), \
+         patch.object(server, "_task_dispatcher", dispatcher):
+        resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    scene_id = body["scene_id"]
+    assert isinstance(scene_id, str) and scene_id
+    assert body["status"] == "queued"
+
+    # Scene was persisted.
+    scene = repo.get(scene_id)
+    assert scene.status == SceneStatus.QUEUED
+    assert scene.bundle_uri == _BUNDLE_URI
+
+    # Exactly one task was enqueued.
+    assert len(dispatcher.tasks) == 1
+    task = dispatcher.tasks[0]
+
+    # task_name == scene_id — Cloud Tasks dedup contract.
+    assert task["task_name"] == scene_id
+
+    # Payload carries the two fields perception-obj needs.
+    assert task["payload"]["scene_id"] == scene_id
+    assert task["payload"]["bundle_uri"] == _BUNDLE_URI
+
+    # target_url is set (defaults to http://localhost:8081/process in tests).
+    assert task["target_url"]
+
+
+def test_dispatch_failure_returns_500_and_marks_scene_failed(client: TestClient) -> None:
+    """If the dispatcher raises, /ingest returns 500 and the Scene is marked
+    failed — no orphaned queued records."""
+    bundle_bytes = _make_bundle(frame_count=2)
+    repo = InMemorySceneRepository()
+
+    failing_dispatcher = MagicMock(spec=InMemoryTaskDispatcher)
+    failing_dispatcher.enqueue.side_effect = RuntimeError("cloud tasks unavailable")
+
+    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+         patch.object(server, "_scene_repo", repo), \
+         patch.object(server, "_task_dispatcher", failing_dispatcher):
+        resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["error"] == "dispatch_failed"
+    assert "cloud tasks unavailable" in body["detail"]
+
+    # The Scene was created but then marked failed — no orphaned queued records.
+    scenes = list(repo._store.values())  # type: ignore[attr-defined]
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED
 
 
 # ---------------------------------------------------------------------------

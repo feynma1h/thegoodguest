@@ -196,9 +196,11 @@ class TestStateMachine:
         with pytest.raises(InvalidTransitionError):
             validate_transition(SceneStatus.QUEUED, SceneStatus.READY)
 
-    def test_queued_to_failed_raises(self):
-        with pytest.raises(InvalidTransitionError):
-            validate_transition(SceneStatus.QUEUED, SceneStatus.FAILED)
+    def test_queued_to_failed_allowed(self):
+        """QUEUED → FAILED is permitted for dispatch-time failures (task never
+        enqueued). Distinct from the PROCESSING → FAILED path triggered by
+        perception errors after the task was dispatched."""
+        validate_transition(SceneStatus.QUEUED, SceneStatus.FAILED)  # must not raise
 
     def test_queued_to_queued_raises(self):
         with pytest.raises(InvalidTransitionError):
@@ -234,7 +236,10 @@ class TestStateMachine:
 
     # allowed_transitions helper
     def test_allowed_from_queued(self):
-        assert allowed_transitions(SceneStatus.QUEUED) == frozenset({SceneStatus.PROCESSING})
+        assert allowed_transitions(SceneStatus.QUEUED) == frozenset({
+            SceneStatus.PROCESSING,
+            SceneStatus.FAILED,  # dispatch-time failure path
+        })
 
     def test_allowed_from_ready_is_empty(self):
         assert allowed_transitions(SceneStatus.READY) == frozenset()
