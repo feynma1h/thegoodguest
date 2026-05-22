@@ -88,6 +88,8 @@ message CaptureBundle {
 
 message Device {
   // e.g. "iPhone15,3" (iPhone 14 Pro Max). Raw from `utsname`.
+  // This is a MODEL string, not a unique device identifier — two phones of
+  // the same model produce the same value. Do not use as a device key.
   string hardware_id = 1;
 
   // e.g. "17.4.1"
@@ -98,6 +100,14 @@ message Device {
 
   // True if the device has a LiDAR sensor (Pro line, iPad Pro).
   bool has_lidar = 4;
+
+  // Stable per-device UUID, generated on first app launch and persisted in
+  // the iOS Keychain. Distinct from hardware_id (which identifies the model)
+  // and from user_id (which identifies the user account). Empty until the iOS
+  // app is built; the backend falls back to hardware_id while this field is
+  // unpopulated. Remove the fallback once iOS bundles populate this field for
+  // ≥99% of captures over a 7-day window.
+  string device_id = 5;
 }
 
 enum CaptureTier {

@@ -92,3 +92,7 @@ would be infrastructure for a deprioritized surface.
   `perception-geom` gets its own queue entry with this same pattern.
 - If we ever need multiple consumers per job (e.g. perception + analytics +
   thumbnailer), revisit Pub/Sub.
+- Once iOS bundles reliably populate `device_id`, remove the `hardware_id`
+  fallback in `server.py` and the `fallback_hardware_id` variant from
+  `DeviceIdSource`. Trigger: ≥99% of scenes have `device_id_source ==
+  "provided"` over a 7-day window in Firestore.

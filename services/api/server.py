@@ -37,6 +37,7 @@ if str(_schemas_path) not in sys.path:
 
 from roomstudio_schemas import CaptureBundle, CaptureTier  # noqa: E402
 from validation import validate_bundle  # noqa: E402
+from scene import DeviceIdSource  # noqa: E402
 
 
 app = FastAPI(
@@ -85,6 +86,45 @@ class IngestError(BaseModel):
     """
     error: str
     detail: str
+
+
+# ---------------------------------------------------------------------------
+# device_id resolution — prefer bundle.device.device_id, fall back to
+# hardware_id while the iOS app is not yet built and device_id is always "".
+#
+# Remove the fallback_hardware_id path once iOS bundles populate device_id
+# for ≥99% of captures over a 7-day window. The DeviceIdSource field on Scene
+# lets you run that query in Firestore: count docs where device_id_source ==
+# "fallback_hardware_id" over the target window.
+# ---------------------------------------------------------------------------
+
+def resolve_device_id(bundle, bundle_gcs_uri: str) -> tuple[str, DeviceIdSource]:
+    """Return (device_id, source) from the parsed CaptureBundle.
+
+    Preference order:
+      1. bundle.device.device_id  — the stable Keychain UUID (preferred).
+      2. bundle.device.hardware_id — model string fallback; not unique across
+         devices of the same model. Logs a WARNING so the fallback is visible
+         in Cloud Logging.
+
+    Raises ValueError if both fields are empty, surfaced as a 400 to the client.
+    """
+    if bundle.device.device_id:
+        return bundle.device.device_id, DeviceIdSource.PROVIDED
+
+    if bundle.device.hardware_id:
+        logger.warning(
+            "device_id absent in bundle; falling back to hardware_id %r "
+            "(not unique per device). bundle_uri=%s",
+            bundle.device.hardware_id,
+            bundle_gcs_uri,
+        )
+        return bundle.device.hardware_id, DeviceIdSource.FALLBACK_HARDWARE_ID
+
+    raise ValueError(
+        "bundle.device.device_id and bundle.device.hardware_id are both empty; "
+        "cannot determine device identity"
+    )
 
 
 # ---------------------------------------------------------------------------
