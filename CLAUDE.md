@@ -56,12 +56,12 @@ outputs/                          gitignored; generated artifacts
 - The photo-upload pipeline (`perception-obj`, `perception-geom`) is deployed and produces per-object splats from photo uploads. It's the old path; we're keeping it alive but not iterating on it.
 - 25 schema + math tests, all passing. Don't break them.
 - Bundle ingester at `services/api/`: `POST /ingest` validates a CaptureBundle by GCS URI, creates a Scene record (Firestore in prod, in-memory in dev), enqueues a Cloud Tasks HTTP job targeting perception-obj, and returns `{scene_id, status: "queued"}` or a structured error. 92 tests passing. Not yet deployed.
+- `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally; real-infra end-to-end is gated on the ingester deploy (see Track A). 145 tests passing across both services.
 
 ## What does NOT work / what we're deliberately not doing
 
 - **No iOS app exists yet.** The bundle synthesizer is the only thing that writes bundles.
 - **Ingester is not deployed.** No Dockerfile, no `infra/deploy_api.sh`, no Cloud Run service. Runs locally only.
-- **perception-obj has no `/process` receiver.** Cloud Tasks will enqueue jobs targeting `PERCEPTION_OBJ_PROCESS_URL`, but the endpoint that accepts and processes them doesn't exist yet. That's the next session.
 - **No web app yet.**
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
@@ -112,13 +112,9 @@ When this section gets stale, the project's drifting. Keep it current.
 
 Two parallel tracks as of end of session (May 2026):
 
-**Track A — backend (two parallel workstreams)**
+**Track A — backend**
 
-- **perception-obj `/process` receiver** *(more urgent)* — accept the Cloud Tasks HTTP POST (`{scene_id, bundle_uri}`), fetch the bundle from GCS, run SAM 3 + SAM 3D Objects, write the result to GCS, update Scene status in Firestore (`processing → ready | failed`). Without this, the system is non-functional end-to-end even after the ingester is deployed.
-
-- **Deploy the ingester** — Dockerfile + `infra/deploy_api.sh` for `services/api/`. CPU-only Cloud Run, `--allow-unauthenticated` for now. Safe to defer until the receiver exists — local testing covers dispatch adequately in the meantime.
-
-These two can proceed in parallel; neither blocks the other. The obvious sequence is: build the receiver locally → deploy both together.
+- **Deploy the ingester** — Dockerfile + `infra/deploy_api.sh` for `services/api/`. CPU-only Cloud Run, `--allow-unauthenticated` for now. With the receiver live locally, deploying the ingester is the last step to a working end-to-end system on real infra.
 
 **Track B — iOS (independent)**
 
