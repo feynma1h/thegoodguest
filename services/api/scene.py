@@ -68,7 +68,7 @@ class DeviceIdSource(str, Enum):
 
 # Allowed state transitions. Values are frozensets of legal target states.
 _ALLOWED_TRANSITIONS: dict[SceneStatus, frozenset[SceneStatus]] = {
-    SceneStatus.QUEUED:     frozenset({SceneStatus.PROCESSING, SceneStatus.FAILED}),
+    SceneStatus.QUEUED:     frozenset({SceneStatus.PROCESSING, SceneStatus.FAILED}),  # FAILED: dispatch never fired (e.g. Cloud Tasks enqueue failed)
     SceneStatus.PROCESSING: frozenset({SceneStatus.READY, SceneStatus.FAILED}),
     SceneStatus.FAILED:     frozenset({SceneStatus.QUEUED}),  # manual retry only
     SceneStatus.READY:      frozenset(),                      # terminal
