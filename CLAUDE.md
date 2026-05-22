@@ -115,13 +115,14 @@ Two parallel tracks as of end of session (May 2026):
 **Track A — backend (sequential within this track)**
 
 1. **Deploy the ingester** — Dockerfile + `infra/deploy_api.sh` for `services/api/`. CPU-only Cloud Run, `--allow-unauthenticated` for now.
-2. **Wire perception dispatch** — after validation passes, `POST /ingest` triggers `perception-obj`/`perception-geom`. Before building: Chat session on sync vs. async dispatch.
+2. **Scene state schema + user/device identity** — `Scene` record shape (id, owner, status, result_uri, timestamps), state machine (`queued → processing → ready | failed`), and a `device_id` field on Scene from day one (proper user auth is later, but the field needs to exist to avoid a painful retrofit).
+3. **Wire perception dispatch (async via Cloud Tasks)** — after validation passes, `POST /ingest` creates a Scene record, enqueues a Cloud Task targeting `perception-obj`, returns `{scene_id, status: "queued"}`. Perception service updates Scene state on completion. Retry policy: Cloud Tasks `maxAttempts: 3` with exponential backoff (30s start); after exhaustion, scene → `failed` and iOS surfaces a manual retry button. State store: Firestore. Notifications: FCM. `perception-geom` stays on its current photo-upload path — not part of this dispatch flow. See `docs/decisions/0003-async-perception-dispatch.md`.
 
 **Track B — iOS (independent)**
 
 - **iOS capture app prototype** — Swift + ARKit, emits the bundle. Derisks the contract from the side the backend can't verify.
 
-Tracks A and B can proceed in parallel. Track A step 2 is blocked on step 1 and on the dispatch architecture decision.
+Tracks A and B can proceed in parallel. Track A step 3 is blocked on steps 1 and 2 and on the dispatch architecture decision.
 
 ## Session-end housekeeping (Claude Code: do this before ending any session)
 
