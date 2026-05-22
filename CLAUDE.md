@@ -55,13 +55,13 @@ outputs/                          gitignored; generated artifacts
 - The capture-bundle contract is defined, generated, and tested. `python tools/build_test_bundle.py && python tools/inspect_bundle.py outputs/test_bundle/bundle.pb` runs clean end-to-end.
 - The photo-upload pipeline (`perception-obj`, `perception-geom`) is deployed and produces per-object splats from photo uploads. It's the old path; we're keeping it alive but not iterating on it.
 - 25 schema + math tests, all passing. Don't break them.
-- Bundle ingester at `services/api/`: `POST /ingest` accepts a CaptureBundle by GCS URI, validates it (schema version, quaternion norms, tier-vs-depth consistency, relative GCS paths), and returns a structured summary or 400 error. 7 tests passing. Not yet deployed; no perception dispatch yet.
+- Bundle ingester at `services/api/`: `POST /ingest` validates a CaptureBundle by GCS URI, creates a Scene record (Firestore in prod, in-memory in dev), enqueues a Cloud Tasks HTTP job targeting perception-obj, and returns `{scene_id, status: "queued"}` or a structured error. 92 tests passing. Not yet deployed.
 
 ## What does NOT work / what we're deliberately not doing
 
 - **No iOS app exists yet.** The bundle synthesizer is the only thing that writes bundles.
 - **Ingester is not deployed.** No Dockerfile, no `infra/deploy_api.sh`, no Cloud Run service. Runs locally only.
-- **Ingester does not dispatch perception work.** `POST /ingest` validates and acknowledges; it does not trigger `perception-obj` or `perception-geom`.
+- **perception-obj has no `/process` receiver.** Cloud Tasks will enqueue jobs targeting `PERCEPTION_OBJ_PROCESS_URL`, but the endpoint that accepts and processes them doesn't exist yet. That's the next session.
 - **No web app yet.**
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
@@ -112,17 +112,19 @@ When this section gets stale, the project's drifting. Keep it current.
 
 Two parallel tracks as of end of session (May 2026):
 
-**Track A — backend (sequential within this track)**
+**Track A — backend (two parallel workstreams)**
 
-1. **Deploy the ingester** — Dockerfile + `infra/deploy_api.sh` for `services/api/`. CPU-only Cloud Run, `--allow-unauthenticated` for now.
-2. **Scene state schema + user/device identity** — `Scene` record shape (id, owner, status, result_uri, timestamps), state machine (`queued → processing → ready | failed`), and a `device_id` field on Scene from day one (proper user auth is later, but the field needs to exist to avoid a painful retrofit).
-3. **Wire perception dispatch (async via Cloud Tasks)** — after validation passes, `POST /ingest` creates a Scene record, enqueues a Cloud Task targeting `perception-obj`, returns `{scene_id, status: "queued"}`. Perception service updates Scene state on completion. Retry policy: Cloud Tasks `maxAttempts: 3` with exponential backoff (30s start); after exhaustion, scene → `failed` and iOS surfaces a manual retry button. State store: Firestore. Notifications: FCM. `perception-geom` stays on its current photo-upload path — not part of this dispatch flow. See `docs/decisions/0003-async-perception-dispatch.md`.
+- **perception-obj `/process` receiver** *(more urgent)* — accept the Cloud Tasks HTTP POST (`{scene_id, bundle_uri}`), fetch the bundle from GCS, run SAM 3 + SAM 3D Objects, write the result to GCS, update Scene status in Firestore (`processing → ready | failed`). Without this, the system is non-functional end-to-end even after the ingester is deployed.
+
+- **Deploy the ingester** — Dockerfile + `infra/deploy_api.sh` for `services/api/`. CPU-only Cloud Run, `--allow-unauthenticated` for now. Safe to defer until the receiver exists — local testing covers dispatch adequately in the meantime.
+
+These two can proceed in parallel; neither blocks the other. The obvious sequence is: build the receiver locally → deploy both together.
 
 **Track B — iOS (independent)**
 
 - **iOS capture app prototype** — Swift + ARKit, emits the bundle. Derisks the contract from the side the backend can't verify.
 
-Tracks A and B can proceed in parallel. Track A step 3 is blocked on steps 1 and 2 and on the dispatch architecture decision.
+Tracks A and B can proceed in parallel.
 
 ## Session-end housekeeping (Claude Code: do this before ending any session)
 
