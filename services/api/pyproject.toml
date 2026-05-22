@@ -1,13 +1,14 @@
 [project]
 name = "roomstudio-api"
 version = "0.1.0"
-description = "roomstudio bundle ingester — validates CaptureBundle from GCS and returns a structured summary"
+description = "roomstudio bundle ingester — validates CaptureBundle from GCS, creates a Scene, and dispatches perception work via Cloud Tasks"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110,<1.0",
     "uvicorn[standard]>=0.27,<1.0",
     "google-cloud-storage>=2.10,<3.0",
     "google-cloud-firestore>=2.14,<3.0",
+    "google-cloud-tasks>=2.13,<3.0",
     # roomstudio-schemas is a local package.
     # Install it first: pip install -e packages/schemas
     "roomstudio-schemas",

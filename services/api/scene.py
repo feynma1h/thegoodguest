@@ -8,6 +8,7 @@ and is read by the ingester, perception services, and eventually the iOS client.
 State machine:
   queued → processing → ready     (happy path)
                       → failed    (perception error; Cloud Tasks exhausted retries)
+         → failed                 (dispatch error; task never enqueued)
   failed → queued                 (manual retry only, via POST /scenes/{id}/retry)
 
 Any other transition is a programming error and raises InvalidTransitionError.
@@ -67,7 +68,7 @@ class DeviceIdSource(str, Enum):
 
 # Allowed state transitions. Values are frozensets of legal target states.
 _ALLOWED_TRANSITIONS: dict[SceneStatus, frozenset[SceneStatus]] = {
-    SceneStatus.QUEUED:     frozenset({SceneStatus.PROCESSING}),
+    SceneStatus.QUEUED:     frozenset({SceneStatus.PROCESSING, SceneStatus.FAILED}),
     SceneStatus.PROCESSING: frozenset({SceneStatus.READY, SceneStatus.FAILED}),
     SceneStatus.FAILED:     frozenset({SceneStatus.QUEUED}),  # manual retry only
     SceneStatus.READY:      frozenset(),                      # terminal
