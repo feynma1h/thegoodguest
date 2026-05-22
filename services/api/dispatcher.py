@@ -127,14 +127,27 @@ class CloudTasksDispatcher(TaskDispatcher):
         client = tasks_v2.CloudTasksClient()
         queue_path = client.queue_path(self._project, self._location, self._queue)
 
+        http_request: dict[str, Any] = {
+            "http_method": tasks_v2.HttpMethod.POST,
+            "url": target_url,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(payload).encode("utf-8"),
+        }
+
+        # Attach OIDC token so the receiver can verify the request came from
+        # Cloud Tasks (not an unauthenticated caller). The token's `email` claim
+        # will equal CLOUD_TASKS_INVOKER_SA; the receiver checks this against its
+        # CLOUD_TASKS_INVOKER_SA env var. If the env var is unset (local dev),
+        # skip OIDC — the receiver also skips verification when its own
+        # CLOUD_TASKS_INVOKER_SA is unset.
+        import os as _os
+        invoker_sa = _os.environ.get("CLOUD_TASKS_INVOKER_SA", "")
+        if invoker_sa:
+            http_request["oidc_token"] = {"service_account_email": invoker_sa}
+
         task = {
             # Full resource name pins the task ID for Cloud Tasks dedup.
             "name": f"{queue_path}/tasks/{task_name}",
-            "http_request": {
-                "http_method": tasks_v2.HttpMethod.POST,
-                "url": target_url,
-                "headers": {"Content-Type": "application/json"},
-                "body": json.dumps(payload).encode("utf-8"),
-            },
+            "http_request": http_request,
         }
         client.create_task(request={"parent": queue_path, "task": task})
