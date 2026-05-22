@@ -20,4 +20,14 @@ dependencies = [
     "numpy<2",
     "einops",
     "safetensors",
+    "google-auth>=2.0,<3.0",
+    "google-cloud-firestore>=2.14,<3.0",
+    "firebase-admin>=6.0,<7.0",
+    "roomstudio-schemas",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "httpx>=0.25,<1.0",
 ]

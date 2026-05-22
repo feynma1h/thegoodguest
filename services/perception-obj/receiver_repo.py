@@ -1,0 +1,326 @@
+"""ReceiverRepository: Scene claim/release for the perception-obj /process endpoint.
+
+Manages the lease lifecycle that the ingester's SceneRepository does not need:
+  - claim()        — atomically transition queued→processing and write
+                     lease_expires_at; or reclaim a PROCESSING scene whose
+                     lease has gone stale (crash recovery per 0004).
+  - release_ready() — mark the scene READY, set result_uri, clear lease.
+  - release_failed() — mark the scene FAILED, set last_error, clear lease.
+
+`lease_expires_at` is an implementation detail of the receiver. It lives in the
+Firestore document alongside the standard Scene fields (written by the ingester)
+but is not part of the Scene domain model in services/api/scene.py.
+
+The receiver drives the queued→processing→ready|failed arc.
+The ingester owns failed→queued (manual retry). The receiver treats `failed`
+on entry as a bug (per 0004) and 200-exits without clobbering state.
+
+Status strings match the SceneStatus enum values in services/api/scene.py:
+  "queued" / "processing" / "ready" / "failed"
+
+Consumers: process_receiver.py (POST /process orchestration).
+"""
+from __future__ import annotations
+
+import threading
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
+from enum import Enum
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# Claim result types
+# ---------------------------------------------------------------------------
+
+class ClaimStatus(str, Enum):
+    """Outcome of a claim() call."""
+    CLAIMED       = "claimed"       # was queued, now processing; caller should proceed
+    RECLAIMED     = "reclaimed"     # was processing with stale lease; reclaimed; proceed
+    ALREADY_OWNED = "already_owned" # processing with fresh lease; another worker owns it; 200-exit
+    WRONG_STATE   = "wrong_state"   # scene is failed or ready; 200-exit (bug per 0004)
+    NOT_FOUND     = "not_found"     # no scene with this id; 200-exit
+
+
+@dataclass
+class ClaimResult:
+    """Result of a claim() call.
+
+    device_id is non-empty only when status is CLAIMED or RECLAIMED — the
+    caller needs it to send FCM notifications on terminal transitions.
+    """
+    status: ClaimStatus
+    device_id: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Abstract interface
+# ---------------------------------------------------------------------------
+
+class ReceiverRepository(ABC):
+    """Interface for Scene claim/release from the perception receiver's perspective."""
+
+    @abstractmethod
+    def claim(self, scene_id: str, lease_ttl_seconds: int) -> ClaimResult:
+        """Atomically attempt to claim scene_id for processing.
+
+        Behaviour by current scene status:
+          queued      → transition to processing, write lease_expires_at.
+                        Returns CLAIMED.
+          processing  → if lease is stale (expired), reclaim: refresh
+                        lease_expires_at without re-transitioning status.
+                        Returns RECLAIMED.
+                        If lease is fresh, another worker owns it.
+                        Returns ALREADY_OWNED.
+          failed      → bug per 0004; receiver should 200-exit.
+                        Returns WRONG_STATE.
+          ready       → already done; receiver should 200-exit.
+                        Returns WRONG_STATE.
+          not found   → idempotency or stale task; receiver should 200-exit.
+                        Returns NOT_FOUND.
+        """
+
+    @abstractmethod
+    def release_ready(self, scene_id: str, result_uri: str) -> None:
+        """Transition scene_id from processing to ready and set result_uri.
+
+        Clears lease_expires_at. Raises ValueError if scene is not processing.
+        """
+
+    @abstractmethod
+    def release_failed(self, scene_id: str, last_error: str) -> None:
+        """Transition scene_id from processing to failed and set last_error.
+
+        Clears lease_expires_at. Raises ValueError if scene is not processing.
+        """
+
+
+# ---------------------------------------------------------------------------
+# In-memory implementation (tests / local dev)
+# ---------------------------------------------------------------------------
+
+class InMemoryReceiverRepository(ReceiverRepository):
+    """Thread-safe in-memory implementation. For tests.
+
+    seed() pre-populates scenes so tests can start from any state.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        # Each entry: {"status": str, "device_id": str, "bundle_uri": str,
+        #              "result_uri": str|None, "last_error": str|None,
+        #              "lease_expires_at": datetime|None}
+        self._scenes: dict[str, dict] = {}
+
+    def seed(
+        self,
+        scene_id: str,
+        *,
+        status: str,
+        device_id: str = "device-1",
+        bundle_uri: str = "gs://bucket/captures/test/bundle.pb",
+        result_uri: Optional[str] = None,
+        last_error: Optional[str] = None,
+        lease_expires_at: Optional[datetime] = None,
+    ) -> None:
+        """Pre-populate a scene for testing. Not part of the production interface."""
+        with self._lock:
+            self._scenes[scene_id] = {
+                "status": status,
+                "device_id": device_id,
+                "bundle_uri": bundle_uri,
+                "result_uri": result_uri,
+                "last_error": last_error,
+                "lease_expires_at": lease_expires_at,
+            }
+
+    def get_raw(self, scene_id: str) -> Optional[dict]:
+        """Return a copy of the raw scene dict for test assertions."""
+        with self._lock:
+            entry = self._scenes.get(scene_id)
+            return dict(entry) if entry is not None else None
+
+    def claim(self, scene_id: str, lease_ttl_seconds: int) -> ClaimResult:
+        with self._lock:
+            entry = self._scenes.get(scene_id)
+            if entry is None:
+                return ClaimResult(ClaimStatus.NOT_FOUND)
+
+            status = entry["status"]
+            now = datetime.now(tz=timezone.utc)
+            new_lease = now + timedelta(seconds=lease_ttl_seconds)
+
+            if status in ("failed", "ready"):
+                return ClaimResult(ClaimStatus.WRONG_STATE)
+
+            if status == "processing":
+                existing_lease = entry.get("lease_expires_at")
+                if existing_lease is not None and existing_lease > now:
+                    return ClaimResult(ClaimStatus.ALREADY_OWNED)
+                # Stale lease — reclaim.
+                entry["lease_expires_at"] = new_lease
+                return ClaimResult(ClaimStatus.RECLAIMED, device_id=entry["device_id"])
+
+            if status == "queued":
+                entry["status"] = "processing"
+                entry["lease_expires_at"] = new_lease
+                return ClaimResult(ClaimStatus.CLAIMED, device_id=entry["device_id"])
+
+            # Unknown status — treat as bug.
+            return ClaimResult(ClaimStatus.WRONG_STATE)
+
+    def release_ready(self, scene_id: str, result_uri: str) -> None:
+        with self._lock:
+            entry = self._scenes.get(scene_id)
+            if entry is None:
+                raise ValueError(f"Scene not found: {scene_id!r}")
+            if entry["status"] != "processing":
+                raise ValueError(
+                    f"Cannot release_ready scene {scene_id!r}: "
+                    f"current status is {entry['status']!r}"
+                )
+            entry["status"] = "ready"
+            entry["result_uri"] = result_uri
+            entry["lease_expires_at"] = None
+
+    def release_failed(self, scene_id: str, last_error: str) -> None:
+        with self._lock:
+            entry = self._scenes.get(scene_id)
+            if entry is None:
+                raise ValueError(f"Scene not found: {scene_id!r}")
+            if entry["status"] != "processing":
+                raise ValueError(
+                    f"Cannot release_failed scene {scene_id!r}: "
+                    f"current status is {entry['status']!r}"
+                )
+            entry["status"] = "failed"
+            entry["last_error"] = last_error
+            entry["lease_expires_at"] = None
+
+
+# ---------------------------------------------------------------------------
+# Firestore implementation (production)
+# ---------------------------------------------------------------------------
+
+class FirestoreReceiverRepository(ReceiverRepository):
+    """Firestore-backed implementation.
+
+    Reads and writes the 'scenes' collection — the same collection the ingester
+    uses. The receiver adds one extra field (`lease_expires_at`) the ingester
+    does not write.
+
+    google.cloud.firestore is imported lazily so this module is safe to import
+    in test environments without GCP credentials or the library installed.
+
+    Collection: 'scenes'. Document id = scene_id.
+    """
+
+    COLLECTION = "scenes"
+
+    def __init__(self, project: Optional[str] = None) -> None:
+        from google.cloud import firestore as _fs  # deferred
+
+        self._db = _fs.Client(project=project)
+
+    def claim(self, scene_id: str, lease_ttl_seconds: int) -> ClaimResult:
+        from google.cloud import firestore as _fs  # deferred
+
+        ref = self._db.collection(self.COLLECTION).document(scene_id)
+        now = datetime.now(tz=timezone.utc)
+        new_lease = now + timedelta(seconds=lease_ttl_seconds)
+
+        result: ClaimResult = ClaimResult(ClaimStatus.NOT_FOUND)
+
+        @_fs.transactional
+        def _txn(transaction, ref):
+            nonlocal result
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                result = ClaimResult(ClaimStatus.NOT_FOUND)
+                return
+
+            data = snap.to_dict()
+            status = data.get("status", "")
+            device_id = data.get("device_id", "")
+
+            if status in ("failed", "ready"):
+                result = ClaimResult(ClaimStatus.WRONG_STATE)
+                return
+
+            if status == "processing":
+                existing_lease = data.get("lease_expires_at")
+                if existing_lease is not None and existing_lease > now:
+                    result = ClaimResult(ClaimStatus.ALREADY_OWNED)
+                    return
+                # Stale lease — reclaim.
+                transaction.update(ref, {
+                    "lease_expires_at": new_lease,
+                    "updated_at": now,
+                })
+                result = ClaimResult(ClaimStatus.RECLAIMED, device_id=device_id)
+                return
+
+            if status == "queued":
+                transaction.update(ref, {
+                    "status": "processing",
+                    "lease_expires_at": new_lease,
+                    "updated_at": now,
+                })
+                result = ClaimResult(ClaimStatus.CLAIMED, device_id=device_id)
+                return
+
+            result = ClaimResult(ClaimStatus.WRONG_STATE)
+
+        _txn(self._db.transaction(), ref)
+        return result
+
+    def release_ready(self, scene_id: str, result_uri: str) -> None:
+        from google.cloud import firestore as _fs  # deferred
+
+        ref = self._db.collection(self.COLLECTION).document(scene_id)
+
+        @_fs.transactional
+        def _txn(transaction, ref):
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                raise ValueError(f"Scene not found: {scene_id!r}")
+            data = snap.to_dict()
+            if data.get("status") != "processing":
+                raise ValueError(
+                    f"Cannot release_ready scene {scene_id!r}: "
+                    f"current status is {data.get('status')!r}"
+                )
+            transaction.update(ref, {
+                "status": "ready",
+                "result_uri": result_uri,
+                "lease_expires_at": None,
+                "updated_at": datetime.now(tz=timezone.utc),
+            })
+
+        _txn(self._db.transaction(), ref)
+
+    def release_failed(self, scene_id: str, last_error: str) -> None:
+        from google.cloud import firestore as _fs  # deferred
+
+        ref = self._db.collection(self.COLLECTION).document(scene_id)
+
+        @_fs.transactional
+        def _txn(transaction, ref):
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                raise ValueError(f"Scene not found: {scene_id!r}")
+            data = snap.to_dict()
+            if data.get("status") != "processing":
+                raise ValueError(
+                    f"Cannot release_failed scene {scene_id!r}: "
+                    f"current status is {data.get('status')!r}"
+                )
+            transaction.update(ref, {
+                "status": "failed",
+                "last_error": last_error,
+                "lease_expires_at": None,
+                "updated_at": datetime.now(tz=timezone.utc),
+            })
+
+        _txn(self._db.transaction(), ref)
