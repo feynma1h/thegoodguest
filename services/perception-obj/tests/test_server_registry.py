@@ -1,8 +1,8 @@
 """Tests for the lazy model registry and health endpoints in server.py.
 
 Verifies:
-  - /healthz always returns 200 without touching the model registry.
-  - /readyz reports the correct per-model status in each registry state.
+  - /health always returns 200 without touching the model registry.
+  - /ready reports the correct per-model status in each registry state.
   - get_sam3() / get_sam3d() trigger deferred model import + construction.
   - Cached failure: a failed load raises HTTPException on every subsequent call.
 
@@ -79,7 +79,7 @@ def clean_registry():
 
 
 # ---------------------------------------------------------------------------
-# /healthz
+# /health
 # ---------------------------------------------------------------------------
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -89,62 +89,62 @@ client = TestClient(server.app)
 
 class TestHealthz:
     def test_always_200(self):
-        """/healthz returns 200 with no model interaction regardless of state."""
-        resp = client.get("/healthz")
+        """/health returns 200 with no model interaction regardless of state."""
+        resp = client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
     def test_200_when_models_not_loaded(self):
-        """/healthz is 200 even before any model has been touched."""
+        """/health is 200 even before any model has been touched."""
         assert server._sam3 is None
         assert server._sam3d is None
-        assert client.get("/healthz").status_code == 200
+        assert client.get("/health").status_code == 200
 
 
 # ---------------------------------------------------------------------------
-# /readyz
+# /ready
 # ---------------------------------------------------------------------------
 
 class TestReadyz:
     def test_not_loaded_state(self):
-        """/readyz reports not_loaded for both models before any /process call."""
-        resp = client.get("/readyz")
+        """/ready reports not_loaded for both models before any /process call."""
+        resp = client.get("/ready")
         assert resp.status_code == 503
         body = resp.json()
         assert body["sam3"] == "not_loaded"
         assert body["sam3d"] == "not_loaded"
 
     def test_loaded_state(self):
-        """/readyz reports loaded for both models after registry is populated."""
+        """/ready reports loaded for both models after registry is populated."""
         server._sam3 = MagicMock()
         server._sam3d = MagicMock()
-        resp = client.get("/readyz")
+        resp = client.get("/ready")
         assert resp.status_code == 200
         body = resp.json()
         assert body["sam3"] == "loaded"
         assert body["sam3d"] == "loaded"
 
     def test_failed_state(self):
-        """/readyz reports failed when an error is recorded."""
+        """/ready reports failed when an error is recorded."""
         server._sam3_error = "RuntimeError: CUDA not available"
-        resp = client.get("/readyz")
+        resp = client.get("/ready")
         assert resp.status_code == 500
         body = resp.json()
         assert body["sam3"] == "failed"
         assert body["sam3_error"] == "RuntimeError: CUDA not available"
 
     def test_loading_state(self):
-        """/readyz reports loading when the loading flag is set."""
+        """/ready reports loading when the loading flag is set."""
         server._sam3_loading = True
-        resp = client.get("/readyz")
+        resp = client.get("/ready")
         assert resp.status_code == 503
         assert resp.json()["sam3"] == "loading"
 
     def test_partial_loaded(self):
-        """/readyz is 503 when sam3 is loaded but sam3d is not yet."""
+        """/ready is 503 when sam3 is loaded but sam3d is not yet."""
         server._sam3 = MagicMock()
         # sam3d still None
-        resp = client.get("/readyz")
+        resp = client.get("/ready")
         assert resp.status_code == 503
         body = resp.json()
         assert body["sam3"] == "loaded"

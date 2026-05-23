@@ -4,9 +4,9 @@ perception-obj server.
 Runs SAM 3 (open-vocabulary segmentation) and SAM 3D Objects (per-object Gaussian
 splat reconstruction). Endpoints:
 
-  GET  /healthz   — Startup probe target. Always 200 as soon as uvicorn is up.
+  GET  /health    — Startup probe target. Always 200 as soon as uvicorn is up.
                     No model interaction. Fast timeout is intentional.
-  GET  /readyz    — Readiness check. Reports model load state: not_loaded /
+  GET  /ready     — Readiness check. Reports model load state: not_loaded /
                     loading / loaded / failed. Intended for Cloud Tasks to poll
                     before sending work (or for debugging cold-start timing).
   POST /segment   — SAM 3 only. Returns object metadata + packed masks as .npz.
@@ -279,18 +279,22 @@ def root() -> dict[str, Any]:
     return {"status": "ok", "device": DEVICE, "models": ["sam3", "sam-3d-objects"]}
 
 
-@app.get("/healthz")
-def healthz() -> dict[str, str]:
+@app.get("/health")
+def health() -> dict[str, str]:
     """Startup probe target. Always returns 200 as soon as uvicorn is up.
     No model interaction — this endpoint must never block. The startup probe
     in infra/deploy_perception.sh points here so Cloud Run marks the container
     healthy in seconds, decoupling container liveness from the ~195s model load.
-    See docs/decisions/0007."""
+    See docs/decisions/0007.
+
+    Note: /healthz is intercepted by Google's Frontend (GFE) and never reaches
+    the container on public Cloud Run URLs. /health is not intercepted.
+    See docs/decisions/0009."""
     return {"status": "ok"}
 
 
-@app.get("/readyz")
-def readyz() -> JSONResponse:
+@app.get("/ready")
+def ready() -> JSONResponse:
     """Model readiness check. Reports load state per model.
 
     status values: not_loaded | loading | loaded | failed
