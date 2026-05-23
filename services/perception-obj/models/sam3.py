@@ -9,19 +9,20 @@ import numpy as np
 import torch
 from PIL import Image
 
-# SAM 3 is installed as an editable package at /opt/sam3
-sys.path.insert(0, "/opt/sam3")
-
-# NOTE: these import paths are best-guess based on the model card snippet.
-# May need adjustment after first deploy; see services/perception/README.md.
-from sam3.model_builder import build_sam3_image_model  # noqa: E402
-from sam3.model.sam3_image_processor import Sam3Processor  # noqa: E402
-
 
 class SAM3Model:
     """Thin wrapper around SAM 3 image model. One instance per container."""
 
     def __init__(self):
+        # SAM 3 is installed as an editable package at /opt/sam3. These imports
+        # are deferred to __init__ (not module level) so that importing
+        # models.sam3 does NOT trigger CUDA initialisation at server startup.
+        # The heavy work happens only when the first request constructs this
+        # instance. See docs/decisions/0007.
+        sys.path.insert(0, "/opt/sam3")
+        from sam3.model_builder import build_sam3_image_model  # noqa: PLC0415
+        from sam3.model.sam3_image_processor import Sam3Processor  # noqa: PLC0415
+
         self.model = build_sam3_image_model()
         self.processor = Sam3Processor(self.model)
         # SAM 3's Sam3Processor.set_image does NOT wrap the encoder in autocast,
