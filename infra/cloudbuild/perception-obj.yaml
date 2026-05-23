@@ -1,10 +1,20 @@
 # Cloud Build configuration for perception-obj.
 #
-# Invoked by infra/deploy_perception.sh obj. Builds the container with
-# BuildKit (so the HF token secret can be mounted into a RUN step) and
-# pushes to Artifact Registry.
+# Invoked by infra/deploy_perception.sh obj from the REPO ROOT.
+# The build context is the repo root (same as the api service) so that
+# packages/schemas/ is reachable from the Dockerfile.  .gcloudignore at the
+# repo root excludes test_data/ and other large non-build paths, keeping the
+# upload small.
+#
+# Two steps before the docker build:
+#   1. Download the pre-built pytorch3d wheel from GCS into /workspace/wheels/.
+#      (Compiled once by infra/build_pytorch3d_wheel.sh; avoids a 30-50 min
+#      compile during every build.)
+#   2. Build the image with BuildKit so the HF token secret can be mounted
+#      into a RUN step without baking it into a layer.
 
 steps:
+  # ── Step 1: download cached pytorch3d wheel ──────────────────────────────
   - name: 'gcr.io/cloud-builders/gsutil'
     entrypoint: 'bash'
     args:
@@ -15,28 +25,24 @@ steps:
         gsutil cp "gs://roomstudio-build-cache/wheels/pytorch3d-*.whl" /workspace/wheels/
         ls -la /workspace/wheels/
 
+  # ── Step 2: build image (repo root is the build context) ─────────────────
   - name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        set -euo pipefail
         export DOCKER_BUILDKIT=1
-        echo "$$HF_TOKEN" > /workspace/hf_token.txt
-        # Stage build context: copy service files alongside the downloaded wheel.
-        # Use /workspace as the build root so the Dockerfile can reference both
-        # the service code (in ./service/) and the prebuilt wheel (in ./wheels/).
-        rm -rf /workspace/build_ctx
-        mkdir -p /workspace/build_ctx/service
-        cp -r ./. /workspace/build_ctx/service/
-        cp -r /workspace/wheels /workspace/build_ctx/wheels
+        echo "$$HF_TOKEN" > /tmp/hf_token.txt
         docker build \
-          --secret id=hf_token,src=/workspace/hf_token.txt \
+          --secret id=hf_token,src=/tmp/hf_token.txt \
           -t "${_IMAGE_URI}" \
-          -f /workspace/build_ctx/service/Dockerfile \
-          /workspace/build_ctx
-        rm /workspace/hf_token.txt
+          -f services/perception-obj/Dockerfile \
+          .
+        rm /tmp/hf_token.txt
     secretEnv: ['HF_TOKEN']
 
+  # ── Step 3: push ──────────────────────────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', '${_IMAGE_URI}']
 

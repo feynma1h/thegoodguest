@@ -1,0 +1,8 @@
+# gcloudignore — controls what gcloud builds submit uploads to Cloud Build.
+#
+# By default (no .gcloudignore present) gcloud falls back to .gitignore, which
+# already excludes .venv/, outputs/, __pycache__, etc.  The one tracked path
+# that costs real bytes is test_data/photos/ (~21 MiB of HEIC files).  Listing
+# .gitignore here inherits those rules and then we add the extra exclusion.
+.gitignore
+test_data/
