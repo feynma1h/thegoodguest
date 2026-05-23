@@ -5,21 +5,25 @@ record, enqueues a Cloud Tasks job targeting perception-obj, and returns an
 acknowledgement with the scene_id and status="queued".
 
 Endpoints:
+  GET  /health  — liveness probe; always returns {"status": "ok"} with HTTP 200.
   POST /ingest  — validate bundle, create Scene, enqueue perception task.
 
 Run locally (from services/api/):
   uvicorn server:app --reload --port 8080
 
-Environment variables (all optional — absent values fall back to local dev
-defaults documented in each section below):
+Environment variables:
+  ENVIRONMENT                — set to "production" to enable startup env-var
+                               validation (see _check_production_env). Unset
+                               or any other value → silent in-memory fallbacks
+                               (appropriate for local dev / tests).
   FIRESTORE_PROJECT          — GCP project for Firestore; absent → in-memory repo
   CLOUD_TASKS_PROJECT        — GCP project for Cloud Tasks  ┐
   CLOUD_TASKS_LOCATION       — Cloud Tasks region           ├ all three required
   CLOUD_TASKS_QUEUE          — Cloud Tasks queue name       ┘ for real dispatch
+  CLOUD_TASKS_INVOKER_SA     — service account email for OIDC token on tasks
   PERCEPTION_OBJ_PROCESS_URL — full URL of the perception-obj /process endpoint
-                               (does not exist yet; see infra/cloud-tasks-queue.md)
 
-See also: infra/cloud-tasks-queue.md for queue setup.
+See also: infra/cloud-tasks-queue.md for queue setup and SA configuration.
 
 Consumed by: the iOS capture app (future) and integration tests.
 """
@@ -29,6 +33,7 @@ import logging
 import os
 import sys
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -52,10 +57,54 @@ from repository import SceneRepository, InMemorySceneRepository  # noqa: E402
 from dispatcher import TaskDispatcher, InMemoryTaskDispatcher  # noqa: E402
 
 
+# ---------------------------------------------------------------------------
+# Startup validation
+# ---------------------------------------------------------------------------
+
+#: Env vars that must be non-empty when ENVIRONMENT=production.
+_PRODUCTION_REQUIRED_VARS: tuple[str, ...] = (
+    "FIRESTORE_PROJECT",
+    "CLOUD_TASKS_PROJECT",
+    "CLOUD_TASKS_LOCATION",
+    "CLOUD_TASKS_QUEUE",
+    "CLOUD_TASKS_INVOKER_SA",
+    "PERCEPTION_OBJ_PROCESS_URL",
+)
+
+
+def _check_production_env() -> None:
+    """Raise RuntimeError if ENVIRONMENT=production and any required var is absent.
+
+    Called from the lifespan handler at process startup. Has no effect when
+    ENVIRONMENT is unset or set to any value other than "production" —
+    preserving the silent in-memory fallback for local dev and tests.
+
+    This turns misconfiguration into an immediate, noisy startup failure so
+    Cloud Run's startup probe catches it and the deploy rolls back, rather
+    than serving traffic with a broken (in-memory) backend silently.
+    """
+    if os.environ.get("ENVIRONMENT") != "production":
+        return
+    missing = [v for v in _PRODUCTION_REQUIRED_VARS if not os.environ.get(v)]
+    if missing:
+        raise RuntimeError(
+            f"ENVIRONMENT=production but the following required env vars are "
+            f"missing or empty: {', '.join(missing)}"
+        )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # noqa: ARG001
+    """FastAPI lifespan: validate config on startup, nothing on shutdown."""
+    _check_production_env()
+    yield
+
+
 app = FastAPI(
     title="roomstudio-api",
     description="Capture-bundle ingester. Validates bundles and dispatches perception work.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 
@@ -234,8 +283,20 @@ def _get_task_dispatcher() -> TaskDispatcher:
 
 
 # ---------------------------------------------------------------------------
-# Route
+# Routes
 # ---------------------------------------------------------------------------
+
+@app.get("/health", summary="Liveness probe")
+def health() -> JSONResponse:
+    """Always returns {"status": "ok"} with HTTP 200.
+
+    Used by Cloud Run startup/liveness probes and external monitoring.
+    Does not exercise Firestore or Cloud Tasks — this is intentional.
+    A healthy response means the process is alive and routing; it says
+    nothing about backend connectivity.
+    """
+    return JSONResponse(status_code=200, content={"status": "ok"})
+
 
 @app.post(
     "/ingest",
