@@ -4,12 +4,21 @@ perception-obj server.
 Runs SAM 3 (open-vocabulary segmentation) and SAM 3D Objects (per-object Gaussian
 splat reconstruction). Endpoints:
 
+  GET  /healthz   — Startup probe target. Always 200 as soon as uvicorn is up.
+                    No model interaction. Fast timeout is intentional.
+  GET  /readyz    — Readiness check. Reports model load state: not_loaded /
+                    loading / loaded / failed. Intended for Cloud Tasks to poll
+                    before sending work (or for debugging cold-start timing).
   POST /segment   — SAM 3 only. Returns object metadata + packed masks as .npz.
   POST /objects   — Full SAM 3 + SAM 3D. Returns a zip archive: manifest.json +
                     per-object splat PLYs + packed masks.
   POST /process   — Cloud Tasks receiver. Accepts {scene_id, bundle_uri}, runs
                     the full pipeline, updates Firestore Scene state, fires FCM.
                     See process_receiver.py and docs/decisions/0004.
+
+Models are loaded lazily: the first /process call (or /segment / /objects call)
+triggers construction. Startup cost (~195s) is paid by that first request, not
+at container boot. See docs/decisions/0007.
 
 This service does NOT know about VGGT. Splat placement into the scene's
 coordinate frame is the client's job (see tools/call_perception.py), using
@@ -26,7 +35,6 @@ import tempfile
 import threading
 import time
 import zipfile
-from contextlib import asynccontextmanager
 from typing import Any
 
 import numpy as np
@@ -41,8 +49,11 @@ try:
 except ImportError:
     pass
 
-from models.sam3 import SAM3Model
-from models.sam3d import SAM3DModel
+# Model classes are NOT imported at module level. Importing models.sam3 or
+# models.sam3d would immediately run the SAM 3 / SAM 3D CUDA initialisation
+# (hundreds of seconds), blocking uvicorn from binding before the startup
+# probe fires. Imports are deferred to the accessor functions below so that
+# the process survives the startup probe and pays the load cost on first use.
 
 
 # -----------------------------------------------------------------------------
@@ -125,62 +136,97 @@ def _gcs_blob_size(blob_path: str) -> int | None:
     return blob.size
 
 # -----------------------------------------------------------------------------
-# Model initialization (background thread, see lifespan below)
+# Lazy model registry
 # -----------------------------------------------------------------------------
-sam3: SAM3Model | None = None
-sam3d: SAM3DModel | None = None
-_models_ready = False
-_startup_error: str | None = None
-_startup_started_at: float | None = None
-_startup_finished_at: float | None = None
+# Models are None until first use. Accessors (get_sam3 / get_sam3d) load on
+# demand with double-checked locking. Cloud Run runs concurrency=1, so the
+# pre-lock error/instance checks cannot race with a concurrent in-flight load;
+# the locking is defensive for the day concurrency is raised.
+# See docs/decisions/0007.
+
+_sam3 = None  # SAM3Model instance or None
+_sam3d = None  # SAM3DModel instance or None
+_sam3_error: str | None = None
+_sam3d_error: str | None = None
+_sam3_loading: bool = False
+_sam3d_loading: bool = False
+_sam3_lock = threading.Lock()
+_sam3d_lock = threading.Lock()
 
 
-def _load_models() -> None:
-    """Load SAM 3 + SAM 3D in a background thread. Sets module-level globals
-    and flips `_models_ready` on success, or captures the error in
-    `_startup_error` on failure."""
-    global sam3, sam3d, _models_ready, _startup_error, _startup_finished_at
-    try:
-        print(f"[startup] Initializing on {DEVICE}", flush=True)
-        t_total = time.time()
+def get_sam3():
+    """Return the SAM3Model singleton, loading it on first call.
 
-        print("[startup] Loading SAM 3...", flush=True)
-        t = time.time()
-        sam3 = SAM3Model()
-        print(f"[startup] SAM 3 loaded in {time.time() - t:.1f}s", flush=True)
+    Raises HTTPException(500) on load failure (cached — won't retry a broken
+    model). Blocks the calling request while loading (~100s on first cold call).
+    Safe under concurrency=1; revisit if we ever raise concurrency.
+    """
+    global _sam3, _sam3_error, _sam3_loading
+    # Pre-lock fast paths — safe under concurrency=1.
+    if _sam3_error is not None:
+        raise HTTPException(status_code=500, detail=f"SAM 3 failed to load: {_sam3_error}")
+    if _sam3 is not None:
+        return _sam3
+    with _sam3_lock:
+        if _sam3 is not None:
+            return _sam3
+        if _sam3_error is not None:
+            raise HTTPException(status_code=500, detail=f"SAM 3 failed to load: {_sam3_error}")
+        _sam3_loading = True
+        try:
+            from models.sam3 import SAM3Model  # noqa: PLC0415
+            print(f"[model] Loading SAM 3 on {DEVICE}...", flush=True)
+            t = time.time()
+            _sam3 = SAM3Model()
+            print(f"[model] SAM 3 loaded in {time.time() - t:.1f}s", flush=True)
+        except Exception as e:
+            _sam3_error = f"{type(e).__name__}: {e}"
+            print(f"[model] SAM 3 FAILED: {_sam3_error}", flush=True)
+            raise HTTPException(status_code=500, detail=f"SAM 3 failed to load: {_sam3_error}")
+        finally:
+            _sam3_loading = False
+    return _sam3
 
-        print("[startup] Loading SAM 3D Objects...", flush=True)
-        t = time.time()
-        sam3d = SAM3DModel()
-        print(f"[startup] SAM 3D loaded in {time.time() - t:.1f}s", flush=True)
 
-        print(f"[startup] All models ready in {time.time() - t_total:.1f}s", flush=True)
-        _models_ready = True
-    except Exception as e:
-        _startup_error = f"{type(e).__name__}: {e}"
-        print(f"[startup] FAILED: {_startup_error}", flush=True)
-    finally:
-        _startup_finished_at = time.time()
+def get_sam3d():
+    """Return the SAM3DModel singleton, loading it on first call.
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Fire model loading in a background thread so uvicorn can bind to
-    the port immediately. Cloud Run's startup probe passes as soon as we're
-    listening; meanwhile, the client polls /ready to know when to send
-    real work."""
-    global _startup_started_at
-    _startup_started_at = time.time()
-    thread = threading.Thread(target=_load_models, name="model-loader", daemon=True)
-    thread.start()
-    yield
-    # No shutdown work needed; daemon thread dies with the process.
+    Raises HTTPException(500) on load failure (cached — won't retry a broken
+    model). Blocks the calling request while loading (~95s on first cold call,
+    including DINOv2 init from baked TORCH_HOME cache).
+    Safe under concurrency=1; revisit if we ever raise concurrency.
+    """
+    global _sam3d, _sam3d_error, _sam3d_loading
+    # Pre-lock fast paths — safe under concurrency=1.
+    if _sam3d_error is not None:
+        raise HTTPException(status_code=500, detail=f"SAM 3D failed to load: {_sam3d_error}")
+    if _sam3d is not None:
+        return _sam3d
+    with _sam3d_lock:
+        if _sam3d is not None:
+            return _sam3d
+        if _sam3d_error is not None:
+            raise HTTPException(status_code=500, detail=f"SAM 3D failed to load: {_sam3d_error}")
+        _sam3d_loading = True
+        try:
+            from models.sam3d import SAM3DModel  # noqa: PLC0415
+            print("[model] Loading SAM 3D Objects...", flush=True)
+            t = time.time()
+            _sam3d = SAM3DModel()
+            print(f"[model] SAM 3D loaded in {time.time() - t:.1f}s", flush=True)
+        except Exception as e:
+            _sam3d_error = f"{type(e).__name__}: {e}"
+            print(f"[model] SAM 3D FAILED: {_sam3d_error}", flush=True)
+            raise HTTPException(status_code=500, detail=f"SAM 3D failed to load: {_sam3d_error}")
+        finally:
+            _sam3d_loading = False
+    return _sam3d
 
 
 # -----------------------------------------------------------------------------
 # FastAPI app
 # -----------------------------------------------------------------------------
-app = FastAPI(title="roomstudio-perception-obj", lifespan=lifespan)
+app = FastAPI(title="roomstudio-perception-obj")
 
 # Lazy-initialized singletons for the /process endpoint. In tests, replace via
 # patch.object(server, "_receiver_repo", ...) etc.
@@ -229,39 +275,56 @@ def _get_oidc_verifier():
 
 
 @app.get("/")
-def health() -> dict[str, Any]:
+def root() -> dict[str, Any]:
     return {"status": "ok", "device": DEVICE, "models": ["sam3", "sam-3d-objects"]}
 
 
-@app.get("/ready")
-def ready() -> JSONResponse:
-    """Readiness check. Returns 200 when models are loaded, 503 while loading,
-    500 if the loader thread crashed. Clients should poll this before posting
-    to /segment or /objects."""
-    elapsed = (
-        (_startup_finished_at or time.time()) - _startup_started_at
-        if _startup_started_at is not None
-        else 0.0
-    )
-    if _startup_error is not None:
-        return JSONResponse(
-            {"ready": False, "error": _startup_error, "elapsed_seconds": elapsed},
-            status_code=500,
-        )
-    if _models_ready:
-        return JSONResponse({"ready": True, "elapsed_seconds": elapsed})
-    return JSONResponse(
-        {"ready": False, "elapsed_seconds": elapsed},
-        status_code=503,
-    )
+@app.get("/healthz")
+def healthz() -> dict[str, str]:
+    """Startup probe target. Always returns 200 as soon as uvicorn is up.
+    No model interaction — this endpoint must never block. The startup probe
+    in infra/deploy_perception.sh points here so Cloud Run marks the container
+    healthy in seconds, decoupling container liveness from the ~195s model load.
+    See docs/decisions/0007."""
+    return {"status": "ok"}
 
 
-def _require_ready() -> None:
-    """Endpoint guard. Raises 503 if models aren't loaded yet."""
-    if _startup_error is not None:
-        raise HTTPException(status_code=500, detail=f"startup failed: {_startup_error}")
-    if not _models_ready:
-        raise HTTPException(status_code=503, detail="models still loading; poll /ready")
+@app.get("/readyz")
+def readyz() -> JSONResponse:
+    """Model readiness check. Reports load state per model.
+
+    status values: not_loaded | loading | loaded | failed
+
+    Returns 200 when both models are loaded, 503 while loading or not yet
+    triggered, 500 if either model failed. Intended for observability and for
+    clients that want to know whether the next /process call will block.
+    """
+    def _model_status(instance, error, loading) -> str:
+        if error is not None:
+            return "failed"
+        if instance is not None:
+            return "loaded"
+        if loading:
+            return "loading"
+        return "not_loaded"
+
+    sam3_status = _model_status(_sam3, _sam3_error, _sam3_loading)
+    sam3d_status = _model_status(_sam3d, _sam3d_error, _sam3d_loading)
+
+    body: dict[str, Any] = {
+        "sam3": sam3_status,
+        "sam3d": sam3d_status,
+    }
+    if _sam3_error:
+        body["sam3_error"] = _sam3_error
+    if _sam3d_error:
+        body["sam3d_error"] = _sam3d_error
+
+    if sam3_status == "failed" or sam3d_status == "failed":
+        return JSONResponse(body, status_code=500)
+    if sam3_status == "loaded" and sam3d_status == "loaded":
+        return JSONResponse(body, status_code=200)
+    return JSONResponse(body, status_code=503)
 
 
 @app.post("/segment")
@@ -271,11 +334,10 @@ async def segment(
 ) -> JSONResponse:
     """SAM 3 only. Returns object metadata. Masks are NOT included in this
     endpoint (too large for JSON). Use /segment-raw to get masks back."""
-    _require_ready()
     t0 = time.time()
     img_bytes = await image.read()
     pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    objects = sam3.segment(pil, prompt)
+    objects = get_sam3().segment(pil, prompt)
     print(f"[segment] {len(objects)} objects in {time.time() - t0:.1f}s", flush=True)
 
     slim = [{k: v for k, v in o.items() if k != "mask"} for o in objects]
@@ -288,11 +350,10 @@ async def segment_raw(
     prompt: str = Form(DEFAULT_OBJECT_PROMPT),
 ) -> Response:
     """SAM 3 only. Returns a zip containing manifest.json + masks.npz."""
-    _require_ready()
     t0 = time.time()
     img_bytes = await image.read()
     pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    objects = sam3.segment(pil, prompt)
+    objects = get_sam3().segment(pil, prompt)
     print(f"[segment-raw] {len(objects)} objects in {time.time() - t0:.1f}s", flush=True)
 
     # Stream the response: with 40+ masks at full-image resolution this can
@@ -327,7 +388,6 @@ async def objects(
     SAM 3D. SAM 3D is the expensive step (per-object inference); capping
     protects runtime.
     """
-    _require_ready()
     t0 = time.time()
     img_bytes = await image.read()
     photo_sha256 = hashlib.sha256(img_bytes).hexdigest()
@@ -349,7 +409,7 @@ async def objects(
 
     pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
-    detections = sam3.segment(pil, prompt)
+    detections = get_sam3().segment(pil, prompt)
     print(
         f"[objects] SAM 3 found {len(detections)} objects in {time.time() - t0:.1f}s",
         flush=True,
@@ -397,14 +457,14 @@ async def objects(
         try:
             t_obj = time.time()
             try:
-                result = sam3d.reconstruct(pil, obj["mask"], seed=42 + i)
+                result = get_sam3d().reconstruct(pil, obj["mask"], seed=42 + i)
             except torch.cuda.OutOfMemoryError as oom:
                 result = None
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 print(f"[objects]   {i:02d} {obj['label']} OOM, retrying: {oom}", flush=True)
-                result = sam3d.reconstruct(pil, obj["mask"], seed=42 + i)
+                result = get_sam3d().reconstruct(pil, obj["mask"], seed=42 + i)
             ply_bytes = _splat_to_ply_bytes(result)
 
             # Upload immediately so this object survives a later OOM in the loop.
@@ -499,8 +559,8 @@ async def process(
     """
     from process_receiver import ProcessRequest, handle_process
 
-    _require_ready()
-
+    # Accessors load models on first call (~195s combined on a cold container).
+    # Cloud Tasks' 30-min deadline absorbs this. Raises 500 on cached load failure.
     return await handle_process(
         request,
         req,
@@ -508,8 +568,8 @@ async def process(
         receiver_repo=_get_receiver_repo(),
         fcm_notifier=_get_fcm_notifier(),
         outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
-        sam3_model=sam3,
-        sam3d_model=sam3d,
+        sam3_model=get_sam3(),
+        sam3d_model=get_sam3d(),
         object_prompt=DEFAULT_OBJECT_PROMPT,
     )
 

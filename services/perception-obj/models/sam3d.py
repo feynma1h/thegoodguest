@@ -18,15 +18,6 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-# SAM 3D Objects ships its high-level Inference class in `notebook/inference.py`
-# rather than as part of the installable sam3d_objects package. Match Meta's
-# own demo.py pattern: add the notebook directory to sys.path.
-_SAM3D_NOTEBOOK = "/opt/sam3d/notebook"
-if _SAM3D_NOTEBOOK not in sys.path:
-    sys.path.insert(0, _SAM3D_NOTEBOOK)
-
-from inference import Inference as _Sam3dInference  # noqa: E402
-
 
 class SAM3DModel:
     """Thin wrapper around SAM 3D Objects' high-level Inference class."""
@@ -36,6 +27,15 @@ class SAM3DModel:
         config_path: str = "/opt/sam3d/checkpoints/hf/pipeline.yaml",
         compile: bool = False,
     ):
+        # SAM 3D Objects ships its Inference class in notebook/inference.py,
+        # not as part of the installable package. Deferred to __init__ (not
+        # module level) so importing models.sam3d does NOT trigger heavy
+        # CUDA/DINOv2 initialisation at server startup. See docs/decisions/0007.
+        _SAM3D_NOTEBOOK = "/opt/sam3d/notebook"
+        if _SAM3D_NOTEBOOK not in sys.path:
+            sys.path.insert(0, _SAM3D_NOTEBOOK)
+        from inference import Inference as _Sam3dInference  # noqa: PLC0415
+
         self.inference = _Sam3dInference(config_path, compile=compile)
 
     def reconstruct(
