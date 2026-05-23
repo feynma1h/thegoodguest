@@ -56,7 +56,7 @@ else
     echo "(First build downloads PyTorch + SAM 3 + SAM 3D weights; expect 25-40 min.)"
 fi
 
-gcloud builds submit "${CONTEXT_DIR}" \
+gcloud builds submit . \
     --project="${PROJECT_ID}" \
     --region="${REGION}" \
     --config="${CLOUDBUILD_CONFIG}" \
@@ -82,7 +82,7 @@ gcloud run deploy "${SERVICE}" \
     --no-cpu-throttling \
     --cpu-boost \
     --startup-probe=tcpSocket.port=8080,initialDelaySeconds=30,periodSeconds=10,failureThreshold=60,timeoutSeconds=5 \
-    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs
+    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app
 
 URL=$(gcloud run services describe "${SERVICE}" \
         --region="${REGION}" --project="${PROJECT_ID}" \
