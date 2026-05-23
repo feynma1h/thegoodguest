@@ -55,13 +55,13 @@ outputs/                          gitignored; generated artifacts
 - The capture-bundle contract is defined, generated, and tested. `python tools/build_test_bundle.py && python tools/inspect_bundle.py outputs/test_bundle/bundle.pb` runs clean end-to-end.
 - The photo-upload pipeline (`perception-obj`, `perception-geom`) is deployed and produces per-object splats from photo uploads. It's the old path; we're keeping it alive but not iterating on it.
 - 25 schema + math tests, all passing. Don't break them.
-- Bundle ingester at `services/api/`: `POST /ingest` validates a CaptureBundle by GCS URI, creates a Scene record (Firestore in prod, in-memory in dev), enqueues a Cloud Tasks HTTP job targeting perception-obj, and returns `{scene_id, status: "queued"}` or a structured error. 92 tests passing. Not yet deployed.
-- `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally; real-infra end-to-end is gated on the ingester deploy (see Track A). 145 tests passing across both services.
+- Bundle ingester at `services/api/`: `POST /ingest` validates a CaptureBundle by GCS URI, creates a Scene record (Firestore in prod, in-memory in dev), enqueues a Cloud Tasks HTTP job targeting perception-obj, and returns `{scene_id, status: "queued"}` or a structured error. Deployed to Cloud Run (`asia-southeast1`, project `roomstudio`). 76 api tests passing.
+- `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally; real-infra end-to-end is gated on redeploying perception-obj to pick up the `/process` endpoint. 145 tests passing across both services.
 
 ## What does NOT work / what we're deliberately not doing
 
 - **No iOS app exists yet.** The bundle synthesizer is the only thing that writes bundles.
-- **Ingester is not deployed.** No Dockerfile, no `infra/deploy_api.sh`, no Cloud Run service. Runs locally only.
+- **perception-obj is not redeployed with `/process`.** The deployed version predates the receiver work. End-to-end requires running `infra/deploy_perception.sh obj` — but check the Dockerfile first; it likely needs the same protobuf force-reinstall workaround the ingester uses (see `docs/decisions/0005`).
 - **No web app yet.**
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
@@ -110,17 +110,21 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-Two parallel tracks as of end of session (May 2026):
+Two items as of end of session (May 2026):
 
-**Track A — backend**
+**1 — Redeploy perception-obj** (unblocks real end-to-end)
 
-- **Deploy the ingester** — Dockerfile + `infra/deploy_api.sh` for `services/api/`. CPU-only Cloud Run, `--allow-unauthenticated` for now. With the receiver live locally, deploying the ingester is the last step to a working end-to-end system on real infra.
+Run `infra/deploy_perception.sh obj` to deploy the perception-obj build that
+includes the `/process` endpoint. The ingester is live, the queue is working,
+this is the last step to a real end-to-end smoke test. Before running, check
+`services/perception-obj/Dockerfile` for the protobuf force-reinstall
+workaround — it likely needs the same fix as the ingester (see
+`docs/decisions/0005`).
 
-**Track B — iOS (independent)**
+**2 — iOS capture app prototype** (independent)
 
-- **iOS capture app prototype** — Swift + ARKit, emits the bundle. Derisks the contract from the side the backend can't verify.
-
-Tracks A and B can proceed in parallel.
+Swift + ARKit, emits the bundle. Derisks the contract from the side the
+backend can't verify.
 
 ## Session-end housekeeping (Claude Code: do this before ending any session)
 
