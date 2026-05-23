@@ -18,16 +18,10 @@ Run from repo root:
 """
 from __future__ import annotations
 
-import sys
 import threading
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 
-_svc_dir = Path(__file__).resolve().parents[1]
-if str(_svc_dir) not in sys.path:
-    sys.path.insert(0, str(_svc_dir))
-
-from receiver_repo import (  # noqa: E402
+from receiver_repo import (
     ClaimStatus,
     InMemoryReceiverRepository,
 )
