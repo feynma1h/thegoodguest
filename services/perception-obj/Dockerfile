@@ -98,6 +98,28 @@ RUN cd /opt/sam3d && pip install -e '.[inference]'
 # referenced as ./patching/hydra in their setup.md)
 RUN python /opt/sam3d/patching/hydra || echo "hydra patch skipped (likely version mismatch with installed hydra)"
 
+# --- Pre-cache DINOv2 weights (fetched by SAM 3D Objects' backbone embedder) ---
+# torch.hub is separate from the HuggingFace cache; set TORCH_HOME explicitly
+# so the location is visible in the image and not buried under /root/.cache.
+# sam3d_objects.model.backbone.dit.embedder.dino.Dino calls:
+#   torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14_reg", source="github")
+# — the register-token variant, as configured by pipeline.yaml. Without this
+# step, ~1.13 GB is fetched from dl.fbaipublicfiles.com on every cold start.
+# Floating on "main" is a known limitation: torch.hub has no commit-pin API.
+ENV TORCH_HOME=/opt/torch_hub
+RUN python -c "\
+import torch; \
+torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg', pretrained=True, trust_repo=True)"
+
+# Verify weights landed where we expect. Fails the build loudly if the bake
+# didn't populate the cache, so we catch it here rather than at cold-start.
+RUN python -c "\
+from pathlib import Path; \
+cache = Path('/opt/torch_hub/hub/checkpoints'); \
+assert any(p.name.endswith('reg4_pretrain.pth') for p in cache.iterdir()), \
+    f'DINOv2 weights not cached at {cache}'; \
+print(f'DINOv2 cached: {[p.name for p in cache.iterdir()]}')"
+
 # --- Stage SAM 3D checkpoints at the layout Meta's pipeline.yaml expects ---
 # The HF repo ships files in `checkpoints/` directly; Meta's setup.md adds the
 # `hf/` directory layer via mv. We download with snapshot_download and then
