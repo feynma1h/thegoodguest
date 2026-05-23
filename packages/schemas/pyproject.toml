@@ -8,6 +8,8 @@ dependencies = [
     # requiring runtime >=7.35.0 (gencode version from protoc 7.35.0 via Homebrew).
     # Bump this floor when regenerating with a newer protoc.
     "protobuf>=7.35.0",
+    # pose_math.py uses numpy for quaternion operations.
+    "numpy>=1.24",
 ]
 
 # The proto source of truth is packages/schemas/capture_bundle.proto.
