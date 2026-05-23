@@ -1,8 +1,58 @@
 # gcloudignore — controls what gcloud builds submit uploads to Cloud Build.
 #
-# By default (no .gcloudignore present) gcloud falls back to .gitignore, which
-# already excludes .venv/, outputs/, __pycache__, etc.  The one tracked path
-# that costs real bytes is test_data/photos/ (~21 MiB of HEIC files).  Listing
-# .gitignore here inherits those rules and then we add the extra exclusion.
+# Once this file exists, gcloud no longer falls back to .gitignore, so we
+# must explicitly inherit it with the line below, then add extras.
 .gitignore
+
+# ── Large tracked files not needed in any build ──────────────────────────────
+# 9 HEIC photos (~21 MiB total). Tracked by git for local tooling; not needed
+# in Cloud Build. Dropping this alone cuts the repo-root archive from 21 MiB
+# to < 1 MiB.
 test_data/
+
+# ── Build / cache artifacts ───────────────────────────────────────────────────
+# .gitignore already covers outputs/, .venv/, __pycache__, *.pyc, *.egg-info,
+# .pytest_cache, .DS_Store, etc.  List them here too so we stay explicit now
+# that the .gitignore fallback is disabled, and to catch anything that slips
+# through (e.g. build/ dirs created by pip wheel builds that aren't gitignored).
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+packages/schemas/build/
+
+# ── Dev-environment directories ───────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Test / lint cache ─────────────────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ── Editor / OS noise ─────────────────────────────────────────────────────────
+.git/
+.DS_Store
+Thumbs.db
+__MACOSX/
+.vscode/
+.idea/
+
+# ── Local Claude Code state ───────────────────────────────────────────────────
+.claude/
+
+# ── Repo sections never needed in a container build ──────────────────────────
+# docs/ and tools/ contain decision notes, workflow docs, and local scripts.
+# Neither service's Dockerfile COPYs anything from these directories.
+docs/
+tools/
+
+# ── Generated artifacts ───────────────────────────────────────────────────────
+outputs/
