@@ -41,24 +41,15 @@ import io
 import json
 import logging
 import os
-import sys
-from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from roomstudio_schemas import CaptureBundle
+
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Shared schemas path (for CaptureBundle proto)
-# ---------------------------------------------------------------------------
-_schemas_path = Path(__file__).resolve().parents[2] / "packages/schemas"
-if str(_schemas_path) not in sys.path:
-    sys.path.insert(0, str(_schemas_path))
-
-from roomstudio_schemas import CaptureBundle  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Configuration

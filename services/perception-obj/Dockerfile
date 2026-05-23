@@ -1,6 +1,11 @@
 # perception-obj: SAM 3 segmentation + SAM 3D Objects per-object reconstruction.
 # AMD64, Cloud Build only. DO NOT build locally on M-series Mac.
 #
+# Build context is the REPO ROOT (same as services/api/Dockerfile) so that
+# packages/schemas/ is reachable.  Cloud Build stages this correctly via
+# infra/cloudbuild/perception-obj.yaml, which also downloads the pytorch3d
+# wheel into wheels/ before invoking docker build.
+#
 # Why this split: SAM 3D Objects pins torch==2.5.1+cu121 while VGGT pins
 # torch==2.3.1. They cannot coexist in one pip env. perception-obj uses
 # CUDA 12.1 / torch 2.5.1; perception-geom uses CUDA 12.1 / torch 2.3.1.
@@ -16,6 +21,17 @@
 # during the build, because pytorch3d's compile alone is ~30-50 min and would
 # push the total build over Cloud Build's 60-min global timeout. The cached
 # wheel matches SAM 3D's pinned commit exactly.
+#
+# DEPENDENCY NOTE — protobuf version conflict (same issue as services/api/):
+#   roomstudio-schemas requires protobuf>=7.35.0 (enforced by
+#   ValidateProtobufRuntimeVersion in the generated pb2 file).
+#   google-cloud-firestore (via proto-plus 1.x) declares protobuf<7.0.0dev.
+#   These constraints are mutually exclusive in a single pip resolve.
+#
+#   Workaround (identical to services/api/Dockerfile, see docs/decisions/0005):
+#   install google-cloud-* first (gets protobuf 6.x), then force-reinstall
+#   protobuf>=7.35.0 before installing roomstudio-schemas.  --no-deps prevents
+#   pip from re-resolving proto-plus's constraint on the upgrade step.
 
 FROM condaforge/mambaforge:24.7.1-0
 
@@ -61,9 +77,9 @@ ENV CONDA_PREFIX=/opt/conda/envs/sam3d-objects \
 
 # --- Install pre-built pytorch3d wheel (deviation from Meta's flow) ---
 # Compiled once by infra/build_pytorch3d_wheel.sh, cached in
-# gs://roomstudio-build-cache/wheels/. The wheel matches SAM 3D's pinned
-# pytorch3d commit. The cloudbuild step downloaded it to wheels/ in the
-# build context.
+# gs://roomstudio-build-cache/wheels/. The wheel is downloaded into wheels/
+# at the repo root by the Cloud Build gsutil step before docker build runs.
+# The cached wheel matches SAM 3D's pinned pytorch3d commit exactly.
 COPY wheels/pytorch3d-*.whl /tmp/
 RUN pip install /tmp/pytorch3d-*.whl && rm /tmp/pytorch3d-*.whl
 
@@ -112,16 +128,37 @@ RUN sam3d_dir="$(cat /tmp/sam3d_snapshot_path.txt)" \
 RUN git clone --depth 1 https://github.com/facebookresearch/sam3.git /opt/sam3-repo \
     && cd /opt/sam3-repo && pip install -e .
 
-# --- App-level deps not already pulled in by SAM 3D's [dev]/[inference] ---
+# ── App-level deps: Layer A — google-cloud-* (brings in proto-plus → protobuf 6.x) ──
+# Install all Google Cloud and Firebase packages together so pip resolves them
+# as a group before the protobuf upgrade below.  Order matters: these must be
+# installed BEFORE the force-reinstall step, or proto-plus will downgrade
+# protobuf again after the upgrade.
 # (FastAPI, uvicorn, and python-multipart are already installed by gradio's
-# dependency chain in [inference], at versions newer than we would pin. Do
-# NOT re-install them here — that would downgrade and break gradio's imports.
-# We only add what SAM 3D doesn't install: pillow-heif for HEIC support.)
-RUN pip install "pillow-heif==0.18.0" "google-cloud-storage==2.18.2"
+# dependency chain in [inference]; do NOT re-install to avoid downgrades.)
+RUN pip install \
+        "pillow-heif==0.18.0" \
+        "google-cloud-storage==2.18.2" \
+        "google-cloud-firestore>=2.14,<3.0" \
+        "firebase-admin>=6.0,<7.0"
 
-# Server code
-COPY service/server.py /app/server.py
-COPY service/models/ /app/models/
+# ── App-level deps: Layer B — protobuf upgrade + roomstudio-schemas ──────────
+# Force-reinstall protobuf to >=7.35.0 BEFORE installing roomstudio-schemas so
+# that ValidateProtobufRuntimeVersion in capture_bundle_pb2.py succeeds.
+# --no-deps prevents pip from re-resolving proto-plus's protobuf constraint
+# (which would downgrade again).  See docs/decisions/0005.
+COPY packages/schemas/ packages/schemas/
+RUN pip install --no-deps --force-reinstall "protobuf>=7.35.0" \
+    && pip install packages/schemas/
+
+# ── Server code ───────────────────────────────────────────────────────────────
+# All Python modules that make up the perception-obj service, including the
+# /process receiver modules added after the initial deployment.
+COPY services/perception-obj/server.py /app/server.py
+COPY services/perception-obj/models/ /app/models/
+COPY services/perception-obj/process_receiver.py /app/process_receiver.py
+COPY services/perception-obj/oidc.py /app/oidc.py
+COPY services/perception-obj/receiver_repo.py /app/receiver_repo.py
+COPY services/perception-obj/fcm.py /app/fcm.py
 
 ENV PORT=8080
 EXPOSE 8080
