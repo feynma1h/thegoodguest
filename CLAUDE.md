@@ -56,12 +56,12 @@ outputs/                          gitignored; generated artifacts
 - The photo-upload pipeline (`perception-obj`, `perception-geom`) is deployed and produces per-object splats from photo uploads. It's the old path; we're keeping it alive but not iterating on it.
 - 25 schema + math tests, all passing. Don't break them.
 - Bundle ingester at `services/api/`: `POST /ingest` validates a CaptureBundle by GCS URI, creates a Scene record (Firestore in prod, in-memory in dev), enqueues a Cloud Tasks HTTP job targeting perception-obj, and returns `{scene_id, status: "queued"}` or a structured error. Deployed to Cloud Run (`asia-southeast1`, project `roomstudio`). 76 api tests passing.
-- `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally. The Dockerfile, cloudbuild config, and deploy script are all patched; not yet deployed. See `docs/decisions/0005`, `0006`. 145 tests passing across both services.
+- `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally. Dockerfile, cloudbuild config, and deploy script env vars are all patched (see `docs/decisions/0005`, `0006`). The container starts cleanly in Cloud Run, uvicorn binds in seconds, and SAM 3 + SAM 3D both load successfully (~195s total). 145 tests passing across both services.
 
 ## What does NOT work / what we're deliberately not doing
 
 - **No iOS app exists yet.** The bundle synthesizer is the only thing that writes bundles.
-- **perception-obj is not yet redeployed with `/process`.** The Dockerfile, cloudbuild build-context, and deploy-script env vars are all fixed (see `docs/decisions/0005`, `0006`). No pre-work remains. End-to-end requires one command: `infra/deploy_perception.sh obj`.
+- **perception-obj is not yet serving `/process` in production.** First deploy attempt (revision 00019-7zr, 2026-05-23) was marked failed by Cloud Run because the 195s synchronous model load at startup exceeded the default startup-probe timeout. 00018-ppx is still serving (without `/process`), so Cloud Tasks hits 404s and the queue is backed up. Fix is to refactor model loading to be lazy — see `docs/decisions/0007` — not to bump the startup probe.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
@@ -113,16 +113,15 @@ When this section gets stale, the project's drifting. Keep it current.
 
 Three items as of end of session (May 2026):
 
-**1 — Execute the perception-obj redeploy** (one command, no pre-work remaining)
+**1 — Refactor perception-obj to lazy-load models** (unblocks deploy)
 
-All Dockerfile, cloudbuild, and deploy-script fixes are committed. Run:
-
-    infra/deploy_perception.sh obj
-
-The ingester is live, the queue is wired, OIDC env vars are set. This is a
-single Cloud Build + Cloud Run deploy that completes the end-to-end path.
-Smoke test: POST /ingest with a real bundle URI and watch the scene move
-queued → processing → ready in Firestore.
+Move SAM 3 + SAM 3D loading out of startup and into a lazy model
+registry triggered by first `/process` call. Add `/healthz` (returns
+200 immediately) and `/readyz` (reports model load state). Configure
+the deploy script's startup probe to target `/healthz`. After this
+lands, `infra/deploy_perception.sh obj` should succeed, with cold-start
+cost paid by the first /process request rather than at container boot.
+See `docs/decisions/0007` for the architectural reasoning.
 
 **2 — iOS capture app prototype** (independent)
 
