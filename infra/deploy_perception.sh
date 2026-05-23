@@ -81,7 +81,7 @@ gcloud run deploy "${SERVICE}" \
     --allow-unauthenticated \
     --no-cpu-throttling \
     --cpu-boost \
-    --startup-probe=httpGet.path=/healthz,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
+    --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
     --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app
 
 URL=$(gcloud run services describe "${SERVICE}" \
