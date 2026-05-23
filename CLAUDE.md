@@ -56,12 +56,12 @@ outputs/                          gitignored; generated artifacts
 - The photo-upload pipeline (`perception-obj`, `perception-geom`) is deployed and produces per-object splats from photo uploads. It's the old path; we're keeping it alive but not iterating on it.
 - 25 schema + math tests, all passing. Don't break them.
 - Bundle ingester at `services/api/`: `POST /ingest` validates a CaptureBundle by GCS URI, creates a Scene record (Firestore in prod, in-memory in dev), enqueues a Cloud Tasks HTTP job targeting perception-obj, and returns `{scene_id, status: "queued"}` or a structured error. Deployed to Cloud Run (`asia-southeast1`, project `roomstudio`). 76 api tests passing.
-- `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally. Dockerfile, cloudbuild config, and deploy script env vars are all patched (see `docs/decisions/0005`, `0006`). The container starts cleanly in Cloud Run, uvicorn binds in seconds, and SAM 3 + SAM 3D both load successfully (~195s total). 145 tests passing across both services.
+- `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally. Dockerfile, cloudbuild config, and deploy script env vars are all patched (see `docs/decisions/0005`, `0006`). Models are lazy-loaded on first `/process` call: `/healthz` returns 200 immediately for the startup probe; `/readyz` reports per-model load state. DINOv2 weights (~1.13 GB) are pre-cached in the image at `TORCH_HOME=/opt/torch_hub`, eliminating the cold-start runtime fetch. Startup probe updated to `httpGet /healthz`. 165 tests passing across both services.
 
 ## What does NOT work / what we're deliberately not doing
 
 - **No iOS app exists yet.** The bundle synthesizer is the only thing that writes bundles.
-- **perception-obj is not yet serving `/process` in production.** First deploy attempt (revision 00019-7zr, 2026-05-23) was marked failed by Cloud Run because the 195s synchronous model load at startup exceeded the default startup-probe timeout. 00018-ppx is still serving (without `/process`), so Cloud Tasks hits 404s and the queue is backed up. Fix is to refactor model loading to be lazy — see `docs/decisions/0007` — not to bump the startup probe.
+- **`perception-obj` is not yet deployed with the lazy-load fix.** The refactor from `docs/decisions/0007` is fully implemented and committed — `/healthz`, `/readyz`, DINOv2 pre-cache, deferred model imports in both wrappers, `httpGet /healthz` startup probe. Revision 00018-ppx is still serving in Cloud Run (no `/process`), so Cloud Tasks hits 404s. One `infra/deploy_perception.sh obj` away from unblocking the queue.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
@@ -113,15 +113,14 @@ When this section gets stale, the project's drifting. Keep it current.
 
 Three items as of end of session (May 2026):
 
-**1 — Refactor perception-obj to lazy-load models** (unblocks deploy)
+**1 — Deploy perception-obj** (queue is backed up)
 
-Move SAM 3 + SAM 3D loading out of startup and into a lazy model
-registry triggered by first `/process` call. Add `/healthz` (returns
-200 immediately) and `/readyz` (reports model load state). Configure
-the deploy script's startup probe to target `/healthz`. After this
-lands, `infra/deploy_perception.sh obj` should succeed, with cold-start
-cost paid by the first /process request rather than at container boot.
-See `docs/decisions/0007` for the architectural reasoning.
+Run `infra/deploy_perception.sh obj`. The lazy-load refactor is
+committed (see `docs/decisions/0007`, `0008`). Cold-start cost (~195s)
+is paid by the first Cloud Tasks request, not at container boot. Startup
+probe targets `/healthz`. After a clean deploy, confirm `/readyz` shows
+`loaded` on the first warm request, and verify at least one queued scene
+processes end-to-end.
 
 **2 — iOS capture app prototype** (independent)
 
