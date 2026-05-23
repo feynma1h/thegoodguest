@@ -61,7 +61,7 @@ echo "Image:    ${IMAGE_URI}"
 echo ""
 
 # ── Step 1: Enable required APIs ─────────────────────────────────────────────
-echo "=== 1/8: Enabling GCP APIs (idempotent) ==="
+echo "=== 1/9: Enabling GCP APIs (idempotent) ==="
 gcloud services enable \
     run.googleapis.com \
     cloudbuild.googleapis.com \
@@ -76,7 +76,7 @@ echo "APIs enabled."
 
 # ── Step 2: Create service accounts ──────────────────────────────────────────
 echo ""
-echo "=== 2/8: Service accounts ==="
+echo "=== 2/9: Service accounts ==="
 
 _ensure_sa() {
     local sa_name="$1"
@@ -98,7 +98,7 @@ _ensure_sa "${INVOKER_SA_NAME}" "${INVOKER_SA}" "Cloud Tasks OIDC invoker for pe
 
 # ── Step 3: Bind IAM roles ────────────────────────────────────────────────────
 echo ""
-echo "=== 3/8: Binding IAM roles (idempotent) ==="
+echo "=== 3/9: Binding IAM roles (idempotent) ==="
 
 # api-runtime: Firestore read/write for scene records.
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
@@ -159,7 +159,7 @@ echo "  Cloud Build SA granted serviceAccountUser on api-runtime."
 
 # ── Step 4: Create Cloud Tasks queue ─────────────────────────────────────────
 echo ""
-echo "=== 4/8: Cloud Tasks queue ==="
+echo "=== 4/9: Cloud Tasks queue ==="
 if gcloud tasks queues describe "${TASKS_QUEUE}" \
         --location="${TASKS_LOCATION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
     echo "  Queue exists: ${TASKS_QUEUE}"
@@ -175,9 +175,22 @@ else
     echo "  Queue created."
 fi
 
-# ── Step 5: Create bundle bucket ─────────────────────────────────────────────
+# ── Step 5: Create Firestore database ────────────────────────────────────────
 echo ""
-echo "=== 5/8: Bundle GCS bucket ==="
+echo "=== 5/9: Firestore database ==="
+if gcloud firestore databases describe --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    echo "  Firestore database (default) exists."
+else
+    echo "  Creating Firestore database (default) in ${REGION}..."
+    gcloud firestore databases create \
+        --location="${REGION}" \
+        --project="${PROJECT_ID}"
+    echo "  Firestore database created."
+fi
+
+# ── Step 6: Create bundle bucket ─────────────────────────────────────────────
+echo ""
+echo "=== 6/9: Bundle GCS bucket ==="
 if gcloud storage buckets describe "gs://${BUNDLE_BUCKET}" \
         --project="${PROJECT_ID}" >/dev/null 2>&1; then
     echo "  Bucket exists: ${BUNDLE_BUCKET}"
@@ -200,7 +213,7 @@ echo "  api-runtime granted storage.objectViewer on gs://${BUNDLE_BUCKET}."
 
 # ── Step 6: Ensure Artifact Registry repo exists ──────────────────────────────
 echo ""
-echo "=== 6/8: Artifact Registry ==="
+echo "=== 7/9: Artifact Registry ==="
 gcloud artifacts repositories describe "${REPO}" \
     --location="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1 \
   || gcloud artifacts repositories create "${REPO}" \
@@ -212,7 +225,7 @@ echo "  Artifact Registry repo ready."
 
 # ── Step 7: Build container via Cloud Build ────────────────────────────────────
 echo ""
-echo "=== 7/8: Building container ==="
+echo "=== 8/9: Building container ==="
 echo "Image: ${IMAGE_URI}"
 echo "(First build downloads Python deps; expect 3-5 min.)"
 
@@ -224,7 +237,7 @@ gcloud builds submit . \
 
 # ── Step 8: Deploy to Cloud Run ───────────────────────────────────────────────
 echo ""
-echo "=== 8/8: Deploying to Cloud Run ==="
+echo "=== 9/9: Deploying to Cloud Run ==="
 gcloud run deploy "${SERVICE_NAME}" \
     --image="${IMAGE_URI}" \
     --region="${REGION}" \
