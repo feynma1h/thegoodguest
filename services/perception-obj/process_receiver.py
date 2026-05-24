@@ -570,7 +570,7 @@ async def handle_process(
         # immediately-reclaimable scene rather than waiting out the full TTL.
         # Status stays processing — Cloud Tasks retry will reclaim and proceed.
         try:
-            receiver_repo.release_lease(scene_id)
+            receiver_repo.release_lease(scene_id, holder_id=_WORKER_ID)
             _log_lease_action("release_error", scene_id=scene_id)
         except Exception as rel_exc:
             logger.error("release_lease failed for scene %s: %s", scene_id, rel_exc)
@@ -587,7 +587,7 @@ async def handle_process(
         # Unexpected errors are treated as environmental.
         logger.exception("process: unexpected failure for scene %s: %s", scene_id, exc)
         try:
-            receiver_repo.release_lease(scene_id)
+            receiver_repo.release_lease(scene_id, holder_id=_WORKER_ID)
             _log_lease_action("release_error", scene_id=scene_id)
         except Exception as rel_exc:
             logger.error("release_lease failed for scene %s: %s", scene_id, rel_exc)

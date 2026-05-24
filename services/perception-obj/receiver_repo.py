@@ -85,13 +85,15 @@ class ReceiverRepository(ABC):
         """
 
     @abstractmethod
-    def release_lease(self, scene_id: str) -> None:
+    def release_lease(self, scene_id: str, *, holder_id: str = "") -> None:
         """Clear lease fields, leave status=processing.
 
         Called by the EnvironmentalError handler before returning 500 so Cloud
         Tasks retries arrive at an immediately-reclaimable state instead of
         waiting for the full lease TTL. Best-effort: no-op if the scene is not
-        found or not in processing state.
+        found, not in processing state, or if the doc's lease_holder_id does
+        not match holder_id (guards against clearing another worker's lease
+        when the OOM-on-cold-start race crosses the TTL boundary).
         """
 
     @abstractmethod
@@ -202,10 +204,12 @@ class InMemoryReceiverRepository(ReceiverRepository):
             # Unknown status — treat as bug.
             return ClaimResult(ClaimStatus.WRONG_STATE)
 
-    def release_lease(self, scene_id: str) -> None:
+    def release_lease(self, scene_id: str, *, holder_id: str = "") -> None:
         with self._lock:
             entry = self._scenes.get(scene_id)
             if entry is None or entry["status"] != "processing":
+                return
+            if entry.get("lease_holder_id") != holder_id:
                 return
             entry["lease_expires_at"] = None
             entry["lease_holder_id"] = ""
@@ -331,7 +335,7 @@ class FirestoreReceiverRepository(ReceiverRepository):
         _txn(self._db.transaction(), ref)
         return result
 
-    def release_lease(self, scene_id: str) -> None:
+    def release_lease(self, scene_id: str, *, holder_id: str = "") -> None:
         from google.cloud import firestore as _fs  # deferred
 
         ref = self._db.collection(self.COLLECTION).document(scene_id)
@@ -342,7 +346,10 @@ class FirestoreReceiverRepository(ReceiverRepository):
             snap = ref.get(transaction=transaction)
             if not snap.exists:
                 return
-            if snap.to_dict().get("status") != "processing":
+            data = snap.to_dict()
+            if data.get("status") != "processing":
+                return
+            if data.get("lease_holder_id") != holder_id:
                 return
             transaction.update(ref, {
                 "lease_expires_at": None,

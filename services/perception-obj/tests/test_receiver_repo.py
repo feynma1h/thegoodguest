@@ -249,7 +249,7 @@ class TestReleaseLease:
         repo = InMemoryReceiverRepository()
         repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
                   lease_holder_id="worker-abc")
-        repo.release_lease(_SCENE_ID)
+        repo.release_lease(_SCENE_ID, holder_id="worker-abc")
         assert repo.get_raw(_SCENE_ID)["lease_holder_id"] == ""
 
     def test_noop_on_wrong_state(self):
@@ -261,6 +261,31 @@ class TestReleaseLease:
     def test_noop_on_not_found(self):
         repo = InMemoryReceiverRepository()
         repo.release_lease("no-such-scene")  # must not raise
+
+    def test_noop_when_holder_id_does_not_match(self):
+        """release_lease() is a no-op when the doc's lease_holder_id differs.
+
+        Guards the OOM-on-cold-start race: model load (~3.5 min) + processing
+        can cross the 300s TTL, worker B reclaims, then worker A's error
+        handler fires release_lease — A must not clear B's lease.
+        """
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
+                  lease_holder_id="worker-B")
+        repo.release_lease(_SCENE_ID, holder_id="worker-A")
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "processing"
+        assert raw["lease_holder_id"] == "worker-B"
+        assert raw["lease_expires_at"] == _future
+
+    def test_releases_when_holder_id_matches(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
+                  lease_holder_id="worker-A")
+        repo.release_lease(_SCENE_ID, holder_id="worker-A")
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["lease_expires_at"] is None
+        assert raw["lease_holder_id"] == ""
 
 
 # ---------------------------------------------------------------------------

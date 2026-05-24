@@ -348,6 +348,43 @@ class TestHandleProcessOrchestration:
         assert raw["status"] == "processing"
         assert raw["lease_expires_at"] is None
 
+    def test_environmental_release_skips_scene_held_by_different_worker(self):
+        """EnvironmentalError handler must not clear another worker's lease.
+
+        Scenario: worker A's OOM-on-cold-start path crosses the 300s TTL.
+        Worker B has already reclaimed. When A's EnvironmentalError handler
+        fires release_lease(), the holder_id guard should prevent A from
+        wiping B's lease fields.
+        """
+        import process_receiver as _pr
+
+        future_lease = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+        repo = InMemoryReceiverRepository()
+        # Start queued so handle_process can claim normally (writing _WORKER_ID).
+        repo.seed(_SCENE_ID, status="queued", device_id=_DEVICE_ID)
+
+        # Intercept run_perception: before raising, swap in a different holder_id
+        # to simulate worker B having reclaimed during A's processing time.
+        def _reclaim_then_raise(*args, **kwargs):
+            repo.seed(_SCENE_ID, status="processing", device_id=_DEVICE_ID,
+                      lease_expires_at=future_lease,
+                      lease_holder_id="worker-B-reclaimed")
+            raise EnvironmentalError("OOM after reclaim")
+
+        with patch("process_receiver.run_perception", side_effect=_reclaim_then_raise):
+            resp = self._run(
+                ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI),
+                repo=repo,
+                extra_headers={"x-cloudtasks-taskretrycount": "0"},
+            )
+
+        assert resp.status_code == 500
+        raw = repo.get_raw(_SCENE_ID)
+        # Worker B's lease must be untouched.
+        assert raw["status"] == "processing"
+        assert raw["lease_holder_id"] == "worker-B-reclaimed"
+        assert raw["lease_expires_at"] == future_lease
+
     # --- OIDC rejection ---
 
     def test_oidc_missing_returns_401(self):
