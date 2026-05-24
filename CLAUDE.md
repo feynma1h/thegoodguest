@@ -61,6 +61,7 @@ outputs/                          gitignored; generated artifacts
 ## What does NOT work / what we're deliberately not doing
 
 - **No iOS app exists yet.** The bundle synthesizer is the only thing that writes bundles.
+- **`perception-obj` has a stuck-scene bug under environmental failure.** When `/process` returns 500 (e.g. CUDA OOM) and Cloud Tasks retries within the lease TTL window (default 300s), the retry sees `ALREADY_OWNED` and returns a 200 noop. Cloud Tasks acks and removes the task. The lease then expires with no reclamation worker watching — passive reclamation only fires on the next `/process` POST, which never arrives. Scene is stuck in `processing` indefinitely. One known stuck scene: `f077e9ed-d339-4be8-8dbf-37b952abfec2` (manually unstuck). Fix planned — see `docs/decisions/0011`. Until fixed, any environmental failure on a job that takes >30s to fail will reproduce this.
 - **`perception-obj` is not yet deployed with the lazy-load fix.** The refactor from `docs/decisions/0007` is fully implemented and committed — `/health`, `/ready`, DINOv2 pre-cache, deferred model imports in both wrappers, `httpGet /health` startup probe. Revision 00018-ppx is still serving in Cloud Run (no `/process`), so Cloud Tasks hits 404s. One `infra/deploy_perception.sh obj` away from unblocking the queue.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
@@ -111,23 +112,35 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-Three items as of end of session (May 2026):
+**1 — Fix perception-obj stuck-scene bug** (blocks redeploy + iOS bundle ingestion at any reliability)
 
-**1 — Deploy perception-obj** (queue is backed up)
+Implement lease-expiration check at `/process`: when a scene is already-owned,
+check whether the lease has actually expired; if yes, reclaim and process; if
+no, return noop. This is the load-bearing correctness fix. Layer on eager lease
+release in the `EnvironmentalError` handler as an optimization (retries happen
+~lease-TTL faster). Add `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` to
+the Cloud Run env config as a separate band-aid for the OOM itself. See
+`docs/decisions/0011`.
 
-Run `infra/deploy_perception.sh obj`. The lazy-load refactor is
-committed (see `docs/decisions/0007`, `0008`). Cold-start cost (~195s)
-is paid by the first Cloud Tasks request, not at container boot. Startup
-probe targets `/healthz`. After a clean deploy, confirm `/readyz` shows
-`loaded` on the first warm request, and verify at least one queued scene
-processes end-to-end.
+**2 — Redeploy perception-obj** (one command, after #1 lands)
 
-**2 — iOS capture app prototype** (independent)
+`infra/deploy_perception.sh obj`. Smoke test: POST /ingest with a real bundle
+URI and watch the scene move queued → processing → ready in Firestore. Then
+deliberately reproduce the OOM scenario (oversized bundle or
+memory-constrained image) and verify the scene moves to `failed` or `ready`
+on retry rather than getting stuck.
 
-Swift + ARKit, emits the bundle. Derisks the contract from the side the
-backend can't verify.
+**3 — Capture-bundle timestamp cleanup** (small, blocking iOS)
 
-**3 — test_data/photos/ privacy review** (deferred, low urgency)
+Rename `started_at_us`/`ended_at_us` to monotonic, add `created_at_wall_us`.
+See `docs/decisions/0007`.
+
+**4 — iOS capture app prototype** (independent, Track B)
+
+Swift + ARKit, emits the bundle. Track B session 1 covered bundle production.
+Upload+auth and capture UX still need scoping before code.
+
+**5 — test_data/photos/ privacy review** (deferred, low urgency)
 
 9 HEIC photos of a real room are tracked by git and used by
 `tools/build_test_bundle.py` for local synthesis testing. Review whether they
