@@ -233,6 +233,148 @@ class TestReleaseFailed:
 
 
 # ---------------------------------------------------------------------------
+# release_lease()
+# ---------------------------------------------------------------------------
+
+class TestReleaseLease:
+    def test_clears_lease_leaves_processing(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future)
+        repo.release_lease(_SCENE_ID)
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "processing"
+        assert raw["lease_expires_at"] is None
+
+    def test_clears_holder_id(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
+                  lease_holder_id="worker-abc")
+        repo.release_lease(_SCENE_ID)
+        assert repo.get_raw(_SCENE_ID)["lease_holder_id"] == ""
+
+    def test_noop_on_wrong_state(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="ready", lease_expires_at=_future)
+        repo.release_lease(_SCENE_ID)  # must not raise
+        assert repo.get_raw(_SCENE_ID)["status"] == "ready"
+
+    def test_noop_on_not_found(self):
+        repo = InMemoryReceiverRepository()
+        repo.release_lease("no-such-scene")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# release_queued()
+# ---------------------------------------------------------------------------
+
+class TestReleaseQueued:
+    def test_status_becomes_queued(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future)
+        repo.release_queued(_SCENE_ID)
+        assert repo.get_raw(_SCENE_ID)["status"] == "queued"
+
+    def test_lease_cleared(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
+                  lease_holder_id="worker-xyz")
+        repo.release_queued(_SCENE_ID)
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["lease_expires_at"] is None
+        assert raw["lease_holder_id"] == ""
+
+    def test_increments_shutdown_release_count(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future)
+        repo.release_queued(_SCENE_ID)
+        assert repo.get_raw(_SCENE_ID)["shutdown_release_count"] == 1
+
+    def test_multiple_calls_accumulate(self):
+        """Seeding processing each time simulates repeated SIGTERM scenarios."""
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future)
+        repo.release_queued(_SCENE_ID)
+        # Re-seed as processing to test a second release.
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
+                  shutdown_release_count=1)
+        repo.release_queued(_SCENE_ID)
+        assert repo.get_raw(_SCENE_ID)["shutdown_release_count"] == 2
+
+    def test_noop_if_not_processing(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="ready")
+        repo.release_queued(_SCENE_ID)  # must not raise or mutate
+        assert repo.get_raw(_SCENE_ID)["status"] == "ready"
+
+    def test_noop_on_not_found(self):
+        repo = InMemoryReceiverRepository()
+        repo.release_queued("no-such-scene")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# holder_id tracking
+# ---------------------------------------------------------------------------
+
+class TestHolderIdTracking:
+    def test_claim_writes_holder_id(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="queued")
+        repo.claim(_SCENE_ID, 300, holder_id="worker-1")
+        assert repo.get_raw(_SCENE_ID)["lease_holder_id"] == "worker-1"
+
+    def test_reclaim_updates_holder_id(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_past,
+                  lease_holder_id="old-worker")
+        repo.claim(_SCENE_ID, 300, holder_id="new-worker")
+        assert repo.get_raw(_SCENE_ID)["lease_holder_id"] == "new-worker"
+
+    def test_already_owned_does_not_change_holder_id(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
+                  lease_holder_id="original-worker")
+        repo.claim(_SCENE_ID, 300, holder_id="interloper")
+        assert repo.get_raw(_SCENE_ID)["lease_holder_id"] == "original-worker"
+
+
+# ---------------------------------------------------------------------------
+# Concurrent stale-lease reclaim race
+# ---------------------------------------------------------------------------
+
+class TestConcurrentStaleReclaimRace:
+    def test_exactly_one_wins_concurrent_stale_reclaim(self):
+        """Two workers both see an expired lease and race to reclaim.
+
+        The InMemoryReceiverRepository lock ensures exactly one gets RECLAIMED
+        and the other gets ALREADY_OWNED (because the first reclaim refreshes
+        the lease, so the second call sees a fresh lease).
+        """
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_past,
+                  device_id=_DEVICE_ID)
+
+        results: list[ClaimStatus] = []
+        lock = threading.Lock()
+
+        def _worker():
+            r = repo.claim(_SCENE_ID, lease_ttl_seconds=300, holder_id="w")
+            with lock:
+                results.append(r.status)
+
+        threads = [threading.Thread(target=_worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(results) == 2
+        reclaimed = results.count(ClaimStatus.RECLAIMED)
+        nooped = results.count(ClaimStatus.ALREADY_OWNED)
+        assert reclaimed == 1, f"Expected 1 RECLAIMED, got: {results}"
+        assert nooped == 1, f"Expected 1 ALREADY_OWNED, got: {results}"
+
+
+# ---------------------------------------------------------------------------
 # Concurrent claim race
 # ---------------------------------------------------------------------------
 

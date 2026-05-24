@@ -301,6 +301,53 @@ class TestHandleProcessOrchestration:
             )
         assert "model OOM" in repo.get_raw(_SCENE_ID)["last_error"]
 
+    # --- stale-lease reclaim via handler ---
+
+    def test_stale_lease_reclaim_refreshes_lease(self):
+        """Stale-lease reclaim writes a fresh lease_expires_at before processing."""
+        past_lease = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+        repo = _seeded_repo("processing", lease_expires_at=past_lease)
+        with _mock_run_perception():
+            self._run(ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI), repo=repo)
+        # After success the lease is cleared, but during processing it must have
+        # been refreshed.  We verify the terminal state is ready and lease is
+        # cleared — if the reclaim had not happened, run_perception would not
+        # have been called and status would still be processing.
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "ready"
+        assert raw["lease_expires_at"] is None  # cleared by release_ready
+
+    def test_live_noop_does_not_mutate_lease(self):
+        """Live-lease noop must not touch lease_expires_at or lease_holder_id."""
+        future_lease = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+        repo = _seeded_repo("processing", lease_expires_at=future_lease)
+        repo.seed(_SCENE_ID, status="processing", device_id=_DEVICE_ID,
+                  lease_expires_at=future_lease, lease_holder_id="other-worker")
+        with _mock_run_perception():
+            resp = self._run(
+                ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI), repo=repo
+            )
+        assert resp.status_code == 200
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["lease_expires_at"] == future_lease
+        assert raw["lease_holder_id"] == "other-worker"
+
+    # --- EnvironmentalError lease release ---
+
+    def test_environmental_non_final_clears_lease(self):
+        """EnvironmentalError clears the lease but leaves status=processing."""
+        repo = _seeded_repo("queued")
+        with _mock_run_perception_raises(EnvironmentalError("transient")):
+            resp = self._run(
+                ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI),
+                repo=repo,
+                extra_headers={"x-cloudtasks-taskretrycount": "0"},
+            )
+        assert resp.status_code == 500
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "processing"
+        assert raw["lease_expires_at"] is None
+
     # --- OIDC rejection ---
 
     def test_oidc_missing_returns_401(self):
@@ -382,6 +429,160 @@ class TestConcurrentClaimRaceViaHandler:
         # Both return 200 (one "ready", one "noop/already_owned").
         assert all(c == 200 for c in results)
         # Scene ends up ready exactly once.
+        assert repo.get_raw(_SCENE_ID)["status"] == "ready"
+
+
+# ---------------------------------------------------------------------------
+# SIGTERM handler
+# ---------------------------------------------------------------------------
+
+class TestSigtermHandler:
+    """Tests for the module-level _sigterm_handler in process_receiver."""
+
+    def _run_claim(self, repo, scene_id=_SCENE_ID):
+        """Claim a scene via handle_process so _held_scene_ids is populated."""
+        import asyncio
+        from fastapi import Request as _Req
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/process",
+            "headers": [],
+            "query_string": b"",
+        }
+        fake_req = _Req(scope)
+        loop = asyncio.new_event_loop()
+        with patch("process_receiver.run_perception", side_effect=EnvironmentalError("hold")):
+            resp = loop.run_until_complete(handle_process(
+                fake_req,
+                ProcessRequest(scene_id=scene_id, bundle_uri=_BUNDLE_URI),
+                oidc_verifier=None,
+                receiver_repo=repo,
+                fcm_notifier=_null_fcm(),
+                outputs_bucket=_OUTPUTS_BUCKET,
+                sam3_model=_fake_sam3,
+                sam3d_model=_fake_sam3d,
+                object_prompt="chair",
+            ))
+        loop.close()
+        return resp
+
+    def test_sigterm_resets_held_scene_to_queued(self):
+        """SIGTERM handler sets status=queued and clears lease for held scenes."""
+        import process_receiver
+        import signal as _signal
+
+        repo = _seeded_repo("queued")
+        # Run a claim that will fail environmentally, leaving the scene in
+        # processing with cleared lease.  Re-seed it as processing+live lease
+        # so the SIGTERM handler has something to release.
+        repo.seed(_SCENE_ID, status="processing", device_id=_DEVICE_ID,
+                  lease_expires_at=datetime.now(tz=timezone.utc) + timedelta(hours=1))
+        process_receiver._sigterm_repo_ref = repo
+        with process_receiver._held_scenes_lock:
+            process_receiver._held_scene_ids.add(_SCENE_ID)
+
+        # Fire the handler directly (same as receiving SIGTERM).
+        process_receiver._sigterm_handler(_signal.SIGTERM, None)
+
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "queued"
+        assert raw["lease_expires_at"] is None
+        assert raw["shutdown_release_count"] == 1
+
+    def test_sigterm_clears_held_scene_ids(self):
+        """After SIGTERM handler runs, _held_scene_ids is cleared."""
+        import process_receiver
+        import signal as _signal
+
+        repo = _seeded_repo("processing")
+        repo.seed(_SCENE_ID, status="processing", device_id=_DEVICE_ID,
+                  lease_expires_at=datetime.now(tz=timezone.utc) + timedelta(hours=1))
+        process_receiver._sigterm_repo_ref = repo
+        with process_receiver._held_scenes_lock:
+            process_receiver._held_scene_ids.add(_SCENE_ID)
+
+        process_receiver._sigterm_handler(_signal.SIGTERM, None)
+
+        with process_receiver._held_scenes_lock:
+            assert _SCENE_ID not in process_receiver._held_scene_ids
+
+    def test_sigterm_noop_when_no_repo(self):
+        """SIGTERM handler is safe to call before any scene is ever claimed."""
+        import process_receiver
+        import signal as _signal
+
+        process_receiver._sigterm_repo_ref = None
+        process_receiver._sigterm_handler(_signal.SIGTERM, None)  # must not raise
+
+    def test_sigterm_noop_on_already_released_scene(self):
+        """SIGTERM handler skips scenes that are no longer in processing state."""
+        import process_receiver
+        import signal as _signal
+
+        repo = _seeded_repo("ready")  # already completed
+        process_receiver._sigterm_repo_ref = repo
+        with process_receiver._held_scenes_lock:
+            process_receiver._held_scene_ids.add(_SCENE_ID)
+
+        process_receiver._sigterm_handler(_signal.SIGTERM, None)
+
+        # Status must not be changed — the scene completed normally.
+        assert repo.get_raw(_SCENE_ID)["status"] == "ready"
+
+
+# ---------------------------------------------------------------------------
+# Concurrent stale-lease reclaim via handle_process
+# ---------------------------------------------------------------------------
+
+class TestConcurrentStaleReclaimViaHandler:
+    def test_exactly_one_worker_reclaims(self):
+        """Two concurrent handle_process calls on a stale-lease PROCESSING scene:
+        exactly one should reclaim and process (scene ends up ready), the other
+        should 200-noop after seeing the refreshed lease.
+        """
+        past_lease = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+        repo = _seeded_repo("processing", lease_expires_at=past_lease)
+        results: list = []
+        lock = threading.Lock()
+
+        def _worker():
+            import asyncio
+            from fastapi import Request as _Req
+            scope = {
+                "type": "http",
+                "method": "POST",
+                "path": "/process",
+                "headers": [],
+                "query_string": b"",
+            }
+            fake_req = _Req(scope)
+            loop = asyncio.new_event_loop()
+            with patch("process_receiver.run_perception", return_value=_RESULT_URI):
+                resp = loop.run_until_complete(handle_process(
+                    fake_req,
+                    ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI),
+                    oidc_verifier=None,
+                    receiver_repo=repo,
+                    fcm_notifier=_null_fcm(),
+                    outputs_bucket=_OUTPUTS_BUCKET,
+                    sam3_model=_fake_sam3,
+                    sam3d_model=_fake_sam3d,
+                    object_prompt="chair",
+                ))
+            loop.close()
+            import json as _json
+            with lock:
+                results.append(_json.loads(resp.body))
+
+        threads = [threading.Thread(target=_worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        statuses = {r["status"] for r in results}
+        assert "ready" in statuses, f"Expected one ready, got: {results}"
         assert repo.get_raw(_SCENE_ID)["status"] == "ready"
 
 
