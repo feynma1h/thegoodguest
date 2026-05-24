@@ -41,6 +41,9 @@ import io
 import json
 import logging
 import os
+import signal
+import threading
+import uuid
 from typing import Any, Optional
 
 from fastapi import Request
@@ -58,8 +61,81 @@ RECEIVER_URL: str = os.environ.get("RECEIVER_URL", "http://localhost:8081")
 CLOUD_TASKS_INVOKER_SA: str = os.environ.get("CLOUD_TASKS_INVOKER_SA", "")
 SCENE_LEASE_TTL_SECONDS: int = int(os.environ.get("SCENE_LEASE_TTL_SECONDS", "300"))
 
+# ---------------------------------------------------------------------------
+# Worker identity and lease tracking
+# ---------------------------------------------------------------------------
+
+_WORKER_ID: str = uuid.uuid4().hex
+
+# Scenes currently held by this worker. Protected by _held_scenes_lock.
+# Populated on claim, cleared on any release path. Read by the SIGTERM handler.
+_held_scenes_lock = threading.Lock()
+_held_scene_ids: set[str] = set()
+
+# Set on first call to handle_process; used by the SIGTERM handler which runs
+# outside the normal call stack and can't receive the repo as an argument.
+_sigterm_repo_ref = None
+
 # maxAttempts - 1 (per 0003: maxAttempts=3, so final attempt index = 2)
 _FINAL_ATTEMPT_INDEX: int = 2
+
+# ---------------------------------------------------------------------------
+# Structured lease logging
+# ---------------------------------------------------------------------------
+
+def _log_lease_action(
+    action: str,
+    *,
+    scene_id: str,
+    lease_expires_at=None,
+) -> None:
+    """Emit one structured log line for every lease state transition.
+
+    action is one of: claim, reclaim_stale, release_error, release_shutdown,
+    noop_live_lease.
+    """
+    logger.info(
+        "lease_action worker_id=%s scene_id=%s lease_expires_at=%s action=%s",
+        _WORKER_ID,
+        scene_id,
+        lease_expires_at.isoformat() if lease_expires_at is not None else "none",
+        action,
+    )
+
+
+# ---------------------------------------------------------------------------
+# SIGTERM handler — release held leases on Cloud Run rolling deploy drain
+# ---------------------------------------------------------------------------
+
+def _sigterm_handler(signum, frame) -> None:
+    """Release all leases held by this worker on SIGTERM.
+
+    Cloud Run sends SIGTERM with a 10s drain before SIGKILL during rolling
+    deploys. Any in-flight /process call will be killed before it completes.
+    Releasing leases here lets Cloud Tasks retries find a clean state (queued)
+    on the new revision rather than a live lease that blocks reclamation until
+    it expires. See docs/decisions/0012.
+
+    Best-effort: if SIGKILL fires before this completes, the lease-expiration
+    check in claim() (docs/decisions/0011) covers the residual case.
+    """
+    repo = _sigterm_repo_ref
+    if repo is None:
+        return
+    with _held_scenes_lock:
+        held = set(_held_scene_ids)
+    for scene_id in held:
+        try:
+            repo.release_queued(scene_id)
+            with _held_scenes_lock:
+                _held_scene_ids.discard(scene_id)
+            _log_lease_action("release_shutdown", scene_id=scene_id)
+        except Exception as exc:
+            logger.error("sigterm release failed scene=%s: %s", scene_id, exc)
+
+
+signal.signal(signal.SIGTERM, _sigterm_handler)
+
 
 # ---------------------------------------------------------------------------
 # Failure classification (per 0004)
@@ -436,6 +512,12 @@ async def handle_process(
                 content={"error": exc.code, "detail": exc.detail},
             )
 
+    # Stash the repo so the SIGTERM handler can use it if this worker is
+    # killed mid-job during a rolling deploy.
+    global _sigterm_repo_ref
+    if _sigterm_repo_ref is None:
+        _sigterm_repo_ref = receiver_repo
+
     retry_count = _parse_retry_count(request)
     is_final_attempt = retry_count >= _FINAL_ATTEMPT_INDEX
 
@@ -443,7 +525,9 @@ async def handle_process(
 
     # 2. Claim scene.
     from receiver_repo import ClaimStatus
-    claim_result = receiver_repo.claim(scene_id, SCENE_LEASE_TTL_SECONDS)
+    claim_result = receiver_repo.claim(
+        scene_id, SCENE_LEASE_TTL_SECONDS, holder_id=_WORKER_ID
+    )
 
     if claim_result.status == ClaimStatus.NOT_FOUND:
         logger.warning("process: scene %s not found; draining task", scene_id)
@@ -454,13 +538,15 @@ async def handle_process(
         return JSONResponse({"status": "noop", "reason": "wrong_state"})
 
     if claim_result.status == ClaimStatus.ALREADY_OWNED:
-        logger.info("process: scene %s already owned by another worker; exiting", scene_id)
+        _log_lease_action("noop_live_lease", scene_id=scene_id)
         return JSONResponse({"status": "noop", "reason": "already_owned"})
 
     # CLAIMED or RECLAIMED — we own it; proceed.
     device_id = claim_result.device_id
-    logger.info("process: claimed scene %s (status=%s retry=%d)",
-                scene_id, claim_result.status.value, retry_count)
+    action = "claim" if claim_result.status == ClaimStatus.CLAIMED else "reclaim_stale"
+    _log_lease_action(action, scene_id=scene_id)
+    with _held_scenes_lock:
+        _held_scene_ids.add(scene_id)
 
     # 3. Run perception.
     try:
@@ -474,10 +560,22 @@ async def handle_process(
         )
     except PoisonError as exc:
         logger.error("process: poison failure for scene %s: %s", scene_id, exc)
+        with _held_scenes_lock:
+            _held_scene_ids.discard(scene_id)
         _finalize_failed(scene_id, str(exc), device_id, receiver_repo, fcm_notifier)
         return JSONResponse({"status": "failed", "reason": str(exc)})
     except EnvironmentalError as exc:
         logger.error("process: environmental failure for scene %s: %s", scene_id, exc)
+        # Release the lease before returning 5xx so Cloud Tasks retries find an
+        # immediately-reclaimable scene rather than waiting out the full TTL.
+        # Status stays processing — Cloud Tasks retry will reclaim and proceed.
+        try:
+            receiver_repo.release_lease(scene_id)
+            _log_lease_action("release_error", scene_id=scene_id)
+        except Exception as rel_exc:
+            logger.error("release_lease failed for scene %s: %s", scene_id, rel_exc)
+        with _held_scenes_lock:
+            _held_scene_ids.discard(scene_id)
         if is_final_attempt:
             logger.error("process: final attempt exhausted for scene %s; marking failed", scene_id)
             _finalize_failed(scene_id, str(exc), device_id, receiver_repo, fcm_notifier)
@@ -488,6 +586,13 @@ async def handle_process(
     except Exception as exc:
         # Unexpected errors are treated as environmental.
         logger.exception("process: unexpected failure for scene %s: %s", scene_id, exc)
+        try:
+            receiver_repo.release_lease(scene_id)
+            _log_lease_action("release_error", scene_id=scene_id)
+        except Exception as rel_exc:
+            logger.error("release_lease failed for scene %s: %s", scene_id, rel_exc)
+        with _held_scenes_lock:
+            _held_scene_ids.discard(scene_id)
         if is_final_attempt:
             _finalize_failed(scene_id, str(exc), device_id, receiver_repo, fcm_notifier)
         return JSONResponse(
@@ -496,6 +601,8 @@ async def handle_process(
         )
 
     # 4. Success path.
+    with _held_scenes_lock:
+        _held_scene_ids.discard(scene_id)
     try:
         receiver_repo.release_ready(scene_id, result_uri)
     except Exception as exc:

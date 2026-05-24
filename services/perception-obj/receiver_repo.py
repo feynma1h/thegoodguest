@@ -62,15 +62,18 @@ class ReceiverRepository(ABC):
     """Interface for Scene claim/release from the perception receiver's perspective."""
 
     @abstractmethod
-    def claim(self, scene_id: str, lease_ttl_seconds: int) -> ClaimResult:
+    def claim(self, scene_id: str, lease_ttl_seconds: int, *, holder_id: str = "") -> ClaimResult:
         """Atomically attempt to claim scene_id for processing.
 
+        holder_id identifies the calling worker (written to lease_holder_id for
+        observability). Pass the module-level _WORKER_ID from process_receiver.
+
         Behaviour by current scene status:
-          queued      → transition to processing, write lease_expires_at.
-                        Returns CLAIMED.
-          processing  → if lease is stale (expired), reclaim: refresh
-                        lease_expires_at without re-transitioning status.
-                        Returns RECLAIMED.
+          queued      → transition to processing, write lease_expires_at +
+                        lease_holder_id. Returns CLAIMED.
+          processing  → if lease is stale (expired), reclaim atomically in a
+                        single transaction: verify still expired, write new
+                        lease_expires_at + lease_holder_id. Returns RECLAIMED.
                         If lease is fresh, another worker owns it.
                         Returns ALREADY_OWNED.
           failed      → bug per 0004; receiver should 200-exit.
@@ -79,6 +82,26 @@ class ReceiverRepository(ABC):
                         Returns WRONG_STATE.
           not found   → idempotency or stale task; receiver should 200-exit.
                         Returns NOT_FOUND.
+        """
+
+    @abstractmethod
+    def release_lease(self, scene_id: str) -> None:
+        """Clear lease fields, leave status=processing.
+
+        Called by the EnvironmentalError handler before returning 500 so Cloud
+        Tasks retries arrive at an immediately-reclaimable state instead of
+        waiting for the full lease TTL. Best-effort: no-op if the scene is not
+        found or not in processing state.
+        """
+
+    @abstractmethod
+    def release_queued(self, scene_id: str) -> None:
+        """Atomically clear lease and set status=queued; increment shutdown_release_count.
+
+        Called by the SIGTERM handler for each held scene so that Cloud Tasks
+        retries after a rolling deploy find a clean state. No-op if the scene is
+        not in processing state. Single transaction — non-negotiable (a two-step
+        clear-then-update is unsafe under SIGKILL between the steps).
         """
 
     @abstractmethod
@@ -123,6 +146,8 @@ class InMemoryReceiverRepository(ReceiverRepository):
         result_uri: Optional[str] = None,
         last_error: Optional[str] = None,
         lease_expires_at: Optional[datetime] = None,
+        lease_holder_id: str = "",
+        shutdown_release_count: int = 0,
     ) -> None:
         """Pre-populate a scene for testing. Not part of the production interface."""
         with self._lock:
@@ -133,6 +158,8 @@ class InMemoryReceiverRepository(ReceiverRepository):
                 "result_uri": result_uri,
                 "last_error": last_error,
                 "lease_expires_at": lease_expires_at,
+                "lease_holder_id": lease_holder_id,
+                "shutdown_release_count": shutdown_release_count,
             }
 
     def get_raw(self, scene_id: str) -> Optional[dict]:
@@ -141,7 +168,7 @@ class InMemoryReceiverRepository(ReceiverRepository):
             entry = self._scenes.get(scene_id)
             return dict(entry) if entry is not None else None
 
-    def claim(self, scene_id: str, lease_ttl_seconds: int) -> ClaimResult:
+    def claim(self, scene_id: str, lease_ttl_seconds: int, *, holder_id: str = "") -> ClaimResult:
         with self._lock:
             entry = self._scenes.get(scene_id)
             if entry is None:
@@ -158,17 +185,37 @@ class InMemoryReceiverRepository(ReceiverRepository):
                 existing_lease = entry.get("lease_expires_at")
                 if existing_lease is not None and existing_lease > now:
                     return ClaimResult(ClaimStatus.ALREADY_OWNED)
-                # Stale lease — reclaim.
+                # Stale lease — reclaim atomically under the lock.
                 entry["lease_expires_at"] = new_lease
+                entry["lease_holder_id"] = holder_id
                 return ClaimResult(ClaimStatus.RECLAIMED, device_id=entry["device_id"])
 
             if status == "queued":
                 entry["status"] = "processing"
                 entry["lease_expires_at"] = new_lease
+                entry["lease_holder_id"] = holder_id
                 return ClaimResult(ClaimStatus.CLAIMED, device_id=entry["device_id"])
 
             # Unknown status — treat as bug.
             return ClaimResult(ClaimStatus.WRONG_STATE)
+
+    def release_lease(self, scene_id: str) -> None:
+        with self._lock:
+            entry = self._scenes.get(scene_id)
+            if entry is None or entry["status"] != "processing":
+                return
+            entry["lease_expires_at"] = None
+            entry["lease_holder_id"] = ""
+
+    def release_queued(self, scene_id: str) -> None:
+        with self._lock:
+            entry = self._scenes.get(scene_id)
+            if entry is None or entry["status"] != "processing":
+                return
+            entry["status"] = "queued"
+            entry["lease_expires_at"] = None
+            entry["lease_holder_id"] = ""
+            entry["shutdown_release_count"] = entry.get("shutdown_release_count", 0) + 1
 
     def release_ready(self, scene_id: str, result_uri: str) -> None:
         with self._lock:
@@ -223,7 +270,7 @@ class FirestoreReceiverRepository(ReceiverRepository):
 
         self._db = _fs.Client(project=project)
 
-    def claim(self, scene_id: str, lease_ttl_seconds: int) -> ClaimResult:
+    def claim(self, scene_id: str, lease_ttl_seconds: int, *, holder_id: str = "") -> ClaimResult:
         from google.cloud import firestore as _fs  # deferred
 
         ref = self._db.collection(self.COLLECTION).document(scene_id)
@@ -253,9 +300,12 @@ class FirestoreReceiverRepository(ReceiverRepository):
                 if existing_lease is not None and existing_lease > now:
                     result = ClaimResult(ClaimStatus.ALREADY_OWNED)
                     return
-                # Stale lease — reclaim.
+                # Stale lease — reclaim atomically within this transaction.
+                # Re-reading the lease inside the transaction closes the TOCTOU
+                # window between two workers both observing an expired lease.
                 transaction.update(ref, {
                     "lease_expires_at": new_lease,
+                    "lease_holder_id": holder_id,
                     "updated_at": now,
                 })
                 result = ClaimResult(ClaimStatus.RECLAIMED, device_id=device_id)
@@ -265,6 +315,7 @@ class FirestoreReceiverRepository(ReceiverRepository):
                 transaction.update(ref, {
                     "status": "processing",
                     "lease_expires_at": new_lease,
+                    "lease_holder_id": holder_id,
                     "updated_at": now,
                 })
                 result = ClaimResult(ClaimStatus.CLAIMED, device_id=device_id)
@@ -274,6 +325,50 @@ class FirestoreReceiverRepository(ReceiverRepository):
 
         _txn(self._db.transaction(), ref)
         return result
+
+    def release_lease(self, scene_id: str) -> None:
+        from google.cloud import firestore as _fs  # deferred
+
+        ref = self._db.collection(self.COLLECTION).document(scene_id)
+        now = datetime.now(tz=timezone.utc)
+
+        @_fs.transactional
+        def _txn(transaction, ref):
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return
+            if snap.to_dict().get("status") != "processing":
+                return
+            transaction.update(ref, {
+                "lease_expires_at": None,
+                "lease_holder_id": "",
+                "updated_at": now,
+            })
+
+        _txn(self._db.transaction(), ref)
+
+    def release_queued(self, scene_id: str) -> None:
+        from google.cloud import firestore as _fs  # deferred
+
+        ref = self._db.collection(self.COLLECTION).document(scene_id)
+        now = datetime.now(tz=timezone.utc)
+
+        @_fs.transactional
+        def _txn(transaction, ref):
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return
+            if snap.to_dict().get("status") != "processing":
+                return
+            transaction.update(ref, {
+                "status": "queued",
+                "lease_expires_at": None,
+                "lease_holder_id": "",
+                "shutdown_release_count": _fs.Increment(1),
+                "updated_at": now,
+            })
+
+        _txn(self._db.transaction(), ref)
 
     def release_ready(self, scene_id: str, result_uri: str) -> None:
         from google.cloud import firestore as _fs  # deferred
