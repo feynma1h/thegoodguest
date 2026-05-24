@@ -1,10 +1,11 @@
-"""Tests for the lazy model registry and health endpoints in server.py.
+"""Tests for the lazy model registry, health endpoints, and route registration.
 
 Verifies:
   - /health always returns 200 without touching the model registry.
   - /ready reports the correct per-model status in each registry state.
   - get_sam3() / get_sam3d() trigger deferred model import + construction.
   - Cached failure: a failed load raises HTTPException on every subsequent call.
+  - POST /process body is parsed as a ProcessRequest model, not a query param.
 
 Strategy: import server once at module level (after stubbing torch and the
 model packages). Between tests, reset only the registry module globals so we
@@ -21,7 +22,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -200,3 +201,66 @@ class TestAccessors:
         result = server.get_sam3d()
         assert result is fake_instance
         assert server._sam3d is fake_instance
+
+
+# ---------------------------------------------------------------------------
+# POST /process — route registration (TestClient level)
+# ---------------------------------------------------------------------------
+
+class TestProcessRoute:
+    """TestClient-level tests for POST /process.
+
+    These test FastAPI route registration — specifically that ProcessRequest is
+    resolved as a request body model, not a query parameter. Tests that call
+    handle_process() directly do not catch this class of bug (see the 422
+    incident in docs/decisions/0010 and the fix in fix(perception-obj) commit).
+    """
+
+    def test_valid_body_reaches_handler(self):
+        """A valid JSON body must reach handle_process as a ProcessRequest.
+
+        Asserts the positive contract: FastAPI parses {scene_id, bundle_uri} as
+        a body model and passes a fully-populated ProcessRequest to the handler.
+        """
+        from process_receiver import ProcessRequest
+
+        captured: dict = {}
+
+        async def _fake_handle(request, req, **kwargs):
+            captured["req"] = req
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"status": "mocked"})
+
+        with (
+            patch("process_receiver.handle_process", _fake_handle),
+            patch.object(server, "get_sam3", return_value=MagicMock()),
+            patch.object(server, "get_sam3d", return_value=MagicMock()),
+            patch.object(server, "_get_oidc_verifier", return_value=None),
+            patch.object(server, "_get_receiver_repo", return_value=MagicMock()),
+            patch.object(server, "_get_fcm_notifier", return_value=MagicMock()),
+        ):
+            resp = client.post(
+                "/process",
+                json={"scene_id": "abc-123", "bundle_uri": "gs://b/bundle.pb"},
+            )
+
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        req = captured.get("req")
+        assert req is not None, "handle_process was not called — body may not have been parsed"
+        assert isinstance(req, ProcessRequest), f"Expected ProcessRequest, got {type(req)}"
+        assert req.scene_id == "abc-123"
+        assert req.bundle_uri == "gs://b/bundle.pb"
+
+    def test_missing_body_is_body_error_not_query_error(self):
+        """Regression guard: missing body must produce loc=['body',...], not
+        loc=['query','req']. The broken pre-fix behavior was the latter — caused
+        by ProcessRequest being imported after the route registration so FastAPI
+        couldn't resolve the annotation and fell back to treating req as a query
+        parameter."""
+        resp = client.post("/process")
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        locs = [d["loc"] for d in detail]
+        assert all(loc[0] == "body" for loc in locs), (
+            f"Query-param validation error indicates annotation not resolved: {locs}"
+        )
