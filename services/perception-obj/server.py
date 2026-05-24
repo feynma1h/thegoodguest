@@ -49,6 +49,13 @@ try:
 except ImportError:
     pass
 
+# ProcessRequest must be imported before any @app.post("/process") registration.
+# FastAPI resolves type annotations at decoration time; if ProcessRequest is not
+# in the module namespace then, FastAPI silently treats `req` as a query param
+# instead of a body model, producing 422 on every Cloud Tasks delivery.
+# See docs/decisions/0010.
+from process_receiver import ProcessRequest  # noqa: E402
+
 # Model classes are NOT imported at module level. Importing models.sam3 or
 # models.sam3d would immediately run the SAM 3 / SAM 3D CUDA initialisation
 # (hundreds of seconds), blocking uvicorn from binding before the startup
@@ -549,7 +556,7 @@ async def objects(
 )
 async def process(
     request: Request,
-    req: "ProcessRequest",
+    req: ProcessRequest,
 ) -> JSONResponse:
     """Cloud Tasks perception receiver.
 
@@ -561,7 +568,7 @@ async def process(
     Returns 5xx on environmental failures so Cloud Tasks retries. Returns 2xx
     on all success and poison paths so the task is drained from the queue.
     """
-    from process_receiver import ProcessRequest, handle_process
+    from process_receiver import handle_process
 
     # Accessors load models on first call (~195s combined on a cold container).
     # Cloud Tasks' 30-min deadline absorbs this. Raises 500 on cached load failure.
@@ -576,11 +583,6 @@ async def process(
         sam3d_model=get_sam3d(),
         object_prompt=DEFAULT_OBJECT_PROMPT,
     )
-
-
-# Import here so FastAPI can resolve the ProcessRequest type annotation above
-# without a circular import (server imports process_receiver, not vice versa).
-from process_receiver import ProcessRequest  # noqa: E402
 
 
 # -----------------------------------------------------------------------------
