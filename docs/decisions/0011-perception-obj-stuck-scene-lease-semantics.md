@@ -81,12 +81,26 @@ Specifically:
 
 ```
 if lease.expires_at <= now():
-    reclaim_and_process()      # stale lease — take it
-elif lease.holder_id == this_worker_id:
-    continue_processing()      # we own it (shouldn't normally hit)
+    reclaim_and_process()   # stale lease — take it
 else:
-    return_noop_200()          # active lease elsewhere — skip
+    return_noop_200()       # active lease — skip
 ```
+
+  The `holder_id == self` case is dropped entirely. If it fires, the
+  defensive noop is correct behavior; there is no normal path that
+  reaches it.
+
+  The reclaim must be a single Firestore transaction (read lease,
+  verify still expired, write new lease + status). A read-verify-write
+  sequence outside a transaction has a TOCTOU window where two
+  concurrent workers both see an expired lease and both proceed.
+
+- A structured log line is emitted at every lease claim, reclaim,
+  release, and noop with fields `worker_id`, `scene_id`,
+  `lease_expires_at`, and `action_taken` (one of `claim`,
+  `reclaim_stale`, `release_error`, `release_shutdown`,
+  `noop_live_lease`). This makes concurrent-writer scenarios detectable
+  and gates the fencing-token decision on observed data.
 
 - The `EnvironmentalError` handler releases the lease before returning
   500. Optimization only — correctness comes from the lease-expiration
@@ -135,10 +149,14 @@ Firestore writes, so worker A's write succeeds.
 
 This is a pre-existing gap, not a regression introduced by this fix.
 Addressing it requires lease fencing tokens (monotonic counter per
-lease claim, checked on every write), which is a larger change. Not
-worth doing until there's evidence the scenario actually occurs.
-Flagged here so future-us doesn't think this design is fully robust
-against partition-then-heal.
+lease claim, checked on every write), which is a larger change.
+The structured logging added above is what generates the evidence to
+trigger that work. Implement fencing tokens if either of the following
+occurs: (a) the claim/reclaim logs show a `reclaim_stale` followed by
+a write from the prior holder's `worker_id` within the same scene, or
+(b) a second writer to scene state is added beyond perception-obj
+(web app edit flow, re-processing path, or anything else that touches
+scene fields under a lease).
 
 ## What would change this decision
 
@@ -154,3 +172,6 @@ against partition-then-heal.
   where this bug manifested narrows. Doesn't change the fix; might
   obsolete the optimization (option 1) since retries would already
   be fast.
+- The deploy-mid-job gap (Cloud Run SIGTERM with 10s drain killing an
+  in-flight job before the lease-expiration check can fire) is a
+  separate structural failure mode. See `docs/decisions/0012`.
