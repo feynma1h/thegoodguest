@@ -61,7 +61,7 @@ outputs/                          gitignored; generated artifacts
 ## What does NOT work / what we're deliberately not doing
 
 - **No iOS app exists yet.** The bundle synthesizer is the only thing that writes bundles.
-- **`perception-obj` has a stuck-scene bug under environmental failure.** When `/process` returns 500 (e.g. CUDA OOM) and Cloud Tasks retries within the lease TTL window (default 300s), the retry sees `ALREADY_OWNED` and returns a 200 noop. Cloud Tasks acks and removes the task. The lease then expires with no reclamation worker watching — passive reclamation only fires on the next `/process` POST, which never arrives. Scene is stuck in `processing` indefinitely. One known stuck scene: `f077e9ed-d339-4be8-8dbf-37b952abfec2` (manually unstuck). Fix planned — see `docs/decisions/0011`. Until fixed, any environmental failure on a job that takes >30s to fail will reproduce this.
+- **`perception-obj` has a stuck-scene bug under environmental failure and mid-deploy job termination.** When `/process` returns 500 (e.g. CUDA OOM) and Cloud Tasks retries within the lease TTL window (default 300s), the retry sees `ALREADY_OWNED` and returns a 200 noop. Cloud Tasks acks and removes the task. The lease then expires with no reclamation worker watching — passive reclamation only fires on the next `/process` POST, which never arrives. Scene is stuck in `processing` indefinitely. The same class of bug occurs on deploy when an instance is SIGKILLed mid-job after the 10s drain. One known stuck scene: `f077e9ed-d339-4be8-8dbf-37b952abfec2` (manually unstuck). Fix designed — see `docs/decisions/0011` (updated this session) and `0012`. Until implemented, any environmental failure on a job that takes >30s, or any redeploy during an in-flight job, will reproduce this.
 - **`perception-obj` is not yet deployed with the lazy-load fix.** The refactor from `docs/decisions/0007` is fully implemented and committed — `/health`, `/ready`, DINOv2 pre-cache, deferred model imports in both wrappers, `httpGet /health` startup probe. Revision 00018-ppx is still serving in Cloud Run (no `/process`), so Cloud Tasks hits 404s. One `infra/deploy_perception.sh obj` away from unblocking the queue.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
@@ -114,13 +114,17 @@ When this section gets stale, the project's drifting. Keep it current.
 
 **1 — Fix perception-obj stuck-scene bug** (blocks redeploy + iOS bundle ingestion at any reliability)
 
-Implement lease-expiration check at `/process`: when a scene is already-owned,
-check whether the lease has actually expired; if yes, reclaim and process; if
-no, return noop. This is the load-bearing correctness fix. Layer on eager lease
-release in the `EnvironmentalError` handler as an optimization (retries happen
-~lease-TTL faster). Add `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` to
-the Cloud Run env config as a separate band-aid for the OOM itself. See
-`docs/decisions/0011`.
+Implement the lease-expiration check at `/process`: when a scene is already-owned,
+check whether the lease has actually expired; if yes, reclaim atomically in a
+Firestore transaction; if no, return noop. Collapse the already-owned branch to
+two cases (drop the `holder_id == self` path; defensive noop covers it). Layer on
+eager lease release in the `EnvironmentalError` handler and a SIGTERM handler that
+releases held leases + resets scenes to `queued` before shutdown — both optimizations
+on top of the expiration check, not load-bearing. Add a structured log line on every
+claim/reclaim (worker_id, scene_id, lease_expires_at, action_taken) so concurrent-writer
+scenarios become detectable. Add `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+to the Cloud Run env config as a separate band-aid for the OOM. Verify (don't change)
+that the lease is claimed after model load, not before. See `docs/decisions/0011` and `0012`.
 
 **2 — Redeploy perception-obj** (one command, after #1 lands)
 
