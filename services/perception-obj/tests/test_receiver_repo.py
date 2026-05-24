@@ -278,7 +278,7 @@ class TestReleaseQueued:
         repo = InMemoryReceiverRepository()
         repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
                   lease_holder_id="worker-xyz")
-        repo.release_queued(_SCENE_ID)
+        repo.release_queued(_SCENE_ID, holder_id="worker-xyz")
         raw = repo.get_raw(_SCENE_ID)
         assert raw["lease_expires_at"] is None
         assert raw["lease_holder_id"] == ""
@@ -309,6 +309,29 @@ class TestReleaseQueued:
     def test_noop_on_not_found(self):
         repo = InMemoryReceiverRepository()
         repo.release_queued("no-such-scene")  # must not raise
+
+    def test_noop_when_holder_id_does_not_match(self):
+        """release_queued() is a no-op when the doc's lease_holder_id differs.
+
+        Guards the reclaim-during-SIGTERM race: worker B may have reclaimed
+        between worker A observing the scene and A's SIGTERM handler firing.
+        A must not wipe B's lease.
+        """
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
+                  lease_holder_id="worker-B")
+        repo.release_queued(_SCENE_ID, holder_id="worker-A")
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "processing"
+        assert raw["lease_holder_id"] == "worker-B"
+        assert raw["lease_expires_at"] == _future
+
+    def test_releases_when_holder_id_matches(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_expires_at=_future,
+                  lease_holder_id="worker-A")
+        repo.release_queued(_SCENE_ID, holder_id="worker-A")
+        assert repo.get_raw(_SCENE_ID)["status"] == "queued"
 
 
 # ---------------------------------------------------------------------------
