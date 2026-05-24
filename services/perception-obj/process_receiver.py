@@ -126,7 +126,7 @@ def _sigterm_handler(signum, frame) -> None:
         held = set(_held_scene_ids)
     for scene_id in held:
         try:
-            repo.release_queued(scene_id)
+            repo.release_queued(scene_id, holder_id=_WORKER_ID)
             with _held_scenes_lock:
                 _held_scene_ids.discard(scene_id)
             _log_lease_action("release_shutdown", scene_id=scene_id)

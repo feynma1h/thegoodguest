@@ -472,12 +472,11 @@ class TestSigtermHandler:
         import process_receiver
         import signal as _signal
 
-        repo = _seeded_repo("queued")
-        # Run a claim that will fail environmentally, leaving the scene in
-        # processing with cleared lease.  Re-seed it as processing+live lease
-        # so the SIGTERM handler has something to release.
+        # Seed the scene with this worker's ID as the holder so the guard passes.
+        repo = InMemoryReceiverRepository()
         repo.seed(_SCENE_ID, status="processing", device_id=_DEVICE_ID,
-                  lease_expires_at=datetime.now(tz=timezone.utc) + timedelta(hours=1))
+                  lease_expires_at=datetime.now(tz=timezone.utc) + timedelta(hours=1),
+                  lease_holder_id=process_receiver._WORKER_ID)
         process_receiver._sigterm_repo_ref = repo
         with process_receiver._held_scenes_lock:
             process_receiver._held_scene_ids.add(_SCENE_ID)
@@ -529,6 +528,38 @@ class TestSigtermHandler:
 
         # Status must not be changed — the scene completed normally.
         assert repo.get_raw(_SCENE_ID)["status"] == "ready"
+
+    def test_sigterm_skips_scene_held_by_different_worker(self):
+        """SIGTERM handler must not release a lease held by a different worker.
+
+        Scenario: worker A holds a lease, fails mid-job, worker B reclaims
+        (writes its own holder_id), and then A's SIGTERM fires.  A's
+        release_queued() should be a no-op because lease_holder_id no longer
+        matches A's _WORKER_ID, leaving B's processing state intact.
+        """
+        import process_receiver
+        import signal as _signal
+
+        future_lease = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+        repo = InMemoryReceiverRepository()
+        repo.seed(
+            _SCENE_ID,
+            status="processing",
+            device_id=_DEVICE_ID,
+            lease_expires_at=future_lease,
+            lease_holder_id="worker-B-different-id",  # another worker now holds it
+        )
+
+        process_receiver._sigterm_repo_ref = repo
+        with process_receiver._held_scenes_lock:
+            process_receiver._held_scene_ids.add(_SCENE_ID)
+
+        process_receiver._sigterm_handler(_signal.SIGTERM, None)
+
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "processing", "worker B's state must be untouched"
+        assert raw["lease_holder_id"] == "worker-B-different-id"
+        assert raw["lease_expires_at"] == future_lease
 
 
 # ---------------------------------------------------------------------------
