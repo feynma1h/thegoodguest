@@ -54,8 +54,14 @@ def main() -> None:
     print(f"  tier:            {_tier_name(b.tier)}")
     print(f"  device:          {b.device.hardware_id} / iOS {b.device.os_version}")
     print(f"                   app {b.device.app_version}, has_lidar={b.device.has_lidar}")
-    duration_s = (b.ended_at_us - b.started_at_us) / 1_000_000
+    duration_s = (b.ended_at_device_us - b.started_at_device_us) / 1_000_000
     print(f"  duration:        {duration_s:.1f}s")
+    if b.started_at_wall_us:
+        import datetime
+        wall_dt = datetime.datetime.fromtimestamp(
+            b.started_at_wall_us / 1_000_000, tz=datetime.timezone.utc
+        )
+        print(f"  captured at:     {wall_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print(f"  frames:          {len(b.frames)}")
     print(f"  has room_plan:   {b.HasField('room_plan')}")
     if b.client_notes:
