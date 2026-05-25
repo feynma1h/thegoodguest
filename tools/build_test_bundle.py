@@ -162,8 +162,10 @@ def main() -> None:
     bundle.device.app_version = "build_test_bundle.py"
     bundle.device.has_lidar = False
     bundle.tier = ARKIT_ONLY
-    now_us = int(time.time() * 1_000_000)
-    bundle.started_at_us = now_us
+    now_device_us = int(time.monotonic_ns() // 1_000)
+    now_wall_us = int(time.time_ns() // 1_000)
+    bundle.started_at_device_us = now_device_us
+    bundle.started_at_wall_us = now_wall_us
 
     print(f"Building bundle from {n} photos in {PHOTOS_DIR}/")
     print(f"  bundle_id: {bundle.bundle_id}")
@@ -192,7 +194,7 @@ def main() -> None:
         f = bundle.frames.add()
         f.frame_index = i
         # 500 ms between frames in the synthetic timeline.
-        f.timestamp_us = now_us + i * 500_000
+        f.timestamp_us = now_device_us + i * 500_000
         f.rgb_gcs_path = rel_path
         f.camera_pose.pos_x = float(pos[0])
         f.camera_pose.pos_y = float(pos[1])
@@ -211,7 +213,7 @@ def main() -> None:
         f.gravity.y = gy
         f.gravity.z = gz
 
-    bundle.ended_at_us = now_us + n * 500_000
+    bundle.ended_at_device_us = now_device_us + n * 500_000
 
     wire = bundle.SerializeToString()
     (OUT_DIR / "bundle.pb").write_bytes(wire)

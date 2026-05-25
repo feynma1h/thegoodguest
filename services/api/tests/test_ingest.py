@@ -96,9 +96,10 @@ def _make_bundle(
     b.device.hardware_id = "test-device"
     b.device.has_lidar = tier in (LIDAR_ARKIT,)
     b.tier = tier
-    now_us = int(time.time() * 1_000_000)
-    b.started_at_us = now_us
-    b.ended_at_us = now_us + frame_count * 500_000
+    now_us = int(time.monotonic_ns() // 1_000)
+    b.started_at_device_us = now_us
+    b.ended_at_device_us = now_us + frame_count * 500_000
+    b.started_at_wall_us = int(time.time_ns() // 1_000)
 
     for i in range(frame_count):
         f = b.frames.add()
@@ -271,8 +272,8 @@ def test_corrupt_quaternion_returns_400(client: TestClient) -> None:
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
     b.tier = ARKIT_ONLY
-    b.started_at_us = 0
-    b.ended_at_us = 1
+    b.started_at_device_us = 0
+    b.ended_at_device_us = 1
     f = b.frames.add()
     f.frame_index = 0
     f.rgb_gcs_path = "frames/000000.jpg"
@@ -331,8 +332,8 @@ def test_absolute_rgb_path_returns_400(client: TestClient) -> None:
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
     b.tier = ARKIT_ONLY
-    b.started_at_us = 0
-    b.ended_at_us = 1
+    b.started_at_device_us = 0
+    b.ended_at_device_us = 1
     f = b.frames.add()
     f.frame_index = 0
     f.rgb_gcs_path = "gs://my-bucket/captures/abc/frames/000000.jpg"  # wrong

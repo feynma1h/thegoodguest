@@ -78,9 +78,10 @@ def _make_bundle_bytes(frame_count: int = 2) -> bytes:
     b.user_id = "user-1"
     b.device.hardware_id = _DEVICE_ID
     b.tier = ARKIT_ONLY
-    now = int(_time.time() * 1_000_000)
-    b.started_at_us = now
-    b.ended_at_us = now + frame_count * 500_000
+    now = int(_time.monotonic_ns() // 1_000)
+    b.started_at_device_us = now
+    b.ended_at_device_us = now + frame_count * 500_000
+    b.started_at_wall_us = int(_time.time_ns() // 1_000)
     for i in range(frame_count):
         f = b.frames.add()
         f.frame_index = i
