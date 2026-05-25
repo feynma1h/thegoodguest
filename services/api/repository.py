@@ -63,15 +63,25 @@ class SceneRepository(ABC):
         *,
         result_uri: Optional[str] = None,
         last_error: Optional[str] = None,
+        missing_paths: Optional[list] = None,
     ) -> Scene:
         """Transition scene_id to new_status and return the updated Scene.
 
         Validates the transition via validate_transition before mutating;
         raises InvalidTransitionError on disallowed moves. Sets updated_at to
-        now. Sets result_uri and last_error only when explicitly provided.
+        now. Sets result_uri, last_error, and missing_paths only when
+        explicitly provided.
 
         Raises SceneNotFoundError if the scene does not exist.
         Raises InvalidTransitionError if the transition is not allowed.
+        """
+
+    @abstractmethod
+    def get_by_bundle_id(self, bundle_id: str) -> Optional[Scene]:
+        """Return the Scene whose bundle_id matches, or None if not found.
+
+        bundle_id is the iOS-generated UUIDv4 stored on the Scene at ingest
+        time. Different from scene_id (the ingester's UUID for the job).
         """
 
 
@@ -105,6 +115,7 @@ class InMemorySceneRepository(SceneRepository):
         *,
         result_uri: Optional[str] = None,
         last_error: Optional[str] = None,
+        missing_paths: Optional[list] = None,
     ) -> Scene:
         scene = self.get(scene_id)          # raises SceneNotFoundError if missing
         validate_transition(scene.status, new_status)  # raises InvalidTransitionError if bad
@@ -114,8 +125,16 @@ class InMemorySceneRepository(SceneRepository):
             scene.result_uri = result_uri
         if last_error is not None:
             scene.last_error = last_error
+        if missing_paths is not None:
+            scene.missing_paths = missing_paths
         self._store[scene_id] = copy.deepcopy(scene)
         return copy.deepcopy(scene)
+
+    def get_by_bundle_id(self, bundle_id: str) -> Optional[Scene]:
+        for scene in self._store.values():
+            if scene.bundle_id == bundle_id:
+                return copy.deepcopy(scene)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +185,9 @@ class FirestoreSceneRepository(SceneRepository):
             result_uri=data.get("result_uri"),
             attempt_count=data.get("attempt_count", 0),
             last_error=data.get("last_error"),
+            bundle_id=data.get("bundle_id"),
+            user_id=data.get("user_id"),
+            missing_paths=data.get("missing_paths"),
         )
 
     @staticmethod
@@ -184,6 +206,9 @@ class FirestoreSceneRepository(SceneRepository):
             "result_uri": scene.result_uri,
             "attempt_count": scene.attempt_count,
             "last_error": scene.last_error,
+            "bundle_id": scene.bundle_id,
+            "user_id": scene.user_id,
+            "missing_paths": scene.missing_paths,
         }
 
     # ------------------------------------------------------------------
@@ -213,6 +238,7 @@ class FirestoreSceneRepository(SceneRepository):
         *,
         result_uri: Optional[str] = None,
         last_error: Optional[str] = None,
+        missing_paths: Optional[list] = None,
     ) -> Scene:
         from google.cloud import firestore as _fs
 
@@ -232,15 +258,29 @@ class FirestoreSceneRepository(SceneRepository):
                 updates["result_uri"] = result_uri
             if last_error is not None:
                 updates["last_error"] = last_error
+            if missing_paths is not None:
+                updates["missing_paths"] = missing_paths
             transaction.update(ref, updates)
 
-            # Return the updated Scene without a second read.
             scene.status = new_status
             scene.updated_at = now
             if result_uri is not None:
                 scene.result_uri = result_uri
             if last_error is not None:
                 scene.last_error = last_error
+            if missing_paths is not None:
+                scene.missing_paths = missing_paths
             return scene
 
         return _run(self._db.transaction(), ref)
+
+    def get_by_bundle_id(self, bundle_id: str) -> Optional[Scene]:
+        docs = (
+            self._db.collection(self.COLLECTION)
+            .where("bundle_id", "==", bundle_id)
+            .limit(1)
+            .stream()
+        )
+        for doc in docs:
+            return self._from_doc(doc)
+        return None

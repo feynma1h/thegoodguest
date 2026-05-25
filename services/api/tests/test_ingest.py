@@ -145,6 +145,7 @@ def test_valid_arkit_bundle_returns_200(client: TestClient) -> None:
     """Well-formed ARKIT_ONLY bundle → 200 with {scene_id, status: queued}."""
     bundle_bytes = _make_bundle(frame_count=3)
     with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+         patch.object(server, "_blob_exists", return_value=True), \
          patch.object(server, "_scene_repo", InMemorySceneRepository()), \
          patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()):
         resp = client.post(
@@ -161,6 +162,7 @@ def test_valid_lidar_bundle_returns_200(client: TestClient) -> None:
     """Well-formed LIDAR_ARKIT bundle with depth on every frame → 200."""
     bundle_bytes = _make_bundle(frame_count=2, add_depth=True)
     with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+         patch.object(server, "_blob_exists", return_value=True), \
          patch.object(server, "_scene_repo", InMemorySceneRepository()), \
          patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()):
         resp = client.post(
@@ -188,6 +190,7 @@ def test_dispatch_happy_path_scene_and_task_created(client: TestClient) -> None:
     dispatcher = InMemoryTaskDispatcher()
 
     with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+         patch.object(server, "_blob_exists", return_value=True), \
          patch.object(server, "_scene_repo", repo), \
          patch.object(server, "_task_dispatcher", dispatcher):
         resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
@@ -228,6 +231,7 @@ def test_dispatch_failure_returns_500_and_marks_scene_failed(client: TestClient)
     failing_dispatcher.enqueue.side_effect = RuntimeError("cloud tasks unavailable")
 
     with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+         patch.object(server, "_blob_exists", return_value=True), \
          patch.object(server, "_scene_repo", repo), \
          patch.object(server, "_task_dispatcher", failing_dispatcher):
         resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})

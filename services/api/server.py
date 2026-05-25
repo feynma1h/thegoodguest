@@ -5,8 +5,23 @@ record, enqueues a Cloud Tasks job targeting perception-obj, and returns an
 acknowledgement with the scene_id and status="queued".
 
 Endpoints:
-  GET  /health  — liveness probe; always returns {"status": "ok"} with HTTP 200.
-  POST /ingest  — validate bundle, create Scene, enqueue perception task.
+  GET  /health
+      Liveness probe; always returns {"status": "ok"} with HTTP 200.
+
+  POST /ingest
+      Validate bundle by GCS URI, run existence check, create Scene, enqueue
+      perception task. Legacy entry-point; kept for compatibility.
+
+  POST /ingest/eventarc
+      Eventarc CloudEvent handler for google.cloud.storage.object.v1.finalized
+      on captures/*/bundle.pb. Extracts bundle_id from the event, runs the
+      same ingest logic as /ingest. Handles idempotency (already-queued scenes)
+      and the retry path (failed_incomplete → queued on successful re-upload).
+
+  POST /captures/{bundle_id}/upload_session
+      Mint GCS resumable session URIs for each entry in the manifest. Auth:
+      Firebase ID token via Authorization: Bearer header. Returns
+      [{relative_path, session_uri}] for the iOS client to upload against.
 
 Run locally (from services/api/):
   uvicorn server:app --reload --port 8080
@@ -22,15 +37,19 @@ Environment variables:
   CLOUD_TASKS_QUEUE          — Cloud Tasks queue name       ┘ for real dispatch
   CLOUD_TASKS_INVOKER_SA     — service account email for OIDC token on tasks
   PERCEPTION_OBJ_PROCESS_URL — full URL of the perception-obj /process endpoint
+  GCS_CAPTURES_BUCKET        — bucket name for capture blobs (existence check +
+                               upload session URI minting)
 
 See also: infra/cloud-tasks-queue.md for queue setup and SA configuration.
 
-Consumed by: the iOS capture app (future) and integration tests.
+Consumed by: the iOS capture app and integration tests.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
+import re
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -39,13 +58,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # Ensure roomstudio_schemas is importable in local dev without a virtualenv
-# having it installed. In production it is a declared dependency and will be
-# installed. The sys.path guard avoids double-adding it if already present.
+# having it installed. In production it is a declared dependency.
 _schemas_path = Path(__file__).resolve().parents[2] / "packages/schemas"
 if str(_schemas_path) not in sys.path:
     sys.path.insert(0, str(_schemas_path))
@@ -55,13 +73,20 @@ from validation import validate_bundle  # noqa: E402
 from scene import DeviceIdSource, SceneStatus, new_scene  # noqa: E402
 from repository import SceneRepository, InMemorySceneRepository  # noqa: E402
 from dispatcher import TaskDispatcher, InMemoryTaskDispatcher  # noqa: E402
+from auth import TokenVerifier, NullTokenVerifier, TokenVerificationError  # noqa: E402
+from fcm import FcmNotifier, NullFcmNotifier  # noqa: E402
+from upload_session_repo import (  # noqa: E402
+    UploadSessionRepository,
+    InMemoryUploadSessionRepository,
+    validate_manifest_path,
+    gcs_mint_resumable_uri,
+)
 
 
 # ---------------------------------------------------------------------------
 # Startup validation
 # ---------------------------------------------------------------------------
 
-#: Env vars that must be non-empty when ENVIRONMENT=production.
 _PRODUCTION_REQUIRED_VARS: tuple[str, ...] = (
     "FIRESTORE_PROJECT",
     "CLOUD_TASKS_PROJECT",
@@ -69,20 +94,12 @@ _PRODUCTION_REQUIRED_VARS: tuple[str, ...] = (
     "CLOUD_TASKS_QUEUE",
     "CLOUD_TASKS_INVOKER_SA",
     "PERCEPTION_OBJ_PROCESS_URL",
+    "GCS_CAPTURES_BUCKET",
 )
 
 
 def _check_production_env() -> None:
-    """Raise RuntimeError if ENVIRONMENT=production and any required var is absent.
-
-    Called from the lifespan handler at process startup. Has no effect when
-    ENVIRONMENT is unset or set to any value other than "production" —
-    preserving the silent in-memory fallback for local dev and tests.
-
-    This turns misconfiguration into an immediate, noisy startup failure so
-    Cloud Run's startup probe catches it and the deploy rolls back, rather
-    than serving traffic with a broken (in-memory) backend silently.
-    """
+    """Raise RuntimeError if ENVIRONMENT=production and any required var is absent."""
     if os.environ.get("ENVIRONMENT") != "production":
         return
     missing = [v for v in _PRODUCTION_REQUIRED_VARS if not os.environ.get(v)]
@@ -95,7 +112,6 @@ def _check_production_env() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
-    """FastAPI lifespan: validate config on startup, nothing on shutdown."""
     _check_production_env()
     yield
 
@@ -103,7 +119,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 app = FastAPI(
     title="roomstudio-api",
     description="Capture-bundle ingester. Validates bundles and dispatches perception work.",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -118,47 +134,126 @@ class IngestRequest(BaseModel):
 
 
 class IngestAck(BaseModel):
-    """Returned on successful ingest (HTTP 200).
-
-    The Scene has been created with status=queued and a perception task has
-    been enqueued. Poll GET /scenes/{scene_id} (not yet implemented) to track
-    progress.
-    """
+    """Returned on successful ingest (HTTP 200)."""
     scene_id: str
-    status: str  # always "queued" on 200
+    status: str
 
 
 class IngestError(BaseModel):
-    """Returned on failure (HTTP 400 or 500).
-
-    error:  machine-readable code, stable across versions.
-    detail: human-readable explanation with enough context to act on.
-    """
+    """Returned on failure (HTTP 400 or 500)."""
     error: str
     detail: str
 
 
+class UploadSessionRequest(BaseModel):
+    """Body for POST /captures/{bundle_id}/upload_session."""
+    manifest: list[dict]         # [{relative_path, expected_size_bytes}]
+    fcm_token: Optional[str] = None
+
+
+class UploadSessionEntry(BaseModel):
+    """One entry in the upload_session response."""
+    relative_path: str
+    session_uri: str
+
+
 # ---------------------------------------------------------------------------
-# device_id resolution — prefer bundle.device.device_id, fall back to
-# hardware_id while the iOS app is not yet built and device_id is always "".
-#
-# Remove the fallback_hardware_id path once iOS bundles populate device_id
-# for ≥99% of captures over a 7-day window. The DeviceIdSource field on Scene
-# lets you run that query in Firestore: count docs where device_id_source ==
-# "fallback_hardware_id" over the target window.
+# Dependency instances — lazy-initialized from env vars on first use.
+# ---------------------------------------------------------------------------
+
+_scene_repo: Optional[SceneRepository] = None
+_task_dispatcher: Optional[TaskDispatcher] = None
+_token_verifier: Optional[TokenVerifier] = None
+_fcm_notifier: Optional[FcmNotifier] = None
+_upload_session_repo: Optional[UploadSessionRepository] = None
+
+_PERCEPTION_OBJ_PROCESS_URL: str = os.environ.get(
+    "PERCEPTION_OBJ_PROCESS_URL", "http://localhost:8081/process"
+)
+_GCS_CAPTURES_BUCKET: str = os.environ.get("GCS_CAPTURES_BUCKET", "roomstudio-captures")
+
+
+def _get_scene_repo() -> SceneRepository:
+    global _scene_repo
+    if _scene_repo is None:
+        project = os.environ.get("FIRESTORE_PROJECT")
+        if project:
+            from repository import FirestoreSceneRepository
+            _scene_repo = FirestoreSceneRepository(project=project)
+            logger.info("Using Firestore SceneRepository (project=%s)", project)
+        else:
+            _scene_repo = InMemorySceneRepository()
+            logger.info("FIRESTORE_PROJECT unset — using in-memory SceneRepository")
+    return _scene_repo
+
+
+def _get_task_dispatcher() -> TaskDispatcher:
+    global _task_dispatcher
+    if _task_dispatcher is None:
+        project = os.environ.get("CLOUD_TASKS_PROJECT")
+        location = os.environ.get("CLOUD_TASKS_LOCATION")
+        queue = os.environ.get("CLOUD_TASKS_QUEUE")
+        if project and location and queue:
+            from dispatcher import CloudTasksDispatcher
+            _task_dispatcher = CloudTasksDispatcher(
+                project=project, location=location, queue=queue
+            )
+            logger.info(
+                "Using CloudTasksDispatcher (project=%s location=%s queue=%s)",
+                project, location, queue,
+            )
+        else:
+            _task_dispatcher = InMemoryTaskDispatcher()
+            logger.info("Cloud Tasks env vars unset — using in-memory TaskDispatcher")
+    return _task_dispatcher
+
+
+def _get_token_verifier() -> TokenVerifier:
+    global _token_verifier
+    if _token_verifier is None:
+        if os.environ.get("ENVIRONMENT") == "production":
+            from auth import FirebaseTokenVerifier
+            _token_verifier = FirebaseTokenVerifier()
+            logger.info("Using FirebaseTokenVerifier")
+        else:
+            _token_verifier = NullTokenVerifier()
+            logger.info("ENVIRONMENT != production — using NullTokenVerifier")
+    return _token_verifier
+
+
+def _get_fcm_notifier() -> FcmNotifier:
+    global _fcm_notifier
+    if _fcm_notifier is None:
+        if os.environ.get("ENVIRONMENT") == "production":
+            from fcm import FirebaseFcmNotifier
+            _fcm_notifier = FirebaseFcmNotifier()
+            logger.info("Using FirebaseFcmNotifier")
+        else:
+            _fcm_notifier = NullFcmNotifier()
+            logger.info("ENVIRONMENT != production — using NullFcmNotifier")
+    return _fcm_notifier
+
+
+def _get_upload_session_repo() -> UploadSessionRepository:
+    global _upload_session_repo
+    if _upload_session_repo is None:
+        project = os.environ.get("FIRESTORE_PROJECT")
+        if project:
+            from upload_session_repo import FirestoreUploadSessionRepository
+            _upload_session_repo = FirestoreUploadSessionRepository(project=project)
+            logger.info("Using Firestore UploadSessionRepository")
+        else:
+            _upload_session_repo = InMemoryUploadSessionRepository()
+            logger.info("FIRESTORE_PROJECT unset — using in-memory UploadSessionRepository")
+    return _upload_session_repo
+
+
+# ---------------------------------------------------------------------------
+# device_id resolution
 # ---------------------------------------------------------------------------
 
 def resolve_device_id(bundle, bundle_gcs_uri: str) -> tuple[str, DeviceIdSource]:
-    """Return (device_id, source) from the parsed CaptureBundle.
-
-    Preference order:
-      1. bundle.device.device_id  — the stable Keychain UUID (preferred).
-      2. bundle.device.hardware_id — model string fallback; not unique across
-         devices of the same model. Logs a WARNING so the fallback is visible
-         in Cloud Logging.
-
-    Raises ValueError if both fields are empty, surfaced as a 400 to the client.
-    """
+    """Return (device_id, source) from the parsed CaptureBundle."""
     if bundle.device.device_id:
         return bundle.device.device_id, DeviceIdSource.PROVIDED
 
@@ -178,37 +273,23 @@ def resolve_device_id(bundle, bundle_gcs_uri: str) -> tuple[str, DeviceIdSource]
 
 
 # ---------------------------------------------------------------------------
-# GCS fetch — isolated so tests can patch without google-cloud-storage
+# GCS fetch
 # ---------------------------------------------------------------------------
 
-MAX_BUNDLE_BYTES: int = 10 * 1024 * 1024  # 10 MiB — proto metadata only, no pixel data
+MAX_BUNDLE_BYTES: int = 10 * 1024 * 1024  # 10 MiB — proto metadata only
 
 
 def _fetch_bundle_bytes(gcs_uri: str) -> bytes:
-    """Download bundle bytes from GCS.
-
-    Checks blob.size before downloading and rejects anything over
-    MAX_BUNDLE_BYTES. The bundle is metadata only (no pixel data); anything
-    larger than 10 MiB is almost certainly a mis-upload.
-
-    Wrapped in its own function so integration tests can patch it without
-    needing google-cloud-storage installed. The deferred import of
-    google.cloud.storage means importing this module in tests is also safe.
-
-    Raises ValueError for a malformed URI or an oversized blob; raises
-    google.cloud.exceptions.* for GCS errors (NotFound, Forbidden, etc.) —
-    callers should handle both.
-    """
-    from google.cloud import storage  # deferred: not installed in tests
+    """Download bundle bytes from GCS. Patched out in tests."""
+    from google.cloud import storage  # deferred
 
     if not gcs_uri.startswith("gs://"):
         raise ValueError(f"Expected gs:// URI, got: {gcs_uri!r}")
-    # Strip scheme and split on the first slash: gs://bucket/path/to/blob
     without_scheme = gcs_uri[5:]
     bucket_name, blob_path = without_scheme.split("/", 1)
     client = storage.Client()
     blob = client.bucket(bucket_name).blob(blob_path)
-    blob.reload()  # fetches blob metadata (size, content-type, etc.)
+    blob.reload()
     if blob.size is not None and blob.size > MAX_BUNDLE_BYTES:
         raise ValueError(
             f"Bundle blob is {blob.size} bytes, exceeds limit of "
@@ -219,122 +300,100 @@ def _fetch_bundle_bytes(gcs_uri: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Dependency instances — lazy-initialized from env vars on first use.
-# In tests, replace via patch.object(server, "_scene_repo", fake) etc.
+# Existence check helpers
 # ---------------------------------------------------------------------------
 
-_scene_repo: Optional[SceneRepository] = None
-_task_dispatcher: Optional[TaskDispatcher] = None
+def _blob_exists(bucket_name: str, blob_path: str) -> bool:
+    """Return True if the GCS blob exists. Patched in tests."""
+    from google.cloud import storage  # deferred
 
-# Perception-obj endpoint to target with Cloud Tasks. The /process receiver
-# does not exist yet; it is the next session's work.
-_PERCEPTION_OBJ_PROCESS_URL: str = os.environ.get(
-    "PERCEPTION_OBJ_PROCESS_URL", "http://localhost:8081/process"
-)
+    return storage.Client().bucket(bucket_name).blob(blob_path).exists()
 
 
-def _get_scene_repo() -> SceneRepository:
-    """Return the module-level SceneRepository, initialising from env if needed.
+def _collect_bundle_blob_paths(bundle) -> list[str]:
+    """Return all relative blob paths referenced in the bundle."""
+    paths: list[str] = []
+    for frame in bundle.frames:
+        if frame.rgb_gcs_path:
+            paths.append(frame.rgb_gcs_path)
+        if frame.HasField("depth"):
+            if frame.depth.depth_gcs_path:
+                paths.append(frame.depth.depth_gcs_path)
+            if frame.depth.HasField("confidence_gcs_path"):
+                if frame.depth.confidence_gcs_path:
+                    paths.append(frame.depth.confidence_gcs_path)
+    if bundle.HasField("room_plan"):
+        if bundle.room_plan.usdz_gcs_path:
+            paths.append(bundle.room_plan.usdz_gcs_path)
+    return paths
 
-    Falls back to InMemorySceneRepository when FIRESTORE_PROJECT is unset
-    (local dev / tests). In tests, patch server._scene_repo directly to inject
-    a controlled instance.
+
+def _check_bundle_blobs_exist(
+    bundle, bucket: str, bundle_id: str
+) -> list[str]:
+    """Return list of relative paths absent in GCS. Empty list = all present.
+
+    Checks all blob paths referenced in the bundle in parallel using
+    ThreadPoolExecutor. The blob paths are relative to captures/{bundle_id}/.
     """
-    global _scene_repo
-    if _scene_repo is None:
-        project = os.environ.get("FIRESTORE_PROJECT")
-        if project:
-            from repository import FirestoreSceneRepository
-            _scene_repo = FirestoreSceneRepository(project=project)
-            logger.info("Using Firestore SceneRepository (project=%s)", project)
-        else:
-            _scene_repo = InMemorySceneRepository()
-            logger.info("FIRESTORE_PROJECT unset — using in-memory SceneRepository")
-    return _scene_repo
+    relative_paths = _collect_bundle_blob_paths(bundle)
+    if not relative_paths:
+        return []
 
+    def _check(rel_path: str) -> str | None:
+        blob_path = f"captures/{bundle_id}/{rel_path}"
+        return rel_path if not _blob_exists(bucket, blob_path) else None
 
-def _get_task_dispatcher() -> TaskDispatcher:
-    """Return the module-level TaskDispatcher, initialising from env if needed.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(relative_paths))) as pool:
+        results = list(pool.map(_check, relative_paths))
 
-    Falls back to InMemoryTaskDispatcher when Cloud Tasks env vars are unset
-    (local dev / tests). In tests, patch server._task_dispatcher directly to
-    inject a controlled instance.
-    """
-    global _task_dispatcher
-    if _task_dispatcher is None:
-        project = os.environ.get("CLOUD_TASKS_PROJECT")
-        location = os.environ.get("CLOUD_TASKS_LOCATION")
-        queue = os.environ.get("CLOUD_TASKS_QUEUE")
-        if project and location and queue:
-            from dispatcher import CloudTasksDispatcher
-            _task_dispatcher = CloudTasksDispatcher(
-                project=project, location=location, queue=queue
-            )
-            logger.info(
-                "Using CloudTasksDispatcher (project=%s, location=%s, queue=%s)",
-                project, location, queue,
-            )
-        else:
-            _task_dispatcher = InMemoryTaskDispatcher()
-            logger.info(
-                "Cloud Tasks env vars unset — using in-memory TaskDispatcher"
-            )
-    return _task_dispatcher
+    return [r for r in results if r is not None]
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# bundle_id extraction from GCS URI
 # ---------------------------------------------------------------------------
 
-@app.get("/health", summary="Liveness probe")
-def health() -> JSONResponse:
-    """Always returns {"status": "ok"} with HTTP 200.
+# Expected pattern: gs://<bucket>/captures/<bundle_id>/bundle.pb
+_BUNDLE_URI_RE = re.compile(r"^gs://[^/]+/captures/([^/]+)/bundle\.pb$")
 
-    Used by Cloud Run startup/liveness probes and external monitoring.
-    Does not exercise Firestore or Cloud Tasks — this is intentional.
-    A healthy response means the process is alive and routing; it says
-    nothing about backend connectivity.
+
+def _extract_bundle_id(bundle_gcs_uri: str) -> str | None:
+    """Extract bundle_id from a gs://…/captures/{bundle_id}/bundle.pb URI."""
+    m = _BUNDLE_URI_RE.match(bundle_gcs_uri)
+    return m.group(1) if m else None
+
+
+def _extract_bucket(bundle_gcs_uri: str) -> str:
+    """Extract bucket name from a gs://bucket/... URI."""
+    return bundle_gcs_uri[5:].split("/", 1)[0]
+
+
+# ---------------------------------------------------------------------------
+# Core ingest logic (shared by /ingest and /ingest/eventarc)
+# ---------------------------------------------------------------------------
+
+def _run_ingest(
+    bundle_gcs_uri: str,
+    repo: SceneRepository,
+    dispatcher: TaskDispatcher,
+    *,
+    existing_scene_id: str | None = None,
+) -> JSONResponse:
+    """Fetch, parse, validate, existence-check, and enqueue a bundle.
+
+    existing_scene_id: if set, the Scene already exists (retry after
+    failed_incomplete) and will be transitioned to QUEUED rather than
+    creating a new record.
     """
-    return JSONResponse(status_code=200, content={"status": "ok"})
-
-
-@app.post(
-    "/ingest",
-    response_model=IngestAck,
-    responses={
-        400: {"model": IngestError},
-        500: {"model": IngestError},
-    },
-    summary="Validate a CaptureBundle and enqueue perception work",
-)
-def ingest(req: IngestRequest) -> JSONResponse:
-    """Accept a serialized CaptureBundle by GCS URI.
-
-    On success (200): the bundle is valid, a Scene record has been created
-    with status=queued, and a Cloud Task has been enqueued targeting
-    perception-obj. Response body: {scene_id, status: "queued"}.
-
-    On validation failure (400): bundle did not pass contract checks; nothing
-    was written to Firestore or Cloud Tasks.
-
-    On dispatch failure (500): bundle was valid and the Scene record was
-    created, but the Cloud Task could not be enqueued. The Scene is marked
-    failed so there are no orphaned queued records.
-
-    Validation checks (see validation.py):
-      - schema_version is a supported version
-      - all camera_pose quaternions are unit-norm within 1e-3
-      - depth fields only appear with a LIDAR_* tier
-      - all GCS paths are relative (not full gs:// URIs)
-    """
-    repo = _get_scene_repo()
-    dispatcher = _get_task_dispatcher()
+    bundle_id = _extract_bundle_id(bundle_gcs_uri)
+    bucket = _extract_bucket(bundle_gcs_uri)
 
     # 1. Fetch from GCS.
     try:
-        raw = _fetch_bundle_bytes(req.bundle_gcs_uri)
+        raw = _fetch_bundle_bytes(bundle_gcs_uri)
     except Exception as exc:
-        logger.exception("Failed to fetch bundle from GCS: %s", req.bundle_gcs_uri)
+        logger.exception("Failed to fetch bundle from GCS: %s", bundle_gcs_uri)
         return JSONResponse(
             status_code=400,
             content=IngestError(error="bundle_fetch_failed", detail=str(exc)).model_dump(),
@@ -346,8 +405,7 @@ def ingest(req: IngestRequest) -> JSONResponse:
         bundle.ParseFromString(raw)
     except Exception as exc:
         logger.exception(
-            "Failed to parse bundle proto from %s (%d bytes)",
-            req.bundle_gcs_uri, len(raw),
+            "Failed to parse bundle proto from %s (%d bytes)", bundle_gcs_uri, len(raw)
         )
         return JSONResponse(
             status_code=400,
@@ -365,39 +423,66 @@ def ingest(req: IngestRequest) -> JSONResponse:
 
     # 4. Resolve device_id.
     try:
-        device_id, device_id_source = resolve_device_id(bundle, req.bundle_gcs_uri)
+        device_id, device_id_source = resolve_device_id(bundle, bundle_gcs_uri)
     except ValueError as exc:
         return JSONResponse(
             status_code=400,
             content=IngestError(error="device_id_missing", detail=str(exc)).model_dump(),
         )
 
-    # 5. Create Scene record with status=queued.
-    scene_id = str(uuid.uuid4())
-    scene = new_scene(
-        scene_id=scene_id,
-        device_id=device_id,
-        device_id_source=device_id_source,
-        bundle_uri=req.bundle_gcs_uri,
-    )
-    repo.create(scene)
-    logger.info(
-        "Scene created: scene_id=%s device_id_source=%s bundle_uri=%s",
-        scene_id, device_id_source.value, req.bundle_gcs_uri,
-    )
+    # 5. Existence check — verify all referenced blobs are present in GCS.
+    if bundle_id:
+        missing = _check_bundle_blobs_exist(bundle, bucket, bundle_id)
+        if missing:
+            _handle_failed_incomplete(
+                bundle_gcs_uri=bundle_gcs_uri,
+                bundle_id=bundle_id,
+                device_id=device_id,
+                device_id_source=device_id_source,
+                missing=missing,
+                repo=repo,
+                existing_scene_id=existing_scene_id,
+            )
+            return JSONResponse(
+                status_code=200,
+                content={"status": "failed_incomplete", "missing_paths": missing},
+            )
 
-    # 6. Enqueue Cloud Task targeting perception-obj.
-    # Task name = scene_id for Cloud Tasks dedup within 1-hour window.
+    # 6. Create or transition Scene to QUEUED.
+    if existing_scene_id:
+        scene = repo.update_status(existing_scene_id, SceneStatus.QUEUED)
+        scene_id = existing_scene_id
+        logger.info(
+            "Scene retried: scene_id=%s bundle_uri=%s", scene_id, bundle_gcs_uri
+        )
+    else:
+        scene_id = str(uuid.uuid4())
+        scene = new_scene(
+            scene_id=scene_id,
+            device_id=device_id,
+            device_id_source=device_id_source,
+            bundle_uri=bundle_gcs_uri,
+        )
+        # Store bundle_id on the scene for later lookup by /ingest/eventarc.
+        scene.bundle_id = bundle_id
+        scene.user_id = bundle.user_id or None
+        repo.create(scene)
+        logger.info(
+            "Scene created: scene_id=%s device_id_source=%s bundle_uri=%s",
+            scene_id,
+            device_id_source.value,
+            bundle_gcs_uri,
+        )
+
+    # 7. Enqueue Cloud Task targeting perception-obj.
     try:
         dispatcher.enqueue(
             task_name=scene_id,
-            payload={"scene_id": scene_id, "bundle_uri": req.bundle_gcs_uri},
+            payload={"scene_id": scene_id, "bundle_uri": bundle_gcs_uri},
             target_url=_PERCEPTION_OBJ_PROCESS_URL,
         )
         logger.info("Task enqueued: scene_id=%s target=%s", scene_id, _PERCEPTION_OBJ_PROCESS_URL)
     except Exception as exc:
-        # Enqueue failed — mark the Scene as failed so there are no orphaned
-        # queued records. The iOS client will see status=failed and offer retry.
         logger.exception("Failed to enqueue task for scene_id=%s: %s", scene_id, exc)
         try:
             repo.update_status(
@@ -417,8 +502,280 @@ def ingest(req: IngestRequest) -> JSONResponse:
             ).model_dump(),
         )
 
-    # 7. Acknowledge.
     return JSONResponse(
         status_code=200,
         content=IngestAck(scene_id=scene_id, status="queued").model_dump(),
     )
+
+
+def _handle_failed_incomplete(
+    *,
+    bundle_gcs_uri: str,
+    bundle_id: str,
+    device_id: str,
+    device_id_source: DeviceIdSource,
+    missing: list[str],
+    repo: SceneRepository,
+    existing_scene_id: str | None,
+) -> None:
+    """Create or update the Scene to FAILED_INCOMPLETE and fire FCM."""
+    if existing_scene_id:
+        scene_id = existing_scene_id
+        repo.update_status(
+            scene_id,
+            SceneStatus.FAILED_INCOMPLETE,
+            missing_paths=missing,
+            last_error=f"missing blobs: {missing}",
+        )
+    else:
+        scene_id = str(uuid.uuid4())
+        scene = new_scene(
+            scene_id=scene_id,
+            device_id=device_id,
+            device_id_source=device_id_source,
+            bundle_uri=bundle_gcs_uri,
+        )
+        scene.bundle_id = bundle_id
+        repo.create(scene)
+        repo.update_status(
+            scene_id,
+            SceneStatus.FAILED_INCOMPLETE,
+            missing_paths=missing,
+            last_error=f"missing blobs: {missing}",
+        )
+    logger.warning(
+        "Scene %s failed_incomplete: bundle_id=%s missing=%s",
+        scene_id,
+        bundle_id,
+        missing,
+    )
+
+    # FCM: look up the FCM token from the upload_session record.
+    try:
+        upload_repo = _get_upload_session_repo()
+        # InMemoryUploadSessionRepository and FirestoreUploadSessionRepository
+        # both expose get_fcm_token; the abstract base does not require it, so
+        # we call it defensively.
+        get_fcm_token = getattr(upload_repo, "get_fcm_token", None)
+        if get_fcm_token:
+            fcm_token = get_fcm_token(bundle_id)
+            if fcm_token:
+                _get_fcm_notifier().notify_upload_incomplete(
+                    fcm_token=fcm_token,
+                    scene_id=scene_id,
+                    missing_paths=missing,
+                )
+    except Exception:
+        logger.exception("FCM notification failed for scene %s (continuing)", scene_id)
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@app.get("/health", summary="Liveness probe")
+def health() -> JSONResponse:
+    """Always returns {"status": "ok"} with HTTP 200."""
+    return JSONResponse(status_code=200, content={"status": "ok"})
+
+
+@app.post(
+    "/ingest",
+    response_model=IngestAck,
+    responses={400: {"model": IngestError}, 500: {"model": IngestError}},
+    summary="Validate a CaptureBundle and enqueue perception work",
+)
+def ingest(req: IngestRequest) -> JSONResponse:
+    """Accept a serialized CaptureBundle by GCS URI.
+
+    On success (200): bundle is valid, all blobs exist, Scene is queued.
+    On validation failure (400): bundle did not pass contract checks.
+    On existence failure (200, status=failed_incomplete): some blobs absent.
+    On dispatch failure (500): valid bundle but task could not be enqueued.
+    """
+    return _run_ingest(
+        req.bundle_gcs_uri,
+        _get_scene_repo(),
+        _get_task_dispatcher(),
+    )
+
+
+@app.post(
+    "/ingest/eventarc",
+    summary="Eventarc CloudEvent handler for captures/*/bundle.pb finalize",
+)
+async def ingest_eventarc(request: Request) -> JSONResponse:
+    """Handle a GCS finalize event from Eventarc for captures/*/bundle.pb.
+
+    Eventarc delivers the GCS StorageObjectData as the request body (JSON).
+    Cloud Run verifies the OIDC token before the request reaches the app.
+
+    Idempotency:
+    - If a Scene for this bundle_id is already QUEUED, PROCESSING, or READY,
+      return 200 immediately without re-processing.
+    - If FAILED_INCOMPLETE, re-run the existence check with the same scene_id
+      (transition to QUEUED if blobs are now present).
+    - Otherwise, run a fresh ingest.
+    """
+    try:
+        body = await request.json()
+    except Exception as exc:
+        logger.warning("Failed to parse Eventarc body: %s", exc)
+        return JSONResponse(status_code=400, content={"error": "bad_event", "detail": str(exc)})
+
+    bucket = body.get("bucket", "")
+    name = body.get("name", "")  # e.g. "captures/<bundle_id>/bundle.pb"
+
+    if not bucket or not name:
+        logger.warning("Eventarc event missing bucket or name: %s", body)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "bad_event", "detail": "missing 'bucket' or 'name' in event body"},
+        )
+
+    bundle_gcs_uri = f"gs://{bucket}/{name}"
+    bundle_id = _extract_bundle_id(bundle_gcs_uri)
+    if not bundle_id:
+        logger.warning("Eventarc event name does not match captures/*/bundle.pb: %s", name)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "bad_event", "detail": f"object name {name!r} is not captures/<bundle_id>/bundle.pb"},
+        )
+
+    repo = _get_scene_repo()
+    dispatcher = _get_task_dispatcher()
+
+    # Idempotency: check for an existing Scene for this bundle_id.
+    existing = repo.get_by_bundle_id(bundle_id)
+    if existing:
+        if existing.status in (SceneStatus.QUEUED, SceneStatus.PROCESSING, SceneStatus.READY):
+            logger.info(
+                "Eventarc: bundle_id=%s already has scene %s in status %s — skipping",
+                bundle_id,
+                existing.scene_id,
+                existing.status,
+            )
+            return JSONResponse(
+                status_code=200,
+                content=IngestAck(
+                    scene_id=existing.scene_id, status=existing.status.value
+                ).model_dump(),
+            )
+        if existing.status == SceneStatus.FAILED_INCOMPLETE:
+            logger.info(
+                "Eventarc: retrying failed_incomplete scene %s for bundle_id=%s",
+                existing.scene_id,
+                bundle_id,
+            )
+            return _run_ingest(
+                bundle_gcs_uri,
+                repo,
+                dispatcher,
+                existing_scene_id=existing.scene_id,
+            )
+
+    return _run_ingest(bundle_gcs_uri, repo, dispatcher)
+
+
+@app.post(
+    "/captures/{bundle_id}/upload_session",
+    summary="Mint GCS resumable session URIs for an iOS capture upload",
+)
+async def create_upload_session(
+    bundle_id: str,
+    req: UploadSessionRequest,
+    authorization: str = Header(...),
+) -> JSONResponse:
+    """Mint GCS resumable session URIs for each entry in the client manifest.
+
+    Auth: Firebase ID token in Authorization: Bearer <token>.
+
+    Request body:
+      manifest: [{relative_path: str, expected_size_bytes: int}]
+      fcm_token: str | null   (FCM registration token for upload-incomplete push)
+
+    Response (200): [{relative_path, session_uri}]
+
+    Idempotent: repeated calls with the same {bundle_id, manifest paths}
+    return the stored URIs without minting new ones.
+
+    Errors:
+      400 invalid_bundle_id   — bundle_id is not a UUIDv4
+      400 invalid_manifest    — a manifest entry has a bad path
+      400 manifest_empty      — manifest has no entries
+      401 missing_token       — Authorization header absent or malformed
+      403 forbidden           — JWT uid does not match the stored user_id for
+                                this bundle_id (another user's upload)
+    """
+    # 1. Verify Firebase ID token.
+    if not authorization.startswith("Bearer "):
+        return JSONResponse(
+            status_code=401,
+            content={"error": "missing_token", "detail": "Authorization: Bearer <token> required"},
+        )
+    token = authorization[len("Bearer "):]
+    try:
+        user_id = _get_token_verifier().verify(token)
+    except TokenVerificationError as exc:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid_token", "detail": str(exc)},
+        )
+
+    # 2. Validate bundle_id is a UUIDv4.
+    try:
+        val = uuid.UUID(bundle_id, version=4)
+        if str(val) != bundle_id:
+            raise ValueError("not canonical form")
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_bundle_id", "detail": f"{bundle_id!r} is not a UUIDv4"},
+        )
+
+    # 3. Validate manifest.
+    if not req.manifest:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "manifest_empty", "detail": "manifest must have at least one entry"},
+        )
+    for entry in req.manifest:
+        path = entry.get("relative_path", "")
+        err = validate_manifest_path(path)
+        if err:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "invalid_manifest", "detail": err},
+            )
+
+    # 4. Check user_id ownership — 403 if another user already claimed this bundle_id.
+    upload_repo = _get_upload_session_repo()
+    stored_uid = upload_repo.get_user_id(bundle_id)
+    if stored_uid is not None and stored_uid != user_id:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "forbidden",
+                "detail": "bundle_id is owned by a different user",
+            },
+        )
+
+    # 5. Mint (or retrieve stored) session URIs.
+    try:
+        bucket = os.environ.get("GCS_CAPTURES_BUCKET", _GCS_CAPTURES_BUCKET)
+        session_entries = upload_repo.create_or_get(
+            bundle_id=bundle_id,
+            user_id=user_id,
+            manifest=req.manifest,
+            fcm_token=req.fcm_token,
+            mint_uri_fn=gcs_mint_resumable_uri,
+            bucket=bucket,
+        )
+    except Exception as exc:
+        logger.exception("Failed to mint upload session for bundle_id=%s", bundle_id)
+        return JSONResponse(
+            status_code=500,
+            content={"error": "session_mint_failed", "detail": str(exc)},
+        )
+
+    return JSONResponse(status_code=200, content=session_entries)
