@@ -67,6 +67,7 @@ outputs/                          gitignored; generated artifacts
 - **No web app yet.**
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
+- **Ingester is not yet upload-orchestrator-ready.** No `/upload_session` endpoint, no Eventarc trigger, no existence-check pass, no `failed_incomplete` state. These are prerequisites for iOS bundle upload; see `docs/decisions/0014` and board item 2.
 
 ## Conventions
 
@@ -120,10 +121,9 @@ monotonic, same domain as ARFrame.timestamp), add `started_at_wall_us`
 at field 11 for human-facing time. No `schema_version` bump (pre-v1).
 See `docs/decisions/0013`.
 
-**2 — iOS capture app prototype** (independent, Track B)
+**2 — iOS capture app prototype: upload + auth layer first** (Track B)
 
-Swift + ARKit, emits the bundle. Track B session 1 covered bundle production.
-Upload+auth and capture UX still need scoping before code.
+Auth and upload architecture scoped (see `docs/decisions/0014`). Firebase Auth anonymous-first with full Firebase iOS SDK as load-bearing dependency; all uploads via `URLSession` background tasks against GCS resumable session URIs; bundle.pb uploaded last as the Eventarc trigger for `/ingest`; fail-fast existence check with `failed_incomplete` retry path; FCM + Firestore listeners drive client state. Backend changes needed before iOS code starts: `/captures/{bundle_id}/upload_session` endpoint on ingester (mints resumable session URIs from a manifest), Eventarc trigger on `captures/*/bundle.pb` finalize → `/ingest`, existence-check pass in `/ingest`, `failed_incomplete` Scene state + FCM, Cloud Storage lifecycle rule (24h orphan cleanup) + Firestore TTL (7d on `failed_incomplete`). Capture UX (RoomCaptureView vs. RoomCaptureSession) still to be scoped in a separate session.
 
 **3 — test_data/photos/ privacy review** (deferred, low urgency)
 
