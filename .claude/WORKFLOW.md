@@ -145,6 +145,34 @@ You shouldn't need C — Code reads CLAUDE.md at session start and auto-prompts 
 
 Cheap sanity check. Forces Code to load context and surface any drift between the docs and reality before it starts changing things. Use this when picking up after a long break, or after a Chat session that may have invalidated parts of CLAUDE.md.
 
+## Cloud Build and deploy tooling
+
+Cloud Build jobs run remotely on GCP. The local `./infra/deploy_*.sh` scripts submit the
+build then stream logs — if the local process is killed (Ctrl-C, shell exit, task killed),
+the Cloud Build job **continues running remotely**.
+
+**Polling rule:** Never rely on a scheduled wakeup or task notification to signal Cloud
+Build completion. The local task ID becomes stale once the local script dies; the wakeup
+mechanism fires on wall-clock time, not build completion. Instead:
+
+1. Note the build ID from submission output
+   (`Created [https://cloudbuild.googleapis.com/...builds/<BUILD_ID>]`).
+2. Poll directly at 2–3 minute intervals:
+   ```
+   gcloud builds describe <BUILD_ID> --project=roomstudio --region=asia-southeast1 \
+     --format='value(status,finishTime)'
+   ```
+   Loop until `status` is `SUCCESS`, `FAILURE`, or `CANCELLED`.
+3. If the build succeeded but the local deploy step never ran, trigger it manually:
+   ```
+   gcloud run deploy <service> \
+     --image=$(gcloud builds describe <BUILD_ID> --project=roomstudio \
+               --region=asia-southeast1 --format='value(images)') \
+     --project=roomstudio --region=asia-southeast1
+   ```
+
+This pattern failed twice in the same session before the rule was written. Don't retry it.
+
 ## Things to actively NOT do
 
 - **Don't run the same task in both tools.** If Code is building X, don't also ask Chat to design X. You'll get two designs and have to reconcile them.

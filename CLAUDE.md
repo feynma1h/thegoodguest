@@ -57,12 +57,12 @@ outputs/                          gitignored; generated artifacts
 - 25 schema + math tests, all passing. Don't break them.
 - Bundle ingester at `services/api/`: `POST /ingest` validates a CaptureBundle by GCS URI, creates a Scene record (Firestore in prod, in-memory in dev), enqueues a Cloud Tasks HTTP job targeting perception-obj, and returns `{scene_id, status: "queued"}` or a structured error. Deployed to Cloud Run (`asia-southeast1`, project `roomstudio`). 76 api tests passing.
 - `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally. Dockerfile, cloudbuild config, and deploy script env vars are all patched (see `docs/decisions/0005`, `0006`). Models are lazy-loaded on first `/process` call: `/health` returns 200 immediately for the startup probe; `/ready` reports per-model load state. DINOv2 weights (~1.13 GB) are pre-cached in the image at `TORCH_HOME=/opt/torch_hub`, eliminating the cold-start runtime fetch. Startup probe targets `httpGet /health`. 165 tests passing across both services.
+- **Stuck-scene lease-semantics fix shipped and verified** (revision `perception-obj-00024-89b`, 2026-05-25). The bug from `docs/decisions/0011` and `0012` is fixed: `/process` reclaims stale leases atomically, `EnvironmentalError` eagerly releases the lease, SIGTERM resets held scenes to `queued`, and `holder_id` is checked defensively on all three lease-mutating paths. Verified production trace for scene `561c68ae`: `action=claim` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` (final, `is_final_attempt`) → scene `failed`. Note: the trace exercised the eager-release optimization path; the load-bearing expiration-check path (stale-but-not-cleared leases) is covered by unit tests only, not this production trace.
 
 ## What does NOT work / what we're deliberately not doing
 
 - **No iOS app exists yet.** The bundle synthesizer is the only thing that writes bundles.
-- **`perception-obj` has a stuck-scene bug under environmental failure and mid-deploy job termination.** When `/process` returns 500 (e.g. CUDA OOM) and Cloud Tasks retries within the lease TTL window (default 300s), the retry sees `ALREADY_OWNED` and returns a 200 noop. Cloud Tasks acks and removes the task. The lease then expires with no reclamation worker watching — passive reclamation only fires on the next `/process` POST, which never arrives. Scene is stuck in `processing` indefinitely. The same class of bug occurs on deploy when an instance is SIGKILLed mid-job after the 10s drain. One known stuck scene: `f077e9ed-d339-4be8-8dbf-37b952abfec2` (manually unstuck). Fix designed — see `docs/decisions/0011` (updated this session) and `0012`. Until implemented, any environmental failure on a job that takes >30s, or any redeploy during an in-flight job, will reproduce this.
-- **`perception-obj` is not yet deployed with the lazy-load fix.** The refactor from `docs/decisions/0007` is fully implemented and committed — `/health`, `/ready`, DINOv2 pre-cache, deferred model imports in both wrappers, `httpGet /health` startup probe. Revision 00018-ppx is still serving in Cloud Run (no `/process`), so Cloud Tasks hits 404s. One `infra/deploy_perception.sh obj` away from unblocking the queue.
+- Scene `f077e9ed-d339-4be8-8dbf-37b952abfec2` is intentionally left in `processing` with an expired lease as a canonical stuck-scene reference. Re-enqueue manually if ever needed to verify the expiration-check reclaim path end-to-end.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
@@ -112,39 +112,17 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-**1 — Fix perception-obj stuck-scene bug** (blocks redeploy + iOS bundle ingestion at any reliability)
-
-Implement the lease-expiration check at `/process`: when a scene is already-owned,
-check whether the lease has actually expired; if yes, reclaim atomically in a
-Firestore transaction; if no, return noop. Collapse the already-owned branch to
-two cases (drop the `holder_id == self` path; defensive noop covers it). Layer on
-eager lease release in the `EnvironmentalError` handler and a SIGTERM handler that
-releases held leases + resets scenes to `queued` before shutdown — both optimizations
-on top of the expiration check, not load-bearing. Add a structured log line on every
-claim/reclaim (worker_id, scene_id, lease_expires_at, action_taken) so concurrent-writer
-scenarios become detectable. Add `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
-to the Cloud Run env config as a separate band-aid for the OOM. Verify (don't change)
-that the lease is claimed after model load, not before. See `docs/decisions/0011` and `0012`.
-
-**2 — Redeploy perception-obj** (one command, after #1 lands)
-
-`infra/deploy_perception.sh obj`. Smoke test: POST /ingest with a real bundle
-URI and watch the scene move queued → processing → ready in Firestore. Then
-deliberately reproduce the OOM scenario (oversized bundle or
-memory-constrained image) and verify the scene moves to `failed` or `ready`
-on retry rather than getting stuck.
-
-**3 — Capture-bundle timestamp cleanup** (small, blocking iOS)
+**1 — Capture-bundle timestamp cleanup** (small, blocking iOS)
 
 Rename `started_at_us`/`ended_at_us` to monotonic, add `created_at_wall_us`.
 See `docs/decisions/0007`.
 
-**4 — iOS capture app prototype** (independent, Track B)
+**2 — iOS capture app prototype** (independent, Track B)
 
 Swift + ARKit, emits the bundle. Track B session 1 covered bundle production.
 Upload+auth and capture UX still need scoping before code.
 
-**5 — test_data/photos/ privacy review** (deferred, low urgency)
+**3 — test_data/photos/ privacy review** (deferred, low urgency)
 
 9 HEIC photos of a real room are tracked by git and used by
 `tools/build_test_bundle.py` for local synthesis testing. Review whether they
