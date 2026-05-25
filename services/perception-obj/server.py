@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 import gc
 import hashlib
@@ -42,6 +43,16 @@ import torch
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from PIL import Image
+
+# Configure root logger so application logger.info() calls reach Cloud Logging.
+# By default uvicorn leaves the root logger with no handlers, falling back to
+# Python's lastResort handler which only outputs WARNING+. basicConfig adds a
+# StreamHandler at INFO level to the root logger; uvicorn's subsequent
+# dictConfig (disable_existing_loggers=False, no "root" key) preserves it.
+# This is a no-op if handlers are already configured (e.g. in test environments
+# that call basicConfig themselves).
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+logger = logging.getLogger(__name__)
 
 try:
     from pillow_heif import register_heif_opener
@@ -182,13 +193,13 @@ def get_sam3():
         _sam3_loading = True
         try:
             from models.sam3 import SAM3Model  # noqa: PLC0415
-            print(f"[model] Loading SAM 3 on {DEVICE}...", flush=True)
+            logger.info("[model] Loading SAM 3 on %s...", DEVICE)
             t = time.time()
             _sam3 = SAM3Model()
-            print(f"[model] SAM 3 loaded in {time.time() - t:.1f}s", flush=True)
+            logger.info("[model] SAM 3 loaded in %.1fs", time.time() - t)
         except Exception as e:
             _sam3_error = f"{type(e).__name__}: {e}"
-            print(f"[model] SAM 3 FAILED: {_sam3_error}", flush=True)
+            logger.error("[model] SAM 3 FAILED: %s", _sam3_error)
             raise HTTPException(status_code=500, detail=f"SAM 3 failed to load: {_sam3_error}")
         finally:
             _sam3_loading = False
@@ -217,13 +228,13 @@ def get_sam3d():
         _sam3d_loading = True
         try:
             from models.sam3d import SAM3DModel  # noqa: PLC0415
-            print("[model] Loading SAM 3D Objects...", flush=True)
+            logger.info("[model] Loading SAM 3D Objects...")
             t = time.time()
             _sam3d = SAM3DModel()
-            print(f"[model] SAM 3D loaded in {time.time() - t:.1f}s", flush=True)
+            logger.info("[model] SAM 3D loaded in %.1fs", time.time() - t)
         except Exception as e:
             _sam3d_error = f"{type(e).__name__}: {e}"
-            print(f"[model] SAM 3D FAILED: {_sam3d_error}", flush=True)
+            logger.error("[model] SAM 3D FAILED: %s", _sam3d_error)
             raise HTTPException(status_code=500, detail=f"SAM 3D failed to load: {_sam3d_error}")
         finally:
             _sam3d_loading = False
@@ -349,7 +360,7 @@ async def segment(
     img_bytes = await image.read()
     pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     objects = get_sam3().segment(pil, prompt)
-    print(f"[segment] {len(objects)} objects in {time.time() - t0:.1f}s", flush=True)
+    logger.info("[segment] %d objects in %.1fs", len(objects), time.time() - t0)
 
     slim = [{k: v for k, v in o.items() if k != "mask"} for o in objects]
     return JSONResponse({"objects": slim, "image_size": [pil.width, pil.height]})
@@ -365,7 +376,7 @@ async def segment_raw(
     img_bytes = await image.read()
     pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     objects = get_sam3().segment(pil, prompt)
-    print(f"[segment-raw] {len(objects)} objects in {time.time() - t0:.1f}s", flush=True)
+    logger.info("[segment-raw] %d objects in %.1fs", len(objects), time.time() - t0)
 
     # Stream the response: with 40+ masks at full-image resolution this can
     # exceed Cloud Run's 32 MiB non-chunked response cap. See /objects below.
@@ -410,21 +421,18 @@ async def objects(
         manifest = json.loads(cached)
         manifest["cached"] = True
         manifest["total_seconds"] = time.time() - t0
-        print(
-            f"[objects] cache HIT {photo_sha256[:12]}, "
-            f"{sum(1 for o in manifest['objects'] if o['ok'])}/"
-            f"{len(manifest['objects'])} objects",
-            flush=True,
+        logger.info(
+            "[objects] cache HIT %s, %d/%d objects",
+            photo_sha256[:12],
+            sum(1 for o in manifest["objects"] if o["ok"]),
+            len(manifest["objects"]),
         )
         return JSONResponse(manifest)
 
     pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
     detections = get_sam3().segment(pil, prompt)
-    print(
-        f"[objects] SAM 3 found {len(detections)} objects in {time.time() - t0:.1f}s",
-        flush=True,
-    )
+    logger.info("[objects] SAM 3 found %d objects in %.1fs", len(detections), time.time() - t0)
     detections = detections[:max_objects]
 
     # Run SAM 3D per object. Upload each successful splat to GCS immediately
@@ -451,11 +459,7 @@ async def objects(
         # Per-object cache hit: previous run already wrote this splat.
         existing_size = _gcs_blob_size(splat_blob)
         if existing_size is not None:
-            print(
-                f"[objects]   {i:02d} {obj['label']:18s} cached "
-                f"({existing_size//1024} KB)",
-                flush=True,
-            )
+            logger.info("[objects]   %02d %-18s cached (%d KB)", i, obj["label"], existing_size // 1024)
             objects_out.append({
                 **meta,
                 "ok": True,
@@ -474,7 +478,7 @@ async def objects(
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                print(f"[objects]   {i:02d} {obj['label']} OOM, retrying: {oom}", flush=True)
+                logger.warning("[objects]   %02d %s OOM, retrying: %s", i, obj["label"], oom)
                 result = get_sam3d().reconstruct(pil, obj["mask"], seed=42 + i)
             ply_bytes = _splat_to_ply_bytes(result)
 
@@ -487,14 +491,13 @@ async def objects(
                 "splat_gcs_uri": uri,
                 "splat_size_bytes": len(ply_bytes),
             })
-            print(
-                f"[objects]   {i:02d} {obj['label']:18s} {time.time() - t_obj:.1f}s "
-                f"({len(ply_bytes)//1024} KB) -> gs",
-                flush=True,
+            logger.info(
+                "[objects]   %02d %-18s %.1fs (%d KB) -> gs",
+                i, obj["label"], time.time() - t_obj, len(ply_bytes) // 1024,
             )
         except Exception as e:
             objects_out.append({**meta, "ok": False, "error": str(e)})
-            print(f"[objects]   {i:02d} {obj['label']} FAILED: {e}", flush=True)
+            logger.error("[objects]   %02d %s FAILED: %s", i, obj["label"], e)
         finally:
             del result
             del ply_bytes
@@ -531,10 +534,9 @@ async def objects(
     if n_ok > 0:
         _gcs_upload(manifest_path, json.dumps(manifest).encode("utf-8"), "application/json")
 
-    print(
-        f"[objects] done in {time.time() - t0:.1f}s, "
-        f"{n_ok}/{len(objects_out)} reconstructed, manifest cached={n_ok > 0}",
-        flush=True,
+    logger.info(
+        "[objects] done in %.1fs, %d/%d reconstructed, manifest cached=%s",
+        time.time() - t0, n_ok, len(objects_out), n_ok > 0,
     )
     return JSONResponse(manifest)
 

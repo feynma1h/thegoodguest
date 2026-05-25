@@ -131,13 +131,25 @@ def _post_ingest(ingester_url: str, bundle_gcs_uri: str, *, dry_run: bool) -> st
 
 
 def _firestore_get(scene_id: str) -> dict:
-    """Fetch a Firestore scene document via gcloud CLI. Returns the fields dict."""
-    path = f"projects/{GCP_PROJECT}/databases/(default)/documents/{FIRESTORE_COLLECTION}/{scene_id}"
-    out = _run([
-        "gcloud", "firestore", "documents", "get", path,
-        f"--project={GCP_PROJECT}", "--format=json",
-    ])
-    doc = json.loads(out)
+    """Fetch a Firestore scene document via the REST API. Returns the fields dict.
+
+    Uses `gcloud auth print-access-token` for credentials. Falls back to
+    Application Default Credentials via google.auth if the gcloud CLI call
+    fails. The `gcloud firestore documents` subcommand is not available in all
+    gcloud SDK versions.
+    """
+    import urllib.request as _urllib_request
+
+    token = _run(["gcloud", "auth", "print-access-token", f"--project={GCP_PROJECT}"])
+    url = (
+        f"https://firestore.googleapis.com/v1/"
+        f"projects/{GCP_PROJECT}/databases/(default)/documents/"
+        f"{FIRESTORE_COLLECTION}/{scene_id}"
+    )
+    req = _urllib_request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    with _urllib_request.urlopen(req, timeout=15) as resp:
+        doc = json.loads(resp.read())
+
     # Firestore REST format: doc["fields"]["<name>"]["stringValue" | ...]
     fields = doc.get("fields", {})
 
