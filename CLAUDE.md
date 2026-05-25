@@ -67,7 +67,6 @@ outputs/                          gitignored; generated artifacts
 - **No web app yet.**
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
-- **Ingester is not yet upload-orchestrator-ready.** No `/upload_session` endpoint, no Eventarc trigger, no existence-check pass, no `failed_incomplete` state. These are prerequisites for iOS bundle upload; see `docs/decisions/0014` and board item 2.
 
 ## Conventions
 
@@ -121,9 +120,19 @@ monotonic, same domain as ARFrame.timestamp), add `started_at_wall_us`
 at field 11 for human-facing time. No `schema_version` bump (pre-v1).
 See `docs/decisions/0013`.
 
-**2 — iOS capture app prototype: upload + auth layer first** (Track B)
+**2 — iOS capture app prototype: deploy backend, then start iOS** (Track B)
 
-Auth and upload architecture scoped (see `docs/decisions/0014`). Firebase Auth anonymous-first with full Firebase iOS SDK as load-bearing dependency; all uploads via `URLSession` background tasks against GCS resumable session URIs; bundle.pb uploaded last as the Eventarc trigger for `/ingest`; fail-fast existence check with `failed_incomplete` retry path; FCM + Firestore listeners drive client state. Backend changes needed before iOS code starts: `/captures/{bundle_id}/upload_session` endpoint on ingester (mints resumable session URIs from a manifest), Eventarc trigger on `captures/*/bundle.pb` finalize → `/ingest`, existence-check pass in `/ingest`, `failed_incomplete` Scene state + FCM, Cloud Storage lifecycle rule (24h orphan cleanup) + Firestore TTL (7d on `failed_incomplete`). Capture UX (RoomCaptureView vs. RoomCaptureSession) still to be scoped in a separate session.
+Backend changes for iOS bundle upload are implemented and tested locally
+(see `docs/decisions/0014`). Two deploys remaining before iOS code can start:
+(a) redeploy `services/api` with the new endpoints (`/captures/{bundle_id}/
+upload_session`, `/ingest/eventarc`) and the new `GCS_CAPTURES_BUCKET` env
+var — one `infra/deploy_api.sh` away; (b) execute `infra/eventarc_setup.sh`
+once against GCP to wire the Eventarc trigger on `captures/*/bundle.pb`
+finalize, the 24h orphan-cleanup lifecycle rule, and the 7d Firestore TTL
+on `failed_incomplete` scenes. After both deploys land and a smoke test
+confirms an end-to-end upload moves a scene queued → processing → ready,
+iOS code can start. Capture UX (RoomCaptureView vs. RoomCaptureSession)
+still to be scoped in a separate session.
 
 **3 — test_data/photos/ privacy review** (deferred, low urgency)
 
