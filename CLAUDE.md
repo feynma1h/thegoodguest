@@ -114,8 +114,11 @@ When this section gets stale, the project's drifting. Keep it current.
 
 **1 — Capture-bundle timestamp cleanup** (small, blocking iOS)
 
-Rename `started_at_us`/`ended_at_us` to monotonic, add `created_at_wall_us`.
-See `docs/decisions/0007`.
+Rename `started_at_us`/`ended_at_us` to `started_at_device_us`/
+`ended_at_device_us` (semantics change from wall-clock to device-
+monotonic, same domain as ARFrame.timestamp), add `started_at_wall_us`
+at field 11 for human-facing time. No `schema_version` bump (pre-v1).
+See `docs/decisions/0013`.
 
 **2 — iOS capture app prototype** (independent, Track B)
 
