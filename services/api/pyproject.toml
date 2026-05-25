@@ -9,6 +9,8 @@ dependencies = [
     "google-cloud-storage>=2.10,<3.0",
     "google-cloud-firestore>=2.14,<3.0",
     "google-cloud-tasks>=2.13,<3.0",
+    "google-auth>=2.20,<3.0",
+    "firebase-admin>=6.3,<7.0",
     # roomstudio-schemas is a local package.
     # Install it first: pip install -e packages/schemas
     "roomstudio-schemas",

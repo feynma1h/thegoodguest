@@ -238,7 +238,8 @@ class TestStateMachine:
     def test_allowed_from_queued(self):
         assert allowed_transitions(SceneStatus.QUEUED) == frozenset({
             SceneStatus.PROCESSING,
-            SceneStatus.FAILED,  # dispatch-time failure path
+            SceneStatus.FAILED,           # dispatch-time failure path
+            SceneStatus.FAILED_INCOMPLETE, # existence-check failure (missing blobs)
         })
 
     def test_allowed_from_ready_is_empty(self):

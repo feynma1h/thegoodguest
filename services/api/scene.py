@@ -6,10 +6,12 @@ for job status; it lives in Firestore (collection: scenes, doc id: scene_id)
 and is read by the ingester, perception services, and eventually the iOS client.
 
 State machine:
-  queued → processing → ready     (happy path)
-                      → failed    (perception error; Cloud Tasks exhausted retries)
-         → failed                 (dispatch error; task never enqueued)
-  failed → queued                 (manual retry only, via POST /scenes/{id}/retry)
+  queued → processing → ready              (happy path)
+                      → failed             (perception error; Cloud Tasks exhausted retries)
+         → failed                          (dispatch error; task never enqueued)
+         → failed_incomplete               (existence check: some blobs absent at ingest time)
+  failed → queued                          (manual retry only, via POST /scenes/{id}/retry)
+  failed_incomplete → queued               (re-upload + Eventarc re-fires → ingest retries)
 
 Any other transition is a programming error and raises InvalidTransitionError.
 
@@ -40,6 +42,7 @@ class SceneStatus(str, Enum):
     PROCESSING = "processing"
     READY = "ready"
     FAILED = "failed"
+    FAILED_INCOMPLETE = "failed_incomplete"  # upload incomplete; recoverable via re-upload
 
 
 class DeviceIdSource(str, Enum):
@@ -68,10 +71,11 @@ class DeviceIdSource(str, Enum):
 
 # Allowed state transitions. Values are frozensets of legal target states.
 _ALLOWED_TRANSITIONS: dict[SceneStatus, frozenset[SceneStatus]] = {
-    SceneStatus.QUEUED:     frozenset({SceneStatus.PROCESSING, SceneStatus.FAILED}),  # FAILED: dispatch never fired (e.g. Cloud Tasks enqueue failed)
-    SceneStatus.PROCESSING: frozenset({SceneStatus.READY, SceneStatus.FAILED}),
-    SceneStatus.FAILED:     frozenset({SceneStatus.QUEUED}),  # manual retry only
-    SceneStatus.READY:      frozenset(),                      # terminal
+    SceneStatus.QUEUED:            frozenset({SceneStatus.PROCESSING, SceneStatus.FAILED, SceneStatus.FAILED_INCOMPLETE}),
+    SceneStatus.PROCESSING:        frozenset({SceneStatus.READY, SceneStatus.FAILED}),
+    SceneStatus.FAILED:            frozenset({SceneStatus.QUEUED}),           # manual retry only
+    SceneStatus.FAILED_INCOMPLETE: frozenset({SceneStatus.QUEUED}),           # re-upload → Eventarc re-fires → ingest retries
+    SceneStatus.READY:             frozenset(),                                # terminal
 }
 
 
@@ -151,7 +155,10 @@ class Scene:
     updated_at: datetime
     result_uri: Optional[str] = None
     attempt_count: int = 0
-    last_error: Optional[str] = None  # server-side only; never serialized to clients
+    last_error: Optional[str] = None      # server-side only; never serialized to clients
+    bundle_id: Optional[str] = None       # iOS bundle UUIDv4; stored for lookup by bundle_id
+    user_id: Optional[str] = None         # Firebase UID from the upload JWT
+    missing_paths: Optional[list] = None  # relative paths absent at existence-check time
 
     def __post_init__(self) -> None:
         if not self.scene_id:
