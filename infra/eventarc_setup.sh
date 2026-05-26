@@ -28,6 +28,17 @@ INGESTER_SA="roomstudio-api@${PROJECT}.iam.gserviceaccount.com"
 
 echo "=== (1) Eventarc trigger: GCS finalize on captures/*/bundle.pb ==="
 
+# Grant roles/run.invoker to the Eventarc SA before creating the trigger.
+# The trigger delivery requires this binding; doing it first means a failed
+# grant exits (set -euo pipefail) before the trigger exists, avoiding the
+# silent-drop failure mode of "trigger exists, binding doesn't."
+gcloud run services add-iam-policy-binding "${INGESTER_SERVICE}" \
+  --region="${REGION}" \
+  --member="serviceAccount:${INGESTER_SA}" \
+  --role="roles/run.invoker"
+echo "Granted roles/run.invoker to ${INGESTER_SA} on ${INGESTER_SERVICE}."
+echo ""
+
 # The Eventarc trigger fires on any object finalize in the captures bucket.
 # The ingester /ingest/eventarc handler filters to captures/*/bundle.pb by name.
 gcloud eventarc triggers create "${TRIGGER_NAME}" \

@@ -608,7 +608,9 @@ async def ingest_eventarc(request: Request) -> JSONResponse:
     """Handle a GCS finalize event from Eventarc for captures/*/bundle.pb.
 
     Eventarc delivers the GCS StorageObjectData as the request body (JSON).
-    Cloud Run verifies the OIDC token before the request reaches the app.
+    Called by Eventarc; Cloud Run requires roles/run.invoker on the caller.
+    The Eventarc SA is granted that role in infra/eventarc_setup.sh before
+    the trigger is created.
 
     Idempotency:
     - If a Scene for this bundle_id is already QUEUED, PROCESSING, or READY,
