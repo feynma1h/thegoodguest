@@ -65,6 +65,7 @@ outputs/                          gitignored; generated artifacts
 - **`services/api` two-service split done** (see `docs/decisions/0016`): `services/api-public/` (`--allow-unauthenticated`, Firebase JWT in-app verification, hosts `/upload_session`) + `services/api-internal/` (`--no-allow-unauthenticated`, Cloud Run IAM, hosts `/ingest` + `/ingest/eventarc`) + `packages/api-core/` (shared `UploadSessionRepository` + `gcs_mint_resumable_uri`). 137 tests passing across all three packages (api-core: 18, api-public: 26, api-internal: 93). Deploy scripts and Cloud Build configs ready; Cloud Run redeployment pending.
 - `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally. Dockerfile, cloudbuild config, and deploy script env vars are all patched (see `docs/decisions/0005`, `0006`). Models are lazy-loaded on first `/process` call: `/health` returns 200 immediately for the startup probe; `/ready` reports per-model load state. DINOv2 weights (~1.13 GB) are pre-cached in the image at `TORCH_HOME=/opt/torch_hub`, eliminating the cold-start runtime fetch. Startup probe targets `httpGet /health`. 165 tests passing across both services.
 - **Stuck-scene lease-semantics fix shipped and verified** (revision `perception-obj-00024-89b`, 2026-05-25). The bug from `docs/decisions/0011` and `0012` is fixed: `/process` reclaims stale leases atomically, `EnvironmentalError` eagerly releases the lease, SIGTERM resets held scenes to `queued`, and `holder_id` is checked defensively on all three lease-mutating paths. Verified production trace for scene `561c68ae`: `action=claim` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` (final, `is_final_attempt`) → scene `failed`. Note: the trace exercised the eager-release optimization path; the load-bearing expiration-check path (stale-but-not-cleared leases) is covered by unit tests only, not this production trace.
+- **Smoke tool pass 3 scoping locked** (see `docs/decisions/0017`): manifest derivation, upload sequencing, and PUT semantics are pinned against the current `/upload_session` contract. Recon from a prior Code session covers the handler, request/response schemas, GCS minting, and Firestore session repo.
 
 ## What does NOT work / what we're deliberately not doing
 
@@ -72,7 +73,7 @@ outputs/                          gitignored; generated artifacts
 - Scene `f077e9ed-d339-4be8-8dbf-37b952abfec2` is intentionally left in `processing` with an expired lease as a canonical stuck-scene reference. Re-enqueue manually if ever needed to verify the expiration-check reclaim path end-to-end.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
-- **Pre-launch rate-limiting and concurrency-guard gaps.** Three holes intentionally left open until v1 launch: (a) TOCTOU race in `/upload_session` bundle_id ownership check — second call from same UID with different manifest overwrites session_entries non-atomically; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` in the manifest is optional and defaults to 0, in which case GCS accepts arbitrary blob size on the minted URI. Acceptable while there are no users; all three close before opening to public traffic. See `docs/decisions/0015`.
+- **Pre-launch gaps (six total, categorized).** See `docs/decisions/0015` and `0018` for full list and un-defer triggers. Abuse-surface (original 0015 set, trigger: first non-developer user): (a) TOCTOU race on `bundle_id` ownership in `/upload_session`; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` optional, defaults to 0. Contract-shape (new from pass 3 recon, trigger: iOS development or web app build begins): (F1) `expires_at` not surfaced in `/upload_session` response; (F2) `X-Upload-Content-Type` hardcoded to `application/octet-stream` server-side; (F3) no semantic manifest validation (unknown extensions, tier/path consistency). All six close in the same launch-hardening pass.
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
 
@@ -130,23 +131,39 @@ pointing at api-internal's service URL; Firestore single-field index on `bundle_
 end-to-end smoke via `tools/upload_test_bundle.py` once it exists. After green,
 iOS code can start.
 
-Note: `tools/upload_test_bundle.py` does not exist yet — it was scoped in a prior
-Code session against the single-service architecture and needs to be re-scoped for
-the two-service architecture (api-public for `/upload_session`, api-internal not
-directly callable from outside) before it's written. `tools/smoke_test_e2e.py`
-(legacy `/ingest` smoke test) is unchanged: still returns 403, not wired into CI,
-fix or replace before reusing.
+Note: `tools/smoke_test_e2e.py` (legacy `/ingest` smoke test) is unchanged: still
+returns 403, not wired into CI, fix or replace before reusing.
 
-**2 — Close the three pre-launch gaps from decision 0015** (before public traffic)
+**2 — Write `tools/upload_test_bundle.py`** (smoke tool; pass 3 scoped)
 
-Wrap `/upload_session` ownership check in a Firestore transaction
-(`@firestore.transactional` around get-then-set). Add per-UID rate limit
-on `/upload_session` (Cloud Armor at the LB, or in-process counter with
-Firestore backing). Make `expected_size_bytes` required in the manifest
-schema and enforce `X-Upload-Content-Length` unconditionally. Land all
-three before opening signups.
+Pass 3 contract is locked (see `docs/decisions/0017`): manifest derivation, wire shape,
+two-phase upload with `ThreadPoolExecutor(max_workers=8)`, PUT headers and accepted status
+codes, response mapping by `relative_path`, fresh UUIDv4 `bundle_id` per invocation. Before
+implementing: complete pass 4 (polling contract against Scene Firestore document) and pass 5
+(failure-mode flag semantics for the four CLI modes), then write the tool in one pass against
+all five locked scopes.
 
-**3 — test_data/photos/ privacy review** (deferred, low urgency)
+**3 — Smoke tool pass 4: polling contract** (against Scene Firestore document)
+
+Scope how the tool polls for scene state after upload completes — which Firestore fields to
+watch, what terminal states to accept, polling interval and timeout. Feeds directly into the
+tool's `--wait` mode.
+
+**4 — Smoke tool pass 5: failure-mode flag semantics** (four CLI modes)
+
+Scope the four CLI modes and their failure behavior: what each exits on, what it logs, what
+it leaves behind on failure. Prerequisite for implementing the tool.
+
+**5 — Close the six pre-launch gaps from decisions 0015 + 0018** (before public traffic)
+
+Abuse-surface set (trigger: first non-developer user): wrap `/upload_session` ownership
+check in a Firestore transaction; add per-UID rate limit (Cloud Armor or in-process with
+Firestore backing); make `expected_size_bytes` required and enforce `X-Upload-Content-Length`
+unconditionally. Contract-shape set (trigger: iOS development or web app build begins):
+surface `expires_at` in the response; derive `X-Upload-Content-Type` from a canonical
+extension map; add semantic manifest validation. All six land in one hardening pass.
+
+**6 — test_data/photos/ privacy review** (deferred, low urgency)
 
 9 HEIC photos of a real room are tracked by git and used by
 `tools/build_test_bundle.py` for local synthesis testing. Review whether they
