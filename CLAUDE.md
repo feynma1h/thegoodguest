@@ -65,6 +65,7 @@ outputs/                          gitignored; generated artifacts
 - Scene `f077e9ed-d339-4be8-8dbf-37b952abfec2` is intentionally left in `processing` with an expired lease as a canonical stuck-scene reference. Re-enqueue manually if ever needed to verify the expiration-check reclaim path end-to-end.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
+- **Pre-launch rate-limiting and concurrency-guard gaps.** Three holes intentionally left open until v1 launch: (a) TOCTOU race in `/upload_session` bundle_id ownership check — second call from same UID with different manifest overwrites session_entries non-atomically; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` in the manifest is optional and defaults to 0, in which case GCS accepts arbitrary blob size on the minted URI. Acceptable while there are no users; all three close before opening to public traffic. See `docs/decisions/0015`.
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
 
@@ -112,27 +113,29 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-**1 — Capture-bundle timestamp cleanup** (small, blocking iOS)
+**1 — services/api redeploy + Eventarc setup** (unblocked)
 
-Rename `started_at_us`/`ended_at_us` to `started_at_device_us`/
-`ended_at_device_us` (semantics change from wall-clock to device-
-monotonic, same domain as ARFrame.timestamp), add `started_at_wall_us`
-at field 11 for human-facing time. No `schema_version` bump (pre-v1).
-See `docs/decisions/0013`.
-
-**2 — iOS capture app prototype: deploy backend, then start iOS** (Track B)
-
-Backend changes for iOS bundle upload are implemented and tested locally
-(see `docs/decisions/0014`). Two deploys remaining before iOS code can start:
-(a) redeploy `services/api` with the new endpoints (`/captures/{bundle_id}/
-upload_session`, `/ingest/eventarc`) and the new `GCS_CAPTURES_BUCKET` env
-var — one `infra/deploy_api.sh` away; (b) execute `infra/eventarc_setup.sh`
-once against GCP to wire the Eventarc trigger on `captures/*/bundle.pb`
-finalize, the 24h orphan-cleanup lifecycle rule, and the 7d Firestore TTL
-on `failed_incomplete` scenes. After both deploys land and a smoke test
-confirms an end-to-end upload moves a scene queued → processing → ready,
+Pre-deploy code changes are done (this session). Deploy sequence:
+lifecycle rule + Firestore TTL first (app-independent; run steps 2 and 3
+of `infra/eventarc_setup.sh` or apply manually), then ingester with
+`--no-traffic` + revision-URL smoke test, traffic flip, Eventarc trigger
+creation, Firestore single-field index confirmation on `bundle_id`,
+end-to-end smoke test via `tools/upload_test_bundle.py`. After green,
 iOS code can start. Capture UX (RoomCaptureView vs. RoomCaptureSession)
 still to be scoped in a separate session.
+
+Note: `tools/smoke_test_e2e.py` (legacy `/ingest` smoke test) will
+return 403 against the live service after the auth flip — it has no
+auth header. Not wired into CI; fix or replace before using it again.
+
+**2 — Close the three pre-launch gaps from decision 0015** (before public traffic)
+
+Wrap `/upload_session` ownership check in a Firestore transaction
+(`@firestore.transactional` around get-then-set). Add per-UID rate limit
+on `/upload_session` (Cloud Armor at the LB, or in-process counter with
+Firestore backing). Make `expected_size_bytes` required in the manifest
+schema and enforce `X-Upload-Content-Length` unconditionally. Land all
+three before opening signups.
 
 **3 — test_data/photos/ privacy review** (deferred, low urgency)
 
