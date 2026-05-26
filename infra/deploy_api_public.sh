@@ -79,8 +79,9 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --quiet
 
 # api-public-runtime: GCS write on captures bucket for minting resumable URIs.
-# Requires storage.objects.create (objectAdmin grants create + read + delete).
-# NOTE: commit (c) documents why objectViewer alone is insufficient here.
+# objectViewer (read-only) is not enough — gcs_mint_resumable_uri POSTs to
+# initiate a resumable upload, which requires storage.objects.create.
+# objectAdmin is the minimal managed role that includes create + read + delete.
 gcloud storage buckets add-iam-policy-binding "gs://${BUNDLE_BUCKET}" \
     --member="serviceAccount:${RUNTIME_SA}" \
     --role="roles/storage.objectAdmin" \
