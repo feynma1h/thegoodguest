@@ -250,7 +250,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --max-instances=10 \
     --timeout=30 \
     --port=8080 \
-    --allow-unauthenticated \
+    --no-allow-unauthenticated \
     --service-account="${RUNTIME_SA}" \
     --env-vars-file="infra/api.env.yaml" \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3
