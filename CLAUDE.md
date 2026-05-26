@@ -34,13 +34,19 @@ packages/schemas/                 capture bundle proto + generated Python + pose
     pose_math.py                     quaternion ops; one place to change
   tests/                              25 invariant tests, all green
 
+packages/api-core/                shared logic consumed by both API services
+  roomstudio_api_core/
+    upload_session_repo.py           UploadSessionRepository ABC + Firestore/in-memory impls + gcs_mint_resumable_uri
+  tests/                              18 direct unit tests, all green
+
 tools/                            local scripts (run from repo root)
   gen_proto.sh                      regenerate Python (and Swift, when iOS exists)
   build_test_bundle.py              synthesize a bundle from test_data/photos
   inspect_bundle.py                 verify a bundle parses + smoke-checks
 
 services/
-  api/                            bundle ingester (deployed)
+  api-public/                     client-facing API (--allow-unauthenticated, Firebase JWT verify)
+  api-internal/                   internal API (--no-allow-unauthenticated, Cloud Run IAM)
   perception-obj/                 SAM 3 + SAM 3D Objects (deployed)
   perception-geom/                VGGT for the photo-upload path (deployed, photo-path only)
 
@@ -55,7 +61,8 @@ outputs/                          gitignored; generated artifacts
 - The capture-bundle contract is defined, generated, and tested. `python tools/build_test_bundle.py && python tools/inspect_bundle.py outputs/test_bundle/bundle.pb` runs clean end-to-end.
 - The photo-upload pipeline (`perception-obj`, `perception-geom`) is deployed and produces per-object splats from photo uploads. It's the old path; we're keeping it alive but not iterating on it.
 - 25 schema + math tests, all passing. Don't break them.
-- Bundle ingester at `services/api/`: `POST /ingest` validates a CaptureBundle by GCS URI, creates a Scene record (Firestore in prod, in-memory in dev), enqueues a Cloud Tasks HTTP job targeting perception-obj, and returns `{scene_id, status: "queued"}` or a structured error. Deployed to Cloud Run (`asia-southeast1`, project `roomstudio`). 76 api tests passing.
+- Bundle ingester (ingest path): `POST /ingest` and `POST /ingest/eventarc` live in `services/api-internal/`; `POST /captures/{bundle_id}/upload_session` in `services/api-public/`. Same logic as the previously deployed `services/api/`. The pre-split single-service revision is still live on Cloud Run; redeployment pending.
+- **`services/api` two-service split done** (see `docs/decisions/0016`): `services/api-public/` (`--allow-unauthenticated`, Firebase JWT in-app verification, hosts `/upload_session`) + `services/api-internal/` (`--no-allow-unauthenticated`, Cloud Run IAM, hosts `/ingest` + `/ingest/eventarc`) + `packages/api-core/` (shared `UploadSessionRepository` + `gcs_mint_resumable_uri`). 137 tests passing across all three packages (api-core: 18, api-public: 26, api-internal: 93). Deploy scripts and Cloud Build configs ready; Cloud Run redeployment pending.
 - `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally. Dockerfile, cloudbuild config, and deploy script env vars are all patched (see `docs/decisions/0005`, `0006`). Models are lazy-loaded on first `/process` call: `/health` returns 200 immediately for the startup probe; `/ready` reports per-model load state. DINOv2 weights (~1.13 GB) are pre-cached in the image at `TORCH_HOME=/opt/torch_hub`, eliminating the cold-start runtime fetch. Startup probe targets `httpGet /health`. 165 tests passing across both services.
 - **Stuck-scene lease-semantics fix shipped and verified** (revision `perception-obj-00024-89b`, 2026-05-25). The bug from `docs/decisions/0011` and `0012` is fixed: `/process` reclaims stale leases atomically, `EnvironmentalError` eagerly releases the lease, SIGTERM resets held scenes to `queued`, and `holder_id` is checked defensively on all three lease-mutating paths. Verified production trace for scene `561c68ae`: `action=claim` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` (final, `is_final_attempt`) → scene `failed`. Note: the trace exercised the eager-release optimization path; the load-bearing expiration-check path (stale-but-not-cleared leases) is covered by unit tests only, not this production trace.
 
@@ -65,7 +72,6 @@ outputs/                          gitignored; generated artifacts
 - Scene `f077e9ed-d339-4be8-8dbf-37b952abfec2` is intentionally left in `processing` with an expired lease as a canonical stuck-scene reference. Re-enqueue manually if ever needed to verify the expiration-check reclaim path end-to-end.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
-- **`services/api` needs a two-service refactor before the redeploy can land.** The auth-flip commit `824a862` put `--no-allow-unauthenticated` on the API service, which correctly gates `/ingest/eventarc` but breaks Firebase-authenticated iOS clients before they exist (Cloud Run platform auth validates Google-issued OIDC tokens; Firebase ID tokens are application-verified — a single service cannot be both). Refactor into `services/api-public/` (`--allow-unauthenticated`, in-app Firebase verification, hosts `/upload_session` and future client endpoints) + `services/api-internal/` (`--no-allow-unauthenticated`, Cloud Run IAM gates Eventarc, hosts `/ingest/eventarc`) + `packages/api-core/` for shared logic. See `docs/decisions/0016`.
 - **Pre-launch rate-limiting and concurrency-guard gaps.** Three holes intentionally left open until v1 launch: (a) TOCTOU race in `/upload_session` bundle_id ownership check — second call from same UID with different manifest overwrites session_entries non-atomically; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` in the manifest is optional and defaults to 0, in which case GCS accepts arbitrary blob size on the minted URI. Acceptable while there are no users; all three close before opening to public traffic. See `docs/decisions/0015`.
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
@@ -114,23 +120,21 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-**1 — services/api two-service refactor, then redeploy + Eventarc setup** (in flight)
+**1 — Deploy both services + Eventarc setup** (refactor done; deploy pending)
 
-Refactor `services/api` per decision 0016: split into `services/api-public/` and
-`services/api-internal/` with `packages/api-core/` shared logic, two deploy scripts,
-two cloudbuild configs. Then proceed with the original deploy sequence (lifecycle
-rule + Firestore TTL first; deploy both services with `--no-traffic`; revision-URL
-smoke tests; traffic flip; Eventarc trigger pointing at api-internal; Firestore
-single-field index on `bundle_id`; end-to-end smoke via
-`tools/upload_test_bundle.py`). After green, iOS code can start. The
-`--no-allow-unauthenticated` flag in the current `deploy_api.sh` moves to
-`deploy_api_internal.sh` as part of the refactor; do not deploy the existing
-single-service config.
+Refactor is done (137 tests green, deploy scripts and Cloud Build configs in place).
+Next: deploy sequence — lifecycle rule + Firestore TTL first; deploy both services
+with `--no-traffic` (`./infra/deploy_api_internal.sh` then `./infra/deploy_api_public.sh`);
+revision-URL smoke test each (`/health`); traffic flip on each; Eventarc trigger
+pointing at api-internal's service URL; Firestore single-field index on `bundle_id`;
+end-to-end smoke via `tools/upload_test_bundle.py` once it exists. After green,
+iOS code can start.
 
 Note: `tools/upload_test_bundle.py` does not exist yet — it was scoped in a prior
 Code session against the single-service architecture and needs to be re-scoped for
-two URLs before it's written. `tools/smoke_test_e2e.py` (legacy `/ingest` smoke
-test) is unchanged: still returns 403 against the live service, not wired into CI,
+the two-service architecture (api-public for `/upload_session`, api-internal not
+directly callable from outside) before it's written. `tools/smoke_test_e2e.py`
+(legacy `/ingest` smoke test) is unchanged: still returns 403, not wired into CI,
 fix or replace before reusing.
 
 **2 — Close the three pre-launch gaps from decision 0015** (before public traffic)

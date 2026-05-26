@@ -53,6 +53,9 @@ service-account*.json
 *.pb
 !outputs/**/*.pb  # already covered by outputs/, listed for clarity
 
+# Python package build artifacts
+packages/*/build/
+
 # iOS (when the iOS app arrives)
 ios/**/build/
 ios/**/DerivedData/
