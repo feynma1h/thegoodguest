@@ -1,4 +1,4 @@
-# 0018 — Extend decision 0015 with contract-shape gaps (F1/F2/F3)
+# 0018 — Extend decision 0015 with contract-shape gaps (F1/F2/F3/F4)
 
 **Date:** 2026-05-26
 **Status:** Accepted
@@ -30,7 +30,7 @@ categorization is important but belongs inside one decision, not two.
 
 ## What we chose
 
-Extend 0015 to cover all six gaps, with explicit categorization:
+Extend 0015 to cover all seven gaps, with explicit categorization:
 
 **Abuse-surface gaps (original 0015 set):**
 - TOCTOU on `bundle_id` ownership in `/upload_session` — second call from same UID with
@@ -39,7 +39,7 @@ Extend 0015 to cover all six gaps, with explicit categorization:
 - `expected_size_bytes` optional with default 0; interaction: enables uncapped-size upload
   via cycled anonymous UIDs.
 
-**Contract-shape gaps (new from pass 3 recon):**
+**Contract-shape gaps (from pass 3 + pass 4 recon):**
 - F1: `expires_at` not surfaced in `/upload_session` response. iOS clients can't know when
   a minted URI expires without hardcoding the 7-day GCS implementation detail.
 - F2: `X-Upload-Content-Type` hardcoded server-side to `application/octet-stream`. Breaks
@@ -48,6 +48,14 @@ Extend 0015 to cover all six gaps, with explicit categorization:
 - F3: No semantic manifest validation at `/upload_session`. Server mints URIs for paths that
   contradict tier (depth paths on `ARKIT_ONLY` tier), unknown extensions, missing
   `bundle.pb`.
+- F4: `result_url` presigning in scene read responses. `GET /scenes/by-bundle/{bundle_id}`
+  on api-public returns `result_uri` as a raw `gs://` URI today (per decision 0019). The
+  web app and any browser-based consumer cannot fetch `gs://` URIs directly; each consumer
+  would need GCS read credentials and presigning logic. Fix: api-public presigns
+  server-side, returns `result_url` (HTTPS) and `expires_at` alongside the raw `result_uri`,
+  requires api-public's service account to have `storage.objects.get` on the results bucket.
+  Naming convention (`_uri` for raw resource identifiers, `_url` for fetchable HTTPS URLs)
+  is pinned in 0019 so this addition is non-breaking.
 
 The two categories have different un-defer triggers:
 
@@ -60,20 +68,25 @@ would force individual gaps to un-defer early.
 
 ## Why
 
-The set framing matters more with six gaps than with three. Without explicit categorization,
+The set framing matters more with seven gaps than with three. Without explicit categorization,
 abuse-surface and contract-shape concerns get conflated, and the un-defer triggers for one
 category get applied incorrectly to the other. Concretely: F2 (content_type) shouldn't wait
 for "first non-developer user" because the trigger is web-app blob serving, not user abuse.
 Conversely, the rate limit shouldn't be pulled forward when iOS development starts because
 the trigger is real traffic, not iOS wire shape.
 
-Keeping all six in one decision preserves the original 0015 framing's value — one decision
+Keeping all seven in one decision preserves the original 0015 framing's value — one decision
 to close one piece of work — while making the un-defer logic legible. Splitting across two
 decisions would mean two separate places to update when the hardening pass begins.
 
+The four contract-shape gaps share a common pattern: each is a case where the contract
+exposes an implementation detail (raw GCS URIs, hardcoded MIME types, missing TTLs,
+unvalidated paths) that every consumer would otherwise have to work around independently.
+Closing them server-side, once, is strictly better than closing them N times in each consumer.
+
 ## What would change this decision
 
-- A seventh gap of either flavor surfaces. Same closure-as-set logic applies; extend the
+- An eighth gap of either flavor surfaces. Same closure-as-set logic applies; extend the
   relevant category here.
 - An individual gap turns out to have a forcing function not anticipated here — e.g. F3
   catches a real bug during development. At that point the single gap pulls forward and the

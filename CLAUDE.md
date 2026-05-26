@@ -66,6 +66,7 @@ outputs/                          gitignored; generated artifacts
 - `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally. Dockerfile, cloudbuild config, and deploy script env vars are all patched (see `docs/decisions/0005`, `0006`). Models are lazy-loaded on first `/process` call: `/health` returns 200 immediately for the startup probe; `/ready` reports per-model load state. DINOv2 weights (~1.13 GB) are pre-cached in the image at `TORCH_HOME=/opt/torch_hub`, eliminating the cold-start runtime fetch. Startup probe targets `httpGet /health`. 165 tests passing across both services.
 - **Stuck-scene lease-semantics fix shipped and verified** (revision `perception-obj-00024-89b`, 2026-05-25). The bug from `docs/decisions/0011` and `0012` is fixed: `/process` reclaims stale leases atomically, `EnvironmentalError` eagerly releases the lease, SIGTERM resets held scenes to `queued`, and `holder_id` is checked defensively on all three lease-mutating paths. Verified production trace for scene `561c68ae`: `action=claim` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` (final, `is_final_attempt`) → scene `failed`. Note: the trace exercised the eager-release optimization path; the load-bearing expiration-check path (stale-but-not-cleared leases) is covered by unit tests only, not this production trace.
 - **Smoke tool pass 3 scoping locked** (see `docs/decisions/0017`): manifest derivation, upload sequencing, and PUT semantics are pinned against the current `/upload_session` contract. Recon from a prior Code session covers the handler, request/response schemas, GCS minting, and Firestore session repo.
+- **Smoke tool pass 4 scoping locked** (see `docs/decisions/0019`): polling contract pinned against a new `GET /scenes/by-bundle/{bundle_id}` endpoint on api-public. Recon from prior Code session covers the Scene document lifecycle, field population at ingest, idempotency under at-least-once Eventarc delivery, and the existing `SceneRepository` patterns in api-internal.
 
 ## What does NOT work / what we're deliberately not doing
 
@@ -73,7 +74,7 @@ outputs/                          gitignored; generated artifacts
 - Scene `f077e9ed-d339-4be8-8dbf-37b952abfec2` is intentionally left in `processing` with an expired lease as a canonical stuck-scene reference. Re-enqueue manually if ever needed to verify the expiration-check reclaim path end-to-end.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
-- **Pre-launch gaps (six total, categorized).** See `docs/decisions/0015` and `0018` for full list and un-defer triggers. Abuse-surface (original 0015 set, trigger: first non-developer user): (a) TOCTOU race on `bundle_id` ownership in `/upload_session`; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` optional, defaults to 0. Contract-shape (new from pass 3 recon, trigger: iOS development or web app build begins): (F1) `expires_at` not surfaced in `/upload_session` response; (F2) `X-Upload-Content-Type` hardcoded to `application/octet-stream` server-side; (F3) no semantic manifest validation (unknown extensions, tier/path consistency). All six close in the same launch-hardening pass.
+- **Pre-launch gaps (seven total, categorized).** See `docs/decisions/0015` and `0018` for full list and un-defer triggers. Abuse-surface (original 0015 set, trigger: first non-developer user): (a) TOCTOU race on `bundle_id` ownership in `/upload_session`; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` optional, defaults to 0. Contract-shape (from pass 3 + pass 4 recon, trigger: iOS development or web app build begins): (F1) `expires_at` not surfaced in `/upload_session` response; (F2) `X-Upload-Content-Type` hardcoded to `application/octet-stream` server-side; (F3) no semantic manifest validation (unknown extensions, tier/path consistency); (F4) `result_url` presigning in `GET /scenes/by-bundle/{bundle_id}` responses (raw `gs://` returned today). All seven close in the same launch-hardening pass.
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
 
@@ -134,34 +135,37 @@ iOS code can start.
 Note: `tools/smoke_test_e2e.py` (legacy `/ingest` smoke test) is unchanged: still
 returns 403, not wired into CI, fix or replace before reusing.
 
-**2 — Write `tools/upload_test_bundle.py`** (smoke tool; pass 3 scoped)
+**2 — Build `GET /scenes/by-bundle/{bundle_id}` on api-public** (pass 4 prerequisite)
 
-Pass 3 contract is locked (see `docs/decisions/0017`): manifest derivation, wire shape,
-two-phase upload with `ThreadPoolExecutor(max_workers=8)`, PUT headers and accepted status
-codes, response mapping by `relative_path`, fresh UUIDv4 `bundle_id` per invocation. Before
-implementing: complete pass 4 (polling contract against Scene Firestore document) and pass 5
-(failure-mode flag semantics for the four CLI modes), then write the tool in one pass against
-all five locked scopes.
+Add `SceneReadRepository` to `packages/api-core/` with `get(scene_id)` and
+`get_by_bundle_id(bundle_id)`. Refactor `services/api-internal/`'s `SceneRepository`
+to extend it (write methods retained, construction signature unchanged). New endpoint on
+api-public mirrors `/upload_session` auth pattern (Firebase ID token; requesting UID must
+equal `scene.user_id`). Response shape and error codes pinned in `docs/decisions/0019`.
 
-**3 — Smoke tool pass 4: polling contract** (against Scene Firestore document)
+**3 — Write `tools/upload_test_bundle.py`** (smoke tool; passes 3 + 4 scoped; pass 5 pending)
 
-Scope how the tool polls for scene state after upload completes — which Firestore fields to
-watch, what terminal states to accept, polling interval and timeout. Feeds directly into the
-tool's `--wait` mode.
+Pass 3 contract locked in `docs/decisions/0017`; pass 4 contract (polling via
+`GET /scenes/by-bundle/{bundle_id}`) locked in `docs/decisions/0019`. Before implementing:
+complete pass 5 (failure-mode flag semantics for the four CLI modes), then write the tool
+in one pass against all five locked scopes.
 
-**4 — Smoke tool pass 5: failure-mode flag semantics** (four CLI modes)
+**4 — Smoke tool pass 5: failure-mode flag semantics** (four CLI modes; terminal-to-exit-code mapping pinned in 0019; implementation details remain)
 
 Scope the four CLI modes and their failure behavior: what each exits on, what it logs, what
-it leaves behind on failure. Prerequisite for implementing the tool.
+it leaves behind on failure. Mode-to-terminal outcome mapping is already pinned in
+`docs/decisions/0019`; pass 5 scopes how each mode triggers its scenario. Prerequisite for
+implementing the tool.
 
-**5 — Close the six pre-launch gaps from decisions 0015 + 0018** (before public traffic)
+**5 — Close the seven pre-launch gaps from decisions 0015 + 0018** (before public traffic; 0018 now contains four contract-shape gaps including F4)
 
 Abuse-surface set (trigger: first non-developer user): wrap `/upload_session` ownership
 check in a Firestore transaction; add per-UID rate limit (Cloud Armor or in-process with
 Firestore backing); make `expected_size_bytes` required and enforce `X-Upload-Content-Length`
 unconditionally. Contract-shape set (trigger: iOS development or web app build begins):
 surface `expires_at` in the response; derive `X-Upload-Content-Type` from a canonical
-extension map; add semantic manifest validation. All six land in one hardening pass.
+extension map; add semantic manifest validation; presign `result_url` in scene read
+responses. All seven land in one hardening pass.
 
 **6 — test_data/photos/ privacy review** (deferred, low urgency)
 
