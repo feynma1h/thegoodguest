@@ -74,7 +74,7 @@ outputs/                          gitignored; generated artifacts
 - Scene `f077e9ed-d339-4be8-8dbf-37b952abfec2` is intentionally left in `processing` with an expired lease as a canonical stuck-scene reference. Re-enqueue manually if ever needed to verify the expiration-check reclaim path end-to-end.
 - **`test_data/photos/` privacy is deferred.** 9 HEIC photos of a real room are tracked by git, used by `tools/build_test_bundle.py` for local synthesis testing. Privacy review (anonymise, replace with synthetic data, or remove from history) is a separate session. Do not act on this until explicitly scoped — it may require a history rewrite.
 - **No web app yet.**
-- **Pre-launch gaps (seven total, categorized).** See `docs/decisions/0015` and `0018` for full list and un-defer triggers. Abuse-surface (original 0015 set, trigger: first non-developer user): (a) TOCTOU race on `bundle_id` ownership in `/upload_session`; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` optional, defaults to 0. Contract-shape (from pass 3 + pass 4 recon, trigger: iOS development or web app build begins): (F1) `expires_at` not surfaced in `/upload_session` response; (F2) `X-Upload-Content-Type` hardcoded to `application/octet-stream` server-side; (F3) no semantic manifest validation (unknown extensions, tier/path consistency); (F4) `result_url` presigning in `GET /scenes/by-bundle/{bundle_id}` responses (raw `gs://` returned today). All seven close in the same launch-hardening pass.
+- **Pre-launch gaps (nine gaps + one audit item, categorized).** See `docs/decisions/0015` and `0018` for full list and un-defer triggers. Abuse-surface (original 0015 set, trigger: first non-developer user): (a) TOCTOU race on `bundle_id` ownership in `/upload_session`; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` optional, defaults to 0. Contract-shape (from pass 3 + pass 4 recon, trigger: iOS development or web app build begins): (F1) `expires_at` not surfaced in `/upload_session` response; (F2) `X-Upload-Content-Type` hardcoded to `application/octet-stream` server-side; (F3) no semantic manifest validation (unknown extensions, tier/path consistency); (F4) `result_url` presigning in `GET /scenes/by-bundle/{bundle_id}` responses (raw `gs://` returned today). Production-hygiene (trigger: launch): (F5) no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`; (F6) no TTL on Firestore `scenes` collection. Audit item (during launch hardening): verify perception-obj runtime SA identity and storage IAM. All nine gaps close in the same launch-hardening pass.
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
 
@@ -143,31 +143,26 @@ to extend it (write methods retained, construction signature unchanged). New end
 api-public mirrors `/upload_session` auth pattern (Firebase ID token; requesting UID must
 equal `scene.user_id`). Response shape and error codes pinned in `docs/decisions/0019`.
 
-**3 — Write `tools/upload_test_bundle.py`** (smoke tool; passes 3 + 4 scoped; pass 5 pending)
+**3 — Write `tools/upload_test_bundle.py`** (smoke tool; all five passes locked; implementation ready)
 
-Pass 3 contract locked in `docs/decisions/0017`; pass 4 contract (polling via
-`GET /scenes/by-bundle/{bundle_id}`) locked in `docs/decisions/0019`. Before implementing:
-complete pass 5 (failure-mode flag semantics for the four CLI modes), then write the tool
-in one pass against all five locked scopes.
+All scoping complete: pass 3 upload contract (`docs/decisions/0017`), pass 4 polling
+contract (`docs/decisions/0019`), pass 5 failure-mode flag semantics
+(`docs/decisions/0020`). Four modes (happy-path, skip-blob, duplicate-event,
+auth-rejection), two-phase upload sequencing, polling against
+`GET /scenes/by-bundle/{bundle_id}`, four-target `--cleanup` via developer ADC.
+Prerequisite: deploy runbook (board item 1) must land first. After item 1 is green,
+write the tool in one pass against all five locked scopes.
 
-**4 — Smoke tool pass 5: failure-mode flag semantics** (four CLI modes; terminal-to-exit-code mapping pinned in 0019; implementation details remain)
+**4 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
 
-Scope the four CLI modes and their failure behavior: what each exits on, what it logs, what
-it leaves behind on failure. Mode-to-terminal outcome mapping is already pinned in
-`docs/decisions/0019`; pass 5 scopes how each mode triggers its scenario. Prerequisite for
-implementing the tool.
+Decision 0018 extended to nine gaps: original three abuse-surface gaps + F1/F2/F3/F4
+contract-shape gaps + F5 (no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`)
++ F6 (no TTL on Firestore `scenes` collection). Plus one audit item: verify perception-obj
+runtime SA identity and storage IAM. Abuse-surface trigger: first non-developer user.
+Contract-shape trigger: iOS development or web app build begins. Production-hygiene and
+audit: launch hardening. All nine gaps close in the same launch-hardening pass.
 
-**5 — Close the seven pre-launch gaps from decisions 0015 + 0018** (before public traffic; 0018 now contains four contract-shape gaps including F4)
-
-Abuse-surface set (trigger: first non-developer user): wrap `/upload_session` ownership
-check in a Firestore transaction; add per-UID rate limit (Cloud Armor or in-process with
-Firestore backing); make `expected_size_bytes` required and enforce `X-Upload-Content-Length`
-unconditionally. Contract-shape set (trigger: iOS development or web app build begins):
-surface `expires_at` in the response; derive `X-Upload-Content-Type` from a canonical
-extension map; add semantic manifest validation; presign `result_url` in scene read
-responses. All seven land in one hardening pass.
-
-**6 — test_data/photos/ privacy review** (deferred, low urgency)
+**5 — test_data/photos/ privacy review** (deferred, low urgency)
 
 9 HEIC photos of a real room are tracked by git and used by
 `tools/build_test_bundle.py` for local synthesis testing. Review whether they
