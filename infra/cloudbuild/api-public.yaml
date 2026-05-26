@@ -1,12 +1,11 @@
-# Cloud Build configuration for the roomstudio bundle ingester (services/api/).
+# Cloud Build configuration for the roomstudio public API (services/api-public/).
 #
-# Invoked by infra/deploy_api.sh. Builds a CPU-only container from repo root
-# (the build context includes packages/schemas/ so the Dockerfile can install
-# it) and pushes to Artifact Registry.
+# Invoked by infra/deploy_api_public.sh. Builds from repo root so that
+# packages/schemas/ and packages/api-core/ are reachable by the Dockerfile.
 #
 # No GPU, no HF token, no pytorch3d wheel — this is a pure-Python FastAPI
-# service. Build time is ~2-4 min on the first run (pip downloads); subsequent
-# runs are faster due to Docker layer caching.
+# service. Build time is ~2-4 min on the first run; faster after Docker
+# layer caching.
 
 steps:
   - name: 'gcr.io/cloud-builders/docker'
@@ -15,7 +14,7 @@ steps:
       - --tag
       - '${_IMAGE_URI}'
       - --file
-      - services/api/Dockerfile
+      - services/api-public/Dockerfile
       - .   # repo root is the build context
 
   - name: 'gcr.io/cloud-builders/docker'

@@ -1,4 +1,4 @@
-"""Firebase ID token verification for the roomstudio API.
+"""Firebase ID token verification for the roomstudio public API.
 
 TokenVerifier interface with two implementations:
   NullTokenVerifier    — for tests; accepts tokens of the form "test-uid:<uid>"

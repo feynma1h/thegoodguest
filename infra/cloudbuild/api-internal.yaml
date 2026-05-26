@@ -1,0 +1,33 @@
+# Cloud Build configuration for the roomstudio internal API (services/api-internal/).
+#
+# Invoked by infra/deploy_api_internal.sh. Builds from repo root so that
+# packages/schemas/ and packages/api-core/ are reachable by the Dockerfile.
+#
+# No GPU, no HF token, no pytorch3d wheel — this is a pure-Python FastAPI
+# service. Build time is ~2-4 min on the first run; faster after Docker
+# layer caching.
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - --tag
+      - '${_IMAGE_URI}'
+      - --file
+      - services/api-internal/Dockerfile
+      - .   # repo root is the build context
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_IMAGE_URI}']
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: 20
+
+timeout: 600s
+
+images:
+  - '${_IMAGE_URI}'
+
+substitutions:
+  _IMAGE_URI: ''

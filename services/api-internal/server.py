@@ -1,8 +1,8 @@
-"""roomstudio bundle ingester — FastAPI service.
+"""roomstudio internal API — IAM-gated Eventarc handler and legacy ingest endpoint.
 
-Accepts a serialized CaptureBundle by GCS URI, validates it, creates a Scene
-record, enqueues a Cloud Tasks job targeting perception-obj, and returns an
-acknowledgement with the scene_id and status="queued".
+This service runs --no-allow-unauthenticated. Cloud Run IAM validates the
+caller's OIDC token at the platform boundary before any request reaches
+application code. No in-app caller verification is needed or implemented here.
 
 Endpoints:
   GET  /health
@@ -18,13 +18,8 @@ Endpoints:
       same ingest logic as /ingest. Handles idempotency (already-queued scenes)
       and the retry path (failed_incomplete → queued on successful re-upload).
 
-  POST /captures/{bundle_id}/upload_session
-      Mint GCS resumable session URIs for each entry in the manifest. Auth:
-      Firebase ID token via Authorization: Bearer header. Returns
-      [{relative_path, session_uri}] for the iOS client to upload against.
-
-Run locally (from services/api/):
-  uvicorn server:app --reload --port 8080
+Run locally (from services/api-internal/):
+  uvicorn server:app --reload --port 8081
 
 Environment variables:
   ENVIRONMENT                — set to "production" to enable startup env-var
@@ -37,12 +32,8 @@ Environment variables:
   CLOUD_TASKS_QUEUE          — Cloud Tasks queue name       ┘ for real dispatch
   CLOUD_TASKS_INVOKER_SA     — service account email for OIDC token on tasks
   PERCEPTION_OBJ_PROCESS_URL — full URL of the perception-obj /process endpoint
-  GCS_CAPTURES_BUCKET        — bucket name for capture blobs (existence check +
-                               upload session URI minting)
 
 See also: infra/cloud-tasks-queue.md for queue setup and SA configuration.
-
-Consumed by: the iOS capture app and integration tests.
 """
 from __future__ import annotations
 
@@ -58,28 +49,26 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-# Ensure roomstudio_schemas is importable in local dev without a virtualenv
-# having it installed. In production it is a declared dependency.
-_schemas_path = Path(__file__).resolve().parents[2] / "packages/schemas"
-if str(_schemas_path) not in sys.path:
-    sys.path.insert(0, str(_schemas_path))
+# Ensure local packages are importable in dev without a virtualenv install.
+_repo_root = Path(__file__).resolve().parents[2]
+for _pkg in ("packages/schemas", "packages/api-core"):
+    _p = str(_repo_root / _pkg)
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from roomstudio_schemas import CaptureBundle, CaptureTier  # noqa: E402
 from validation import validate_bundle  # noqa: E402
 from scene import DeviceIdSource, SceneStatus, new_scene  # noqa: E402
 from repository import SceneRepository, InMemorySceneRepository  # noqa: E402
 from dispatcher import TaskDispatcher, InMemoryTaskDispatcher  # noqa: E402
-from auth import TokenVerifier, NullTokenVerifier, TokenVerificationError  # noqa: E402
 from fcm import FcmNotifier, NullFcmNotifier  # noqa: E402
-from upload_session_repo import (  # noqa: E402
+from roomstudio_api_core.upload_session_repo import (  # noqa: E402
     UploadSessionRepository,
     InMemoryUploadSessionRepository,
-    validate_manifest_path,
-    gcs_mint_resumable_uri,
 )
 
 
@@ -94,7 +83,6 @@ _PRODUCTION_REQUIRED_VARS: tuple[str, ...] = (
     "CLOUD_TASKS_QUEUE",
     "CLOUD_TASKS_INVOKER_SA",
     "PERCEPTION_OBJ_PROCESS_URL",
-    "GCS_CAPTURES_BUCKET",
 )
 
 
@@ -117,9 +105,9 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 
 app = FastAPI(
-    title="roomstudio-api",
-    description="Capture-bundle ingester. Validates bundles and dispatches perception work.",
-    version="0.2.0",
+    title="roomstudio-api-internal",
+    description="Internal IAM-gated API. Hosts /ingest/eventarc (Eventarc trigger) and legacy /ingest.",
+    version="0.1.0",
     lifespan=lifespan,
 )
 
@@ -145,32 +133,18 @@ class IngestError(BaseModel):
     detail: str
 
 
-class UploadSessionRequest(BaseModel):
-    """Body for POST /captures/{bundle_id}/upload_session."""
-    manifest: list[dict]         # [{relative_path, expected_size_bytes}]
-    fcm_token: Optional[str] = None
-
-
-class UploadSessionEntry(BaseModel):
-    """One entry in the upload_session response."""
-    relative_path: str
-    session_uri: str
-
-
 # ---------------------------------------------------------------------------
 # Dependency instances — lazy-initialized from env vars on first use.
 # ---------------------------------------------------------------------------
 
 _scene_repo: Optional[SceneRepository] = None
 _task_dispatcher: Optional[TaskDispatcher] = None
-_token_verifier: Optional[TokenVerifier] = None
 _fcm_notifier: Optional[FcmNotifier] = None
 _upload_session_repo: Optional[UploadSessionRepository] = None
 
 _PERCEPTION_OBJ_PROCESS_URL: str = os.environ.get(
     "PERCEPTION_OBJ_PROCESS_URL", "http://localhost:8081/process"
 )
-_GCS_CAPTURES_BUCKET: str = os.environ.get("GCS_CAPTURES_BUCKET", "roomstudio-captures")
 
 
 def _get_scene_repo() -> SceneRepository:
@@ -208,19 +182,6 @@ def _get_task_dispatcher() -> TaskDispatcher:
     return _task_dispatcher
 
 
-def _get_token_verifier() -> TokenVerifier:
-    global _token_verifier
-    if _token_verifier is None:
-        if os.environ.get("ENVIRONMENT") == "production":
-            from auth import FirebaseTokenVerifier
-            _token_verifier = FirebaseTokenVerifier()
-            logger.info("Using FirebaseTokenVerifier")
-        else:
-            _token_verifier = NullTokenVerifier()
-            logger.info("ENVIRONMENT != production — using NullTokenVerifier")
-    return _token_verifier
-
-
 def _get_fcm_notifier() -> FcmNotifier:
     global _fcm_notifier
     if _fcm_notifier is None:
@@ -235,11 +196,14 @@ def _get_fcm_notifier() -> FcmNotifier:
 
 
 def _get_upload_session_repo() -> UploadSessionRepository:
+    # Each service defines its own factory. The factory reads FIRESTORE_PROJECT
+    # from this service's bootstrap context; putting it in api-core would couple
+    # core to each service's env-var conventions, defeating the isolation.
     global _upload_session_repo
     if _upload_session_repo is None:
         project = os.environ.get("FIRESTORE_PROJECT")
         if project:
-            from upload_session_repo import FirestoreUploadSessionRepository
+            from roomstudio_api_core.upload_session_repo import FirestoreUploadSessionRepository
             _upload_session_repo = FirestoreUploadSessionRepository(project=project)
             logger.info("Using Firestore UploadSessionRepository")
         else:
@@ -553,9 +517,8 @@ def _handle_failed_incomplete(
     # FCM: look up the FCM token from the upload_session record.
     try:
         upload_repo = _get_upload_session_repo()
-        # InMemoryUploadSessionRepository and FirestoreUploadSessionRepository
-        # both expose get_fcm_token; the abstract base does not require it, so
-        # we call it defensively.
+        # Both concrete implementations expose get_fcm_token; the abstract
+        # base does not require it, so we call defensively.
         get_fcm_token = getattr(upload_repo, "get_fcm_token", None)
         if get_fcm_token:
             fcm_token = get_fcm_token(bundle_id)
@@ -677,107 +640,3 @@ async def ingest_eventarc(request: Request) -> JSONResponse:
             )
 
     return _run_ingest(bundle_gcs_uri, repo, dispatcher)
-
-
-@app.post(
-    "/captures/{bundle_id}/upload_session",
-    summary="Mint GCS resumable session URIs for an iOS capture upload",
-)
-async def create_upload_session(
-    bundle_id: str,
-    req: UploadSessionRequest,
-    authorization: str = Header(...),
-) -> JSONResponse:
-    """Mint GCS resumable session URIs for each entry in the client manifest.
-
-    Auth: Firebase ID token in Authorization: Bearer <token>.
-
-    Request body:
-      manifest: [{relative_path: str, expected_size_bytes: int}]
-      fcm_token: str | null   (FCM registration token for upload-incomplete push)
-
-    Response (200): [{relative_path, session_uri}]
-
-    Idempotent: repeated calls with the same {bundle_id, manifest paths}
-    return the stored URIs without minting new ones.
-
-    Errors:
-      400 invalid_bundle_id   — bundle_id is not a UUIDv4
-      400 invalid_manifest    — a manifest entry has a bad path
-      400 manifest_empty      — manifest has no entries
-      401 missing_token       — Authorization header absent or malformed
-      403 forbidden           — JWT uid does not match the stored user_id for
-                                this bundle_id (another user's upload)
-    """
-    # 1. Verify Firebase ID token.
-    if not authorization.startswith("Bearer "):
-        return JSONResponse(
-            status_code=401,
-            content={"error": "missing_token", "detail": "Authorization: Bearer <token> required"},
-        )
-    token = authorization[len("Bearer "):]
-    try:
-        user_id = _get_token_verifier().verify(token)
-    except TokenVerificationError as exc:
-        return JSONResponse(
-            status_code=401,
-            content={"error": "invalid_token", "detail": str(exc)},
-        )
-
-    # 2. Validate bundle_id is a UUIDv4.
-    try:
-        val = uuid.UUID(bundle_id, version=4)
-        if str(val) != bundle_id:
-            raise ValueError("not canonical form")
-    except ValueError:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "invalid_bundle_id", "detail": f"{bundle_id!r} is not a UUIDv4"},
-        )
-
-    # 3. Validate manifest.
-    if not req.manifest:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "manifest_empty", "detail": "manifest must have at least one entry"},
-        )
-    for entry in req.manifest:
-        path = entry.get("relative_path", "")
-        err = validate_manifest_path(path)
-        if err:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "invalid_manifest", "detail": err},
-            )
-
-    # 4. Check user_id ownership — 403 if another user already claimed this bundle_id.
-    upload_repo = _get_upload_session_repo()
-    stored_uid = upload_repo.get_user_id(bundle_id)
-    if stored_uid is not None and stored_uid != user_id:
-        return JSONResponse(
-            status_code=403,
-            content={
-                "error": "forbidden",
-                "detail": "bundle_id is owned by a different user",
-            },
-        )
-
-    # 5. Mint (or retrieve stored) session URIs.
-    try:
-        bucket = os.environ.get("GCS_CAPTURES_BUCKET", _GCS_CAPTURES_BUCKET)
-        session_entries = upload_repo.create_or_get(
-            bundle_id=bundle_id,
-            user_id=user_id,
-            manifest=req.manifest,
-            fcm_token=req.fcm_token,
-            mint_uri_fn=gcs_mint_resumable_uri,
-            bucket=bucket,
-        )
-    except Exception as exc:
-        logger.exception("Failed to mint upload session for bundle_id=%s", bundle_id)
-        return JSONResponse(
-            status_code=500,
-            content={"error": "session_mint_failed", "detail": str(exc)},
-        )
-
-    return JSONResponse(status_code=200, content=session_entries)

@@ -23,7 +23,8 @@ Implementations:
 The GCS resumable URI minting is injectable (mint_uri_fn) so tests can
 substitute a fake without google-cloud-storage installed.
 
-Consumers: server.py (POST /captures/{bundle_id}/upload_session).
+Consumers: services/api-public (POST /captures/{bundle_id}/upload_session),
+           services/api-internal (_handle_failed_incomplete FCM token lookup).
 """
 from __future__ import annotations
 
@@ -240,7 +241,7 @@ def gcs_mint_resumable_uri(bucket: str, blob_path: str, size_bytes: int) -> str:
     The URI is valid for 7 days per GCS docs. The iOS client uses it directly
     with URLSession background tasks (PUT requests with the resumable URI).
 
-    google.cloud.storage and google.auth are imported lazily.
+    google.auth and google.auth.transport.requests are imported lazily.
     """
     import google.auth  # deferred
     import google.auth.transport.requests  # deferred
