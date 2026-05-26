@@ -18,8 +18,13 @@ import sys
 from pathlib import Path
 
 _api_dir = Path(__file__).resolve().parents[1]
-if str(_api_dir) not in sys.path:
-    sys.path.insert(0, str(_api_dir))
+_repo_root = _api_dir.parents[1]
+for _p in (
+    str(_api_dir),
+    str(_repo_root / "packages/api-core"),
+):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from dispatcher import InMemoryTaskDispatcher
 

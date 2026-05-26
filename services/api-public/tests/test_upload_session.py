@@ -15,7 +15,7 @@ NullTokenVerifier is used for all tests (accepts "test-uid:<uid>" tokens).
 The GCS URI minter is injected as a lambda — no google-cloud-storage needed.
 
 Run from repo root:
-  pytest services/api/tests/test_upload_session.py -v
+  pytest services/api-public/tests/test_upload_session.py -v
 """
 from __future__ import annotations
 
@@ -28,14 +28,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 _api_dir = Path(__file__).resolve().parents[1]
-_schemas_dir = _api_dir.parents[1] / "packages/schemas"
-for _p in (_api_dir, _schemas_dir):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+_repo_root = _api_dir.parents[1]
+for _p in (
+    str(_api_dir),
+    str(_repo_root / "packages/schemas"),
+    str(_repo_root / "packages/api-core"),
+):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import server  # noqa: E402
 from auth import NullTokenVerifier  # noqa: E402
-from upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402
+from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +76,7 @@ def _post_upload_session(
     with (
         patch.object(server, "_token_verifier", NullTokenVerifier()),
         patch.object(server, "_upload_session_repo", repo),
-        patch("upload_session_repo.gcs_mint_resumable_uri", side_effect=_fake_mint),
+        patch("roomstudio_api_core.upload_session_repo.gcs_mint_resumable_uri", side_effect=_fake_mint),
     ):
         return client.post(
             f"/captures/{bundle_id}/upload_session",

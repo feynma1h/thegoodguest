@@ -1,29 +1,19 @@
 #!/usr/bin/env bash
-# Deploy the roomstudio bundle ingester (services/api/) to Cloud Run.
+# Deploy the roomstudio internal API (services/api-internal/) to Cloud Run.
+#
+# This service runs --no-allow-unauthenticated. Cloud Run IAM validates the
+# Eventarc service account's OIDC token at the platform boundary. No in-app
+# caller verification is needed or implemented in this service.
 #
 # Run from the repo root:
-#   ./infra/deploy_api.sh
+#   ./infra/deploy_api_internal.sh
 #
-# The script is fully idempotent: safe to re-run after a failed deploy or to
-# refresh IAM bindings after a change. Every step checks existence before
-# creating, and role bindings are re-asserted on every run (idempotent by
-# design in gcloud).
-#
-# What this script does, in order:
-#   1. Enable required GCP APIs.
-#   2. Create service accounts (api-runtime, tasks-invoker) if absent.
-#   3. Bind IAM roles to each SA (idempotent).
-#   4. Create the Cloud Tasks queue (perception-dispatch) if absent.
-#   5. Create the bundle GCS bucket (roomstudio-captures) if absent.
-#   6. Build the container image via Cloud Build.
-#   7. Deploy to Cloud Run.
-#   8. Print the service URL.
+# The script is fully idempotent. Run it before deploy_api_public.sh on the
+# first deploy — it creates shared infrastructure (Firestore, GCS bucket,
+# Cloud Tasks queue) that both services depend on.
 #
 # Prerequisites:
 #   - gcloud authenticated and project set to "roomstudio"
-#     (gcloud config set project roomstudio)
-#   - Cloud Build SA (PROJECT_NUMBER@cloudbuild.gserviceaccount.com) must have
-#     roles/iam.serviceAccountUser on api-runtime SA; this is granted below.
 
 set -euo pipefail
 
@@ -31,14 +21,16 @@ set -euo pipefail
 
 PROJECT_ID="roomstudio"
 REGION="asia-southeast1"
-SERVICE_NAME="api"
-REPO="roomstudio"                                          # Artifact Registry repo name
+SERVICE_NAME="api-internal"
+REPO="roomstudio"
 IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE_NAME}:${IMAGE_TAG}"
 
-RUNTIME_SA_NAME="api-runtime"
+RUNTIME_SA_NAME="api-internal-runtime"
 RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
+# tasks-invoker is the SA whose identity is stamped on Cloud Tasks OIDC tokens
+# so that perception-obj can verify the caller is Cloud Tasks, not the internet.
 INVOKER_SA_NAME="tasks-invoker"
 INVOKER_SA="${INVOKER_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
@@ -49,19 +41,18 @@ BUNDLE_BUCKET="roomstudio-captures"
 
 PERCEPTION_OBJ_SERVICE="perception-obj"
 
-# Always run from the repo root regardless of where the script is invoked from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
-echo "=== roomstudio ingester deploy ==="
+echo "=== roomstudio api-internal deploy ==="
 echo "Project:  ${PROJECT_ID}"
 echo "Region:   ${REGION}"
 echo "Image:    ${IMAGE_URI}"
 echo ""
 
 # ── Step 1: Enable required APIs ─────────────────────────────────────────────
-echo "=== 1/9: Enabling GCP APIs (idempotent) ==="
+echo "=== 1/10: Enabling GCP APIs (idempotent) ==="
 gcloud services enable \
     run.googleapis.com \
     cloudbuild.googleapis.com \
@@ -76,7 +67,7 @@ echo "APIs enabled."
 
 # ── Step 2: Create service accounts ──────────────────────────────────────────
 echo ""
-echo "=== 2/9: Service accounts ==="
+echo "=== 2/10: Service accounts ==="
 
 _ensure_sa() {
     local sa_name="$1"
@@ -93,38 +84,37 @@ _ensure_sa() {
     fi
 }
 
-_ensure_sa "${RUNTIME_SA_NAME}" "${RUNTIME_SA}" "roomstudio API runtime"
+_ensure_sa "${RUNTIME_SA_NAME}" "${RUNTIME_SA}" "roomstudio API internal runtime"
 _ensure_sa "${INVOKER_SA_NAME}" "${INVOKER_SA}" "Cloud Tasks OIDC invoker for perception-obj"
 
 # ── Step 3: Bind IAM roles ────────────────────────────────────────────────────
 echo ""
-echo "=== 3/9: Binding IAM roles (idempotent) ==="
+echo "=== 3/10: Binding IAM roles (idempotent) ==="
 
-# api-runtime: Firestore read/write for scene records.
+# api-internal-runtime: Firestore read/write for scene records and upload_sessions.
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${RUNTIME_SA}" \
     --role="roles/datastore.user" \
     --condition=None \
     --quiet
 
-# api-runtime: enqueue Cloud Tasks.
+# api-internal-runtime: enqueue Cloud Tasks.
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${RUNTIME_SA}" \
     --role="roles/cloudtasks.enqueuer" \
     --condition=None \
     --quiet
 
-# api-runtime: read bundle objects from the captures bucket (not project-wide).
+# api-internal-runtime: read bundle objects from the captures bucket.
 gcloud storage buckets add-iam-policy-binding "gs://${BUNDLE_BUCKET}" \
     --member="serviceAccount:${RUNTIME_SA}" \
     --role="roles/storage.objectViewer" \
     --project="${PROJECT_ID}" 2>/dev/null || {
-    echo "  Note: bucket ${BUNDLE_BUCKET} may not exist yet — bucket binding"
-    echo "  will be re-applied after bucket creation in step 5."
+    echo "  Note: bucket ${BUNDLE_BUCKET} may not exist yet — binding re-applied in step 7."
 }
 
-# api-runtime: must be able to act as the invoker SA so Cloud Tasks can mint
-# OIDC tokens stamped with tasks-invoker's identity.
+# api-internal-runtime: must be able to act as the invoker SA so Cloud Tasks
+# can mint OIDC tokens stamped with tasks-invoker's identity.
 gcloud iam service-accounts add-iam-policy-binding "${INVOKER_SA}" \
     --member="serviceAccount:${RUNTIME_SA}" \
     --role="roles/iam.serviceAccountUser" \
@@ -132,7 +122,6 @@ gcloud iam service-accounts add-iam-policy-binding "${INVOKER_SA}" \
     --quiet
 
 # tasks-invoker: invoke the perception-obj Cloud Run service.
-# gcloud run services add-iam-policy-binding requires the service to exist.
 if gcloud run services describe "${PERCEPTION_OBJ_SERVICE}" \
         --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
     gcloud run services add-iam-policy-binding "${PERCEPTION_OBJ_SERVICE}" \
@@ -155,11 +144,11 @@ gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
     --role="roles/iam.serviceAccountUser" \
     --project="${PROJECT_ID}" \
     --quiet
-echo "  Cloud Build SA granted serviceAccountUser on api-runtime."
+echo "  Cloud Build SA granted serviceAccountUser on api-internal-runtime."
 
 # ── Step 4: Create Cloud Tasks queue ─────────────────────────────────────────
 echo ""
-echo "=== 4/9: Cloud Tasks queue ==="
+echo "=== 4/10: Cloud Tasks queue ==="
 if gcloud tasks queues describe "${TASKS_QUEUE}" \
         --location="${TASKS_LOCATION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
     echo "  Queue exists: ${TASKS_QUEUE}"
@@ -177,7 +166,7 @@ fi
 
 # ── Step 5: Create Firestore database ────────────────────────────────────────
 echo ""
-echo "=== 5/9: Firestore database ==="
+echo "=== 5/10: Firestore database ==="
 if gcloud firestore databases describe --project="${PROJECT_ID}" >/dev/null 2>&1; then
     echo "  Firestore database (default) exists."
 else
@@ -190,7 +179,7 @@ fi
 
 # ── Step 6: Create bundle bucket ─────────────────────────────────────────────
 echo ""
-echo "=== 6/9: Bundle GCS bucket ==="
+echo "=== 6/10: Bundle GCS bucket ==="
 if gcloud storage buckets describe "gs://${BUNDLE_BUCKET}" \
         --project="${PROJECT_ID}" >/dev/null 2>&1; then
     echo "  Bucket exists: ${BUNDLE_BUCKET}"
@@ -200,7 +189,7 @@ else
         --location="${REGION}" \
         --project="${PROJECT_ID}" \
         --uniform-bucket-level-access \
-        --no-public-access-prevention   # keep default; we control access via IAM
+        --no-public-access-prevention
     echo "  Bucket created."
 fi
 
@@ -209,11 +198,11 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUNDLE_BUCKET}" \
     --member="serviceAccount:${RUNTIME_SA}" \
     --role="roles/storage.objectViewer" \
     --project="${PROJECT_ID}"
-echo "  api-runtime granted storage.objectViewer on gs://${BUNDLE_BUCKET}."
+echo "  api-internal-runtime granted storage.objectViewer on gs://${BUNDLE_BUCKET}."
 
-# ── Step 6: Ensure Artifact Registry repo exists ──────────────────────────────
+# ── Step 7: Ensure Artifact Registry repo exists ──────────────────────────────
 echo ""
-echo "=== 7/9: Artifact Registry ==="
+echo "=== 7/10: Artifact Registry ==="
 gcloud artifacts repositories describe "${REPO}" \
     --location="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1 \
   || gcloud artifacts repositories create "${REPO}" \
@@ -223,21 +212,19 @@ gcloud artifacts repositories describe "${REPO}" \
         --description="roomstudio container images"
 echo "  Artifact Registry repo ready."
 
-# ── Step 7: Build container via Cloud Build ────────────────────────────────────
+# ── Step 8: Build container via Cloud Build ────────────────────────────────────
 echo ""
-echo "=== 8/9: Building container ==="
+echo "=== 8/10: Building container ==="
 echo "Image: ${IMAGE_URI}"
-echo "(First build downloads Python deps; expect 3-5 min.)"
-
 gcloud builds submit . \
     --project="${PROJECT_ID}" \
     --region="${REGION}" \
-    --config="infra/cloudbuild/api.yaml" \
+    --config="infra/cloudbuild/api-internal.yaml" \
     --substitutions="_IMAGE_URI=${IMAGE_URI}"
 
-# ── Step 8: Deploy to Cloud Run ───────────────────────────────────────────────
+# ── Step 9: Deploy to Cloud Run ───────────────────────────────────────────────
 echo ""
-echo "=== 9/9: Deploying to Cloud Run ==="
+echo "=== 9/10: Deploying to Cloud Run ==="
 gcloud run deploy "${SERVICE_NAME}" \
     --image="${IMAGE_URI}" \
     --region="${REGION}" \
@@ -252,18 +239,33 @@ gcloud run deploy "${SERVICE_NAME}" \
     --port=8080 \
     --no-allow-unauthenticated \
     --service-account="${RUNTIME_SA}" \
-    --env-vars-file="infra/api.env.yaml" \
-    --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3
+    --env-vars-file="infra/api-internal.env.yaml" \
+    --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
+    --no-traffic
 
-URL="$(gcloud run services describe "${SERVICE_NAME}" \
+# ── Step 10: Print revision URL ───────────────────────────────────────────────
+echo ""
+echo "=== 10/10: Done ==="
+REVISION="$(gcloud run revisions list \
+    --service="${SERVICE_NAME}" \
+    --region="${REGION}" \
+    --project="${PROJECT_ID}" \
+    --format='value(name)' \
+    --limit=1)"
+REVISION_URL="$(gcloud run revisions describe "${REVISION}" \
+    --region="${REGION}" \
+    --project="${PROJECT_ID}" \
+    --format='value(status.url)' 2>/dev/null || echo '(unavailable)')"
+SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" \
     --region="${REGION}" --project="${PROJECT_ID}" \
     --format='value(status.url)')"
 
 echo ""
-echo "=== Done ==="
-echo "Ingester URL: ${URL}"
+echo "Service URL:  ${SERVICE_URL} (no traffic yet — --no-traffic flag)"
+echo "Revision URL: ${REVISION_URL}"
 echo ""
-echo "Smoke test:"
-echo "  curl ${URL}/health"
-echo "  curl -X POST ${URL}/ingest -H 'Content-Type: application/json' \\"
-echo "       -d '{\"bundle_gcs_uri\": \"gs://roomstudio-captures/<bundle-path>/bundle.pb\"}'"
+echo "Smoke test the revision, then flip traffic, then create Eventarc trigger:"
+echo "  curl ${REVISION_URL}/health"
+echo "  gcloud run services update-traffic ${SERVICE_NAME} --to-latest \\"
+echo "    --region=${REGION} --project=${PROJECT_ID}"
+echo "  # then run infra/eventarc_setup.sh to create the trigger against ${REVISION_URL}"

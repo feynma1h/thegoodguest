@@ -16,10 +16,7 @@ Bundles are built in-memory using roomstudio_schemas directly — no file I/O,
 no network, no GCS credentials required.
 
 Run from repo root:
-  pytest services/api/tests/ -v
-
-Or from services/api/:
-  pytest tests/ -v
+  pytest services/api-internal/tests/ -v
 """
 from __future__ import annotations
 
@@ -37,10 +34,14 @@ from unittest.mock import MagicMock
 # pytest is invoked from. Mirrors the sys.path approach used in the schema
 # tests (packages/schemas/tests/test_capture_bundle.py).
 _api_dir = Path(__file__).resolve().parents[1]
-_schemas_dir = _api_dir.parents[1] / "packages/schemas"
-for _p in (_api_dir, _schemas_dir):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+_repo_root = _api_dir.parents[1]
+for _p in (
+    str(_api_dir),
+    str(_repo_root / "packages/schemas"),
+    str(_repo_root / "packages/api-core"),
+):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from roomstudio_schemas import (  # noqa: E402
     ARKIT_ONLY,

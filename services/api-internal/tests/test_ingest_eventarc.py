@@ -35,10 +35,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 _api_dir = Path(__file__).resolve().parents[1]
-_schemas_dir = _api_dir.parents[1] / "packages/schemas"
-for _p in (_api_dir, _schemas_dir):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+_repo_root = _api_dir.parents[1]
+for _p in (
+    str(_api_dir),
+    str(_repo_root / "packages/schemas"),
+    str(_repo_root / "packages/api-core"),
+):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from roomstudio_schemas import ARKIT_ONLY, LIDAR_ARKIT, SCHEMA_VERSION, CaptureBundle  # noqa: E402
 
@@ -47,7 +51,7 @@ from repository import InMemorySceneRepository  # noqa: E402
 from dispatcher import InMemoryTaskDispatcher  # noqa: E402
 from scene import SceneStatus  # noqa: E402
 from fcm import NullFcmNotifier  # noqa: E402
-from upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402
+from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

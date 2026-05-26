@@ -28,10 +28,14 @@ from unittest.mock import patch
 import pytest
 
 _api_dir = Path(__file__).resolve().parents[1]
-_schemas_dir = _api_dir.parents[1] / "packages/schemas"
-for _p in (_api_dir, _schemas_dir):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+_repo_root = _api_dir.parents[1]
+for _p in (
+    str(_api_dir),
+    str(_repo_root / "packages/schemas"),
+    str(_repo_root / "packages/api-core"),
+):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from scene import (
     DeviceIdSource,
