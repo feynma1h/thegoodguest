@@ -1,7 +1,7 @@
 # 0021 — Pin protobuf runtime to match gencode in api-internal/api-public images
 
 **Date:** 2026-05-27
-**Status:** Proposed (pending implementation — promote to Accepted when the fix commits)
+**Status:** Accepted
 
 ## Context
 
@@ -31,17 +31,64 @@ applies there.
 
 ## What we tried
 
-(To be filled when the fix lands — document the actual investigation, including
-which dep was pulling in protobuf 6.33.6, whether any other dep upper-bounded
-protobuf below 7.x, and what was observed when the fix was applied. Do not
-transcribe the candidate paths sketched before investigation; record what
-was actually done.)
+**Checked whether the fix from 0005 was already present:** Yes — both new
+Dockerfiles already had the `--no-deps --force-reinstall "protobuf>=7.35.0"`
+step from the moment of the two-service split (commit `79e2e5e`). The workaround
+was not missing; it was in the wrong position.
+
+**Traced which layer undid the pin:** `packages/schemas/pyproject.toml` declares
+`protobuf>=7.35.0`. `packages/api-core/pyproject.toml` declares
+`google-cloud-firestore>=2.14,<3.0`; Firestore pulls `proto-plus 1.x` which
+declares `protobuf<7.0.0dev`. In both Dockerfiles, Layer 2 ran the
+force-reinstall (protobuf → 7.35.0), then Layer 3 ran `pip install
+packages/api-core/`. Even though Firestore was already installed, pip's resolver
+re-checked the dep tree when satisfying api-core's `google-cloud-firestore` dep,
+saw proto-plus's `<7.0.0dev` constraint violated by protobuf 7.35.0, and
+downgraded protobuf back to 6.33.6. The symptom (runtime 6.33.6) is exactly what
+a resolver-triggered downgrade produces.
+
+**Confirmed no other dep caps protobuf below 7.x:** Neither service's
+`pyproject.toml` nor either local package's `pyproject.toml` specifies an upper
+bound on protobuf. The only upper bound in the transitive tree is proto-plus's
+`<7.0.0dev`. No second constraint blocked a simple layer-reorder fix.
+
+**Considered regenerating gencode at a lower version:** Rejected. It would
+require pinning `protoc` in `tools/gen_proto.sh` and accepting static typing
+against an older API surface. The 0005 force-reinstall approach already works
+at the services/api/ level; the issue was purely layer ordering, not the approach
+itself.
 
 ## What we chose
 
-(To be filled when the fix lands — state the chosen direction with evidence:
-pin-up, regen-down, or something else, and why the transitive dep tree allowed
-or required it.)
+Swap Layer 2 and Layer 3 in both Dockerfiles so that `packages/api-core/` is
+installed *before* the protobuf force-reinstall:
+
+```
+Layer 1: pip install service deps (google-cloud-*, firebase-admin) → protobuf 6.x
+Layer 2: pip install packages/api-core/  ← moved earlier; protobuf still 6.x, no conflict
+Layer 3: pip install --no-deps --force-reinstall "protobuf>=7.35.0"
+         pip install packages/schemas/   ← nothing after this re-resolves the tree
+Layer 4: COPY service source
+```
+
+After the reorder, nothing installed after the force-reinstall touches the dep
+tree, so proto-plus cannot trigger a downgrade. The `packages/schemas/` install
+that follows finds `protobuf>=7.35.0` already satisfied and does not invoke the
+resolver for protobuf.
+
+Added a container-import smoke step to both `infra/cloudbuild/api-internal.yaml`
+and `infra/cloudbuild/api-public.yaml` between build and push:
+
+```
+docker run --rm <image> python -c "
+  from roomstudio_schemas import CaptureBundle, CaptureTier
+  from roomstudio_api_core.scene import Scene
+  print('import smoke: OK')
+"
+```
+
+If this step fails, the push is blocked. The smoke catches any future
+layer-ordering regression before the image reaches Cloud Run.
 
 ## Why
 
