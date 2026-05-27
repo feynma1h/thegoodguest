@@ -36,8 +36,10 @@ packages/schemas/                 capture bundle proto + generated Python + pose
 
 packages/api-core/                shared logic consumed by both API services
   roomstudio_api_core/
+    scene.py                         Scene model, SceneStatus, DeviceIdSource, state machine
+    scene_read_repo.py               SceneReadRepository ABC + Firestore/in-memory read-only impls
     upload_session_repo.py           UploadSessionRepository ABC + Firestore/in-memory impls + gcs_mint_resumable_uri
-  tests/                              18 direct unit tests, all green
+  tests/                              48 direct unit tests, all green
 
 tools/                            local scripts (run from repo root)
   gen_proto.sh                      regenerate Python (and Swift, when iOS exists)
@@ -62,16 +64,17 @@ outputs/                          gitignored; generated artifacts
 - The photo-upload pipeline (`perception-obj`, `perception-geom`) is deployed and produces per-object splats from photo uploads. It's the old path; we're keeping it alive but not iterating on it.
 - 25 schema + math tests, all passing. Don't break them.
 - Bundle ingester (ingest path): `POST /ingest` and `POST /ingest/eventarc` live in `services/api-internal/`; `POST /captures/{bundle_id}/upload_session` in `services/api-public/`. Same logic as the previously deployed `services/api/`. The pre-split single-service revision is still live on Cloud Run; redeployment pending.
-- **`services/api` two-service split done** (see `docs/decisions/0016`): `services/api-public/` (`--allow-unauthenticated`, Firebase JWT in-app verification, hosts `/upload_session`) + `services/api-internal/` (`--no-allow-unauthenticated`, Cloud Run IAM, hosts `/ingest` + `/ingest/eventarc`) + `packages/api-core/` (shared `UploadSessionRepository` + `gcs_mint_resumable_uri`). 137 tests passing across all three packages (api-core: 18, api-public: 26, api-internal: 93). Deploy scripts and Cloud Build configs ready; Cloud Run redeployment pending.
+- **`services/api` two-service split done** (see `docs/decisions/0016`): `services/api-public/` (`--allow-unauthenticated`, Firebase JWT in-app verification, hosts `/upload_session`) + `services/api-internal/` (`--no-allow-unauthenticated`, Cloud Run IAM, hosts `/ingest` + `/ingest/eventarc`) + `packages/api-core/` (shared `UploadSessionRepository` + `gcs_mint_resumable_uri`). Deploy scripts and Cloud Build configs ready; Cloud Run redeployment pending.
 - `perception-obj` `/process` receiver: accepts Cloud Tasks HTTP POST (OIDC-verified), claims scenes atomically in Firestore with lease-TTL crash recovery, runs SAM 3 + SAM 3D Objects, writes outputs to GCS, updates Scene state, fires FCM on terminal transitions. System is functional end-to-end locally. Dockerfile, cloudbuild config, and deploy script env vars are all patched (see `docs/decisions/0005`, `0006`). Models are lazy-loaded on first `/process` call: `/health` returns 200 immediately for the startup probe; `/ready` reports per-model load state. DINOv2 weights (~1.13 GB) are pre-cached in the image at `TORCH_HOME=/opt/torch_hub`, eliminating the cold-start runtime fetch. Startup probe targets `httpGet /health`. 165 tests passing across both services.
 - **Stuck-scene lease-semantics fix shipped and verified** (revision `perception-obj-00024-89b`, 2026-05-25). The bug from `docs/decisions/0011` and `0012` is fixed: `/process` reclaims stale leases atomically, `EnvironmentalError` eagerly releases the lease, SIGTERM resets held scenes to `queued`, and `holder_id` is checked defensively on all three lease-mutating paths. Verified production trace for scene `561c68ae`: `action=claim` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` → `action=reclaim_stale` → OOM → `action=release_error` (final, `is_final_attempt`) → scene `failed`. Note: the trace exercised the eager-release optimization path; the load-bearing expiration-check path (stale-but-not-cleared leases) is covered by unit tests only, not this production trace.
 - **Smoke tool pass 3 scoping locked** (see `docs/decisions/0017`): manifest derivation, upload sequencing, and PUT semantics are pinned against the current `/upload_session` contract. Recon from a prior Code session covers the handler, request/response schemas, GCS minting, and Firestore session repo.
 - **Smoke tool pass 4 scoping locked** (see `docs/decisions/0019`): polling contract pinned against a new `GET /scenes/by-bundle/{bundle_id}` endpoint on api-public. Recon from prior Code session covers the Scene document lifecycle, field population at ingest, idempotency under at-least-once Eventarc delivery, and the existing `SceneRepository` patterns in api-internal.
 - **Smoke tool pass 5 scoping locked** (see `docs/decisions/0020`): four-mode CLI shape, `--cleanup` semantics, `--verbose`/`--json` output, and exit-code 2 (misconfig vs. system-under-test failure) pinned.
 - **`tools/upload_test_bundle.py` written**: 1008-line substitute iOS client. Four modes (happy-path, skip-blob, duplicate-event, auth-rejection), two-phase upload sequencing per decision 0017, polling per decision 0019, failure semantics per decision 0020. `--cleanup`, `--verbose`, `--json` (NDJSON), exit codes 0–3. 27 unit tests in `tools/test_upload_test_bundle.py`. Verification against a deployed stack pending runbook execution.
-- **`packages/api-core/roomstudio_api_core/test_fixtures/capture_bundle.py` added**: `build_capture_bundle()` + `TestBundleArtifacts`. Generates valid `CaptureBundle` protos for all three tiers with configurable per-frame blob kinds. 22 new invariant tests. api-core now 40 tests total (25 schema + 40 api-core + 26 api-public + 93 api-internal + 27 smoke tool = 211 across all packages).
+- **`packages/api-core/roomstudio_api_core/test_fixtures/capture_bundle.py` added**: `build_capture_bundle()` + `TestBundleArtifacts`. Generates valid `CaptureBundle` protos for all three tiers with configurable per-frame blob kinds. 22 new invariant tests.
 - **Deploy runbook preconditions landed**: `infra/eventarc_setup.sh` corrected — `INGESTER_SERVICE` changed from `roomstudio-api` to `api-internal`, `INGESTER_SA` changed to `api-internal-runtime@roomstudio.iam.gserviceaccount.com` (both were stale post-split). `services/api/` confirmed local-only (only gitignored `__pycache__/`) and removed. `upload_sessions.created_at` verified correct (`datetime.now(tz=timezone.utc)`) — TTL semantics match intent, no code change needed.
-- **`infra/RUNBOOK.md` written**: 8-phase deploy runbook (Preflight + Phases 1–8) for the two-service iOS upload path (decisions 0014–0020). `eventarc_setup.sh` gains `--lifecycle-only`, `--ttl-only`, `--trigger-only` flags for per-phase invocation. Ready to execute once `GET /scenes/by-bundle/{bundle_id}` (board item 1) is built.
+- **`infra/RUNBOOK.md` written**: 8-phase deploy runbook (Preflight + Phases 1–8) for the two-service iOS upload path (decisions 0014–0020). `eventarc_setup.sh` gains `--lifecycle-only`, `--ttl-only`, `--trigger-only` flags for per-phase invocation.
+- **`GET /scenes/by-bundle/{bundle_id}` on api-public built** (board item 1, decision 0019). `SceneReadRepository` + `InMemorySceneReadRepository` + `FirestoreSceneReadRepository` in `packages/api-core/`. Scene model moved to `packages/api-core/roomstudio_api_core/scene.py`; `services/api-internal/scene.py` is now a re-export shim. `SceneRepository` in api-internal extends `SceneReadRepository`; `FirestoreSceneRepository` extends `FirestoreSceneReadRepository` (no duplication of read logic). 233 tests across all packages, all green (25 schema + 48 api-core + 40 api-public + 93 api-internal + 27 smoke tool). Runbook Phase 0 preflight gate now satisfied.
 
 ## What does NOT work / what we're deliberately not doing
 
@@ -127,28 +130,17 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-**1 — Build `GET /scenes/by-bundle/{bundle_id}` on api-public** (runbook Phase 0 preflight; smoke tool prerequisite)
+**1 — Execute the deploy runbook** (`infra/RUNBOOK.md`)
 
-`infra/RUNBOOK.md` Phase 0 halts if this endpoint is absent. The smoke tool's
-`happy-path`, `skip-blob`, and `duplicate-event` modes all poll against it.
-
-Add `SceneReadRepository` to `packages/api-core/` with `get(scene_id)` and
-`get_by_bundle_id(bundle_id)`. Refactor `services/api-internal/`'s `SceneRepository`
-to extend it (write methods retained, construction signature unchanged). New endpoint on
-api-public mirrors `/upload_session` auth pattern (Firebase ID token; requesting UID must
-equal `scene.user_id`). Response shape and error codes pinned in `docs/decisions/0019`.
-
-**2 — Execute the deploy runbook** (`infra/RUNBOOK.md`) (preconditions landed; board item 1 must complete first)
-
-Preconditions landed: `eventarc_setup.sh` patched, `services/api/` removed, `created_at`
-verified. `tools/upload_test_bundle.py` is already written and runs in Phase 7.
-Board item 1 (`GET /scenes/by-bundle/{bundle_id}`) must pass Phase 0 preflight before
-the runbook can be executed. After runbook is green, iOS code can start.
+All preconditions met: `eventarc_setup.sh` patched, `services/api/` removed,
+`created_at` verified, `GET /scenes/by-bundle/{bundle_id}` built (board item 1 done).
+`tools/upload_test_bundle.py` is already written and runs in Phase 7. Phase 0 preflight
+should pass on a clean environment. After runbook is green, iOS code can start.
 
 Note: `tools/smoke_test_e2e.py` (legacy `/ingest` smoke test) is unchanged: still
 returns 403, not wired into CI, fix or replace before reusing.
 
-**3 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
+**2 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
 
 Decision 0018 extended to nine gaps: original three abuse-surface gaps + F1/F2/F3/F4
 contract-shape gaps + F5 (no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`)
@@ -157,7 +149,7 @@ runtime SA identity and storage IAM. Abuse-surface trigger: first non-developer 
 Contract-shape trigger: iOS development or web app build begins. Production-hygiene and
 audit: launch hardening. All nine gaps close in the same launch-hardening pass.
 
-**4 — test_data/photos/ privacy review** (deferred, low urgency)
+**3 — test_data/photos/ privacy review** (deferred, low urgency)
 
 9 HEIC photos of a real room are tracked by git and used by
 `tools/build_test_bundle.py` for local synthesis testing. Review whether they
