@@ -78,6 +78,9 @@ outputs/                          gitignored; generated artifacts
 - **Phase 1 deploy infrastructure is live.** GCS lifecycle rule on `gs://roomstudio-captures` (delete after age=1, prefix `captures/`) is configured. Firestore TTL policy is set on `upload_sessions.created_at` (state `ACTIVE`). Automatic single-field index on `scenes.bundle_id` is confirmed unexempt. `infra/RUNBOOK.md` Phase 0 preflight passes (v2 refinements drafted but not yet landed — board item 2).
 - **Firebase Auth is configured for the project and usable from the smoke tool.** Firebase added to the GCP project (previously GCP-native only). Web app `roomstudio-smoke-test` registered (`appId 1:502805861152:web:095d7e3b331e0e0ddcbd45`); anonymous sign-in provider enabled; `firebase.googleapis.com` and Identity Toolkit enabled. `tools/upload_test_bundle.py` can obtain valid `idToken` credentials against the real project. ADC quota project set to `roomstudio`.
 - **Protobuf gencode/runtime mismatch fixed in both service images** (see `docs/decisions/0021`). Root cause: `pip install packages/api-core/` in Layer 3 triggered proto-plus's `<7.0.0dev` constraint and downgraded protobuf from 7.35.0 back to 6.33.6, undoing the Layer 2 force-reinstall from decision 0005. Fix: api-core install moved to Layer 2 (before the force-reinstall); schemas install remains last. Container-import smoke added to both `infra/cloudbuild/api-internal.yaml` and `infra/cloudbuild/api-public.yaml` (build → smoke → push).
+- **Two-service iOS upload path deployed to `asia-southeast1`:** `api-public` (revision `api-public-00001-7wn`, 100% traffic, Firebase verifier wired) and `api-internal` (revision `api-internal-00002-tpl`, 100% traffic, Cloud Run IAM gated). `/health` 200 on both.
+- **Eventarc trigger `captures-bundle-pb-finalized` live**, destination `api-internal/ingest/eventarc`. App-side path filtering working (bundle.pb → 200, non-bundle.pb → 400).
+- **Decision 0021 verified end-to-end:** layer-swap fix landed cleanly, CI import smoke ran in Cloud Build, no protobuf downgrade recurrence.
 
 ## What does NOT work / what we're deliberately not doing
 
@@ -88,7 +91,8 @@ outputs/                          gitignored; generated artifacts
 - **Pre-launch gaps (nine gaps + one audit item, categorized).** See `docs/decisions/0015` and `0018` for full list and un-defer triggers. Abuse-surface (original 0015 set, trigger: first non-developer user): (a) TOCTOU race on `bundle_id` ownership in `/upload_session`; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` optional, defaults to 0. Contract-shape (from pass 3 + pass 4 recon, trigger: iOS development or web app build begins): (F1) `expires_at` not surfaced in `/upload_session` response; (F2) `X-Upload-Content-Type` hardcoded to `application/octet-stream` server-side; (F3) no semantic manifest validation (unknown extensions, tier/path consistency); (F4) `result_url` presigning in `GET /scenes/by-bundle/{bundle_id}` responses (raw `gs://` returned today). Production-hygiene (trigger: launch): (F5) no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`; (F6) no TTL on Firestore `scenes` collection. Audit item (during launch hardening): verify perception-obj runtime SA identity and storage IAM. All nine gaps close in the same launch-hardening pass.
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
-- **Phase 2 onward of the runbook is still pending.** api-internal has a corrected image but has not been redeployed. api-public not yet deployed. The pre-split `roomstudio-api` service has not been touched; pre-existing Eventarc triggers (if any) still point at it.
+- **`perception-obj` is dead at import time** since 2026-05-16. `/ready` returns 503, `sam3` and `sam3d` both `not_loaded`. Root cause: `FileNotFoundError: '/opt/sam3d/checkpoints/hf/pipeline.yaml'` in `SAM3DModel.__init__`. Container exits at startup. Blocks `happy-path` and `duplicate-event` smoke modes; blocks Phase 8c (iOS code start).
+- **Ingest creates scenes with `user_id = None` on the failed-incomplete branch.** `skip-blob` smoke mode surfaced this: `GET /scenes/by-bundle/{bundle_id}` returns 403 `"scene has no owner"` (the diagnostic 403 from decision 0019). Happy-path scenes have `user_id` set correctly via `bundle.user_id`. Root cause: `_handle_failed_incomplete` in `services/api-internal/server.py` creates the scene but never sets `scene.user_id`. Fix: read from `upload_session_repo.get_user_id(bundle_id)`. See decision 0022.
 
 ## Conventions
 
@@ -134,26 +138,30 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-**1 — Resume the deploy runbook from Phase 2** (`infra/RUNBOOK.md`)
+**1 — Fix `perception-obj` checkpoint path / image build** (perception-obj owner)
 
-Protobuf fix is in. Rebuild both images (Cloud Build smoke step will verify
-import compatibility before push). Redeploy api-internal (`--no-traffic` on the
-existing service shell, then shift traffic once the revision is healthy). Then
-proceed through Phase 3 (api-public deploy) → Phase 4 smoke checks →
-Phase 5 traffic flip → Phase 6 Eventarc trigger → Phase 7 end-to-end with
-`tools/upload_test_bundle.py`. After runbook is green, iOS code can start.
+`SAM3DModel.__init__` raises `FileNotFoundError` for
+`/opt/sam3d/checkpoints/hf/pipeline.yaml` at container start. Service exits before
+reaching `/health`. Unrelated to the iOS upload path; tracked separately.
 
-**2 — Land the `infra/RUNBOOK.md` v2 PR**
+**2 — Fix ingest `user_id` propagation on failed-incomplete** (`services/api-internal`)
 
-Eight v2 findings drafted from the first execution. Scope of the PR: corrected Phase 0a
-IAM check (effective-permission test, not named-role filter); fully specified Phase 0b
-Firebase preconditions (project enablement, web-app registration, API key retrieval,
-anonymous-sign-in provider check, ADC quota-project setup); Phase 0h rewritten for
-lazy-load `/ready` semantics; Phase 2/3 branching for new-service vs. existing-service
-deploys; new "container-failed-to-start = halt" branch in Phase 2; resuming-the-runbook
-appendix.
+`_handle_failed_incomplete` creates a scene without setting `user_id`, causing
+`GET /scenes/by-bundle/{bundle_id}` on api-public to return 403. Fix: read
+`user_id` from `upload_session_repo.get_user_id(bundle_id)` and write to the
+scene. Verification: `skip-blob` smoke mode exits 0 with `status=failed_incomplete`.
+See decision 0022.
 
-**3 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
+**3 — Land the `infra/RUNBOOK.md` v2 PR** (18 findings: #1–#5, #7–#19; #6 closed by 0021)
+
+Including: deploy-script `--no-traffic` conditional, `eventarc_setup.sh` IAM
+completeness (eventReceiver + pubsub.publisher + Eventarc API enable), Phase 0
+verifier grep, Phase 0h `/ready` actually-run discipline, runbook redelivery loop on
+400 responses (finding #17).
+
+**4 — Re-run Phase 7 (all 4 modes)** once board items 1 and 2 close. Phase 8c follows.
+
+**5 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
 
 Decision 0018 extended to nine gaps: original three abuse-surface gaps + F1/F2/F3/F4
 contract-shape gaps + F5 (no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`)
@@ -162,7 +170,7 @@ runtime SA identity and storage IAM. Abuse-surface trigger: first non-developer 
 Contract-shape trigger: iOS development or web app build begins. Production-hygiene and
 audit: launch hardening. All nine gaps close in the same launch-hardening pass.
 
-**4 — test_data/photos/ privacy review** (deferred, low urgency)
+**6 — test_data/photos/ privacy review** (deferred, low urgency)
 
 9 HEIC photos of a real room are tracked by git and used by
 `tools/build_test_bundle.py` for local synthesis testing. Review whether they
