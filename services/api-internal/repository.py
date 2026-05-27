@@ -8,8 +8,16 @@ Defines the SceneRepository interface and two implementations:
                              module is safe to import in test environments
                              without GCP credentials or the library installed.
 
-The abstract base enforces the interface contract. Callers program to
-SceneRepository, not to an implementation.
+SceneRepository extends roomstudio_api_core.scene_read_repo.SceneReadRepository,
+adding write methods (create, update_status). api-public only receives the read
+interface; api-internal gets the full read+write interface.
+
+FirestoreSceneRepository extends FirestoreSceneReadRepository from api-core so
+the Firestore read logic (_db, _doc_ref, _from_doc, get, get_by_bundle_id) is
+not duplicated. It adds create() and update_status().
+
+SceneNotFoundError is defined in api-core and re-exported from here so that
+existing `from repository import SceneNotFoundError` imports continue to work.
 
 No Firestore types leak beyond FirestoreSceneRepository. The rest of the
 codebase works entirely with the Scene dataclass from scene.py.
@@ -19,34 +27,40 @@ Consumers: server.py (step 3 dispatch wiring), tests.
 from __future__ import annotations
 
 import copy
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from datetime import datetime, timezone
 from typing import Optional
 
-from scene import InvalidTransitionError, Scene, SceneStatus, validate_transition
+from roomstudio_api_core.scene import InvalidTransitionError, Scene, SceneStatus, validate_transition
+from roomstudio_api_core.scene_read_repo import (
+    FirestoreSceneReadRepository,
+    InMemorySceneReadRepository,
+    SceneNotFoundError,  # re-exported; callers may import from here or api-core
+    SceneReadRepository,
+)
+
+# Re-export SceneNotFoundError so existing `from repository import SceneNotFoundError`
+# continues to work without changes in test files.
+__all__ = [
+    "SceneNotFoundError",
+    "SceneRepository",
+    "InMemorySceneRepository",
+    "FirestoreSceneRepository",
+]
 
 
 # ---------------------------------------------------------------------------
-# Exceptions
+# Abstract interface (read + write)
 # ---------------------------------------------------------------------------
 
-class SceneNotFoundError(Exception):
-    """Raised when a requested scene_id does not exist in the store."""
+class SceneRepository(SceneReadRepository):
+    """Full read+write interface for Scene persistence.
 
+    Extends SceneReadRepository (get, get_by_bundle_id) with write methods.
+    Implementations must be thread-safe.
 
-# ---------------------------------------------------------------------------
-# Abstract interface
-# ---------------------------------------------------------------------------
-
-class SceneRepository(ABC):
-    """Interface for Scene persistence. Implementations must be thread-safe."""
-
-    @abstractmethod
-    def get(self, scene_id: str) -> Scene:
-        """Return the Scene with the given scene_id.
-
-        Raises SceneNotFoundError if not found.
-        """
+    api-public uses only SceneReadRepository; api-internal uses SceneRepository.
+    """
 
     @abstractmethod
     def create(self, scene: Scene) -> Scene:
@@ -76,14 +90,6 @@ class SceneRepository(ABC):
         Raises InvalidTransitionError if the transition is not allowed.
         """
 
-    @abstractmethod
-    def get_by_bundle_id(self, bundle_id: str) -> Optional[Scene]:
-        """Return the Scene whose bundle_id matches, or None if not found.
-
-        bundle_id is the iOS-generated UUIDv4 stored on the Scene at ingest
-        time. Different from scene_id (the ingester's UUID for the job).
-        """
-
 
 # ---------------------------------------------------------------------------
 # In-memory implementation (tests)
@@ -98,7 +104,6 @@ class InMemorySceneRepository(SceneRepository):
     def get(self, scene_id: str) -> Scene:
         if scene_id not in self._store:
             raise SceneNotFoundError(f"Scene not found: {scene_id!r}")
-        # Return a deep copy so callers can't mutate stored state by accident.
         return copy.deepcopy(self._store[scene_id])
 
     def create(self, scene: Scene) -> Scene:
@@ -141,85 +146,18 @@ class InMemorySceneRepository(SceneRepository):
 # Firestore implementation (production)
 # ---------------------------------------------------------------------------
 
-class FirestoreSceneRepository(SceneRepository):
+class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
     """Firestore-backed Scene repository.
 
-    Collection: 'scenes'. Document id = scene_id.
+    Extends FirestoreSceneReadRepository (api-core) to inherit _db, _doc_ref,
+    _from_doc, get, and get_by_bundle_id. Adds create() and update_status().
 
-    All Firestore types are fully encapsulated here. The rest of the codebase
-    never sees a Firestore DocumentSnapshot, DocumentReference, or Transaction.
-
-    google.cloud.firestore is imported lazily so that importing this module in
-    a test environment (no GCP credentials, library may not be installed) is
-    safe — provided FirestoreSceneRepository is never instantiated.
+    Construction signature: FirestoreSceneRepository(project=None).
     """
 
-    COLLECTION = "scenes"
-
     def __init__(self, project: Optional[str] = None) -> None:
-        from google.cloud import firestore as _fs  # deferred
-
-        self._db = _fs.Client(project=project)
-
-    # ------------------------------------------------------------------
-    # Serialization helpers
-    # ------------------------------------------------------------------
-
-    def _doc_ref(self, scene_id: str):
-        return self._db.collection(self.COLLECTION).document(scene_id)
-
-    @staticmethod
-    def _from_doc(doc) -> Scene:
-        """Deserialize a Firestore DocumentSnapshot into a Scene."""
-        from scene import DeviceIdSource, SceneStatus
-
-        data = doc.to_dict()
-        return Scene(
-            scene_id=doc.id,
-            device_id=data["device_id"],
-            device_id_source=DeviceIdSource(data["device_id_source"]),
-            status=SceneStatus(data["status"]),
-            bundle_uri=data["bundle_uri"],
-            created_at=data["created_at"],
-            updated_at=data["updated_at"],
-            result_uri=data.get("result_uri"),
-            attempt_count=data.get("attempt_count", 0),
-            last_error=data.get("last_error"),
-            bundle_id=data.get("bundle_id"),
-            user_id=data.get("user_id"),
-            missing_paths=data.get("missing_paths"),
-        )
-
-    @staticmethod
-    def _to_dict(scene: Scene) -> dict:
-        """Serialize a Scene to a Firestore-compatible dict.
-
-        scene_id is stored as the document id, not as a field.
-        """
-        return {
-            "device_id": scene.device_id,
-            "device_id_source": scene.device_id_source.value,
-            "status": scene.status.value,
-            "bundle_uri": scene.bundle_uri,
-            "created_at": scene.created_at,
-            "updated_at": scene.updated_at,
-            "result_uri": scene.result_uri,
-            "attempt_count": scene.attempt_count,
-            "last_error": scene.last_error,
-            "bundle_id": scene.bundle_id,
-            "user_id": scene.user_id,
-            "missing_paths": scene.missing_paths,
-        }
-
-    # ------------------------------------------------------------------
-    # SceneRepository interface
-    # ------------------------------------------------------------------
-
-    def get(self, scene_id: str) -> Scene:
-        doc = self._doc_ref(scene_id).get()
-        if not doc.exists:
-            raise SceneNotFoundError(f"Scene not found: {scene_id!r}")
-        return self._from_doc(doc)
+        # FirestoreSceneReadRepository.__init__ initialises self._db.
+        super().__init__(project=project)
 
     def create(self, scene: Scene) -> Scene:
         from google.api_core.exceptions import AlreadyExists
@@ -274,13 +212,23 @@ class FirestoreSceneRepository(SceneRepository):
 
         return _run(self._db.transaction(), ref)
 
-    def get_by_bundle_id(self, bundle_id: str) -> Optional[Scene]:
-        docs = (
-            self._db.collection(self.COLLECTION)
-            .where("bundle_id", "==", bundle_id)
-            .limit(1)
-            .stream()
-        )
-        for doc in docs:
-            return self._from_doc(doc)
-        return None
+    @staticmethod
+    def _to_dict(scene: Scene) -> dict:
+        """Serialize a Scene to a Firestore-compatible dict.
+
+        scene_id is stored as the document id, not as a field.
+        """
+        return {
+            "device_id": scene.device_id,
+            "device_id_source": scene.device_id_source.value,
+            "status": scene.status.value,
+            "bundle_uri": scene.bundle_uri,
+            "created_at": scene.created_at,
+            "updated_at": scene.updated_at,
+            "result_uri": scene.result_uri,
+            "attempt_count": scene.attempt_count,
+            "last_error": scene.last_error,
+            "bundle_id": scene.bundle_id,
+            "user_id": scene.user_id,
+            "missing_paths": scene.missing_paths,
+        }

@@ -13,6 +13,11 @@ Endpoints:
       Firebase ID token via Authorization: Bearer header. Returns
       [{relative_path, session_uri}] for the iOS client to upload against.
 
+  GET  /scenes/by-bundle/{bundle_id}
+      Read scene state for a bundle the caller owns. Auth: Firebase ID token.
+      Returns scene status, result_uri, missing_paths, and timestamps. The
+      smoke tool polls this endpoint after upload to observe state transitions.
+
 Run locally (from services/api-public/):
   uvicorn server:app --reload --port 8080
 
@@ -20,8 +25,8 @@ Environment variables:
   ENVIRONMENT         — set to "production" to enable startup env-var
                         validation. Unset or any other value → silent
                         in-memory fallbacks (local dev / tests).
-  FIRESTORE_PROJECT   — GCP project for Firestore upload_sessions collection;
-                        absent → in-memory UploadSessionRepository
+  FIRESTORE_PROJECT   — GCP project for Firestore upload_sessions and scenes
+                        collections; absent → in-memory repositories
   GCS_CAPTURES_BUCKET — bucket name for capture blobs; used when minting
                         GCS resumable session URIs
 
@@ -56,6 +61,11 @@ from roomstudio_api_core.upload_session_repo import (  # noqa: E402
     InMemoryUploadSessionRepository,
     validate_manifest_path,
     gcs_mint_resumable_uri,
+)
+from roomstudio_api_core.scene_read_repo import (  # noqa: E402
+    SceneReadRepository,
+    InMemorySceneReadRepository,
+    SceneNotFoundError,
 )
 
 
@@ -117,6 +127,7 @@ class UploadSessionEntry(BaseModel):
 
 _token_verifier: Optional[TokenVerifier] = None
 _upload_session_repo: Optional[UploadSessionRepository] = None
+_scene_read_repo: Optional[SceneReadRepository] = None
 
 _GCS_CAPTURES_BUCKET: str = os.environ.get("GCS_CAPTURES_BUCKET", "roomstudio-captures")
 
@@ -149,6 +160,20 @@ def _get_upload_session_repo() -> UploadSessionRepository:
             _upload_session_repo = InMemoryUploadSessionRepository()
             logger.info("FIRESTORE_PROJECT unset — using in-memory UploadSessionRepository")
     return _upload_session_repo
+
+
+def _get_scene_read_repo() -> SceneReadRepository:
+    global _scene_read_repo
+    if _scene_read_repo is None:
+        project = os.environ.get("FIRESTORE_PROJECT")
+        if project:
+            from roomstudio_api_core.scene_read_repo import FirestoreSceneReadRepository
+            _scene_read_repo = FirestoreSceneReadRepository(project=project)
+            logger.info("Using Firestore SceneReadRepository")
+        else:
+            _scene_read_repo = InMemorySceneReadRepository()
+            logger.info("FIRESTORE_PROJECT unset — using in-memory SceneReadRepository")
+    return _scene_read_repo
 
 
 # ---------------------------------------------------------------------------
@@ -263,3 +288,97 @@ async def create_upload_session(
         )
 
     return JSONResponse(status_code=200, content=session_entries)
+
+
+@app.get(
+    "/scenes/by-bundle/{bundle_id}",
+    summary="Read scene state for a bundle the caller owns",
+)
+async def get_scene_by_bundle(
+    bundle_id: str,
+    authorization: str = Header(...),
+) -> JSONResponse:
+    """Return the Scene record for bundle_id.
+
+    Auth: Firebase ID token in Authorization: Bearer <token>. The requesting
+    UID must match scene.user_id (ownership check).
+
+    Response (200):
+      {scene_id, bundle_id, status, result_uri, missing_paths, created_at, updated_at}
+
+    status is body-only — a scene in 'failed' or 'failed_incomplete' returns
+    HTTP 200. 404 is reserved for "no scene exists for this bundle_id."
+
+    Errors:
+      400 invalid_bundle_id   — bundle_id is not a UUIDv4
+      401 missing_token       — Authorization header absent or malformed
+      401 invalid_token       — JWT failed verification
+      403 forbidden           — JWT uid does not match scene.user_id
+      403 forbidden           — scene.user_id is None (scene has no owner)
+      404 not_found           — no scene exists for this bundle_id
+    """
+    # 1. Verify Firebase ID token.
+    if not authorization.startswith("Bearer "):
+        return JSONResponse(
+            status_code=401,
+            content={"error": "missing_token", "detail": "Authorization: Bearer <token> required"},
+        )
+    token = authorization[len("Bearer "):]
+    try:
+        user_id = _get_token_verifier().verify(token)
+    except TokenVerificationError as exc:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid_token", "detail": str(exc)},
+        )
+
+    # 2. Validate bundle_id is a UUIDv4.
+    try:
+        val = uuid.UUID(bundle_id, version=4)
+        if str(val) != bundle_id:
+            raise ValueError("not canonical form")
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_bundle_id", "detail": f"{bundle_id!r} is not a UUIDv4"},
+        )
+
+    # 3. Look up the scene.
+    scene_repo = _get_scene_read_repo()
+    scene = scene_repo.get_by_bundle_id(bundle_id)
+    if scene is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "not_found", "detail": f"No scene found for bundle_id {bundle_id!r}"},
+        )
+
+    # 4. Authorization: caller must own the scene.
+    if scene.user_id is None:
+        logger.warning(
+            "Scene %s for bundle_id %s has no user_id — possible ingest bug",
+            scene.scene_id,
+            bundle_id,
+        )
+        return JSONResponse(
+            status_code=403,
+            content={"error": "forbidden", "detail": "scene has no owner"},
+        )
+    if scene.user_id != user_id:
+        return JSONResponse(
+            status_code=403,
+            content={"error": "forbidden", "detail": "bundle_id is owned by a different user"},
+        )
+
+    # 5. Return scene state. last_error is server-side only — excluded per decision 0019.
+    return JSONResponse(
+        status_code=200,
+        content={
+            "scene_id": scene.scene_id,
+            "bundle_id": scene.bundle_id,
+            "status": scene.status.value,
+            "result_uri": scene.result_uri,
+            "missing_paths": scene.missing_paths,
+            "created_at": scene.created_at.isoformat(),
+            "updated_at": scene.updated_at.isoformat(),
+        },
+    )
