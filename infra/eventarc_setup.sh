@@ -2,18 +2,22 @@
 # infra/eventarc_setup.sh — Eventarc trigger + lifecycle/TTL config for iOS upload path
 #
 # Run once per environment to wire up:
-#   (1) Eventarc trigger: GCS finalize on captures/*/bundle.pb → ingester /ingest/eventarc
+#   (1) Eventarc trigger: GCS finalize on captures/*/bundle.pb → api-internal /ingest/eventarc
 #   (2) Cloud Storage lifecycle rule: delete orphan captures after 24h
-#   (3) Firestore TTL on upload_sessions (7 days) and scenes in failed_incomplete (7 days)
+#   (3) Firestore TTL on upload_sessions (7 days)
 #
 # Prerequisites:
 #   - gcloud authenticated with an account that has roles/eventarc.admin,
 #     roles/storage.admin, roles/datastore.owner on the roomstudio project
-#   - The ingester Cloud Run service is already deployed (deploy_api.sh)
+#   - api-internal Cloud Run service is already deployed (deploy_api_internal.sh)
 #   - GCS bucket GCS_CAPTURES_BUCKET already exists
 #
 # Usage (from repo root):
-#   ./infra/eventarc_setup.sh
+#   ./infra/eventarc_setup.sh                  # run all three sections
+#   ./infra/eventarc_setup.sh --lifecycle-only  # section (2) only
+#   ./infra/eventarc_setup.sh --ttl-only        # section (3) only
+#   ./infra/eventarc_setup.sh --trigger-only    # section (1) only
+#   Flags can be combined: --lifecycle-only --ttl-only
 #
 # Re-running is safe: gcloud commands are idempotent (update-or-create).
 
@@ -21,11 +25,33 @@ set -euo pipefail
 
 PROJECT="roomstudio"
 REGION="asia-southeast1"
-INGESTER_SERVICE="roomstudio-api"
+INGESTER_SERVICE="api-internal"
 GCS_CAPTURES_BUCKET="roomstudio-captures"
 TRIGGER_NAME="captures-bundle-pb-finalized"
-INGESTER_SA="roomstudio-api@${PROJECT}.iam.gserviceaccount.com"
+INGESTER_SA="api-internal-runtime@${PROJECT}.iam.gserviceaccount.com"
 
+# ── Parse flags ───────────────────────────────────────────────────────────────
+RUN_TRIGGER=true
+RUN_LIFECYCLE=true
+RUN_TTL=true
+
+if [[ "$#" -gt 0 ]]; then
+  RUN_TRIGGER=false
+  RUN_LIFECYCLE=false
+  RUN_TTL=false
+  for arg in "$@"; do
+    case "$arg" in
+      --trigger-only)    RUN_TRIGGER=true ;;
+      --lifecycle-only)  RUN_LIFECYCLE=true ;;
+      --ttl-only)        RUN_TTL=true ;;
+      *) echo "Unknown argument: $arg" >&2
+         echo "Usage: $0 [--trigger-only] [--lifecycle-only] [--ttl-only]" >&2
+         exit 1 ;;
+    esac
+  done
+fi
+
+if $RUN_TRIGGER; then
 echo "=== (1) Eventarc trigger: GCS finalize on captures/*/bundle.pb ==="
 
 # Grant roles/run.invoker to the Eventarc SA before creating the trigger.
@@ -56,8 +82,10 @@ gcloud eventarc triggers create "${TRIGGER_NAME}" \
        --destination-run-path="/ingest/eventarc"
 
 echo "Eventarc trigger '${TRIGGER_NAME}' configured."
-
 echo ""
+fi  # RUN_TRIGGER
+
+if $RUN_LIFECYCLE; then
 echo "=== (2) Cloud Storage lifecycle rule: delete orphan captures after 24h ==="
 
 # Lifecycle rule: delete all objects under captures/ that are older than 1 day
@@ -91,17 +119,16 @@ EOF
 gsutil lifecycle set /tmp/lifecycle_rule.json "gs://${GCS_CAPTURES_BUCKET}"
 echo "Lifecycle rule applied to gs://${GCS_CAPTURES_BUCKET}."
 rm /tmp/lifecycle_rule.json
-
 echo ""
+fi  # RUN_LIFECYCLE
+
+if $RUN_TTL; then
 echo "=== (3) Firestore TTL policies ==="
 # Firestore TTL policies are set on a per-collection-group basis via the
 # Firestore console or REST API. The gcloud CLI doesn't expose TTL management
 # directly; use the console or the REST API below.
 #
 # Collection: upload_sessions — TTL on field 'created_at', 7 days (604800s).
-# Collection: scenes — Firestore does not support conditional TTL (e.g. only
-#   for failed_incomplete status). Instead, the cleanup Cloud Function
-#   (future work) will delete scenes older than 7 days in failed_incomplete.
 #
 # To set TTL via REST (requires roles/datastore.owner):
 
@@ -115,8 +142,10 @@ curl -s -X PATCH \
   }' | python3 -m json.tool || echo "TTL set request sent (check Firestore console for status)."
 
 echo ""
+fi  # RUN_TTL
+
 echo "=== Done ==="
 echo "Verify in GCP console:"
-echo "  Eventarc → Triggers → ${TRIGGER_NAME}"
-echo "  Cloud Storage → gs://${GCS_CAPTURES_BUCKET} → Lifecycle"
-echo "  Firestore → upload_sessions → TTL settings"
+$RUN_TRIGGER   && echo "  Eventarc → Triggers → ${TRIGGER_NAME}"
+$RUN_LIFECYCLE && echo "  Cloud Storage → gs://${GCS_CAPTURES_BUCKET} → Lifecycle"
+$RUN_TTL       && echo "  Firestore → upload_sessions → TTL settings"
