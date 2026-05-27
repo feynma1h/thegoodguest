@@ -500,6 +500,7 @@ def _handle_failed_incomplete(
             bundle_uri=bundle_gcs_uri,
         )
         scene.bundle_id = bundle_id
+        scene.user_id = _get_upload_session_repo().get_user_id(bundle_id)
         repo.create(scene)
         repo.update_status(
             scene_id,
