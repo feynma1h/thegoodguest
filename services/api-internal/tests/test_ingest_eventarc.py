@@ -331,6 +331,40 @@ class TestExistenceCheck:
         assert scenes[0].status == SceneStatus.FAILED_INCOMPLETE
         assert scenes[0].missing_paths
 
+    def test_failed_incomplete_scene_has_user_id_from_upload_session(
+        self, client: TestClient
+    ) -> None:
+        """Scene created on the failed-incomplete branch must carry user_id from the
+        upload session, not be left as None (decision 0022)."""
+        bundle_id = str(uuid.uuid4())
+        bundle_uri = f"gs://{_BUCKET}/captures/{bundle_id}/bundle.pb"
+        bundle_bytes = _make_bundle(frame_count=1)
+
+        upload_repo = InMemoryUploadSessionRepository()
+        upload_repo._store[bundle_id] = {
+            "user_id": "uid-from-session-42",
+            "fcm_token": None,
+            "manifest": [],
+            "session_entries": [],
+            "created_at": None,
+        }
+        repo = InMemorySceneRepository()
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", return_value=False),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()),
+            patch.object(server, "_fcm_notifier", NullFcmNotifier()),
+            patch.object(server, "_upload_session_repo", upload_repo),
+        ):
+            resp = client.post("/ingest", json={"bundle_gcs_uri": bundle_uri})
+
+        assert resp.json()["status"] == "failed_incomplete"
+        scenes = list(repo._store.values())
+        assert len(scenes) == 1
+        assert scenes[0].user_id == "uid-from-session-42"
+
     def test_fcm_notifier_called_when_upload_incomplete(self, client: TestClient) -> None:
         bundle_id = str(uuid.uuid4())
         bundle_uri = f"gs://{_BUCKET}/captures/{bundle_id}/bundle.pb"
