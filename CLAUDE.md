@@ -75,6 +75,8 @@ outputs/                          gitignored; generated artifacts
 - **Deploy runbook preconditions landed**: `infra/eventarc_setup.sh` corrected — `INGESTER_SERVICE` changed from `roomstudio-api` to `api-internal`, `INGESTER_SA` changed to `api-internal-runtime@roomstudio.iam.gserviceaccount.com` (both were stale post-split). `services/api/` confirmed local-only (only gitignored `__pycache__/`) and removed. `upload_sessions.created_at` verified correct (`datetime.now(tz=timezone.utc)`) — TTL semantics match intent, no code change needed.
 - **`infra/RUNBOOK.md` written**: 8-phase deploy runbook (Preflight + Phases 1–8) for the two-service iOS upload path (decisions 0014–0020). `eventarc_setup.sh` gains `--lifecycle-only`, `--ttl-only`, `--trigger-only` flags for per-phase invocation.
 - **`GET /scenes/by-bundle/{bundle_id}` on api-public built** (board item 1, decision 0019). `SceneReadRepository` + `InMemorySceneReadRepository` + `FirestoreSceneReadRepository` in `packages/api-core/`. Scene model moved to `packages/api-core/roomstudio_api_core/scene.py`; `services/api-internal/scene.py` is now a re-export shim. `SceneRepository` in api-internal extends `SceneReadRepository`; `FirestoreSceneRepository` extends `FirestoreSceneReadRepository` (no duplication of read logic). 233 tests across all packages, all green (25 schema + 48 api-core + 40 api-public + 93 api-internal + 27 smoke tool). Runbook Phase 0 preflight gate now satisfied.
+- **Phase 1 deploy infrastructure is live.** GCS lifecycle rule on `gs://roomstudio-captures` (delete after age=1, prefix `captures/`) is configured. Firestore TTL policy is set on `upload_sessions.created_at` (state `ACTIVE`). Automatic single-field index on `scenes.bundle_id` is confirmed unexempt. `infra/RUNBOOK.md` Phase 0 preflight passes (v2 refinements drafted but not yet landed — board item 2).
+- **Firebase Auth is configured for the project and usable from the smoke tool.** Firebase added to the GCP project (previously GCP-native only). Web app `roomstudio-smoke-test` registered (`appId 1:502805861152:web:095d7e3b331e0e0ddcbd45`); anonymous sign-in provider enabled; `firebase.googleapis.com` and Identity Toolkit enabled. `tools/upload_test_bundle.py` can obtain valid `idToken` credentials against the real project. ADC quota project set to `roomstudio`.
 
 ## What does NOT work / what we're deliberately not doing
 
@@ -85,6 +87,9 @@ outputs/                          gitignored; generated artifacts
 - **Pre-launch gaps (nine gaps + one audit item, categorized).** See `docs/decisions/0015` and `0018` for full list and un-defer triggers. Abuse-surface (original 0015 set, trigger: first non-developer user): (a) TOCTOU race on `bundle_id` ownership in `/upload_session`; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` optional, defaults to 0. Contract-shape (from pass 3 + pass 4 recon, trigger: iOS development or web app build begins): (F1) `expires_at` not surfaced in `/upload_session` response; (F2) `X-Upload-Content-Type` hardcoded to `application/octet-stream` server-side; (F3) no semantic manifest validation (unknown extensions, tier/path consistency); (F4) `result_url` presigning in `GET /scenes/by-bundle/{bundle_id}` responses (raw `gs://` returned today). Production-hygiene (trigger: launch): (F5) no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`; (F6) no TTL on Firestore `scenes` collection. Audit item (during launch hardening): verify perception-obj runtime SA identity and storage IAM. All nine gaps close in the same launch-hardening pass.
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
+- **api-internal Cloud Run service has no working revision.** Revision `api-internal-00001-5zx` exits at import time due to a protobuf gencode/runtime version mismatch (see `docs/decisions/0021`). No traffic has ever been served by the new service. Fix is board item 1.
+- **Phase 2 onward of the runbook is blocked on the protobuf fix.** api-public not yet deployed. The pre-split `roomstudio-api` service has not been touched by this deploy; pre-existing Eventarc triggers (if any) still point at it.
+- **Test suite does not catch container-import failures.** The 233 tests run against the local Python env; a CI smoke that runs imports inside the built image is missing. Fix is board item 3.
 
 ## Conventions
 
@@ -130,17 +135,35 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-**1 — Execute the deploy runbook** (`infra/RUNBOOK.md`)
+**1 — Fix protobuf gencode/runtime mismatch in api-internal (and api-public — same risk, same image base)**
 
-All preconditions met: `eventarc_setup.sh` patched, `services/api/` removed,
-`created_at` verified, `GET /scenes/by-bundle/{bundle_id}` built (board item 1 done).
-`tools/upload_test_bundle.py` is already written and runs in Phase 7. Phase 0 preflight
-should pass on a clean environment. After runbook is green, iOS code can start.
+See `docs/decisions/0021`. Pin the protobuf runtime in the deploy images to match the
+gencode version embedded in `capture_bundle_pb2.py` (currently 7.35.0; the runtime
+constraint is `protobuf>=5.27` in the gencode header but the image installed `6.33.6`,
+which violates the runtime guarantee). Apply the same fix to api-public's image — same
+gencode is imported there too. Rebuild both images; redeploy api-internal (new revision
+on existing service, so `--no-traffic` will work as the runbook's Phase 2 originally
+intended); resume the runbook from Phase 2.
 
-Note: `tools/smoke_test_e2e.py` (legacy `/ingest` smoke test) is unchanged: still
-returns 403, not wired into CI, fix or replace before reusing.
+**2 — Land the `infra/RUNBOOK.md` v2 PR**
 
-**2 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
+Eight v2 findings drafted from the first execution. Scope of the PR: corrected Phase 0a
+IAM check (effective-permission test, not named-role filter); fully specified Phase 0b
+Firebase preconditions (project enablement, web-app registration, API key retrieval,
+anonymous-sign-in provider check, ADC quota-project setup); Phase 0h rewritten for
+lazy-load `/ready` semantics; Phase 2/3 branching for new-service vs. existing-service
+deploys; new "container-failed-to-start = halt" branch in Phase 2; resuming-the-runbook
+appendix.
+
+**3 — Add container-image protobuf-import smoke to CI**
+
+The 233 green tests would have caught the protobuf bug if any of them ran inside the
+built image. Add a Cloud Build step that does `docker run --rm <image> python -c "from
+roomstudio_schemas import CaptureBundle"` before pushing, OR a step that runs the
+existing test suite inside the image. Decision between the two depends on how heavy the
+test deps are relative to image size; the import smoke is the minimum bar.
+
+**4 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
 
 Decision 0018 extended to nine gaps: original three abuse-surface gaps + F1/F2/F3/F4
 contract-shape gaps + F5 (no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`)
@@ -149,7 +172,7 @@ runtime SA identity and storage IAM. Abuse-surface trigger: first non-developer 
 Contract-shape trigger: iOS development or web app build begins. Production-hygiene and
 audit: launch hardening. All nine gaps close in the same launch-hardening pass.
 
-**3 — test_data/photos/ privacy review** (deferred, low urgency)
+**5 — test_data/photos/ privacy review** (deferred, low urgency)
 
 9 HEIC photos of a real room are tracked by git and used by
 `tools/build_test_bundle.py` for local synthesis testing. Review whether they
