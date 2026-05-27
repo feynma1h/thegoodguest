@@ -17,6 +17,21 @@ steps:
       - services/api-public/Dockerfile
       - .   # repo root is the build context
 
+  # Smoke-test: verify protobuf gencode/runtime compatibility before pushing.
+  # Catches the class of failure in docs/decisions/0021 (layer-order bug that
+  # let proto-plus downgrade protobuf back to 6.x after the force-reinstall).
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - run
+      - --rm
+      - '${_IMAGE_URI}'
+      - python
+      - -c
+      - |
+        from roomstudio_schemas import CaptureBundle, CaptureTier
+        from roomstudio_api_core.scene import Scene
+        print("import smoke: OK")
+
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', '${_IMAGE_URI}']
 
