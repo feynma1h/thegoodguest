@@ -331,20 +331,36 @@ section individually (`--lifecycle-only` or `--ttl-only`) to isolate and fix.
 ./infra/deploy_api_internal.sh
 ```
 
-The script takes ~10 minutes (Cloud Build + image push). It prints the revision URL when
-done. Record it:
+The script takes ~10 minutes (Cloud Build + image push). Copy-paste the printed export line
+to record the candidate URL in your shell:
 
 ```bash
-API_INTERNAL_REVISION_URL="<printed revision URL>"
+# copy-paste this from script output — do not type the URL by hand:
+export API_INTERNAL_REVISION_URL=https://candidate---api-internal-<hash>-as.a.run.app
 ```
 
 **Expect:**
 
-The script ends with output like:
+**Subsequent deploy** (the normal case — service already exists):
 ```
-Service URL:  https://api-internal-<hash>-as.a.run.app (no traffic yet — --no-traffic flag)
-Revision URL: https://api-internal-<revision>-as.a.run.app
+[deploy] api-internal exists; deploying candidate revision held at 0% traffic. Promote in Phase 5.
+...
+Service URL: https://api-internal-<hash>-as.a.run.app
+export API_INTERNAL_REVISION_URL=https://candidate---api-internal-<hash>-as.a.run.app
 ```
+
+**First-ever deploy** (service did not exist — happens on initial setup or after a full teardown):
+```
+[deploy] WARNING: api-internal has no prior revision. --no-traffic cannot be honored; the new
+revision serves 100% on creation. Phase 4 smoke runs against a live revision — acceptable,
+no prior traffic to protect.
+...
+Service URL: https://api-internal-<hash>-as.a.run.app
+export API_INTERNAL_REVISION_URL=https://candidate---api-internal-<hash>-as.a.run.app
+```
+
+In both cases the export line is printed and Phase 4 smoke applies. The difference is
+whether the candidate revision is at 0% traffic (subsequent deploy) or 100% (first-ever).
 
 Health check:
 ```bash
@@ -372,13 +388,15 @@ safe — just fix and redeploy.
 ./infra/deploy_api_public.sh
 ```
 
-Record the revision URL:
+Copy-paste the printed export line to record the candidate URL in your shell:
 
 ```bash
-API_PUBLIC_REVISION_URL="<printed revision URL>"
+# copy-paste this from script output — do not type the URL by hand:
+export API_PUBLIC_REVISION_URL=https://candidate---api-public-<hash>-as.a.run.app
 ```
 
-**Expect:** same shape as Phase 2. Health check:
+**Expect:** same two-case shape as Phase 2 (subsequent deploy: held at 0%; first-ever deploy:
+100% on creation with a WARNING line). In both cases the export line is printed. Health check:
 
 ```bash
 curl -s "${API_PUBLIC_REVISION_URL}/health"
@@ -391,9 +409,10 @@ curl -s "${API_PUBLIC_REVISION_URL}/health"
 
 ## Phase 4 — Revision-URL smoke checks
 
-These checks verify auth wiring and platform configuration against the revision URLs
-**before traffic is flipped**. At this point, production traffic is still on the old
-revisions (or the service has no prior traffic).
+These checks verify auth wiring and platform configuration against the candidate revision
+URLs **before traffic is flipped**. At this point, production traffic is still on the old
+revisions (or, on a first-ever deploy, the candidate revision is already serving 100%;
+there is no prior revision to protect, and the revision-URL smoke below still applies).
 
 ### 4a. api-public: Firebase verifier is wired
 
