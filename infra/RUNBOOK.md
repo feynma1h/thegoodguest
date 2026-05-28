@@ -27,6 +27,13 @@ Phase 0 is a hard gate: any preflight failure halts the entire runbook.
 
 **Halt on any failure. Do not proceed to Phase 1 until all checks below pass.**
 
+**Resumability:** this runbook is safe to re-run from the top after a mid-run failure.
+Phases 1 and 6 are explicitly idempotent — re-run the failing section without concern.
+Phases 4 and 7 are read-only and re-runnable at any time. Phases 2 and 3 create a new
+Cloud Run revision on each run; revision accumulation is harmless and cleaned up in
+Phase 8a. Phase 5 (traffic flip) is the exception: if it fails mid-run, do not re-run
+naively — follow the recovery guidance in Phase 5's block.
+
 ### 0a. Operator environment: gcloud auth
 
 ```bash
@@ -153,27 +160,64 @@ through step 6 and re-check.
 ### 0h. Infrastructure preconditions: perception-obj live and ready
 
 ```bash
-gcloud run services describe perception-obj \
+DESCRIBE_OUT=$(gcloud run services describe perception-obj \
   --region=asia-southeast1 --project=roomstudio \
-  --format='value(status.conditions[0].type,status.conditions[0].status)'
-# Expect: Ready True
+  --format='value(status.conditions[0].type,status.conditions[0].status)' 2>/dev/null)
+if echo "${DESCRIBE_OUT}" | grep -qE "^Ready[[:space:]]+True"; then
+  echo "OK: perception-obj Cloud Run revision is Ready."
+else
+  echo "FAIL: perception-obj is not ready (got: '${DESCRIBE_OUT}')."
+  if [ -z "${DESCRIBE_OUT}" ]; then
+    echo "  Service does not exist. Fix perception-obj first; this runbook requires it."
+  else
+    echo "  A container revision failed to start (dead-at-import is the common cause)."
+    echo "  Check startup logs:"
+    echo "  gcloud logging read 'resource.type=\"cloud_run_revision\" resource.labels.service_name=\"perception-obj\" severity>=ERROR' --project=roomstudio --limit=50"
+  fi
+  exit 1
+fi
+```
 
+```bash
 PERCEPTION_URL=$(gcloud run services describe perception-obj \
   --region=asia-southeast1 --project=roomstudio \
   --format='value(status.url)')
-curl -s "${PERCEPTION_URL}/ready" | python3 -m json.tool
-# Expect: {"status": "loaded", ...} with HTTP 200.
+
 # (perception-obj is --allow-unauthenticated; no auth token needed for /ready)
+READY_DEADLINE=$(( $(date +%s) + 600 ))
+while true; do
+  code=$(curl -s -o /tmp/ready_body -w "%{http_code}" "${PERCEPTION_URL}/ready")
+  if [ "${code}" = "200" ]; then
+    LOADED_COUNT=$(grep -o '"loaded"' /tmp/ready_body | wc -l | tr -d ' ')
+    if [ "${LOADED_COUNT}" -ge 2 ]; then
+      echo "OK: perception-obj models loaded."
+      python3 -m json.tool /tmp/ready_body
+      break
+    else
+      echo "FAIL: perception-obj returned 200 but sam3/sam3d are not both 'loaded'."
+      python3 -m json.tool /tmp/ready_body
+      exit 1
+    fi
+  elif [ "${code}" = "503" ]; then
+    if [ "$(date +%s)" -ge "${READY_DEADLINE}" ]; then
+      echo "FAIL: perception-obj still returning 503 after 10 minutes."
+      echo "  Check perception-obj logs before continuing."
+      python3 -m json.tool /tmp/ready_body
+      exit 1
+    fi
+    echo "  /ready returned 503 — models still loading. Waiting 2 minutes..."
+    sleep 120
+  elif [ "${code}" = "500" ]; then
+    echo "FAIL: perception-obj /ready returned 500 — a model failed to load."
+    echo "  Do not proceed — Cloud Tasks will enqueue perception work and it will fail immediately."
+    python3 -m json.tool /tmp/ready_body
+    exit 1
+  else
+    echo "FAIL: perception-obj /ready returned '${code}' — connection failure or service unreachable."
+    exit 1
+  fi
+done
 ```
-
-**If HTTP 503:** models are still loading. Wait 2–3 minutes and retry. If still 503
-after 10 minutes, check perception-obj logs before continuing.
-
-**If HTTP 500:** a model failed to load. Do not proceed — Cloud Tasks will enqueue
-perception work and it will fail immediately.
-
-**If the service does not exist:** the deploy runbook does not deploy perception-obj.
-Fix perception-obj first; this runbook requires it to be live.
 
 ### 0i. Infrastructure preconditions: Cloud Tasks queue
 
@@ -464,6 +508,14 @@ echo "api-internal: ${API_INTERNAL_URL}"
 
 **Rollback (if the traffic flip itself fails or immediate issues appear):**
 
+If Phase 5 fails between the api-internal flip and the api-public flip (api-internal
+is on the new revision, api-public is still on the old): this split state is safe.
+No consumer calls api-internal until the Eventarc trigger is created in Phase 6, so
+nothing is affected. The correct recovery is to complete the api-public forward flip —
+re-running `gcloud run services update-traffic api-public --to-latest` is idempotent.
+Do NOT roll api-internal back. The rollback commands below are for the case where both
+services have flipped and a real problem appears.
+
 Cloud Run retains the prior revision. Flip back:
 ```bash
 # Get the prior revision name
@@ -636,6 +688,21 @@ curl -s \
 TTL check returns EXISTS.
 
 ### Failure decision tree
+
+- **Cloud Build succeeds but the Cloud Run revision never becomes healthy (`/health`
+  does not return 200, or `gcloud run services describe` shows the revision unhealthy):**
+  the container failed to start. Read the failed revision's import-time logs:
+  ```bash
+  gcloud logging read \
+    'resource.type="cloud_run_revision" resource.labels.service_name="<service>" severity>=ERROR' \
+    --project=roomstudio --limit=50
+  ```
+  Inspect the first error at container start. First suspects:
+  (a) **Protobuf gencode/runtime `VersionError`** — see decision 0021; root cause was
+  api-core install order in the Dockerfile downgrading protobuf.
+  (b) **`FileNotFoundError` for a missing model or checkpoint path** — the current dead
+  state of `perception-obj` (`/opt/sam3d/checkpoints/hf/pipeline.yaml` not found).
+  Do not proceed to Phases 4–7 until the revision is healthy.
 
 - **Smoke tool fails at `/upload_session` (before any upload):** api-public is broken.
   Roll back api-public traffic to prior revision (Phase 5 rollback). Leave api-internal
