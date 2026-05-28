@@ -90,12 +90,30 @@ git rev-parse HEAD
 grep -n "scenes/by-bundle" services/api-public/server.py
 # Expect: a line matching GET /scenes/by-bundle/{bundle_id}
 
-grep -n "upload_session\|health\|FirebaseTokenVerifier" services/api-public/server.py
-# Expect: /upload_session route, /health route, and FirebaseTokenVerifier all present.
+grep -n "upload_session\|health" services/api-public/server.py
+# Expect: /upload_session route and /health route present.
 ```
 
 **If `scenes/by-bundle` is absent:** board item 1 (`GET /scenes/by-bundle/{bundle_id}`)
 has not been built yet. This runbook cannot proceed.
+
+Trust-boundary check: Firebase verifier must be wired into api-public and must be
+absent from api-internal and api-core (decision 0016: api-internal is IAM-gated only;
+no in-app client auth anywhere on that side of the boundary).
+
+```bash
+grep -q "FirebaseTokenVerifier" services/api-public/server.py \
+  && echo "OK: FirebaseTokenVerifier wired into api-public." \
+  || { echo "FAIL: Firebase verifier not wired into api-public (trust boundary, decision 0016)."; exit 1; }
+
+grep -rq "FirebaseTokenVerifier" services/api-internal/ \
+  && { echo "FAIL: Firebase verifier present in api-internal — trust boundary violation (decision 0016: api-internal is IAM-gated only)."; exit 1; } \
+  || echo "OK: FirebaseTokenVerifier absent from api-internal."
+
+grep -rq "FirebaseTokenVerifier" packages/api-core/ \
+  && { echo "FAIL: Firebase verifier present in api-core — would leak client auth into api-internal via shared import (decision 0016)."; exit 1; } \
+  || echo "OK: FirebaseTokenVerifier absent from api-core."
+```
 
 ### 0e. Code-level preconditions: api-internal
 
