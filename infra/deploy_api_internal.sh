@@ -225,6 +225,23 @@ gcloud builds submit . \
 # ── Step 9: Deploy to Cloud Run ───────────────────────────────────────────────
 echo ""
 echo "=== 9/10: Deploying to Cloud Run ==="
+
+# On first-ever service creation, Cloud Run ignores --no-traffic and promotes the
+# revision to 100% regardless. Pass it only when the service already exists so the
+# candidate revision stays at 0% until Phase 5.
+# Case B (service exists but all revisions are unhealthy, e.g. api-internal-00001
+# protobuf failure): we still pass --no-traffic so no untested revision is auto-promoted.
+# Whether gcloud 567.0.0 honors --no-traffic over a fully-failed service is unverified
+# from history; treat Phase 4 smoke as the safety check regardless.
+TRAFFIC_FLAGS=()
+if gcloud run services describe "${SERVICE_NAME}" \
+        --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    TRAFFIC_FLAGS=(--no-traffic)
+    echo "[deploy] ${SERVICE_NAME} exists; deploying candidate revision held at 0% traffic. Promote in Phase 5."
+else
+    echo "[deploy] WARNING: ${SERVICE_NAME} has no prior revision. --no-traffic cannot be honored; the new revision serves 100% on creation. Phase 4 smoke runs against a live revision — acceptable, no prior traffic to protect."
+fi
+
 gcloud run deploy "${SERVICE_NAME}" \
     --image="${IMAGE_URI}" \
     --region="${REGION}" \
@@ -241,31 +258,34 @@ gcloud run deploy "${SERVICE_NAME}" \
     --service-account="${RUNTIME_SA}" \
     --env-vars-file="infra/api-internal.env.yaml" \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
-    --no-traffic
+    "${TRAFFIC_FLAGS[@]}" --tag=candidate
 
-# ── Step 10: Print revision URL ───────────────────────────────────────────────
+# ── Step 10: Print candidate revision URL ─────────────────────────────────────
 echo ""
 echo "=== 10/10: Done ==="
-REVISION="$(gcloud run revisions list \
-    --service="${SERVICE_NAME}" \
-    --region="${REGION}" \
-    --project="${PROJECT_ID}" \
-    --format='value(name)' \
-    --limit=1)"
-REVISION_URL="$(gcloud run revisions describe "${REVISION}" \
-    --region="${REGION}" \
-    --project="${PROJECT_ID}" \
-    --format='value(status.url)' 2>/dev/null || echo '(unavailable)')"
 SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" \
     --region="${REGION}" --project="${PROJECT_ID}" \
     --format='value(status.url)')"
+CANDIDATE_URL="$(gcloud run services describe "${SERVICE_NAME}" \
+    --region="${REGION}" --project="${PROJECT_ID}" \
+    --format='json(status.traffic)' \
+    | jq -r '.status.traffic[] | select(.tag == "candidate") | .url // empty')"
+
+if [[ -z "${CANDIDATE_URL}" ]]; then
+    echo "ERROR: could not resolve candidate revision URL from --tag=candidate traffic entry."
+    echo "Service describe output:"
+    gcloud run services describe "${SERVICE_NAME}" \
+        --region="${REGION}" --project="${PROJECT_ID}" \
+        --format='yaml(status.traffic)'
+    exit 1
+fi
 
 echo ""
-echo "Service URL:  ${SERVICE_URL} (no traffic yet — --no-traffic flag)"
-echo "Revision URL: ${REVISION_URL}"
+echo "Service URL: ${SERVICE_URL}"
+echo "export API_INTERNAL_REVISION_URL=${CANDIDATE_URL}"
 echo ""
-echo "Smoke test the revision, then flip traffic, then create Eventarc trigger:"
-echo "  curl ${REVISION_URL}/health"
+echo "Smoke test the candidate revision, then flip traffic, then create Eventarc trigger:"
+echo "  curl \${API_INTERNAL_REVISION_URL}/health"
 echo "  gcloud run services update-traffic ${SERVICE_NAME} --to-latest \\"
 echo "    --region=${REGION} --project=${PROJECT_ID}"
-echo "  # then run infra/eventarc_setup.sh to create the trigger against ${REVISION_URL}"
+echo "  # then run infra/eventarc_setup.sh to create the trigger against \${API_INTERNAL_REVISION_URL}"
