@@ -2,13 +2,26 @@
 # infra/eventarc_setup.sh — Eventarc trigger + lifecycle/TTL config for iOS upload path
 #
 # Run once per environment to wire up:
-#   (1) Eventarc trigger: GCS finalize on captures/*/bundle.pb → api-internal /ingest/eventarc
+#   (1) Eventarc trigger: GCS finalize on roomstudio-captures → api-internal /ingest/eventarc
+#       The trigger is bucket-wide (GCS Eventarc does not support object-path suffix filters
+#       on object.v1.finalized events). The /ingest/eventarc handler discriminates bundle.pb
+#       from pixel-blob events; see decision 0023.
 #   (2) Cloud Storage lifecycle rule: delete orphan captures after 24h
 #   (3) Firestore TTL on upload_sessions (7 days)
 #
+# Section (1) also:
+#   - Enables the Eventarc API if not already enabled.
+#   - Waits (bounded retry) for the Eventarc Service Agent to be provisioned.
+#   - Grants roles/eventarc.eventReceiver to the trigger SA at project scope.
+#   - Grants roles/pubsub.publisher to the GCS service agent at project scope.
+#   All four are required for end-to-end Eventarc delivery; the trigger was initially
+#   created without them because they had been set manually. This script makes the
+#   grants explicit so re-running on a fresh project works without manual intervention.
+#
 # Prerequisites:
 #   - gcloud authenticated with an account that has roles/eventarc.admin,
-#     roles/storage.admin, roles/datastore.owner on the roomstudio project
+#     roles/storage.admin, roles/datastore.owner, roles/resourcemanager.projectIamAdmin
+#     on the roomstudio project
 #   - api-internal Cloud Run service is already deployed (deploy_api_internal.sh)
 #   - GCS bucket GCS_CAPTURES_BUCKET already exists
 #
@@ -19,7 +32,7 @@
 #   ./infra/eventarc_setup.sh --trigger-only    # section (1) only
 #   Flags can be combined: --lifecycle-only --ttl-only
 #
-# Re-running is safe: gcloud commands are idempotent (update-or-create).
+# Re-running is safe: all operations are idempotent.
 
 set -euo pipefail
 
@@ -52,37 +65,136 @@ if [[ "$#" -gt 0 ]]; then
 fi
 
 if $RUN_TRIGGER; then
-echo "=== (1) Eventarc trigger: GCS finalize on captures/*/bundle.pb ==="
+echo "=== (1) Eventarc trigger: GCS finalize → api-internal /ingest/eventarc ==="
 
-# Grant roles/run.invoker to the Eventarc SA before creating the trigger.
-# The trigger delivery requires this binding; doing it first means a failed
-# grant exits (set -euo pipefail) before the trigger exists, avoiding the
-# silent-drop failure mode of "trigger exists, binding doesn't."
+# ── Resolve project number (needed for service agent email addresses) ─────────
+PROJECT_NUMBER=$(gcloud projects describe "${PROJECT}" --format='value(projectNumber)')
+echo "Project number: ${PROJECT_NUMBER}"
+echo ""
+
+EVENTARC_SA="service-${PROJECT_NUMBER}@gcp-sa-eventarc.iam.gserviceaccount.com"
+GCS_SA="service-${PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com"
+
+# ── Step 1: Enable the Eventarc API ──────────────────────────────────────────
+# Idempotent: gcloud services enable is a no-op if already enabled.
+echo "Enabling Eventarc API..."
+gcloud services enable eventarc.googleapis.com --project="${PROJECT}"
+echo "Eventarc API enabled (or already enabled)."
+echo ""
+
+# ── Step 2: Wait for the Eventarc Service Agent ───────────────────────────────
+# GCP provisions the Service Agent asynchronously after the API is enabled.
+# The agent must exist before trigger creation or IAM grants will fail.
+# Poll with bounded retry (10 attempts × 15 s = 2.5 min maximum wait).
+echo "Waiting for Eventarc Service Agent: ${EVENTARC_SA}"
+SA_READY=false
+for i in $(seq 1 10); do
+  if gcloud iam service-accounts describe "${EVENTARC_SA}" \
+       --project="${PROJECT}" >/dev/null 2>&1; then
+    echo "Attempt ${i}/10: Eventarc Service Agent exists."
+    SA_READY=true
+    break
+  fi
+  echo "Attempt ${i}/10: Service Agent not yet present; waiting 15s..."
+  sleep 15
+done
+if [[ "${SA_READY}" != "true" ]]; then
+  echo "ERROR: Eventarc Service Agent ${EVENTARC_SA} did not appear after 10 attempts." >&2
+  echo "The Eventarc API may still be propagating. Wait a few minutes and re-run." >&2
+  exit 1
+fi
+echo ""
+
+# ── Step 3: Grant roles/eventarc.eventReceiver to the trigger SA ─────────────
+# Required at project scope (not just on the Cloud Run service) for the
+# Eventarc-managed Pub/Sub subscription to deliver events.
+# Idempotent: add-iam-policy-binding deduplicates at the IAM level.
+echo "Granting roles/eventarc.eventReceiver to ${INGESTER_SA}..."
+gcloud projects add-iam-policy-binding "${PROJECT}" \
+  --member="serviceAccount:${INGESTER_SA}" \
+  --role="roles/eventarc.eventReceiver" \
+  --condition=None
+echo "Granted roles/eventarc.eventReceiver."
+echo ""
+
+# ── Step 4: Grant roles/pubsub.publisher to the GCS service agent ─────────────
+# The GCS service agent publishes finalize events to the Eventarc-managed
+# Pub/Sub topic. Without this binding events are silently dropped at the source.
+# Idempotent: add-iam-policy-binding deduplicates at the IAM level.
+echo "Granting roles/pubsub.publisher to GCS service agent ${GCS_SA}..."
+gcloud projects add-iam-policy-binding "${PROJECT}" \
+  --member="serviceAccount:${GCS_SA}" \
+  --role="roles/pubsub.publisher" \
+  --condition=None
+echo "Granted roles/pubsub.publisher."
+echo ""
+
+# ── Step 5: Grant roles/run.invoker to the trigger SA on api-internal ─────────
+# The trigger delivery requires this binding; doing it before trigger creation
+# avoids the silent-drop failure mode of "trigger exists, binding doesn't."
+echo "Granting roles/run.invoker to ${INGESTER_SA} on ${INGESTER_SERVICE}..."
 gcloud run services add-iam-policy-binding "${INGESTER_SERVICE}" \
   --region="${REGION}" \
   --member="serviceAccount:${INGESTER_SA}" \
   --role="roles/run.invoker"
-echo "Granted roles/run.invoker to ${INGESTER_SA} on ${INGESTER_SERVICE}."
+echo "Granted roles/run.invoker."
 echo ""
 
-# The Eventarc trigger fires on any object finalize in the captures bucket.
-# The ingester /ingest/eventarc handler filters to captures/*/bundle.pb by name.
-gcloud eventarc triggers create "${TRIGGER_NAME}" \
-  --project="${PROJECT}" \
-  --location="${REGION}" \
-  --destination-run-service="${INGESTER_SERVICE}" \
-  --destination-run-region="${REGION}" \
-  --destination-run-path="/ingest/eventarc" \
-  --event-filters="type=google.cloud.storage.object.v1.finalized" \
-  --event-filters="bucket=${GCS_CAPTURES_BUCKET}" \
-  --service-account="${INGESTER_SA}" \
-  || gcloud eventarc triggers update "${TRIGGER_NAME}" \
+# ── Step 6: Create or update the Eventarc trigger ─────────────────────────────
+# Narrow retry: only retries on Service-Agent-not-ready errors (up to 5 attempts,
+# 10 s intervals). "Already exists" → update destination path (idempotent re-run).
+# Any other error class → fast-fail.
+#
+# Trigger is bucket-wide: GCS Eventarc does not support object-path suffix filters
+# on object.v1.finalized events. The /ingest/eventarc handler discriminates
+# bundle.pb from pixel-blob events and returns 200 on non-match (decision 0023).
+echo "Creating Eventarc trigger '${TRIGGER_NAME}'..."
+TRIGGER_DONE=false
+for i in $(seq 1 5); do
+  TRIGGER_ERR=""
+  if TRIGGER_ERR=$(gcloud eventarc triggers create "${TRIGGER_NAME}" \
        --project="${PROJECT}" \
        --location="${REGION}" \
-       --destination-run-path="/ingest/eventarc"
-
-echo "Eventarc trigger '${TRIGGER_NAME}' configured."
+       --destination-run-service="${INGESTER_SERVICE}" \
+       --destination-run-region="${REGION}" \
+       --destination-run-path="/ingest/eventarc" \
+       --event-filters="type=google.cloud.storage.object.v1.finalized" \
+       --event-filters="bucket=${GCS_CAPTURES_BUCKET}" \
+       --service-account="${INGESTER_SA}" \
+       2>&1); then
+    echo "Eventarc trigger '${TRIGGER_NAME}' created."
+    TRIGGER_DONE=true
+    break
+  fi
+  # "Already exists" → update destination path (idempotent re-run; no retry needed).
+  if echo "${TRIGGER_ERR}" | grep -qi "already exist"; then
+    gcloud eventarc triggers update "${TRIGGER_NAME}" \
+      --project="${PROJECT}" \
+      --location="${REGION}" \
+      --destination-run-path="/ingest/eventarc"
+    echo "Eventarc trigger '${TRIGGER_NAME}' updated (already existed)."
+    TRIGGER_DONE=true
+    break
+  fi
+  # Service Agent propagation delay → narrow retry (only this error class).
+  if echo "${TRIGGER_ERR}" | grep -qiE "service.?agent|FAILED_PRECONDITION|permission denied|has not been provisioned"; then
+    echo "Attempt ${i}/5: trigger creation failed (Service Agent not yet ready?); waiting 10s..."
+    echo "  Error detail: ${TRIGGER_ERR}"
+    sleep 10
+  else
+    # Unexpected error → fast-fail.
+    echo "ERROR: trigger creation failed with unexpected error:" >&2
+    echo "${TRIGGER_ERR}" >&2
+    exit 1
+  fi
+done
+if [[ "${TRIGGER_DONE}" != "true" ]]; then
+  echo "ERROR: Could not create/update trigger '${TRIGGER_NAME}' after 5 attempts." >&2
+  echo "Check that the Eventarc Service Agent exists and all IAM grants have propagated." >&2
+  exit 1
+fi
 echo ""
+
 fi  # RUN_TRIGGER
 
 if $RUN_LIFECYCLE; then

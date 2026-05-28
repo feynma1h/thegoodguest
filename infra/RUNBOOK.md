@@ -169,6 +169,46 @@ gcloud tasks queues describe perception-dispatch \
 **If paused:** `gcloud tasks queues resume perception-dispatch --location=asia-southeast1 --project=roomstudio`
 **If absent:** the queue is created by `deploy_api_internal.sh` step 4. Run that script first.
 
+### 0j. Infrastructure preconditions: Eventarc API, Service Agent, and IAM grants
+
+These four prerequisites are required for end-to-end Eventarc delivery. They were resolved
+manually when the trigger was first created; `eventarc_setup.sh` now enforces them
+explicitly (decision 0023).
+
+```bash
+# 1. Verify the Eventarc API is enabled.
+gcloud services list --enabled --project=roomstudio \
+  --filter="name:eventarc.googleapis.com" --format="value(name)"
+# Expect: eventarc.googleapis.com
+
+# 2. Resolve the project number (needed for service agent addresses).
+PROJECT_NUMBER=$(gcloud projects describe roomstudio --format='value(projectNumber)')
+echo "Project number: ${PROJECT_NUMBER}"
+
+# 3. Verify the Eventarc Service Agent exists.
+gcloud iam service-accounts describe \
+  "service-${PROJECT_NUMBER}@gcp-sa-eventarc.iam.gserviceaccount.com" \
+  --project=roomstudio --format="value(email)"
+# Expect: service-<PROJECT_NUMBER>@gcp-sa-eventarc.iam.gserviceaccount.com
+
+# 4. Verify roles/eventarc.eventReceiver is granted to the trigger SA.
+gcloud projects get-iam-policy roomstudio \
+  --flatten="bindings[].members" \
+  --filter="bindings.role=roles/eventarc.eventReceiver AND bindings.members=serviceAccount:api-internal-runtime@roomstudio.iam.gserviceaccount.com" \
+  --format="table(bindings.members,bindings.role)"
+# Expect: one row with api-internal-runtime@roomstudio.iam.gserviceaccount.com
+
+# 5. Verify roles/pubsub.publisher is granted to the GCS service agent.
+gcloud projects get-iam-policy roomstudio \
+  --flatten="bindings[].members" \
+  --filter="bindings.role=roles/pubsub.publisher AND bindings.members=serviceAccount:service-${PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com" \
+  --format="table(bindings.members,bindings.role)"
+# Expect: one row with service-<PROJECT_NUMBER>@gs-project-accounts.iam.gserviceaccount.com
+```
+
+**If any check produces empty output or an error:** run `./infra/eventarc_setup.sh --trigger-only`,
+which enables the API, waits for the Service Agent, and grants all required bindings idempotently.
+
 ---
 
 ## Phase 1 — Pre-deploy infrastructure

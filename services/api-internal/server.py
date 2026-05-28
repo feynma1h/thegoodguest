@@ -14,9 +14,13 @@ Endpoints:
 
   POST /ingest/eventarc
       Eventarc CloudEvent handler for google.cloud.storage.object.v1.finalized
-      on captures/*/bundle.pb. Extracts bundle_id from the event, runs the
-      same ingest logic as /ingest. Handles idempotency (already-queued scenes)
-      and the retry path (failed_incomplete → queued on successful re-upload).
+      on the captures bucket (bucket-wide filter — GCS Eventarc does not support
+      object-path suffix filters; see decision 0023). Discriminates bundle.pb from
+      pixel-blob events in-handler: non-matching paths return HTTP 200 with a
+      structured ignore-log so Pub/Sub acknowledges rather than retrying. Matching
+      paths run the same ingest logic as /ingest. Handles idempotency
+      (already-queued scenes) and the retry path (failed_incomplete → queued on
+      successful re-upload).
 
 Run locally (from services/api-internal/):
   uvicorn server:app --reload --port 8081
@@ -569,14 +573,23 @@ def ingest(req: IngestRequest) -> JSONResponse:
     summary="Eventarc CloudEvent handler for captures/*/bundle.pb finalize",
 )
 async def ingest_eventarc(request: Request) -> JSONResponse:
-    """Handle a GCS finalize event from Eventarc for captures/*/bundle.pb.
+    """Handle a GCS finalize event from Eventarc.
+
+    The Eventarc trigger is bucket-wide on roomstudio-captures (GCS Eventarc does
+    not support object-path suffix filters on object.v1.finalized events — see
+    decision 0023). Every finalize event arrives here, including pixel-blob uploads.
+
+    Non-bundle.pb paths: return HTTP 200 with a structured INFO log so Pub/Sub
+    acknowledges the message. No work is done; the 200 closes the delivery loop.
+
+    bundle.pb paths: run the full ingest pipeline.
 
     Eventarc delivers the GCS StorageObjectData as the request body (JSON).
     Called by Eventarc; Cloud Run requires roles/run.invoker on the caller.
     The Eventarc SA is granted that role in infra/eventarc_setup.sh before
     the trigger is created.
 
-    Idempotency:
+    Idempotency (bundle.pb path only):
     - If a Scene for this bundle_id is already QUEUED, PROCESSING, or READY,
       return 200 immediately without re-processing.
     - If FAILED_INCOMPLETE, re-run the existence check with the same scene_id
@@ -602,10 +615,17 @@ async def ingest_eventarc(request: Request) -> JSONResponse:
     bundle_gcs_uri = f"gs://{bucket}/{name}"
     bundle_id = _extract_bundle_id(bundle_gcs_uri)
     if not bundle_id:
-        logger.warning("Eventarc event name does not match captures/*/bundle.pb: %s", name)
+        # Pixel-blob upload or other non-bundle.pb finalize event. The trigger is
+        # bucket-wide (GCS Eventarc cannot filter by object path suffix — see
+        # decision 0023), so these are expected steady-state traffic. Return 200
+        # so Pub/Sub acknowledges the message rather than entering the retry loop.
+        logger.info(
+            "event=eventarc_ignored object_name=%s reason=not_bundle_pb",
+            name,
+        )
         return JSONResponse(
-            status_code=400,
-            content={"error": "bad_event", "detail": f"object name {name!r} is not captures/<bundle_id>/bundle.pb"},
+            status_code=200,
+            content={"event": "eventarc_ignored", "object_name": name, "reason": "not_bundle_pb"},
         )
 
     repo = _get_scene_repo()
