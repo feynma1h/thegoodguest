@@ -81,6 +81,7 @@ outputs/                          gitignored; generated artifacts
 - **Two-service iOS upload path deployed to `asia-southeast1`:** `api-public` (revision `api-public-00001-7wn`, 100% traffic, Firebase verifier wired) and `api-internal` (revision `api-internal-00002-tpl`, 100% traffic, Cloud Run IAM gated). `/health` 200 on both.
 - **Eventarc trigger `captures-bundle-pb-finalized` live**, destination `api-internal/ingest/eventarc`. App-side path filtering working (bundle.pb → 200, non-bundle.pb → 400).
 - **Decision 0021 verified end-to-end:** layer-swap fix landed cleanly, CI import smoke ran in Cloud Build, no protobuf downgrade recurrence.
+- **Phase 0 verifier check is now a hard gate** enforcing decision 0016's trust boundary: positive grep that `FirebaseTokenVerifier` is wired into api-public (`server.py`), negative greps that it's absent from `services/api-internal/` and `packages/api-core/`. Exits non-zero with a labeled message on any failure. (v2 PR #9, commit d166ec0.)
 
 ## What does NOT work / what we're deliberately not doing
 
@@ -154,23 +155,15 @@ reaching `/health`. Unrelated to the iOS upload path; tracked separately.
 scene. Verification: `skip-blob` smoke mode exits 0 with `status=failed_incomplete`.
 See decision 0022.
 
-**3 — Land the `infra/RUNBOOK.md` v2 PR** (18 findings: #1–#5, #7–#19; #6 closed by 0021)
+**3 — Land the `infra/RUNBOOK.md` v2 PR** (18 findings; #6 closed by 0021)
 
-Including: deploy-script `--no-traffic` conditional, `eventarc_setup.sh` IAM
-completeness (eventReceiver + pubsub.publisher + Eventarc API enable), Phase 0
-verifier grep, Phase 0h `/ready` actually-run discipline, runbook redelivery loop on
-400 responses (finding #17).
+Progress: Cluster A done (#12–#15 closed; #17 fixed, pending post-deploy Pub/Sub
+no-redelivery verify). Cluster F done (#9 closed). Remaining clusters in order:
+D (#7/#8/#18), H (#4), B (#5/#11), C (#1/#2/#3), G (#16/#19), E (#10), plus #20.
 
-**3a — Cluster A of the v2 PR: Eventarc filter + handler fix** (`infra/`, `services/api-internal`)
+**3a — Cluster D of the v2 PR: next up** (findings #7/#8/#18)
 
-Rewrite `infra/eventarc_setup.sh` (enable API, wait for Service Agent, grant
-`eventReceiver` + `pubsub.publisher`, narrow retry on trigger creation); change
-`/ingest/eventarc` to return 200 on non-`captures/*/bundle.pb` paths with structured
-ignore-log; add Phase 0 checks for API + Service Agent + both IAM grants. Closes
-findings #12, #13, #14, #15, #17. See decision 0023.
-Done when: the two "What does NOT work" bullets added for 0023 are moved to "What works"
-(or removed) and the Pub/Sub no-redelivery check passes (delivered count increments, ack
-count matches, nack/redelivery count does not move after a non-`bundle.pb` upload).
+Brief pending from Chat session. Scope to be walked before Code starts.
 
 **4 — Re-run Phase 7 (all 4 modes)** once board items 1 and 2 close. Phase 8c follows.
 
