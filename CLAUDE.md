@@ -93,6 +93,8 @@ outputs/                          gitignored; generated artifacts
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
 - **`perception-obj` is dead at import time** since 2026-05-16. `/ready` returns 503, `sam3` and `sam3d` both `not_loaded`. Root cause: `FileNotFoundError: '/opt/sam3d/checkpoints/hf/pipeline.yaml'` in `SAM3DModel.__init__`. Container exits at startup. Blocks `happy-path` and `duplicate-event` smoke modes; blocks Phase 8c (iOS code start).
 - **Ingest creates scenes with `user_id = None` on the failed-incomplete branch.** `skip-blob` smoke mode surfaced this: `GET /scenes/by-bundle/{bundle_id}` returns 403 `"scene has no owner"` (the diagnostic 403 from decision 0019). Happy-path scenes have `user_id` set correctly via `bundle.user_id`. Root cause: `_handle_failed_incomplete` in `services/api-internal/server.py` creates the scene but never sets `scene.user_id`. Fix: read from `upload_session_repo.get_user_id(bundle_id)`. See decision 0022.
+- **Eventarc trigger `captures-bundle-pb-finalized` has no object-path filter and is bucket-wide on `roomstudio-captures`.** `/ingest/eventarc` on api-internal returns 400 for non-`bundle.pb` paths, which Pub/Sub reads as delivery failure and retries; every pixel-blob upload generates redelivery traffic until the message expires. No production impact today (only the smoke tool uploads), but the loop will surface on the first real bundle.
+- **`infra/eventarc_setup.sh` does not enable the Eventarc API, does not wait for the Eventarc Service Agent to propagate after enable, does not grant `roles/eventarc.eventReceiver` to the trigger SA, and does not grant `roles/pubsub.publisher` to the GCS service agent.** Current trigger works only because all four were resolved manually or pre-existed.
 
 ## Conventions
 
@@ -158,6 +160,17 @@ Including: deploy-script `--no-traffic` conditional, `eventarc_setup.sh` IAM
 completeness (eventReceiver + pubsub.publisher + Eventarc API enable), Phase 0
 verifier grep, Phase 0h `/ready` actually-run discipline, runbook redelivery loop on
 400 responses (finding #17).
+
+**3a — Cluster A of the v2 PR: Eventarc filter + handler fix** (`infra/`, `services/api-internal`)
+
+Rewrite `infra/eventarc_setup.sh` (enable API, wait for Service Agent, grant
+`eventReceiver` + `pubsub.publisher`, narrow retry on trigger creation); change
+`/ingest/eventarc` to return 200 on non-`captures/*/bundle.pb` paths with structured
+ignore-log; add Phase 0 checks for API + Service Agent + both IAM grants. Closes
+findings #12, #13, #14, #15, #17. See decision 0023.
+Done when: the two "What does NOT work" bullets added for 0023 are moved to "What works"
+(or removed) and the Pub/Sub no-redelivery check passes (delivered count increments, ack
+count matches, nack/redelivery count does not move after a non-`bundle.pb` upload).
 
 **4 — Re-run Phase 7 (all 4 modes)** once board items 1 and 2 close. Phase 8c follows.
 
