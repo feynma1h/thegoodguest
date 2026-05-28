@@ -82,6 +82,7 @@ outputs/                          gitignored; generated artifacts
 - **Eventarc trigger `captures-bundle-pb-finalized` live**, destination `api-internal/ingest/eventarc`. App-side path filtering working (bundle.pb → 200, non-bundle.pb → 400).
 - **Decision 0021 verified end-to-end:** layer-swap fix landed cleanly, CI import smoke ran in Cloud Build, no protobuf downgrade recurrence.
 - **Phase 0 verifier check is now a hard gate** enforcing decision 0016's trust boundary: positive grep that `FirebaseTokenVerifier` is wired into api-public (`server.py`), negative greps that it's absent from `services/api-internal/` and `packages/api-core/`. Exits non-zero with a labeled message on any failure. (v2 PR #9, commit d166ec0.)
+- **Phase 0h is now a liveness-only gate** consistent with perception-obj's scale-to-zero lazy-load design (decision 0024). `gcloud describe` halts on anything but `Ready True`; `curl /ready` confirms reachability and accepts any HTTP response (200/503/500 all confirm the service is invokable). Broken-model failures are caught downstream by Phase 7 + the container-failed-to-start decision-tree branch from Cluster D.
 
 ## What does NOT work / what we're deliberately not doing
 
@@ -92,7 +93,7 @@ outputs/                          gitignored; generated artifacts
 - **Pre-launch gaps (nine gaps + one audit item, categorized).** See `docs/decisions/0015` and `0018` for full list and un-defer triggers. Abuse-surface (original 0015 set, trigger: first non-developer user): (a) TOCTOU race on `bundle_id` ownership in `/upload_session`; (b) no per-UID rate limit on `/upload_session`; (c) `expected_size_bytes` optional, defaults to 0. Contract-shape (from pass 3 + pass 4 recon, trigger: iOS development or web app build begins): (F1) `expires_at` not surfaced in `/upload_session` response; (F2) `X-Upload-Content-Type` hardcoded to `application/octet-stream` server-side; (F3) no semantic manifest validation (unknown extensions, tier/path consistency); (F4) `result_url` presigning in `GET /scenes/by-bundle/{bundle_id}` responses (raw `gs://` returned today). Production-hygiene (trigger: launch): (F5) no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`; (F6) no TTL on Firestore `scenes` collection. Audit item (during launch hardening): verify perception-obj runtime SA identity and storage IAM. All nine gaps close in the same launch-hardening pass.
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
-- **`perception-obj` is dead at import time** since 2026-05-16. `/ready` returns 503, `sam3` and `sam3d` both `not_loaded`. Root cause: `FileNotFoundError: '/opt/sam3d/checkpoints/hf/pipeline.yaml'` in `SAM3DModel.__init__`. Container exits at startup. Blocks `happy-path` and `duplicate-event` smoke modes; blocks Phase 8c (iOS code start).
+- **perception-obj happy-path and duplicate-event smoke modes are blocked** on a missing SAM 3D checkpoint (`/opt/sam3d/checkpoints/hf/pipeline.yaml`, FileNotFoundError on first `/process`). Filed as referral P1 to perception-obj owner. Skip-blob and auth-rejection modes pass.
 - **Ingest creates scenes with `user_id = None` on the failed-incomplete branch.** `skip-blob` smoke mode surfaced this: `GET /scenes/by-bundle/{bundle_id}` returns 403 `"scene has no owner"` (the diagnostic 403 from decision 0019). Happy-path scenes have `user_id` set correctly via `bundle.user_id`. Root cause: `_handle_failed_incomplete` in `services/api-internal/server.py` creates the scene but never sets `scene.user_id`. Fix: read from `upload_session_repo.get_user_id(bundle_id)`. See decision 0022.
 - **Eventarc trigger `captures-bundle-pb-finalized` has no object-path filter and is bucket-wide on `roomstudio-captures`.** `/ingest/eventarc` on api-internal returns 400 for non-`bundle.pb` paths, which Pub/Sub reads as delivery failure and retries; every pixel-blob upload generates redelivery traffic until the message expires. No production impact today (only the smoke tool uploads), but the loop will surface on the first real bundle.
 - **`infra/eventarc_setup.sh` does not enable the Eventarc API, does not wait for the Eventarc Service Agent to propagate after enable, does not grant `roles/eventarc.eventReceiver` to the trigger SA, and does not grant `roles/pubsub.publisher` to the GCS service agent.** Current trigger works only because all four were resolved manually or pre-existed.
@@ -157,11 +158,11 @@ See decision 0022.
 
 **3 — Land the `infra/RUNBOOK.md` v2 PR** (18 findings; #6 closed by 0021)
 
-Progress: Cluster A done (#12–#15 closed; #17 fixed, pending post-deploy Pub/Sub
-no-redelivery verify). Cluster F done (#9 closed). Remaining clusters in order:
-D (#7/#8/#18), H (#4), B (#5/#11), C (#1/#2/#3), G (#16/#19), E (#10), plus #20.
+Progress: Clusters A done (#17 pending post-deploy Pub/Sub verify), F done (#9),
+D done (#7/#8; #18 closed by reframe in 0024), H done (#4/#18, decision 0024).
+Remaining clusters: B (#5/#11), C (#1/#2/#3), G (#16/#19), E (#10), plus #20.
 
-**3a — Cluster D of the v2 PR: next up** (findings #7/#8/#18)
+**3a — Cluster B of the v2 PR: next up** (findings #5/#11)
 
 Brief pending from Chat session. Scope to be walked before Code starts.
 

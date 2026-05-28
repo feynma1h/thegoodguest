@@ -159,23 +159,24 @@ through step 6 and re-check.
 
 ### 0h. Infrastructure preconditions: perception-obj live and ready
 
+This check gates liveness only. Phase 0h proves the Cloud Run revision is alive and
+the service is reachable over HTTPS. It does not prove models are loaded — perception-obj
+lazy-loads on first `/process` (decision 0007), so a cold container returns 503
+`not_loaded` by design; that state is indistinguishable from broken at preflight. Broken-
+model failures surface at Phase 7 happy-path (which triggers a real `/process`). See
+decision 0024.
+
 ```bash
 DESCRIBE_OUT=$(gcloud run services describe perception-obj \
   --region=asia-southeast1 --project=roomstudio \
   --format='value(status.conditions[0].type,status.conditions[0].status)' 2>/dev/null)
-if echo "${DESCRIBE_OUT}" | grep -qE "^Ready[[:space:]]+True"; then
-  echo "OK: perception-obj Cloud Run revision is Ready."
-else
-  echo "FAIL: perception-obj is not ready (got: '${DESCRIBE_OUT}')."
-  if [ -z "${DESCRIBE_OUT}" ]; then
-    echo "  Service does not exist. Fix perception-obj first; this runbook requires it."
-  else
-    echo "  A container revision failed to start (dead-at-import is the common cause)."
-    echo "  Check startup logs:"
-    echo "  gcloud logging read 'resource.type=\"cloud_run_revision\" resource.labels.service_name=\"perception-obj\" severity>=ERROR' --project=roomstudio --limit=50"
-  fi
-  exit 1
-fi
+echo "${DESCRIBE_OUT}" | grep -qE "^Ready[[:space:]]+True" \
+  && echo "OK: perception-obj Cloud Run revision is Ready." \
+  || { echo "FAIL: perception-obj is not ready (got: '${DESCRIBE_OUT}')."; \
+       echo "  If empty: service does not exist. Fix perception-obj first."; \
+       echo "  If non-empty: container revision failed to start. Check startup logs:"; \
+       echo "  gcloud logging read 'resource.type=\"cloud_run_revision\" resource.labels.service_name=\"perception-obj\" severity>=ERROR' --project=roomstudio --limit=50"; \
+       exit 1; }
 ```
 
 ```bash
@@ -183,40 +184,23 @@ PERCEPTION_URL=$(gcloud run services describe perception-obj \
   --region=asia-southeast1 --project=roomstudio \
   --format='value(status.url)')
 
+# Liveness check: any HTTP response (200/503/500) confirms the service is invokable.
+# 200 = models loaded; 503 = cold/not yet triggered (normal scale-to-zero state);
+# 500 = cached load failure in current instance (warning only — next cold container
+# retries; Phase 7 surfaces this as a hard failure). Only connection failure halts.
 # (perception-obj is --allow-unauthenticated; no auth token needed for /ready)
-READY_DEADLINE=$(( $(date +%s) + 600 ))
-while true; do
-  code=$(curl -s -o /tmp/ready_body -w "%{http_code}" "${PERCEPTION_URL}/ready")
-  if [ "${code}" = "200" ]; then
-    LOADED_COUNT=$(grep -o '"loaded"' /tmp/ready_body | wc -l | tr -d ' ')
-    if [ "${LOADED_COUNT}" -ge 2 ]; then
-      echo "OK: perception-obj models loaded."
-      python3 -m json.tool /tmp/ready_body
-      break
-    else
-      echo "FAIL: perception-obj returned 200 but sam3/sam3d are not both 'loaded'."
-      python3 -m json.tool /tmp/ready_body
-      exit 1
-    fi
-  elif [ "${code}" = "503" ]; then
-    if [ "$(date +%s)" -ge "${READY_DEADLINE}" ]; then
-      echo "FAIL: perception-obj still returning 503 after 10 minutes."
-      echo "  Check perception-obj logs before continuing."
-      python3 -m json.tool /tmp/ready_body
-      exit 1
-    fi
-    echo "  /ready returned 503 — models still loading. Waiting 2 minutes..."
-    sleep 120
-  elif [ "${code}" = "500" ]; then
-    echo "FAIL: perception-obj /ready returned 500 — a model failed to load."
-    echo "  Do not proceed — Cloud Tasks will enqueue perception work and it will fail immediately."
-    python3 -m json.tool /tmp/ready_body
-    exit 1
-  else
-    echo "FAIL: perception-obj /ready returned '${code}' — connection failure or service unreachable."
-    exit 1
-  fi
-done
+code=$(curl -s -o /tmp/ready_body -w "%{http_code}" "${PERCEPTION_URL}/ready")
+if [ -z "${code}" ] || [ "${code}" = "000" ]; then
+  echo "FAIL: perception-obj /ready unreachable (got: '${code}') — connection failure or service not responding."
+  exit 1
+elif [ "${code}" = "500" ]; then
+  echo "WARNING: perception-obj /ready returned 500 (cached model-load failure in current instance)."
+  echo "  Models will retry on the next cold container. Phase 7 will surface this as a hard failure."
+  cat /tmp/ready_body
+else
+  echo "OK: perception-obj /ready reachable (HTTP ${code})."
+  cat /tmp/ready_body
+fi
 ```
 
 ### 0i. Infrastructure preconditions: Cloud Tasks queue
