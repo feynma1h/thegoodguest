@@ -4,7 +4,9 @@ Covers:
   Eventarc endpoint:
     - Valid GCS finalize event → dispatches ingest and returns 200
     - Missing 'bucket' or 'name' in event body → 400
-    - object name that doesn't match captures/*/bundle.pb → 400
+    - object name that doesn't match captures/*/bundle.pb → 200 eventarc_ignored
+      (not 400 — the trigger is bucket-wide; non-bundle.pb events must be
+      acknowledged so Pub/Sub does not retry; see decision 0023)
     - Idempotency: scene already QUEUED → 200, no re-enqueue
     - Idempotency: scene already PROCESSING → 200, no re-enqueue
     - Idempotency: scene FAILED_INCOMPLETE → re-runs ingest with existing scene_id
@@ -147,13 +149,20 @@ class TestIngestEventarc:
         assert resp.status_code == 400
         assert resp.json()["error"] == "bad_event"
 
-    def test_name_not_bundle_pb_returns_400(self, client: TestClient) -> None:
+    def test_name_not_bundle_pb_returns_200_ignored(self, client: TestClient) -> None:
+        """Non-bundle.pb finalize events must return 200 (not 400) so Pub/Sub
+        acknowledges the message and does not enter the retry loop.
+        The trigger is bucket-wide; pixel-blob events are expected traffic.
+        See decision 0023."""
         resp = client.post(
             "/ingest/eventarc",
             json={"bucket": _BUCKET, "name": f"captures/{_BUNDLE_ID}/frames/000000.jpg"},
         )
-        assert resp.status_code == 400
-        assert resp.json()["error"] == "bad_event"
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["event"] == "eventarc_ignored"
+        assert body["reason"] == "not_bundle_pb"
+        assert "frames/000000.jpg" in body["object_name"]
 
     def test_idempotency_already_queued_skips_reenqueue(self, client: TestClient) -> None:
         bundle_id = str(uuid.uuid4())
