@@ -721,7 +721,9 @@ python3 tools/upload_test_bundle.py happy-path \
   --verbose
 ```
 
-**Expect:** exit 0. The tool prints phase transitions culminating in `status=ready`.
+**Expect:** exit 0. The tool prints phase transitions culminating in `status=failed_invalid`
+(~3–10 s end-to-end, including Eventarc delivery latency). perception-obj never wakes,
+confirming the pre-GPU fast-fail gate is active.
 
 ### Mode 2: skip-blob
 
@@ -753,8 +755,8 @@ python3 tools/upload_test_bundle.py duplicate-event \
   --verbose
 ```
 
-**Expect:** exit 0. The tool asserts `scene_id` is unchanged and `status=ready` after
-re-upload of `bundle.pb`.
+**Expect:** exit 0. The tool asserts `scene_id` is unchanged and `status=failed_invalid`
+after re-upload of `bundle.pb` (~3–10 s end-to-end, including Eventarc delivery latency).
 
 **Retry policy:** `duplicate-event` may be retried up to 2 additional times (3 attempts
 total) to absorb Eventarc at-least-once delivery flake. Three consecutive failures is a
@@ -894,10 +896,12 @@ python3 tools/upload_test_bundle.py happy-path \
   --gcs-bucket="${GCS_BUCKET}" \
   --cleanup \
   --verbose
-# Expect: exit 0, status=ready
+# Expect: exit 0, status=failed_invalid
 ```
 
-If this passes, iOS code can begin.
+If this passes, iOS code can begin. Real bundles from the iOS app are expected to reach
+`status=ready`; the smoke tool's synthetic fixture terminates at `failed_invalid`
+(non-decodable placeholder pixels — by design).
 
 ---
 
