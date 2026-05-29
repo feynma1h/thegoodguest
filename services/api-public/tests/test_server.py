@@ -20,8 +20,8 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-import server
-from server import _check_production_env, _PRODUCTION_REQUIRED_VARS  # noqa: E402
+import public_server as server
+from public_server import _check_production_env, _PRODUCTION_REQUIRED_VARS  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
