@@ -34,7 +34,7 @@ from scene import (
     new_scene,
     validate_transition,
 )
-from repository import InMemorySceneRepository, SceneNotFoundError
+from repository import InMemorySceneRepository, FirestoreSceneRepository, SceneNotFoundError
 import ingest_server as server  # for resolve_device_id
 
 
@@ -352,6 +352,74 @@ class TestInMemoryRepository:
         s = _scene(device_id_source=DeviceIdSource.FALLBACK_HARDWARE_ID)
         repo.create(s)
         assert repo.get(s.scene_id).device_id_source == DeviceIdSource.FALLBACK_HARDWARE_ID
+
+
+# ---------------------------------------------------------------------------
+# 3b. Firestore serialization round-trip (_to_dict / _from_doc)
+# ---------------------------------------------------------------------------
+
+class _DocStub:
+    """Minimal stand-in for a Firestore DocumentSnapshot.
+
+    _from_doc calls doc.id and doc.to_dict(); that's all we need to exercise
+    the deserialization path without instantiating a real Firestore client.
+    """
+    def __init__(self, scene_id: str, data: dict):
+        self.id = scene_id
+        self._data = data
+
+    def to_dict(self) -> dict:
+        return dict(self._data)
+
+
+class TestFirestoreSerializationRoundTrip:
+    """Exercises _to_dict → _from_doc symmetry for invalid_blobs.
+
+    FirestoreSceneRepository._to_dict and FirestoreSceneReadRepository._from_doc
+    are both static — they can be called without a live Firestore connection.
+    A _DocStub replaces the real DocumentSnapshot so no GCP credentials are
+    needed.
+    """
+
+    def test_invalid_blobs_survives_round_trip(self):
+        """A FAILED_INVALID scene with a populated invalid_blobs list round-trips
+        intact through _to_dict → (doc stub) → _from_doc."""
+        invalid_blobs = [
+            {"relative_path": "frames/000000.jpg", "reason": "too_small"},
+            {"relative_path": "frames/000001.jpg", "reason": "bad_magic"},
+        ]
+        scene = _scene(
+            status=SceneStatus.FAILED_INVALID,
+            invalid_blobs=invalid_blobs,
+        )
+        # Serialize via Firestore path.
+        doc_data = FirestoreSceneRepository._to_dict(scene)
+        # Deserialize via Firestore path.
+        doc_stub = _DocStub(scene.scene_id, doc_data)
+        restored = FirestoreSceneRepository._from_doc(doc_stub)
+
+        assert restored.status == SceneStatus.FAILED_INVALID
+        assert restored.invalid_blobs == invalid_blobs
+        assert restored.invalid_blobs[0]["reason"] == "too_small"
+        assert restored.invalid_blobs[1]["reason"] == "bad_magic"
+        assert restored.invalid_blobs[0]["relative_path"] == "frames/000000.jpg"
+
+    def test_invalid_blobs_none_round_trips_without_spurious_field(self):
+        """A Scene with invalid_blobs=None round-trips cleanly — _to_dict writes
+        None (not absent), and _from_doc reconstructs None via data.get()."""
+        scene = _scene(status=SceneStatus.QUEUED)
+        assert scene.invalid_blobs is None
+
+        doc_data = FirestoreSceneRepository._to_dict(scene)
+        # The field must be present in the serialized dict (as None / null),
+        # not silently absent — Firestore sets the field to null on create(),
+        # which is fine. _from_doc uses .get() with a None default.
+        assert "invalid_blobs" in doc_data
+        assert doc_data["invalid_blobs"] is None
+
+        doc_stub = _DocStub(scene.scene_id, doc_data)
+        restored = FirestoreSceneRepository._from_doc(doc_stub)
+        assert restored.invalid_blobs is None
 
 
 # ---------------------------------------------------------------------------
