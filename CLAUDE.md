@@ -145,11 +145,13 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-**1 — Phase 8c onward: begin iOS code.** The ingest validation gate is shipped (board item 1 done) and Phase 7 is 4/4 green; happy-path and duplicate-event both terminate at `failed_invalid` deterministically. iOS development (Swift + ARKit + RoomPlan capture app) can begin now. Real bundles from the iOS app are expected to reach `ready`. Note: the 24h smoke-tool confirmation soak (see "What does NOT work") must be green before the iOS app's first real upload — it does not block iOS development itself.
+**1 — Phase 8c onward: begin iOS code.** The ingest validation gate is shipped and Phase 7 is 4/4 green; happy-path and duplicate-event both terminate at `failed_invalid` deterministically. iOS development (Swift + ARKit + RoomPlan capture app) can begin now. Real bundles from the iOS app are expected to reach `ready`. Note: the 24h smoke-tool confirmation soak (see "What does NOT work") must be green before the iOS app's first real upload — it does not block iOS development itself.
 
-**2 — #17 post-deploy Pub/Sub no-redelivery verify** on the live system (see What-does-NOT-work).
+**2 — Pin `schema_version = "1"` in api-internal ingest handler (pre-iOS-Phase-2 gate).** The proto says the backend rejects bundles with an unknown `schema_version`, but no enforcing check exists in the ingest handler today. The canonical value is pinned to `"1"`. A backend task: add an explicit validation/reject in `api-internal`'s ingest handler that rejects any bundle whose `schema_version` != `"1"`, with a structured log and `failed_invalid` Scene state. This check must land, be tested, and be deployed before iOS Phase 2 merges (Phase 2 is when the iOS app first serializes a real `bundle.pb`).
 
-**3 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
+**3 — #17 post-deploy Pub/Sub no-redelivery verify** on the live system (see What-does-NOT-work).
+
+**4 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
 
 Decision 0018 extended to nine gaps: original three abuse-surface gaps + F1/F2/F3/F4
 contract-shape gaps + F5 (no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`)
@@ -158,7 +160,7 @@ runtime SA identity and storage IAM. Abuse-surface trigger: first non-developer 
 Contract-shape trigger: iOS development or web app build begins. Production-hygiene and
 audit: launch hardening. All nine gaps close in the same launch-hardening pass.
 
-**4 — test_data/photos/ privacy review** (deferred, low urgency)
+**5 — test_data/photos/ privacy review** (deferred, low urgency)
 
 9 HEIC photos of a real room are tracked by git and used by
 `tools/build_test_bundle.py` for local synthesis testing. Review whether they
