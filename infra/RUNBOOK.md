@@ -716,7 +716,7 @@ python3 tools/upload_test_bundle.py skip-blob \
   --firebase-api-key="${FIREBASE_API_KEY}" \
   --firebase-project-id="${FIREBASE_PROJECT_ID}" \
   --gcs-bucket="${GCS_BUCKET}" \
-  --drop-blob-kind=frame_jpeg \
+  --drop-blob-kind=rgb \
   --cleanup \
   --verbose
 ```
