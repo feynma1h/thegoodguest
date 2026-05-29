@@ -78,11 +78,13 @@ outputs/                          gitignored; generated artifacts
 - **Phase 1 deploy infrastructure is live.** GCS lifecycle rule on `gs://roomstudio-captures` (delete after age=1, prefix `captures/`) is configured. Firestore TTL policy is set on `upload_sessions.created_at` (state `ACTIVE`). Automatic single-field index on `scenes.bundle_id` is confirmed unexempt. `infra/RUNBOOK.md` Phase 0 preflight passes (v2 refinements drafted but not yet landed — board item 2).
 - **Firebase Auth is configured for the project and usable from the smoke tool.** Firebase added to the GCP project (previously GCP-native only). Web app `roomstudio-smoke-test` registered (`appId 1:502805861152:web:095d7e3b331e0e0ddcbd45`); anonymous sign-in provider enabled; `firebase.googleapis.com` and Identity Toolkit enabled. `tools/upload_test_bundle.py` can obtain valid `idToken` credentials against the real project. ADC quota project set to `roomstudio`.
 - **Protobuf gencode/runtime mismatch fixed in both service images** (see `docs/decisions/0021`). Root cause: `pip install packages/api-core/` in Layer 3 triggered proto-plus's `<7.0.0dev` constraint and downgraded protobuf from 7.35.0 back to 6.33.6, undoing the Layer 2 force-reinstall from decision 0005. Fix: api-core install moved to Layer 2 (before the force-reinstall); schemas install remains last. Container-import smoke added to both `infra/cloudbuild/api-internal.yaml` and `infra/cloudbuild/api-public.yaml` (build → smoke → push).
-- **Two-service iOS upload path deployed to `asia-southeast1`:** `api-public` (revision `api-public-00001-7wn`, 100% traffic, Firebase verifier wired) and `api-internal` (revision `api-internal-00002-tpl`, 100% traffic, Cloud Run IAM gated). `/health` 200 on both.
-- **Eventarc trigger `captures-bundle-pb-finalized` live**, destination `api-internal/ingest/eventarc`. App-side path filtering working (bundle.pb → 200, non-bundle.pb → 400).
+- **Two-service iOS upload path deployed to `asia-southeast1`:** `api-public` (revision `api-public-00001-7wn`, 100% traffic, Firebase verifier wired) and `api-internal` (revision `api-internal-00003-mtg`, 100% traffic, Cloud Run IAM gated; carries the decision 0022 user_id fix). `/health` 200 on both.
+- **Eventarc trigger `captures-bundle-pb-finalized` live**, destination `api-internal/ingest/eventarc`. App-side path filtering working (bundle.pb → 200, non-bundle.pb → 200 with structured ignore-log, per decision 0023).
 - **Decision 0021 verified end-to-end:** layer-swap fix landed cleanly, CI import smoke ran in Cloud Build, no protobuf downgrade recurrence.
 - **Phase 0 verifier check is now a hard gate** enforcing decision 0016's trust boundary: positive grep that `FirebaseTokenVerifier` is wired into api-public (`server.py`), negative greps that it's absent from `services/api-internal/` and `packages/api-core/`. Exits non-zero with a labeled message on any failure. (v2 PR #9, commit d166ec0.)
 - **Phase 0h is now a liveness-only gate** consistent with perception-obj's scale-to-zero lazy-load design (decision 0024). `gcloud describe` halts on anything but `Ready True`; `curl /ready` confirms reachability and accepts any HTTP response (200/503/500 all confirm the service is invokable). Broken-model failures are caught downstream by Phase 7 + the container-failed-to-start decision-tree branch from Cluster D.
+- **v2 PR RUNBOOK hardening landed** (board item 3): all 20 findings closed. Deploy scripts now conditionally pass `--no-traffic` (only when the service already exists) and tag each revision `candidate` for reliable pre-flip smoke URLs (findings #5/#11/#10). Phase 0a IAM check uses effective-permission tests; Phase 0b Firebase setup and ADC quota-project fully specified (#1/#2/#3). Test collection is invocation-independent via pytest rootdir + conftest path setup (#20). 242 tests green from any CWD.
+- **Service modules renamed** `server.py` → `services/api-internal/ingest_server.py` and `services/api-public/public_server.py` (resolves a test-collection module-name collision, #20). Dockerfile CMDs updated to the new entrypoints. **Consequence: the next redeploy of either service is mandatory** — the live revisions boot `server:app`; a new image boots `ingest_server:app`/`public_server:app`, and an old image referencing `server:app` will not start. No behavior change, entrypoint name only.
 
 ## What does NOT work / what we're deliberately not doing
 
@@ -94,9 +96,7 @@ outputs/                          gitignored; generated artifacts
 - The photo-upload composition path (`_compose_scene` in `perception-obj`) has unsolved per-object orientation issues. We are NOT fixing them. The iOS path replaces all of it.
 - The pre-VGGT pydantic schemas (`packages/schemas/room_perception.py`, `spatial_graph.py`) are old Layer 1/2 work. Don't touch.
 - **perception-obj happy-path and duplicate-event smoke modes are blocked** on a missing SAM 3D checkpoint (`/opt/sam3d/checkpoints/hf/pipeline.yaml`, FileNotFoundError on first `/process`). Filed as referral P1 to perception-obj owner. Skip-blob and auth-rejection modes pass.
-- **Ingest creates scenes with `user_id = None` on the failed-incomplete branch.** `skip-blob` smoke mode surfaced this: `GET /scenes/by-bundle/{bundle_id}` returns 403 `"scene has no owner"` (the diagnostic 403 from decision 0019). Happy-path scenes have `user_id` set correctly via `bundle.user_id`. Root cause: `_handle_failed_incomplete` in `services/api-internal/server.py` creates the scene but never sets `scene.user_id`. Fix: read from `upload_session_repo.get_user_id(bundle_id)`. See decision 0022.
-- **Eventarc trigger `captures-bundle-pb-finalized` has no object-path filter and is bucket-wide on `roomstudio-captures`.** `/ingest/eventarc` on api-internal returns 400 for non-`bundle.pb` paths, which Pub/Sub reads as delivery failure and retries; every pixel-blob upload generates redelivery traffic until the message expires. No production impact today (only the smoke tool uploads), but the loop will surface on the first real bundle.
-- **`infra/eventarc_setup.sh` does not enable the Eventarc API, does not wait for the Eventarc Service Agent to propagate after enable, does not grant `roles/eventarc.eventReceiver` to the trigger SA, and does not grant `roles/pubsub.publisher` to the GCS service agent.** Current trigger works only because all four were resolved manually or pre-existed.
+- **#17 post-deploy verify pending:** Eventarc 200-on-non-match is implemented (0023) but the live Pub/Sub no-redelivery metric check (upload a non-bundle.pb blob; confirm delivered +1, ack matching, nack/redelivery flat) has not yet been run against the deployed system.
 
 ## Conventions
 
@@ -142,33 +142,11 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 When this section gets stale, the project's drifting. Keep it current.
 
-**1 — Fix `perception-obj` checkpoint path / image build** (perception-obj owner)
+**1 — Re-run Phase 7 (all 4 modes)** once perception-obj P1 (SAM 3D checkpoint) clears. happy-path and duplicate-event are blocked on the missing checkpoint (`/opt/sam3d/checkpoints/hf/pipeline.yaml`, FileNotFoundError on first `/process`); skip-blob and auth-rejection pass. Phase 8c follows a green Phase 7.
 
-`SAM3DModel.__init__` raises `FileNotFoundError` for
-`/opt/sam3d/checkpoints/hf/pipeline.yaml` at container start. Service exits before
-reaching `/health`. Unrelated to the iOS upload path; tracked separately.
+**2 — #17 post-deploy Pub/Sub no-redelivery verify** on the live system (see What-does-NOT-work).
 
-**2 — Fix ingest `user_id` propagation on failed-incomplete** (`services/api-internal`)
-
-`_handle_failed_incomplete` creates a scene without setting `user_id`, causing
-`GET /scenes/by-bundle/{bundle_id}` on api-public to return 403. Fix: read
-`user_id` from `upload_session_repo.get_user_id(bundle_id)` and write to the
-scene. Verification: `skip-blob` smoke mode exits 0 with `status=failed_incomplete`.
-See decision 0022.
-
-**3 — Land the `infra/RUNBOOK.md` v2 PR** (18 findings; #6 closed by 0021)
-
-Progress: Clusters A done (#17 pending post-deploy Pub/Sub verify), F done (#9),
-D done (#7/#8; #18 closed by reframe in 0024), H done (#4/#18, decision 0024).
-Remaining clusters: B (#5/#11), C (#1/#2/#3), G (#16/#19), E (#10), plus #20.
-
-**3a — Cluster B of the v2 PR: next up** (findings #5/#11)
-
-Brief pending from Chat session. Scope to be walked before Code starts.
-
-**4 — Re-run Phase 7 (all 4 modes)** once board items 1 and 2 close. Phase 8c follows.
-
-**5 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
+**3 — Close the nine pre-launch gaps + one audit item (decisions 0015 + 0018)** (before public traffic)
 
 Decision 0018 extended to nine gaps: original three abuse-surface gaps + F1/F2/F3/F4
 contract-shape gaps + F5 (no lifecycle rule on `gs://roomstudio-perception-outputs/scenes/`)
@@ -177,7 +155,7 @@ runtime SA identity and storage IAM. Abuse-surface trigger: first non-developer 
 Contract-shape trigger: iOS development or web app build begins. Production-hygiene and
 audit: launch hardening. All nine gaps close in the same launch-hardening pass.
 
-**6 — test_data/photos/ privacy review** (deferred, low urgency)
+**4 — test_data/photos/ privacy review** (deferred, low urgency)
 
 9 HEIC photos of a real room are tracked by git and used by
 `tools/build_test_bundle.py` for local synthesis testing. Review whether they
