@@ -56,4 +56,4 @@ COPY services/api-internal/ services/api-internal/
 WORKDIR /app/services/api-internal
 
 ENV PORT=8080
-CMD uvicorn server:app --host 0.0.0.0 --port "$PORT"
+CMD uvicorn ingest_server:app --host 0.0.0.0 --port "$PORT"

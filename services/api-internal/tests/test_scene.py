@@ -35,7 +35,7 @@ from scene import (
     validate_transition,
 )
 from repository import InMemorySceneRepository, SceneNotFoundError
-import server  # for resolve_device_id
+import ingest_server as server  # for resolve_device_id
 
 
 # ---------------------------------------------------------------------------

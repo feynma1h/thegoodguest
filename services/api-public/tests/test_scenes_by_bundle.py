@@ -26,7 +26,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-import server
+import public_server as server
 from auth import NullTokenVerifier  # noqa: E402
 from roomstudio_api_core.scene import DeviceIdSource, Scene, SceneStatus  # noqa: E402
 from roomstudio_api_core.scene_read_repo import InMemorySceneReadRepository  # noqa: E402

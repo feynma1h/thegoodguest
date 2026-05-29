@@ -52,4 +52,4 @@ COPY services/api-public/ services/api-public/
 WORKDIR /app/services/api-public
 
 ENV PORT=8080
-CMD uvicorn server:app --host 0.0.0.0 --port "$PORT"
+CMD uvicorn public_server:app --host 0.0.0.0 --port "$PORT"

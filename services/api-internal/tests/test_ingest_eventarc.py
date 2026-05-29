@@ -36,7 +36,7 @@ from fastapi.testclient import TestClient
 
 from roomstudio_schemas import ARKIT_ONLY, LIDAR_ARKIT, SCHEMA_VERSION, CaptureBundle
 
-import server  # noqa: E402
+import ingest_server as server  # noqa: E402
 from repository import InMemorySceneRepository  # noqa: E402
 from dispatcher import InMemoryTaskDispatcher  # noqa: E402
 from scene import SceneStatus  # noqa: E402

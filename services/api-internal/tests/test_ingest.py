@@ -35,7 +35,7 @@ from roomstudio_schemas import (
     CaptureBundle,
 )
 
-import server  # the service module  # noqa: E402
+import ingest_server as server  # the service module  # noqa: E402
 from repository import InMemorySceneRepository  # noqa: E402
 from dispatcher import InMemoryTaskDispatcher  # noqa: E402
 from scene import SceneStatus  # noqa: E402
