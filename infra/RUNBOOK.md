@@ -182,10 +182,10 @@ git rev-parse HEAD
 ### 0d. Code-level preconditions: api-public
 
 ```bash
-grep -n "scenes/by-bundle" services/api-public/server.py
+grep -n "scenes/by-bundle" services/api-public/public_server.py
 # Expect: a line matching GET /scenes/by-bundle/{bundle_id}
 
-grep -n "upload_session\|health" services/api-public/server.py
+grep -n "upload_session\|health" services/api-public/public_server.py
 # Expect: /upload_session route and /health route present.
 ```
 
@@ -197,7 +197,7 @@ absent from api-internal and api-core (decision 0016: api-internal is IAM-gated 
 no in-app client auth anywhere on that side of the boundary).
 
 ```bash
-grep -q "FirebaseTokenVerifier" services/api-public/server.py \
+grep -q "FirebaseTokenVerifier" services/api-public/public_server.py \
   && echo "OK: FirebaseTokenVerifier wired into api-public." \
   || { echo "FAIL: Firebase verifier not wired into api-public (trust boundary, decision 0016)."; exit 1; }
 
@@ -213,7 +213,7 @@ grep -rq "FirebaseTokenVerifier" packages/api-core/ \
 ### 0e. Code-level preconditions: api-internal
 
 ```bash
-grep -n "def ingest\|ingest/eventarc\|health" services/api-internal/server.py
+grep -n "def ingest\|ingest/eventarc\|health" services/api-internal/ingest_server.py
 # Expect: /ingest route, /ingest/eventarc route, /health route all present.
 ```
 
