@@ -55,20 +55,33 @@ The active account needs the following IAM roles on project `roomstudio`:
 
 Effective-permission check — proves the caller actually has the permissions, not just
 that a role is bound by name (custom roles, or permissions removed from a predefined
-role, would still grep green against a role-name check). `test-iam-permissions` returns
-only the subset the caller actually holds; any permission absent from the response is
-missing from the effective grants.
+role, would still grep green against a role-name check). The IAM `testIamPermissions`
+REST API returns only the subset the caller actually holds; any permission absent from
+the response is missing from the effective grants.
+
+Note: `gcloud projects test-iam-permissions` does NOT exist as a gcloud subcommand —
+it fails with "Invalid choice" and produces empty stdout, which silently passes any check
+built around it. Use the Cloud Resource Manager REST API directly via curl instead.
 
 ```bash
 # Project-level permissions (maps to roles/run.admin, roles/iam.serviceAccountUser,
 # roles/eventarc.admin, roles/datastore.indexAdmin).
-MISSING=$(gcloud projects test-iam-permissions roomstudio \
-  --permissions=\
-run.services.create,run.services.update,run.services.setIamPolicy,\
-iam.serviceAccounts.actAs,\
-eventarc.triggers.create,eventarc.triggers.update,\
-datastore.indexes.list \
-  --format=json \
+# Uses the Cloud Resource Manager v1 REST API — gcloud has no equivalent subcommand.
+MISSING=$(curl -s -X POST \
+  "https://cloudresourcemanager.googleapis.com/v1/projects/roomstudio:testIamPermissions" \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "permissions": [
+      "run.services.create",
+      "run.services.update",
+      "run.services.setIamPolicy",
+      "iam.serviceAccounts.actAs",
+      "eventarc.triggers.create",
+      "eventarc.triggers.update",
+      "datastore.indexes.list"
+    ]
+  }' \
   | python3 -c "
 import sys, json
 want = {
@@ -92,7 +105,7 @@ if [ -n "${MISSING}" ]; then
 fi
 echo "OK: all project-level permissions confirmed."
 
-# Bucket-level storage.admin grants cannot be verified via test-iam-permissions —
+# Bucket-level storage.admin grants cannot be verified via testIamPermissions —
 # that API only tests permissions on the project resource, not resource-scoped
 # (bucket-level) bindings. Probe with objects.list instead.
 gcloud storage ls gs://roomstudio-captures/ > /dev/null 2>&1 \
@@ -452,7 +465,10 @@ whether the candidate revision is at 0% traffic (subsequent deploy) or 100% (fir
 
 Health check:
 ```bash
-curl -s "${API_INTERNAL_REVISION_URL}/health"
+# api-internal is --no-allow-unauthenticated; an unauthenticated curl always gets a
+# platform 403. Use an identity token from the operator's ADC credentials.
+curl -s -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  "${API_INTERNAL_REVISION_URL}/health"
 # Expect: {"status": "ok"}  HTTP 200
 ```
 
@@ -791,8 +807,11 @@ TTL check returns EXISTS.
   Inspect the first error at container start. First suspects:
   (a) **Protobuf gencode/runtime `VersionError`** — see decision 0021; root cause was
   api-core install order in the Dockerfile downgrading protobuf.
-  (b) **`FileNotFoundError` for a missing model or checkpoint path** — the current dead
-  state of `perception-obj` (`/opt/sam3d/checkpoints/hf/pipeline.yaml` not found).
+  (b) **`FileNotFoundError` for a missing model or checkpoint path** — historically this
+  was the failure for `/opt/sam3d/checkpoints/hf/pipeline.yaml` on revisions 00002/00003
+  (eager-import era, before lazy-load). That checkpoint is present on current serving
+  revisions; if this error reappears, a new image was built without the checkpoint baked
+  in — fix the Dockerfile `RUN` assertion step (decision 0008) before redeploying.
   Do not proceed to Phases 4–7 until the revision is healthy.
 
 - **Smoke tool fails at `/upload_session` (before any upload):** api-public is broken.
@@ -804,10 +823,16 @@ TTL check returns EXISTS.
   Roll back api-public.
 
 - **Smoke tool fails at polling (scene never reaches terminal state, times out):**
-  Could be api-internal, Eventarc, perception-obj, or Cloud Tasks. Triage order:
-  1. `gcloud logging read 'resource.type="cloud_run_revision" resource.labels.service_name="api-internal"' --project=roomstudio --limit=50`
-  2. Check Eventarc trigger delivery metrics in the GCP console.
-  3. Check perception-obj logs for the relevant `bundle_id`.
+  There are two distinct failure layers — triage in order:
+  1. **Ingest layer** (api-internal, Eventarc, Cloud Tasks): fast failures, pre-GPU. The
+     scene reaches a terminal state in seconds (`failed_incomplete`, `failed_invalid`) or
+     gets stuck in `queued`/`processing` without ever reaching perception-obj.
+     Check: `gcloud logging read 'resource.type="cloud_run_revision" resource.labels.service_name="api-internal"' --project=roomstudio --limit=50`
+     Also check Eventarc trigger delivery metrics in the GCP console.
+  2. **Reconstruction layer** (perception-obj): slow failures, post-model-load (94–138 s
+     after Cloud Tasks delivers the task). The scene was enqueued and processing started,
+     but reconstruction failed (e.g. undecodable frame images, SAM 3D error).
+     Check: perception-obj logs for the relevant `bundle_id`.
   Do not roll back until the layer is identified.
 
 - **Smoke tool fails at `auth-rejection`:** auth boundary is broken. Roll back api-public.

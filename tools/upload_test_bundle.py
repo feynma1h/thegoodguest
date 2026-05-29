@@ -618,10 +618,19 @@ def do_cleanup(
             out.warn(f"cleanup outputs GCS failed: {exc}")
 
     # 3. Firestore upload_sessions
+    # google-cloud-firestore is not in the root venv; use the REST API instead.
     try:
-        from google.cloud import firestore as fs
-        db = fs.Client(project=cfg.firebase_project_id)
-        db.collection("upload_sessions").document(bundle_id).delete()
+        import google.auth
+        import google.auth.transport.requests as _ga_transport
+        import requests as _reqs
+        _creds, _ = google.auth.default()
+        _creds.refresh(_ga_transport.Request())
+        _base = (
+            f"https://firestore.googleapis.com/v1/projects/{cfg.firebase_project_id}"
+            "/databases/(default)/documents"
+        )
+        _hdrs = {"Authorization": f"Bearer {_creds.token}"}
+        _reqs.delete(f"{_base}/upload_sessions/{bundle_id}", headers=_hdrs)
         out.detail(f"  deleted Firestore upload_sessions/{bundle_id}")
     except Exception as exc:
         out.warn(f"cleanup Firestore upload_sessions failed: {exc}")
@@ -629,9 +638,17 @@ def do_cleanup(
     # 4. Firestore scenes (only if scene_id known)
     if scene_id:
         try:
-            from google.cloud import firestore as fs
-            db = fs.Client(project=cfg.firebase_project_id)
-            db.collection("scenes").document(scene_id).delete()
+            import google.auth
+            import google.auth.transport.requests as _ga_transport
+            import requests as _reqs
+            _creds, _ = google.auth.default()
+            _creds.refresh(_ga_transport.Request())
+            _base = (
+                f"https://firestore.googleapis.com/v1/projects/{cfg.firebase_project_id}"
+                "/databases/(default)/documents"
+            )
+            _hdrs = {"Authorization": f"Bearer {_creds.token}"}
+            _reqs.delete(f"{_base}/scenes/{scene_id}", headers=_hdrs)
             out.detail(f"  deleted Firestore scenes/{scene_id}")
         except Exception as exc:
             out.warn(f"cleanup Firestore scenes failed: {exc}")
