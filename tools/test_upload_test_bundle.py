@@ -9,24 +9,10 @@ Run from repo root:
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-# Add repo root packages to sys.path so the tool can import its deps.
-_repo_root = Path(__file__).resolve().parents[1]
-for _pkg in ("packages/schemas", "packages/api-core"):
-    _p = str(_repo_root / _pkg)
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-# Import the modules under test.
-_tools_dir = str(_repo_root / "tools")
-if _tools_dir not in sys.path:
-    sys.path.insert(0, _tools_dir)
-
-from upload_test_bundle import (  # noqa: E402
+from upload_test_bundle import (
     Config,
     Misconfig,
     validate_config,

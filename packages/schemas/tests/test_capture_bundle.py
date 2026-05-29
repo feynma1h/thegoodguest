@@ -13,13 +13,7 @@ Or just:
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-
-# Make the schemas package importable without installing it.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from roomstudio_schemas import (
     ARKIT_ONLY,
     LIDAR_ARKIT,

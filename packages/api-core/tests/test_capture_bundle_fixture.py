@@ -9,15 +9,6 @@ Run from repo root:
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-_repo_root = Path(__file__).resolve().parents[3]
-for _pkg in ("packages/api-core", "packages/schemas"):
-    _p = str(_repo_root / _pkg)
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 from roomstudio_api_core.test_fixtures.capture_bundle import (
     TestBundleArtifacts,
     build_capture_bundle,
@@ -25,13 +16,7 @@ from roomstudio_api_core.test_fixtures.capture_bundle import (
     TIER_LIDAR_ARKIT,
     TIER_LIDAR_ROOMPLAN,
 )
-
-# Import the ingester's validation to check fixture-generated bundles pass.
-_ingest_dir = str(_repo_root / "services" / "api-internal")
-if _ingest_dir not in sys.path:
-    sys.path.insert(0, _ingest_dir)
-
-from validation import validate_bundle  # noqa: E402
+from validation import validate_bundle
 
 import pytest
 

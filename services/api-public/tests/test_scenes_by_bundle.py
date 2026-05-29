@@ -19,26 +19,14 @@ Run from repo root:
 """
 from __future__ import annotations
 
-import sys
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-_api_dir = Path(__file__).resolve().parents[1]
-_repo_root = _api_dir.parents[1]
-for _p in (
-    str(_api_dir),
-    str(_repo_root / "packages/schemas"),
-    str(_repo_root / "packages/api-core"),
-):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-import server  # noqa: E402
+import server
 from auth import NullTokenVerifier  # noqa: E402
 from roomstudio_api_core.scene import DeviceIdSource, Scene, SceneStatus  # noqa: E402
 from roomstudio_api_core.scene_read_repo import InMemorySceneReadRepository  # noqa: E402

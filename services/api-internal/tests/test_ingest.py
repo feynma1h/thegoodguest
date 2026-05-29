@@ -20,30 +20,15 @@ Run from repo root:
 """
 from __future__ import annotations
 
-import sys
 import time
 import uuid
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
-# Make services/api/ and packages/schemas importable regardless of where
-# pytest is invoked from. Mirrors the sys.path approach used in the schema
-# tests (packages/schemas/tests/test_capture_bundle.py).
-_api_dir = Path(__file__).resolve().parents[1]
-_repo_root = _api_dir.parents[1]
-for _p in (
-    str(_api_dir),
-    str(_repo_root / "packages/schemas"),
-    str(_repo_root / "packages/api-core"),
-):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from roomstudio_schemas import (  # noqa: E402
+from roomstudio_schemas import (
     ARKIT_ONLY,
     LIDAR_ARKIT,
     SCHEMA_VERSION,
