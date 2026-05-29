@@ -68,6 +68,7 @@ from roomstudio_schemas import CaptureBundle, CaptureTier  # noqa: E402
 from validation import validate_bundle  # noqa: E402
 from scene import DeviceIdSource, SceneStatus, new_scene  # noqa: E402
 from repository import SceneRepository, InMemorySceneRepository  # noqa: E402
+import blob_validator  # noqa: E402
 from dispatcher import TaskDispatcher, InMemoryTaskDispatcher  # noqa: E402
 from fcm import FcmNotifier, NullFcmNotifier  # noqa: E402
 from roomstudio_api_core.upload_session_repo import (  # noqa: E402
@@ -416,6 +417,27 @@ def _run_ingest(
                 content={"status": "failed_incomplete", "missing_paths": missing},
             )
 
+    # 5b. Image-blob validation gate — check RGB frames before dispatching to GPU.
+    # Fast-fails bundles with non-decodable image data (too small, wrong format,
+    # or bad magic bytes) before they reach the perception pipeline. FAILED_INVALID
+    # is terminal: corrupted blobs cannot be fixed by re-uploading the same data.
+    if bundle_id:
+        invalid_blobs = _validate_image_blobs(bundle, bucket, bundle_id)
+        if invalid_blobs:
+            _handle_failed_invalid(
+                bundle_gcs_uri=bundle_gcs_uri,
+                bundle_id=bundle_id,
+                device_id=device_id,
+                device_id_source=device_id_source,
+                invalid_blobs=invalid_blobs,
+                repo=repo,
+                existing_scene_id=existing_scene_id,
+            )
+            return JSONResponse(
+                status_code=200,
+                content={"status": "failed_invalid", "invalid_blobs": invalid_blobs},
+            )
+
     # 6. Create or transition Scene to QUEUED.
     if existing_scene_id:
         scene = repo.update_status(existing_scene_id, SceneStatus.QUEUED)
@@ -474,6 +496,18 @@ def _run_ingest(
         status_code=200,
         content=IngestAck(scene_id=scene_id, status="queued").model_dump(),
     )
+
+
+def _validate_image_blobs(bundle, bucket: str, bundle_id: str) -> list[dict]:
+    """Thin wrapper around blob_validator.validate_image_blobs.
+
+    Exists as a module-level function so tests can patch it on the server
+    module (patch.object(server, "_validate_image_blobs", ...)) without
+    affecting the blob_validator module directly. All existing tests that
+    exercise the happy path patch this wrapper to return [] (no invalid blobs),
+    keeping them independent of GCS I/O.
+    """
+    return blob_validator.validate_image_blobs(bundle, bucket, bundle_id)
 
 
 def _handle_failed_incomplete(
@@ -535,6 +569,58 @@ def _handle_failed_incomplete(
                 )
     except Exception:
         logger.exception("FCM notification failed for scene %s (continuing)", scene_id)
+
+
+def _handle_failed_invalid(
+    *,
+    bundle_gcs_uri: str,
+    bundle_id: str,
+    device_id: str,
+    device_id_source: DeviceIdSource,
+    invalid_blobs: list[dict],
+    repo: SceneRepository,
+    existing_scene_id: str | None,
+) -> None:
+    """Create (or update) a Scene to FAILED_INVALID and log the bad blobs.
+
+    FAILED_INVALID is terminal — corrupted or non-decodable blobs cannot be
+    fixed by re-uploading the same data. The Scene is created but never
+    dispatched to the GPU pipeline.
+    """
+    if existing_scene_id:
+        # existing_scene_id is only set when retrying a FAILED_INCOMPLETE scene,
+        # which means blobs were previously absent but are now present. If they
+        # turn out to be non-decodable, transition to FAILED_INVALID directly.
+        scene_id = existing_scene_id
+        repo.update_status(
+            scene_id,
+            SceneStatus.FAILED_INVALID,
+            invalid_blobs=invalid_blobs,
+            last_error=f"invalid blobs: {[b['relative_path'] for b in invalid_blobs]}",
+        )
+    else:
+        scene_id = str(uuid.uuid4())
+        scene = new_scene(
+            scene_id=scene_id,
+            device_id=device_id,
+            device_id_source=device_id_source,
+            bundle_uri=bundle_gcs_uri,
+        )
+        scene.bundle_id = bundle_id
+        scene.user_id = _get_upload_session_repo().get_user_id(bundle_id)
+        repo.create(scene)
+        repo.update_status(
+            scene_id,
+            SceneStatus.FAILED_INVALID,
+            invalid_blobs=invalid_blobs,
+            last_error=f"invalid blobs: {[b['relative_path'] for b in invalid_blobs]}",
+        )
+    logger.warning(
+        "Scene %s failed_invalid: bundle_id=%s invalid_blobs=%s",
+        scene_id,
+        bundle_id,
+        invalid_blobs,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -640,6 +726,23 @@ async def ingest_eventarc(request: Request) -> JSONResponse:
                 bundle_id,
                 existing.scene_id,
                 existing.status,
+            )
+            return JSONResponse(
+                status_code=200,
+                content=IngestAck(
+                    scene_id=existing.scene_id, status=existing.status.value
+                ).model_dump(),
+            )
+        if existing.status == SceneStatus.FAILED_INVALID:
+            # Terminal state: corrupted blobs cannot be fixed by re-uploading
+            # the same data. Unlike FAILED_INCOMPLETE (missing blobs that a
+            # re-upload can supply), FAILED_INVALID means the bytes were present
+            # but non-decodable. A second finalize event for the same bundle_id
+            # cannot change that — skip without re-processing.
+            logger.info(
+                "Eventarc: bundle_id=%s scene %s is FAILED_INVALID (terminal) — skipping",
+                bundle_id,
+                existing.scene_id,
             )
             return JSONResponse(
                 status_code=200,

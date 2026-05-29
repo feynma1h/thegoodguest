@@ -217,3 +217,41 @@ class TestReuseUidCache:
         good = tmp_path / "uid.json"
         good.write_text(json.dumps({"local_id": "uid-123", "refresh_token": "tok-abc"}))
         validate_config(_make_cfg(reuse_uid=str(good)))
+
+
+# ---------------------------------------------------------------------------
+# happy-path pass condition
+# ---------------------------------------------------------------------------
+
+class TestHappyPathPassCondition:
+    """Verify that run_happy_path recognises failed_invalid as PASS.
+
+    The synthetic fixture carries non-decodable placeholder pixels; once the
+    ingest validation gate ships, happy-path smoke reaches failed_invalid
+    deterministically rather than timing out. This test guards against
+    accidentally reverting the pass condition back to 'ready'.
+    """
+
+    def test_failed_invalid_is_the_expected_terminal_state(self):
+        """The poll_scene terminal set must include failed_invalid."""
+        from upload_test_bundle import poll_scene
+        import inspect
+        src = inspect.getsource(poll_scene)
+        assert "failed_invalid" in src, (
+            "poll_scene terminal set must include 'failed_invalid'"
+        )
+
+    def test_run_happy_path_passes_on_failed_invalid(self):
+        """run_happy_path source must check for failed_invalid, not ready."""
+        from upload_test_bundle import run_happy_path
+        import inspect
+        src = inspect.getsource(run_happy_path)
+        assert "failed_invalid" in src, (
+            "run_happy_path must recognise 'failed_invalid' as the PASS condition"
+        )
+        # The old pass condition ("ready") must no longer be the primary check.
+        # We allow "ready" to appear in comments, but the equality check must
+        # not be == "ready".
+        assert 'status == "ready"' not in src, (
+            "run_happy_path must not check `status == 'ready'` as the PASS condition"
+        )

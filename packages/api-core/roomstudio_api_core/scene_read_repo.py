@@ -133,6 +133,7 @@ class FirestoreSceneReadRepository(SceneReadRepository):
             bundle_id=data.get("bundle_id"),
             user_id=data.get("user_id"),
             missing_paths=data.get("missing_paths"),
+            invalid_blobs=data.get("invalid_blobs"),
         )
 
     def get(self, scene_id: str) -> Scene:

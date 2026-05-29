@@ -227,11 +227,23 @@ class TestStateMachine:
             validate_transition(SceneStatus.FAILED, SceneStatus.FAILED)
 
     # allowed_transitions helper
+    def test_queued_to_failed_invalid_allowed(self):
+        """QUEUED → FAILED_INVALID is permitted for the ingest validation gate
+        (blobs present but content is non-decodable). Terminal state."""
+        validate_transition(SceneStatus.QUEUED, SceneStatus.FAILED_INVALID)  # must not raise
+
+    def test_failed_invalid_is_terminal(self):
+        """FAILED_INVALID is a terminal state — no outgoing transitions allowed."""
+        for target in SceneStatus:
+            with pytest.raises(InvalidTransitionError):
+                validate_transition(SceneStatus.FAILED_INVALID, target)
+
     def test_allowed_from_queued(self):
         assert allowed_transitions(SceneStatus.QUEUED) == frozenset({
             SceneStatus.PROCESSING,
             SceneStatus.FAILED,           # dispatch-time failure path
             SceneStatus.FAILED_INCOMPLETE, # existence-check failure (missing blobs)
+            SceneStatus.FAILED_INVALID,   # ingest validation gate (non-decodable blobs)
         })
 
     def test_allowed_from_ready_is_empty(self):

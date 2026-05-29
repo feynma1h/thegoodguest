@@ -33,6 +33,23 @@ class SceneStatus(str, Enum):
     READY = "ready"
     FAILED = "failed"
     FAILED_INCOMPLETE = "failed_incomplete"  # upload incomplete; recoverable via re-upload
+    FAILED_INVALID = "failed_invalid"        # blobs present but content is non-decodable
+
+
+class InvalidBlobReason:
+    """Fixed reason codes for invalid_blobs entries on FAILED_INVALID scenes.
+
+    Defined in api-core alongside FAILED_INVALID so api-public can surface them
+    to clients (e.g. the web app) without importing api-internal.
+
+    Values are stable strings — treat as a versioned API contract. Do not
+    rename without a migration: the web app will map these to user-facing
+    messages (e.g. "too_small" → "Photo could not be read — try again").
+    """
+    TOO_SMALL = "too_small"                    # blob < MIN_IMAGE_SIZE_BYTES; catches zero-byte,
+                                               # truncated, and the 21-byte synthetic fixture
+    BAD_MAGIC = "bad_magic"                    # first bytes don't match the extension's format
+    UNRECOGNIZED_FORMAT = "unrecognized_format" # extension not in the known image format set
 
 
 class DeviceIdSource(str, Enum):
@@ -61,10 +78,16 @@ class DeviceIdSource(str, Enum):
 
 # Allowed state transitions. Values are frozensets of legal target states.
 _ALLOWED_TRANSITIONS: dict[SceneStatus, frozenset[SceneStatus]] = {
-    SceneStatus.QUEUED:            frozenset({SceneStatus.PROCESSING, SceneStatus.FAILED, SceneStatus.FAILED_INCOMPLETE}),
+    SceneStatus.QUEUED: frozenset({
+        SceneStatus.PROCESSING,
+        SceneStatus.FAILED,           # dispatch-time failure (task never enqueued)
+        SceneStatus.FAILED_INCOMPLETE, # existence-check failure (missing blobs)
+        SceneStatus.FAILED_INVALID,   # validity-check failure (present but non-decodable blobs)
+    }),
     SceneStatus.PROCESSING:        frozenset({SceneStatus.READY, SceneStatus.FAILED}),
     SceneStatus.FAILED:            frozenset({SceneStatus.QUEUED}),           # manual retry only
     SceneStatus.FAILED_INCOMPLETE: frozenset({SceneStatus.QUEUED}),           # re-upload → Eventarc re-fires → ingest retries
+    SceneStatus.FAILED_INVALID:    frozenset(),                                # terminal — corrupted blobs cannot be fixed by re-upload
     SceneStatus.READY:             frozenset(),                                # terminal
 }
 
@@ -144,6 +167,7 @@ class Scene:
     bundle_id: Optional[str] = None       # iOS bundle UUIDv4; stored for lookup by bundle_id
     user_id: Optional[str] = None         # Firebase UID from the upload JWT
     missing_paths: Optional[list] = None  # relative paths absent at existence-check time
+    invalid_blobs: Optional[list] = None  # [{relative_path, reason}] for FAILED_INVALID scenes
 
     def __post_init__(self) -> None:
         if not self.scene_id:

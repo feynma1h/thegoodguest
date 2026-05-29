@@ -78,13 +78,14 @@ class SceneRepository(SceneReadRepository):
         result_uri: Optional[str] = None,
         last_error: Optional[str] = None,
         missing_paths: Optional[list] = None,
+        invalid_blobs: Optional[list] = None,
     ) -> Scene:
         """Transition scene_id to new_status and return the updated Scene.
 
         Validates the transition via validate_transition before mutating;
         raises InvalidTransitionError on disallowed moves. Sets updated_at to
-        now. Sets result_uri, last_error, and missing_paths only when
-        explicitly provided.
+        now. Sets result_uri, last_error, missing_paths, and invalid_blobs only
+        when explicitly provided.
 
         Raises SceneNotFoundError if the scene does not exist.
         Raises InvalidTransitionError if the transition is not allowed.
@@ -121,6 +122,7 @@ class InMemorySceneRepository(SceneRepository):
         result_uri: Optional[str] = None,
         last_error: Optional[str] = None,
         missing_paths: Optional[list] = None,
+        invalid_blobs: Optional[list] = None,
     ) -> Scene:
         scene = self.get(scene_id)          # raises SceneNotFoundError if missing
         validate_transition(scene.status, new_status)  # raises InvalidTransitionError if bad
@@ -132,6 +134,8 @@ class InMemorySceneRepository(SceneRepository):
             scene.last_error = last_error
         if missing_paths is not None:
             scene.missing_paths = missing_paths
+        if invalid_blobs is not None:
+            scene.invalid_blobs = invalid_blobs
         self._store[scene_id] = copy.deepcopy(scene)
         return copy.deepcopy(scene)
 
@@ -177,6 +181,7 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
         result_uri: Optional[str] = None,
         last_error: Optional[str] = None,
         missing_paths: Optional[list] = None,
+        invalid_blobs: Optional[list] = None,
     ) -> Scene:
         from google.cloud import firestore as _fs
 
@@ -198,6 +203,8 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
                 updates["last_error"] = last_error
             if missing_paths is not None:
                 updates["missing_paths"] = missing_paths
+            if invalid_blobs is not None:
+                updates["invalid_blobs"] = invalid_blobs
             transaction.update(ref, updates)
 
             scene.status = new_status
@@ -208,6 +215,8 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
                 scene.last_error = last_error
             if missing_paths is not None:
                 scene.missing_paths = missing_paths
+            if invalid_blobs is not None:
+                scene.invalid_blobs = invalid_blobs
             return scene
 
         return _run(self._db.transaction(), ref)
@@ -231,4 +240,5 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
             "bundle_id": scene.bundle_id,
             "user_id": scene.user_id,
             "missing_paths": scene.missing_paths,
+            "invalid_blobs": scene.invalid_blobs,
         }
