@@ -17,4 +17,12 @@ select = ["E", "F", "I", "W", "UP", "B"]
 ignore = ["E501"]  # line length handled by formatter
 
 [tool.pytest.ini_options]
-testpaths = ["services", "packages", "tools"]
+testpaths = [
+    "packages/schemas/tests",
+    "packages/api-core/tests",
+    "services/api-internal/tests",
+    "services/api-public/tests",
+    "tools/test_upload_test_bundle.py",
+    "tools/test_smoke_test_e2e.py",
+]
+addopts = "--import-mode=importlib"

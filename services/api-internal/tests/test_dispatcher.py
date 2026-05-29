@@ -14,18 +14,6 @@ Run from repo root:
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-_api_dir = Path(__file__).resolve().parents[1]
-_repo_root = _api_dir.parents[1]
-for _p in (
-    str(_api_dir),
-    str(_repo_root / "packages/api-core"),
-):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 from dispatcher import InMemoryTaskDispatcher
 
 

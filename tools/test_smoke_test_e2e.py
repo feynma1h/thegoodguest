@@ -7,17 +7,11 @@ Run the real script against staging when you need end-to-end confidence.
 from __future__ import annotations
 
 import subprocess
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure tools/ is importable
-_TOOLS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(_TOOLS_DIR))
-
-import smoke_test_e2e as sut  # noqa: E402
+import smoke_test_e2e as sut
 
 
 # ---------------------------------------------------------------------------

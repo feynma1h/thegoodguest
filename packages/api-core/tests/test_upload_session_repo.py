@@ -22,13 +22,6 @@ Run from repo root:
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-_api_core_dir = Path(__file__).resolve().parents[1]
-if str(_api_core_dir) not in sys.path:
-    sys.path.insert(0, str(_api_core_dir))
-
 from roomstudio_api_core.upload_session_repo import (
     InMemoryUploadSessionRepository,
     validate_manifest_path,
