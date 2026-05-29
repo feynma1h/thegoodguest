@@ -17,9 +17,9 @@ Four mutually exclusive modes (positional argument):
       → exit 0. Requires --drop-blob-kind.
 
   duplicate-event
-      Run happy-path to ready, then re-upload bundle.pb to GCS directly (SDK,
-      not resumable URI), wait 15s for Eventarc redelivery, poll again.
-      Expects scene_id unchanged and status=ready → exit 0.
+      Run happy-path to failed_invalid, then re-upload bundle.pb to GCS directly
+      (SDK, not resumable URI), wait 15s for Eventarc redelivery, poll again.
+      Expects scene_id unchanged and status=failed_invalid → exit 0.
 
   auth-rejection
       POST /upload_session with an empty Authorization header (no "Bearer "
