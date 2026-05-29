@@ -53,22 +53,97 @@ The active account needs the following IAM roles on project `roomstudio`:
 - `roles/storage.admin` on `gs://roomstudio-captures` and `gs://roomstudio-perception-outputs`
 - Firestore write access to `upload_sessions` and `scenes` (for smoke `--cleanup`)
 
-Spot-check IAM (the single most important one for this deploy):
+Effective-permission check — proves the caller actually has the permissions, not just
+that a role is bound by name (custom roles, or permissions removed from a predefined
+role, would still grep green against a role-name check). `test-iam-permissions` returns
+only the subset the caller actually holds; any permission absent from the response is
+missing from the effective grants.
 
 ```bash
-gcloud projects get-iam-policy roomstudio \
-  --flatten="bindings[].members" \
-  --filter="bindings.role=roles/run.admin" \
-  --format="table(bindings.members)"
-# Expect: your authenticated account appears in the output.
+# Project-level permissions (maps to roles/run.admin, roles/iam.serviceAccountUser,
+# roles/eventarc.admin, roles/datastore.indexAdmin).
+MISSING=$(gcloud projects test-iam-permissions roomstudio \
+  --permissions=\
+run.services.create,run.services.update,run.services.setIamPolicy,\
+iam.serviceAccounts.actAs,\
+eventarc.triggers.create,eventarc.triggers.update,\
+datastore.indexes.list \
+  --format=json \
+  | python3 -c "
+import sys, json
+want = {
+    'run.services.create',       # roles/run.admin — deploy services
+    'run.services.update',       # roles/run.admin — update + traffic flip
+    'run.services.setIamPolicy', # roles/run.admin — Eventarc invoker binding
+    'iam.serviceAccounts.actAs', # roles/iam.serviceAccountUser — deploy with runtime SA
+    'eventarc.triggers.create',  # roles/eventarc.admin
+    'eventarc.triggers.update',  # roles/eventarc.admin
+    'datastore.indexes.list',    # roles/datastore.indexAdmin — Phase 1 index verify
+}
+got = set(json.load(sys.stdin).get('permissions', []))
+for p in sorted(want - got):
+    print(p)
+")
+if [ -n "${MISSING}" ]; then
+  echo "FAIL: missing project-level permissions:"
+  echo "${MISSING}" | sed 's/^/  /'
+  echo "Grant the missing roles before continuing."
+  exit 1
+fi
+echo "OK: all project-level permissions confirmed."
+
+# Bucket-level storage.admin grants cannot be verified via test-iam-permissions —
+# that API only tests permissions on the project resource, not resource-scoped
+# (bucket-level) bindings. Probe with objects.list instead.
+gcloud storage ls gs://roomstudio-captures/ > /dev/null 2>&1 \
+  && echo "OK: storage access confirmed for gs://roomstudio-captures." \
+  || { echo "FAIL: cannot list gs://roomstudio-captures — storage.admin on bucket missing."; exit 1; }
+
+gcloud storage ls gs://roomstudio-perception-outputs/ > /dev/null 2>&1 \
+  && echo "OK: storage access confirmed for gs://roomstudio-perception-outputs." \
+  || { echo "FAIL: cannot list gs://roomstudio-perception-outputs — storage.admin on bucket missing."; exit 1; }
 ```
 
-**If not:** grant the missing roles before continuing. Do not proceed with insufficient IAM.
+**If any check fails:** grant the missing role or bucket-level binding before continuing.
+Do not proceed with insufficient IAM.
 
 ### 0b. Operator environment: Firebase credentials
 
-The smoke tool (Phase 7) needs a Firebase anonymous sign-in to mint an ID token.
-Set these env vars before reaching Phase 7:
+The smoke tool (Phase 7) authenticates as a Firebase anonymous user to mint ID tokens.
+This requires Firebase to be configured for the project and a web app registered.
+
+**One-time setup — verify or perform once per project; skip if already done:**
+
+**Step 1: Add Firebase to the GCP project.**
+Firebase console (`console.firebase.google.com`) → "Add project" → select the existing
+GCP project `roomstudio` → "Add Firebase to an existing Google Cloud project". Complete
+the wizard.
+
+**Step 2: Register a web app.**
+Firebase console → Project settings (gear icon, top-left sidebar) → "Your apps" tab →
+"Add app" → Web (`</>` icon). Nickname: `roomstudio-smoke-test`. Register without
+Firebase Hosting. Note the `appId`; current registered value:
+`1:502805861152:web:095d7e3b331e0e0ddcbd45`.
+
+**Step 3: Enable anonymous sign-in.**
+Firebase console → Authentication (left sidebar) → Sign-in method tab → Anonymous →
+Enable → Save.
+
+**Step 4: Verify required APIs are enabled.**
+```bash
+gcloud services list --enabled --project=roomstudio \
+  --filter="name:firebase.googleapis.com OR name:identitytoolkit.googleapis.com" \
+  --format="value(name)"
+# Expect: both firebase.googleapis.com and identitytoolkit.googleapis.com
+```
+
+If either is missing:
+```bash
+gcloud services enable firebase.googleapis.com identitytoolkit.googleapis.com \
+  --project=roomstudio
+```
+
+**Set env vars** (required in every shell session before reaching Phase 7):
 
 ```bash
 export FIREBASE_API_KEY="<Web API key>"        # Firebase console → Project settings
@@ -77,7 +152,20 @@ export FIREBASE_PROJECT_ID="roomstudio"
 ```
 
 `FIREBASE_API_KEY` is not in `infra/secrets.md` (it's a client-side key, not a server secret).
-Find it in the Firebase console. The project ID is always `roomstudio`.
+Find it in the Firebase console under Project settings → General → Your apps → Web API key.
+The project ID is always `roomstudio`.
+
+**Set ADC quota project** (required for smoke `--cleanup`):
+
+```bash
+gcloud auth application-default set-quota-project roomstudio
+```
+
+The smoke tool's `--cleanup` flag uses Application Default Credentials for direct
+Firestore and GCS calls (decision 0020). Without the quota project set, ADC calls are
+routed through the ADC credential's own quota project — which may differ from `roomstudio`
+if the credential was originally created for a different project — causing billing errors
+or rejected requests.
 
 ### 0c. Repo state
 
