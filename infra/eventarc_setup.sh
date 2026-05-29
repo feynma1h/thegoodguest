@@ -82,30 +82,13 @@ gcloud services enable eventarc.googleapis.com --project="${PROJECT}"
 echo "Eventarc API enabled (or already enabled)."
 echo ""
 
-# ── Step 2: Wait for the Eventarc Service Agent ───────────────────────────────
-# GCP provisions the Service Agent asynchronously after the API is enabled.
-# The agent must exist before trigger creation or IAM grants will fail.
-# Poll with bounded retry (10 attempts × 15 s = 2.5 min maximum wait).
-echo "Waiting for Eventarc Service Agent: ${EVENTARC_SA}"
-SA_READY=false
-for i in $(seq 1 10); do
-  if gcloud iam service-accounts describe "${EVENTARC_SA}" \
-       --project="${PROJECT}" >/dev/null 2>&1; then
-    echo "Attempt ${i}/10: Eventarc Service Agent exists."
-    SA_READY=true
-    break
-  fi
-  echo "Attempt ${i}/10: Service Agent not yet present; waiting 15s..."
-  sleep 15
-done
-if [[ "${SA_READY}" != "true" ]]; then
-  echo "ERROR: Eventarc Service Agent ${EVENTARC_SA} did not appear after 10 attempts." >&2
-  echo "The Eventarc API may still be propagating. Wait a few minutes and re-run." >&2
-  exit 1
-fi
-echo ""
-
 # ── Step 3: Grant roles/eventarc.eventReceiver to the trigger SA ─────────────
+# (Step 2 — "wait for Eventarc Service Agent" — was removed. The describe loop used
+# `gcloud iam service-accounts describe` on a Google-managed gcp-sa-eventarc agent,
+# which an operator account cannot call (PERMISSION_DENIED). It misread that as "not
+# yet present" and timed out even when the agent existed. It was also redundant: Step 6's
+# trigger-create retry loop already treats Service-Agent-not-ready as a transient error
+# and retries on it. Step 6's loop is the correct, sufficient guard.)
 # Required at project scope (not just on the Cloud Run service) for the
 # Eventarc-managed Pub/Sub subscription to deliver events.
 # Idempotent: add-iam-policy-binding deduplicates at the IAM level.
