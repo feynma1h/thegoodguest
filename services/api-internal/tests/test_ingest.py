@@ -132,6 +132,7 @@ def test_valid_arkit_bundle_returns_200(client: TestClient) -> None:
     bundle_bytes = _make_bundle(frame_count=3)
     with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
          patch.object(server, "_blob_exists", return_value=True), \
+         patch.object(server, "_validate_image_blobs", return_value=[]), \
          patch.object(server, "_scene_repo", InMemorySceneRepository()), \
          patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()):
         resp = client.post(
@@ -149,6 +150,7 @@ def test_valid_lidar_bundle_returns_200(client: TestClient) -> None:
     bundle_bytes = _make_bundle(frame_count=2, add_depth=True)
     with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
          patch.object(server, "_blob_exists", return_value=True), \
+         patch.object(server, "_validate_image_blobs", return_value=[]), \
          patch.object(server, "_scene_repo", InMemorySceneRepository()), \
          patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()):
         resp = client.post(
@@ -177,6 +179,7 @@ def test_dispatch_happy_path_scene_and_task_created(client: TestClient) -> None:
 
     with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
          patch.object(server, "_blob_exists", return_value=True), \
+         patch.object(server, "_validate_image_blobs", return_value=[]), \
          patch.object(server, "_scene_repo", repo), \
          patch.object(server, "_task_dispatcher", dispatcher):
         resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
@@ -218,6 +221,7 @@ def test_dispatch_failure_returns_500_and_marks_scene_failed(client: TestClient)
 
     with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
          patch.object(server, "_blob_exists", return_value=True), \
+         patch.object(server, "_validate_image_blobs", return_value=[]), \
          patch.object(server, "_scene_repo", repo), \
          patch.object(server, "_task_dispatcher", failing_dispatcher):
         resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
@@ -338,3 +342,116 @@ def test_absolute_rgb_path_returns_400(client: TestClient) -> None:
     body = resp.json()
     assert body["error"] == "absolute_gcs_path"
     assert "rgb_gcs_path" in body["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Blob validation gate
+# ---------------------------------------------------------------------------
+
+class TestBlobValidationGate:
+    """Tests for the ingest-side image-blob validation gate (step 5b).
+
+    All GCS I/O is patched: _blob_exists returns True (blobs exist),
+    _validate_image_blobs is controlled to return specific invalid-blob lists.
+    Tests assert the HTTP response, the Scene status in the repo, and that
+    no task is enqueued for FAILED_INVALID scenes.
+    """
+
+    _BUNDLE_URI = "gs://test-bucket/captures/bundle-abc/bundle.pb"
+
+    def test_undersized_blobs_return_failed_invalid(self, client: TestClient) -> None:
+        """_validate_image_blobs returning TOO_SMALL entries → 200 status=failed_invalid."""
+        bundle_bytes = _make_bundle(frame_count=2)
+        repo = InMemorySceneRepository()
+        dispatcher = InMemoryTaskDispatcher()
+
+        invalid = [
+            {"relative_path": "frames/000000.jpg", "reason": "too_small"},
+            {"relative_path": "frames/000001.jpg", "reason": "too_small"},
+        ]
+
+        with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+             patch.object(server, "_blob_exists", return_value=True), \
+             patch.object(server, "_validate_image_blobs", return_value=invalid), \
+             patch.object(server, "_scene_repo", repo), \
+             patch.object(server, "_task_dispatcher", dispatcher), \
+             patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()):
+            resp = client.post("/ingest", json={"bundle_gcs_uri": self._BUNDLE_URI})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "failed_invalid"
+        assert len(body["invalid_blobs"]) == 2
+        assert body["invalid_blobs"][0]["reason"] == "too_small"
+        # No task enqueued — FAILED_INVALID is terminal.
+        assert len(dispatcher.tasks) == 0
+        # Scene persisted as FAILED_INVALID.
+        scenes = list(repo._store.values())
+        assert len(scenes) == 1
+        assert scenes[0].status == SceneStatus.FAILED_INVALID
+        assert scenes[0].invalid_blobs == invalid
+
+    def test_bad_magic_blobs_return_failed_invalid(self, client: TestClient) -> None:
+        """_validate_image_blobs returning BAD_MAGIC → 200 status=failed_invalid."""
+        bundle_bytes = _make_bundle(frame_count=1)
+        repo = InMemorySceneRepository()
+        dispatcher = InMemoryTaskDispatcher()
+
+        invalid = [{"relative_path": "frames/000000.jpg", "reason": "bad_magic"}]
+
+        with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+             patch.object(server, "_blob_exists", return_value=True), \
+             patch.object(server, "_validate_image_blobs", return_value=invalid), \
+             patch.object(server, "_scene_repo", repo), \
+             patch.object(server, "_task_dispatcher", dispatcher), \
+             patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()):
+            resp = client.post("/ingest", json={"bundle_gcs_uri": self._BUNDLE_URI})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "failed_invalid"
+        assert body["invalid_blobs"][0]["reason"] == "bad_magic"
+        assert len(dispatcher.tasks) == 0
+
+    def test_valid_blobs_proceed_to_queued(self, client: TestClient) -> None:
+        """_validate_image_blobs returning [] → scene reaches QUEUED and task enqueued."""
+        bundle_bytes = _make_bundle(frame_count=2)
+        repo = InMemorySceneRepository()
+        dispatcher = InMemoryTaskDispatcher()
+
+        with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+             patch.object(server, "_blob_exists", return_value=True), \
+             patch.object(server, "_validate_image_blobs", return_value=[]), \
+             patch.object(server, "_scene_repo", repo), \
+             patch.object(server, "_task_dispatcher", dispatcher):
+            resp = client.post("/ingest", json={"bundle_gcs_uri": self._BUNDLE_URI})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "queued"
+        assert len(dispatcher.tasks) == 1
+
+    def test_failed_invalid_scene_has_invalid_blobs_field(self, client: TestClient) -> None:
+        """Scene.invalid_blobs carries the structured list from _validate_image_blobs."""
+        bundle_bytes = _make_bundle(frame_count=1)
+        repo = InMemorySceneRepository()
+
+        invalid = [{"relative_path": "frames/000000.jpg", "reason": "unrecognized_format"}]
+
+        with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes), \
+             patch.object(server, "_blob_exists", return_value=True), \
+             patch.object(server, "_validate_image_blobs", return_value=invalid), \
+             patch.object(server, "_scene_repo", repo), \
+             patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()), \
+             patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()):
+            client.post("/ingest", json={"bundle_gcs_uri": self._BUNDLE_URI})
+
+        scenes = list(repo._store.values())
+        assert len(scenes) == 1
+        scene = scenes[0]
+        assert scene.status == SceneStatus.FAILED_INVALID
+        assert scene.invalid_blobs == invalid
+
+
+# Import needed for TestBlobValidationGate
+from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402

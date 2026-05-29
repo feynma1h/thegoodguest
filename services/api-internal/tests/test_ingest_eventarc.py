@@ -115,6 +115,7 @@ class TestIngestEventarc:
         with (
             patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
             patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
             patch.object(server, "_scene_repo", repo),
             patch.object(server, "_task_dispatcher", dispatcher),
             patch.object(server, "_fcm_notifier", NullFcmNotifier()),
@@ -164,6 +165,7 @@ class TestIngestEventarc:
         with (
             patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
             patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
             patch.object(server, "_scene_repo", repo),
             patch.object(server, "_task_dispatcher", dispatcher),
             patch.object(server, "_fcm_notifier", NullFcmNotifier()),
@@ -192,6 +194,7 @@ class TestIngestEventarc:
         with (
             patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
             patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
             patch.object(server, "_scene_repo", repo),
             patch.object(server, "_task_dispatcher", dispatcher),
             patch.object(server, "_fcm_notifier", NullFcmNotifier()),
@@ -208,6 +211,47 @@ class TestIngestEventarc:
             assert resp2.status_code == 200
             assert resp2.json()["status"] == "processing"
             assert len(dispatcher.tasks) == 1  # still just one task
+
+    def test_idempotency_failed_invalid_skips_reenqueue(self, client: TestClient) -> None:
+        """FAILED_INVALID is terminal — a second Eventarc event for the same
+        bundle_id must return 200 immediately without re-running ingest.
+
+        Unlike FAILED_INCOMPLETE (missing blobs that a re-upload can supply),
+        FAILED_INVALID means the bytes were present but non-decodable. There
+        is nothing a second finalize event can do to fix that."""
+        bundle_id = str(uuid.uuid4())
+        bundle_bytes = _make_bundle()
+        repo = InMemorySceneRepository()
+        dispatcher = InMemoryTaskDispatcher()
+        event = {"bucket": _BUCKET, "name": f"captures/{bundle_id}/bundle.pb"}
+
+        invalid = [{"relative_path": "frames/000000.jpg", "reason": "too_small"}]
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=invalid),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_task_dispatcher", dispatcher),
+            patch.object(server, "_fcm_notifier", NullFcmNotifier()),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+        ):
+            # First fire → FAILED_INVALID.
+            resp1 = client.post("/ingest/eventarc", json=event)
+            assert resp1.status_code == 200
+            assert resp1.json()["status"] == "failed_invalid"
+            scenes = list(repo._store.values())
+            scene_id = scenes[0].scene_id
+            assert len(dispatcher.tasks) == 0
+
+            # Second fire → idempotent skip (FAILED_INVALID is terminal).
+            resp2 = client.post("/ingest/eventarc", json=event)
+            assert resp2.status_code == 200
+            assert resp2.json()["status"] == "failed_invalid"
+            assert resp2.json()["scene_id"] == scene_id
+            # No additional scenes created, no tasks enqueued.
+            assert len(list(repo._store.values())) == 1
+            assert len(dispatcher.tasks) == 0
 
     def test_failed_incomplete_retries_with_existing_scene(self, client: TestClient) -> None:
         bundle_id = str(uuid.uuid4())
@@ -236,7 +280,10 @@ class TestIngestEventarc:
             assert len(dispatcher.tasks) == 0
 
             # Second fire: all blobs now present → should re-use same scene_id.
-            with patch.object(server, "_blob_exists", return_value=True):
+            with (
+                patch.object(server, "_blob_exists", return_value=True),
+                patch.object(server, "_validate_image_blobs", return_value=[]),
+            ):
                 resp2 = client.post("/ingest/eventarc", json=event)
             assert resp2.status_code == 200
             assert resp2.json()["status"] == "queued"
@@ -259,6 +306,7 @@ class TestExistenceCheck:
         with (
             patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
             patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
             patch.object(server, "_scene_repo", repo),
             patch.object(server, "_task_dispatcher", dispatcher),
         ):
@@ -405,6 +453,7 @@ class TestExistenceCheck:
         with (
             patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
             patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
             patch.object(server, "_scene_repo", InMemorySceneRepository()),
             patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()),
             patch.object(server, "_fcm_notifier", mock_notifier),
@@ -433,6 +482,7 @@ class TestExistenceCheck:
         with (
             patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
             patch.object(server, "_blob_exists", exists_mock),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
             patch.object(server, "_scene_repo", repo),
             patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()),
         ):
@@ -454,6 +504,7 @@ class TestExistenceCheck:
         with (
             patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
             patch.object(server, "_blob_exists", side_effect=_exists),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
             patch.object(server, "_scene_repo", InMemorySceneRepository()),
             patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()),
         ):

@@ -108,19 +108,24 @@ Option B with the inheritance-based repository split. Concretely:
    - 404 is normal for the first ~15s after upload completes (Eventarc delivery latency).
      After 15s, 404 means ingest stalled — exit 1.
    - Status field drives termination. Terminal states: `ready`, `failed`,
-     `failed_incomplete`. Transient states: `queued`, `processing`.
+     `failed_incomplete`, `failed_invalid`. Transient states: `queued`, `processing`.
    - `--timeout` (default 120s) bounds the whole polling phase. Timeout → exit 3.
    - `updated_at` is surfaced in `--verbose` mode for debugging but does not drive control
      flow. No separate stall detection.
 
 9. **Mode-to-terminal mapping:**
-   - `happy-path` — expected: `ready` (exit 0). Unexpected: `failed`, `failed_incomplete`
-     (exit 1). Timeout: exit 3.
+   - `happy-path` — expected: `failed_invalid` (exit 0). The synthetic fixture carries
+     non-decodable placeholder pixels; the ingest validation gate fast-fails them to
+     `failed_invalid` (~3s). `ready` requires real image data (deferred to iOS client).
+     Unexpected: `failed`, `failed_incomplete`, `ready` (exit 1). Timeout: exit 3.
+     See docs/decisions/0025.
    - `skip-blob` — expected: `failed_incomplete` with the deliberately-dropped path present
      in `missing_paths` (exit 0). Unexpected: any other terminal, or `missing_paths` not
      containing the dropped path (exit 1). Timeout: exit 3.
-   - `duplicate-event` — expected: `ready` (idempotency held; exit 0). Unexpected:
-     `failed_incomplete`, `failed` (exit 1). Timeout: exit 3.
+   - `duplicate-event` — expected: `failed_invalid` on first pass, then `failed_invalid`
+     with the same `scene_id` on second pass (idempotency held; exit 0). Unexpected:
+     any other terminal on first pass, or `scene_id` changes on second pass (exit 1).
+     Timeout: exit 3.
    - `auth-rejection` — does not reach polling. Fails at `/upload_session` with 401/403
      (exit 0, expected outcome).
 

@@ -524,7 +524,7 @@ def poll_scene(
     headers = {"Authorization": f"Bearer {id_token}"}
     stall_deadline = start_time + _STALL_DETECT_SECONDS
     timeout_deadline = start_time + cfg.timeout
-    terminal = {"ready", "failed", "failed_incomplete"}
+    terminal = {"ready", "failed", "failed_incomplete", "failed_invalid"}
 
     while True:
         if time.monotonic() > timeout_deadline:
@@ -753,12 +753,16 @@ def run_happy_path(
     scene_id = scene.get("scene_id")
     status = scene.get("status")
 
-    if status == "ready":
-        out.progress(f"PASS: status=ready (scene_id={scene_id})")
+    if status == "failed_invalid":
+        # The synthetic fixture carries non-decodable placeholder pixels; the
+        # ingest validation gate catches them and transitions to failed_invalid
+        # (~3 s). This is the expected terminal state until real iPhone images
+        # are used. See docs/decisions/0025.
+        out.progress(f"PASS: status=failed_invalid (scene_id={scene_id})")
         out.event("run_complete", mode="happy-path", outcome="pass", scene_id=scene_id, status=status)
         return EXIT_OK, scene_id
 
-    out.progress(f"FAIL: expected status=ready, got status={status}")
+    out.progress(f"FAIL: expected status=failed_invalid, got status={status}")
     out.event("run_complete", mode="happy-path", outcome="fail", scene_id=scene_id, status=status)
     return EXIT_UNEXPECTED, scene_id
 
@@ -828,14 +832,18 @@ def run_duplicate_event(
     upload_phase1(artifacts, session_map, out)
     upload_phase2(artifacts, session_map, out)
 
-    out.progress("Polling to ready state (first pass)...")
+    out.progress("Polling to terminal state (first pass)...")
     t0 = time.monotonic()
     scene = poll_scene(cfg, bundle_id, id_token, out, start_time=t0)
     scene_id = scene.get("scene_id")
     status = scene.get("status")
 
-    if status != "ready":
-        out.progress(f"FAIL: expected status=ready before duplicate event, got status={status}")
+    if status != "failed_invalid":
+        # The synthetic fixture's non-decodable pixels should trigger the ingest
+        # validation gate → failed_invalid. See docs/decisions/0025.
+        out.progress(
+            f"FAIL: expected status=failed_invalid before duplicate event, got status={status}"
+        )
         out.event(
             "run_complete",
             mode="duplicate-event",
@@ -847,7 +855,8 @@ def run_duplicate_event(
         return EXIT_UNEXPECTED, scene_id
 
     out.progress(
-        f"Scene ready (scene_id={scene_id}). Re-uploading bundle.pb to trigger duplicate event..."
+        f"Scene failed_invalid (scene_id={scene_id}). "
+        "Re-uploading bundle.pb to trigger duplicate event..."
     )
     _reupload_bundle_pb_gcs(cfg, bundle_id, artifacts.blobs["bundle.pb"], out)
 
@@ -860,8 +869,8 @@ def run_duplicate_event(
     scene_id2 = scene2.get("scene_id")
     status2 = scene2.get("status")
 
-    if status2 == "ready" and scene_id2 == scene_id:
-        out.progress(f"PASS: scene_id unchanged ({scene_id}), status still ready")
+    if status2 == "failed_invalid" and scene_id2 == scene_id:
+        out.progress(f"PASS: scene_id unchanged ({scene_id}), status still failed_invalid")
         out.event(
             "run_complete",
             mode="duplicate-event",
@@ -872,7 +881,7 @@ def run_duplicate_event(
         return EXIT_OK, scene_id
 
     out.progress(
-        f"FAIL: expected scene_id={scene_id} status=ready; "
+        f"FAIL: expected scene_id={scene_id} status=failed_invalid; "
         f"got scene_id={scene_id2} status={status2}"
     )
     out.event(
