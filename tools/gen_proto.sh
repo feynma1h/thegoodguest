@@ -44,7 +44,7 @@ protoc "${PROTOC_PY_ARGS[@]}" "${PROTO_FILES[@]}"
 echo "  -> ${PY_OUT}/capture_bundle_pb2.py"
 
 # Swift out (best-effort; the iOS project consumes this when it exists)
-SWIFT_OUT="ios/RoomStudioCapture/Generated"
+SWIFT_OUT="ios/RoomStudioCapture/RoomStudioCapture/Generated"
 echo "=== Swift ==="
 if command -v protoc-gen-swift >/dev/null 2>&1; then
     mkdir -p "${SWIFT_OUT}"
