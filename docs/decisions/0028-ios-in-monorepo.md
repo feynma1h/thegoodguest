@@ -17,7 +17,7 @@ sides must stay in sync with.
 
 `ios/` directory in this monorepo. The Xcode project lives at
 `ios/RoomStudioCapture/`. The generated Swift proto output,
-`ios/RoomStudioCapture/RoomStudioCapture/Generated/CaptureBundle.pb.swift`, is committed as
+`ios/RoomStudioCapture/RoomStudioCapture/Generated/capture_bundle.pb.swift`, is committed as
 version-controlled source, the same way `packages/schemas/roomstudio_schemas/
 capture_bundle_pb2.py` is committed today. `tools/gen_proto.sh` already
 hardcodes this output path; it becomes functional once `protoc-gen-swift` is
@@ -74,6 +74,6 @@ developer without a Python virtualenv is unaffected.
   structural edits) became a meaningful noise problem in PRs for backend
   contributors. SPM-only dependencies reduce this significantly since
   package state lives in `Package.resolved`, not inside `.xcodeproj`.
-- If the proto stabilizes and `CaptureBundle.pb.swift` stops changing — at
+- If the proto stabilizes and `capture_bundle.pb.swift` stops changing — at
   that point a published Swift package for the generated proto would be
   viable, and the cross-repo coordination cost drops to near zero.
