@@ -6,7 +6,7 @@
 # Outputs:
 #   packages/schemas/roomstudio_schemas/capture_bundle_pb2.py     (Python)
 #   packages/schemas/roomstudio_schemas/capture_bundle_pb2.pyi    (Python stubs, if mypy-protobuf present)
-#   ios/RoomStudioCapture/Generated/CaptureBundle.pb.swift        (Swift, if protoc-gen-swift present)
+#   ios/RoomStudioCapture/RoomStudioCapture/Generated/capture_bundle.pb.swift  (Swift, if protoc-gen-swift present)
 #
 # Tooling:
 #   - protoc 7.35.0:    brew install protobuf   (current generated code requires runtime >=7.35.0)
@@ -53,7 +53,7 @@ if command -v protoc-gen-swift >/dev/null 2>&1; then
         --swift_out="${SWIFT_OUT}" \
         --swift_opt=Visibility=Public \
         "${PROTO_FILES[@]}"
-    echo "  -> ${SWIFT_OUT}/CaptureBundle.pb.swift"
+    echo "  -> ${SWIFT_OUT}/capture_bundle.pb.swift"
 else
     echo "  (skipped: protoc-gen-swift not installed; 'brew install swift-protobuf')"
 fi
