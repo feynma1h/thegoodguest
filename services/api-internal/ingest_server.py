@@ -417,6 +417,12 @@ def _run_ingest(
                     status_code=200,
                     content={"status": "failed_invalid", "error": error_code},
                 )
+        # Fallback: no bundle_id in the URI or bundle has no device identity.
+        # 400 is acceptable here — the client can't poll either way (no bundle_id)
+        # or the bundle is so malformed it's not worth a Scene. Retry behaviour on
+        # the Eventarc path is bounded: _extract_bundle_id returns None only for
+        # paths that don't match captures/*/bundle.pb, which the trigger's bucket-wide
+        # filter makes rare steady-state traffic rather than a stale-cohort storm.
         return JSONResponse(
             status_code=400,
             content=IngestError(error=error_code, detail=detail).model_dump(),

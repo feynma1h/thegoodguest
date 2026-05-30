@@ -1,9 +1,11 @@
 /// Manages an ARWorldTracking session and accumulates keyframes to a local temp directory.
 ///
-/// P1 scope: capture-only. No proto serialization, no networking, no tier dispatch.
-/// P2 will read `capturedFrames` and `bundleOutputDir` to assemble and serialize a
-/// CaptureBundle proto. Gravity is intentionally omitted from CapturedKeyframe in P1
-/// because PoseExtractor.gravity(from:) is a stub pending formula review (decision 0029).
+/// P2 scope: tier dispatch, depth capture (LiDAR devices), and bundle assembly.
+/// On stop, all in-flight writes complete and BundleAssembler serializes bundle.pb
+/// into the session output directory. The resulting URL is published as `bundlePath`.
+///
+/// Gravity is populated as a zero vector in P2; chunk C fills the formula after
+/// Chat review (decision 0030).
 
 import ARKit
 import Combine
@@ -12,28 +14,29 @@ import UIKit
 
 // MARK: - CapturedKeyframe
 
-/// In-memory record for one accepted keyframe. Proto-typed fields for forward
-/// compatibility with P2 serialization; nothing is written to disk except the JPEG.
-///
-/// `gravity` is omitted until PoseExtractor.gravity(from:) is implemented and its
-/// formula is confirmed (see TODO in PoseExtractor.swift, decision 0029).
+/// In-memory record for one accepted keyframe. All fields except `depth` are
+/// present on every tier. `depth` is set iff the session is LiDAR tier and depth
+/// was available on this ARFrame.
 struct CapturedKeyframe {
     let index: UInt32
-    /// Device-monotonic microseconds — same clock as ARFrame.timestamp (CACurrentMediaTime).
+    /// Device-monotonic microseconds — same clock as ARFrame.timestamp.
     let timestampUs: Int64
     /// Relative path within the bundle output directory, e.g. "frames/000000.jpg".
     let rgbRelativePath: String
     let pose: RSPose
     let intrinsics: RSIntrinsics
+    /// Zero vector in P2; formula filled in chunk C (decision 0030).
+    let gravity: RSGravity
+    /// Set iff LiDAR tier and capturedDepthData was present. Contains relative
+    /// paths ("depth/000000.f32", "confidence/000000.png") and depth intrinsics.
+    let depth: RSDepth?
 }
 
 // MARK: - WriteStats
 
-/// Mutable counters for JPEG-write observability.
+/// Mutable counters for JPEG/depth write observability.
 /// Accessed exclusively from jpegQueue (serial DispatchQueue), which provides
 /// the synchronisation — no locks needed. Not actor-isolated by design.
-/// P2 note: promote to structured logging / surface in UI when write failures
-/// need operator visibility during real-bundle uploads.
 private final class WriteStats {
     var written  = 0
     var failures = 0
@@ -48,18 +51,37 @@ final class CaptureManager: NSObject, ObservableObject {
     @Published private(set) var frameCount: Int = 0
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var trackingState: ARCamera.TrackingState = .notAvailable
+    /// Set after stopCapture() and bundle assembly completes. Nil while capturing or
+    /// before first stop.
+    @Published private(set) var bundlePath: URL? = nil
 
     /// Root directory for this capture's output (temp, per-session UUID).
     /// Structure: <bundleOutputDir>/frames/NNNNNN.jpg
+    ///            <bundleOutputDir>/depth/NNNNNN.f32     (LiDAR tier only)
+    ///            <bundleOutputDir>/confidence/NNNNNN.png (LiDAR tier only)
+    ///            <bundleOutputDir>/bundle.pb            (written on stop)
     private(set) var bundleOutputDir: URL?
 
-    /// Accumulated keyframes in acceptance order. Read by P2 to build CaptureBundle.
+    /// Accumulated keyframes in acceptance order.
     private(set) var capturedFrames: [CapturedKeyframe] = []
+
+    /// Tier selected at session start based on hardware capability.
+    private(set) var tier: RSCaptureTier = .arkitOnly
+
+    /// Stable UUID for this capture session, generated at startCapture().
+    private(set) var bundleId: UUID = UUID()
+
+    /// Device-monotonic microseconds (CACurrentMediaTime) at capture start/stop.
+    private(set) var startedAtDeviceUs: Int64 = 0
+    private(set) var endedAtDeviceUs: Int64 = 0
+
+    /// Wall-clock microseconds (Unix epoch) at capture start. Display/sort only.
+    private(set) var startedAtWallUs: Int64 = 0
 
     private let arSession   = ARSession()
     private var accumulator = KeyframeAccumulator()
 
-    /// Dedicated queue for JPEG encoding; avoids blocking the main thread.
+    /// Dedicated queue for JPEG + depth encoding; avoids blocking the main thread.
     /// CIContext is thread-safe for concurrent rendering and is reused across frames.
     private let jpegQueue   = DispatchQueue(label: "com.roomstudio.capture.jpeg", qos: .utility)
     private let ciContext   = CIContext()
@@ -73,53 +95,105 @@ final class CaptureManager: NSObject, ObservableObject {
     // MARK: - Session control
 
     func startCapture() {
-        let config = ARWorldTrackingConfiguration()
-        config.worldAlignment = .gravity
-        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
-            config.frameSemantics.insert(.sceneDepth)
-        }
+        bundlePath = nil
         capturedFrames  = []
         accumulator.reset()
         frameCount      = 0
-        bundleOutputDir = makeOutputDir()
-        // Reset write counters on the queue so any straggler from a previous
-        // session has flushed before the new session's counts begin.
+        bundleId        = UUID()
+
+        // Tier dispatch: LiDAR devices use LIDAR_ARKIT; LIDAR_ROOMPLAN is deferred.
+        let hasLidar = ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification)
+        tier = hasLidar ? .lidarArkit : .arkitOnly
+
+        startedAtDeviceUs = Int64(CACurrentMediaTime() * 1_000_000)
+        startedAtWallUs   = Int64(Date().timeIntervalSince1970 * 1_000_000)
+        bundleOutputDir   = makeOutputDir(forLidar: hasLidar)
+
         let stats = writeStats
         jpegQueue.async { stats.reset() }
+
+        let config = ARWorldTrackingConfiguration()
+        config.worldAlignment = .gravity
+        if hasLidar, ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            config.frameSemantics.insert(.sceneDepth)
+        }
         arSession.run(config, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
     }
 
-    /// Pause the session and log a write-verification summary to the console.
-    /// The summary is enqueued on jpegQueue so it runs after all in-flight
-    /// writes complete — on-disk count reflects actual landed files, not dispatched count.
+    /// Stop the session. Waits for in-flight writes, logs summary, assembles bundle.pb.
     func stopCapture() {
         arSession.pause()
         isRunning = false
-        logWriteSummary()
+        endedAtDeviceUs = Int64(CACurrentMediaTime() * 1_000_000)
+
+        // Snapshot immutable session state before hopping off MainActor.
+        let frames    = capturedFrames
+        let outDir    = bundleOutputDir!
+        let assembler = BundleAssembler(
+            bundleId:          bundleId,
+            tier:              tier,
+            startedAtDeviceUs: startedAtDeviceUs,
+            endedAtDeviceUs:   endedAtDeviceUs,
+            startedAtWallUs:   startedAtWallUs,
+            frames:            frames,
+            outputDir:         outDir
+        )
+        let stats     = writeStats
+        let accepted  = frameCount
+
+        // Enqueue on jpegQueue — this block runs after all in-flight JPEG/depth writes.
+        jpegQueue.async { [weak self] in
+            let framesDir = outDir.appendingPathComponent("frames")
+            let onDisk = (try? FileManager.default.contentsOfDirectory(
+                at: framesDir, includingPropertiesForKeys: nil
+            ).filter { $0.pathExtension == "jpg" }.count) ?? -1
+            print("""
+            [CaptureManager] stop — write verification
+              accepted : \(accepted)
+              written  : \(stats.written)
+              failures : \(stats.failures)
+              on-disk  : \(onDisk) .jpg files
+              temp-dir : \(framesDir.path)
+            """)
+
+            do {
+                let url = try assembler.write()
+                print("[CaptureManager] bundle.pb → \(url.path)")
+                DispatchQueue.main.async { self?.bundlePath = url }
+            } catch {
+                print("[CaptureManager] bundle assembly failed: \(error)")
+            }
+        }
     }
 
     // MARK: - Private helpers
 
-    private func makeOutputDir() -> URL {
-        let root   = FileManager.default.temporaryDirectory
-                         .appendingPathComponent(UUID().uuidString)
-        let frames = root.appendingPathComponent("frames")
-        try? FileManager.default.createDirectory(
-            at: frames, withIntermediateDirectories: true)
+    private func makeOutputDir(forLidar: Bool) -> URL {
+        let root = FileManager.default.temporaryDirectory
+                       .appendingPathComponent(UUID().uuidString)
+        var subdirs = ["frames"]
+        if forLidar { subdirs += ["depth", "confidence"] }
+        for sub in subdirs {
+            try? FileManager.default.createDirectory(
+                at: root.appendingPathComponent(sub),
+                withIntermediateDirectories: true)
+        }
         return root
     }
 
     private func acceptFrame(
         camera:      ARCamera,
         pixelBuffer: CVImageBuffer,
-        timestamp:   TimeInterval
+        timestamp:   TimeInterval,
+        depthData:   ARDepthData?
     ) {
         guard let outputDir = bundleOutputDir else { return }
         let index        = UInt32(capturedFrames.count)
         let relativePath = String(format: "frames/%06d.jpg", index)
         let fileURL      = outputDir.appendingPathComponent(relativePath)
 
+        // Write JPEG on jpegQueue.
         let context = ciContext
         let stats   = writeStats
         jpegQueue.async {
@@ -141,40 +215,95 @@ final class CaptureManager: NSObject, ObservableObject {
             }
         }
 
+        // Capture depth for LiDAR frames.
+        let depth: RSDepth? = depthData.flatMap { dd in
+            captureDepth(dd, index: index, outputDir: outputDir, stats: stats)
+        }
+
         capturedFrames.append(CapturedKeyframe(
             index:           index,
             timestampUs:     Int64(timestamp * 1_000_000),
             rgbRelativePath: relativePath,
             pose:            PoseExtractor.pose(from: camera),
-            intrinsics:      PoseExtractor.intrinsics(from: camera)
+            intrinsics:      PoseExtractor.intrinsics(from: camera),
+            gravity:         PoseExtractor.gravity(from: camera),
+            depth:           depth
         ))
         frameCount = capturedFrames.count
     }
 
-    private func logWriteSummary() {
-        let stats    = writeStats
-        let dir      = bundleOutputDir
-        let accepted = frameCount
-        // Enqueue on jpegQueue so this block runs after all in-flight writes finish.
+    /// Build an RSDepth value and schedule the raster writes on jpegQueue.
+    /// Returns nil if pixel buffer access fails.
+    private func captureDepth(
+        _ depthData:  ARDepthData,
+        index:        UInt32,
+        outputDir:    URL,
+        stats:        WriteStats
+    ) -> RSDepth? {
+        let depthRelPath = String(format: "depth/%06d.f32",  index)
+        let confRelPath  = String(format: "confidence/%06d.png", index)
+
+        // Extract intrinsics and dimensions on the calling thread (MainActor).
+        // depthData is reference-counted; pixel buffers are valid while held.
+        let intrinsics = PoseExtractor.depthIntrinsics(from: depthData)
+        let w = intrinsics.width
+        let h = intrinsics.height
+
+        let depthMap   = depthData.depthMap
+        let confMap    = depthData.confidenceMap   // CVPixelBuffer?
+        let depthURL   = outputDir.appendingPathComponent(depthRelPath)
+        let confURL    = outputDir.appendingPathComponent(confRelPath)
+
         jpegQueue.async {
-            let framesDir = dir?.appendingPathComponent("frames")
-            let onDisk: Int
-            if let framesDir {
-                onDisk = (try? FileManager.default.contentsOfDirectory(
-                    at: framesDir, includingPropertiesForKeys: nil
-                ).filter { $0.pathExtension == "jpg" }.count) ?? -1
-            } else {
-                onDisk = -1
+            // Float32 raster: width*height*4 bytes, row-major, packed (no stride padding).
+            if let bytes = Self.extractPackedBytes(depthMap, bytesPerPixel: 4) {
+                do {
+                    try bytes.write(to: depthURL)
+                } catch {
+                    print("[CaptureManager] depth write error: \(depthRelPath): \(error)")
+                    stats.failures += 1
+                }
             }
-            print("""
-            [CaptureManager] stop — write verification
-              accepted : \(accepted)
-              written  : \(stats.written)
-              failures : \(stats.failures)
-              on-disk  : \(onDisk) .jpg files
-              temp-dir : \(framesDir?.path ?? "nil")
-            """)
+            // Confidence raster: uint8, 0=low/1=med/2=high (ARConfidenceLevel).
+            if let conf = confMap,
+               let bytes = Self.extractPackedBytes(conf, bytesPerPixel: 1) {
+                do {
+                    try bytes.write(to: confURL)
+                } catch {
+                    print("[CaptureManager] confidence write error: \(confRelPath): \(error)")
+                }
+            }
         }
+
+        var depth = RSDepth()
+        depth.depthGcsPath = depthRelPath
+        depth.confidenceGcsPath = confRelPath
+        depth.width      = w
+        depth.height     = h
+        depth.intrinsics = intrinsics
+        return depth
+    }
+
+    /// Copy pixel buffer bytes into a packed Data (strips stride padding).
+    /// Returns nil if the base address cannot be locked.
+    private static func extractPackedBytes(_ buffer: CVPixelBuffer, bytesPerPixel: Int) -> Data? {
+        guard CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+        let w       = CVPixelBufferGetWidth(buffer)
+        let h       = CVPixelBufferGetHeight(buffer)
+        let stride  = CVPixelBufferGetBytesPerRow(buffer)
+        let rowBytes = w * bytesPerPixel
+        var out = Data(count: h * rowBytes)
+        out.withUnsafeMutableBytes { dst in
+            guard let dstBase = dst.baseAddress else { return }
+            for row in 0..<h {
+                memcpy(dstBase.advanced(by: row * rowBytes),
+                       base.advanced(by: row * stride),
+                       rowBytes)
+            }
+        }
+        return out
     }
 }
 
@@ -185,15 +314,16 @@ extension CaptureManager: ARSessionDelegate {
     nonisolated func session(_ session: ARSession, didUpdate frame: ARFrame) {
         // Skip frames with unreliable tracking — pose and gravity data invalid.
         switch frame.camera.trackingState {
-        case .normal:              break
+        case .normal:                 break
         case .limited, .notAvailable: return
         }
 
-        // Extract values on this thread before hopping to MainActor.
-        // ARFrame and CVImageBuffer are both reference-counted and safe to carry across.
-        let camera      = frame.camera
+        // Extract values on the ARKit thread before hopping to MainActor.
+        // ARFrame and its pixel buffers are ref-counted and remain valid while held.
+        let camera     = frame.camera
         let pixelBuffer = frame.capturedImage
-        let timestamp   = frame.timestamp
+        let timestamp  = frame.timestamp
+        let depthData  = frame.capturedDepthData   // ARDepthData? — nil on non-LiDAR
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else { return }
@@ -201,7 +331,8 @@ extension CaptureManager: ARSessionDelegate {
                 self.acceptFrame(
                     camera:      camera,
                     pixelBuffer: pixelBuffer,
-                    timestamp:   timestamp)
+                    timestamp:   timestamp,
+                    depthData:   depthData)
             }
         }
     }
