@@ -1,13 +1,13 @@
-/// P1 capture UI: start/stop button, live frame counter, tracking-state indicator.
+/// Capture UI: start/stop button, live frame counter, tracking-state indicator,
+/// and bundle-path readout after assembly.
 ///
-/// This view owns the CaptureManager for the lifetime of the app (P1: single screen).
-/// P2+ will push a navigation stack here once scene upload and status screens exist.
+/// P2 additions: tier badge, bundle.pb path shown after stop + assembly.
 ///
-/// On-device verification checklist for P1 sign-off:
-///   □ Tracking state shows "Normal" after a few seconds
-///   □ Frame counter climbs while walking (pose-delta filter active — static holds count)
-///   □ Stop → counter freezes; Start → counter resets and climbs again
-///   □ App does not crash or stall during a 60-second room walk
+/// On-device verification checklist for P2 sign-off:
+///   □ Tier badge shows correct tier (ARKIT ONLY vs LIDAR ARKIT) for the device
+///   □ Frame counter climbs while walking; Stop → assembly → bundlePath text appears
+///   □ Console: "bundle.pb → <path>" printed; file exists at that path
+///   □ python tools/inspect_bundle.py <path> passes on the resulting bundle.pb
 
 import ARKit
 import SwiftUI
@@ -20,11 +20,13 @@ struct ContentView: View {
         VStack(spacing: 24) {
             Spacer()
 
+            tierBadge
             trackingStatusBadge
-
             frameCountDisplay
 
             Spacer()
+
+            bundleReadout
 
             captureButton
                 .padding(.horizontal, 32)
@@ -33,6 +35,22 @@ struct ContentView: View {
     }
 
     // MARK: - Subviews
+
+    /// Tier chip — shows which capture path is active on this device.
+    private var tierBadge: some View {
+        let (label, color): (String, Color) = switch capture.tier {
+        case .lidarRoomplan: ("LIDAR + ROOMPLAN", .purple)
+        case .lidarArkit:    ("LIDAR ARKIT",      .teal)
+        default:             ("ARKIT ONLY",        .blue)
+        }
+        return Text(label)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.15))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
 
     /// Coloured dot + label showing current ARKit tracking quality.
     private var trackingStatusBadge: some View {
@@ -56,6 +74,24 @@ struct ContentView: View {
             Text("frames")
                 .font(.headline)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Shows bundle.pb path after assembly completes, or a spinner while assembling.
+    @ViewBuilder
+    private var bundleReadout: some View {
+        if let path = capture.bundlePath {
+            Text("bundle.pb ready")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.green)
+            Text(path.deletingLastPathComponent().lastPathComponent)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        } else if !capture.isRunning && capture.frameCount > 0 {
+            ProgressView()
+                .scaleEffect(0.7)
         }
     }
 
