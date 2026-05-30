@@ -1,0 +1,56 @@
+# 0031 — schema_version string: "1.0.0" → "1"
+
+**Date:** 2026-05-30
+**Status:** Decided
+
+## Context
+
+The capture bundle proto uses a `schema_version` string field. The backend
+rejects bundles with unknown versions (decided in 0030 and board item 2).
+When the ingest validation gate shipped (0027 era), `SCHEMA_VERSION` was set
+to `"1.0.0"` and `SUPPORTED_VERSIONS` accepted `{"1.0.0"}`. Decision 0030
+and CLAUDE.md board item 2 both specified the canonical value as `"1"` —
+a discrepancy that needed resolving before iOS P2 serializes its first real
+`bundle.pb`.
+
+## What we tried
+
+No alternatives explored. `"1.0.0"` vs `"1"` is not a tradeoff; it is a
+correctness question about what the version field is supposed to mean.
+
+## What we chose
+
+Standardize on `"1"`. `SCHEMA_VERSION` in `packages/schemas/roomstudio_schemas/__init__.py`
+and `SUPPORTED_VERSIONS` in `services/api-internal/validation.py` both set to
+`"1"`. `"1.0.0"` is not carried in the accepted set.
+
+One commit, writer and reader together: `SCHEMA_VERSION` is imported by every
+fixture and emitter (`build_capture_bundle()`, `tools/build_test_bundle.py`,
+`test_ingest.py`, `test_ingest_eventarc.py`, `test_process_receiver.py`), so
+all update automatically from the single constant change.
+
+Handler ordering confirmed correct: `_check_schema_version` runs as check 1
+inside `validate_bundle` (step 3 in `_run_ingest`), before the image-blob
+decodability check (step 5b). No reordering needed.
+
+## Why
+
+The `schema_version` contract is exact-match with monotonic bumps on breaking
+changes, not semver. Semver (`"1.0.0"`) advertises a sub-version compatibility
+structure — patch and minor ranges — that this contract does not have. The
+backend accepts or rejects a version string exactly; there is no "accept
+1.x.x" logic and no plans for any. `"1"` is an honest representation: the
+version is a named contract revision, not a version triplet.
+
+Additionally, 0030 and CLAUDE.md board item 2 stated "no enforcing check
+exists in the ingest handler today," but `_check_schema_version` was already
+live when those notes were written (it shipped with the validation gate,
+0027 era). The P2 gate work was a value fix (`"1.0.0"` → `"1"`), not a
+greenfield implementation. Board item 2 is satisfied by this commit.
+
+## What would change this decision
+
+If the version scheme ever evolves to carry minor/patch semantics (e.g. a
+"1.1" that is backward-compatible with "1"), the accepted-set logic would
+need updating and the version string convention would need re-specifying.
+That would be a new decision note, not a revision of this one.
