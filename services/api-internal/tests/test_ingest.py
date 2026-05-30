@@ -241,35 +241,65 @@ def test_dispatch_failure_returns_500_and_marks_scene_failed(client: TestClient)
 # Validation failures
 # ---------------------------------------------------------------------------
 
-def test_unsupported_schema_version_returns_400(client: TestClient) -> None:
-    """Bundle with an unrecognized schema_version → 400 unsupported_schema_version."""
+def test_unsupported_schema_version_creates_failed_invalid_scene(client: TestClient) -> None:
+    """Bundle with an unrecognized schema_version → 200 + failed_invalid Scene.
+
+    HTTP 200 (not 400) prevents Pub/Sub retry storms on the Eventarc path.
+    A Scene in failed_invalid is created so the iOS client can observe the
+    rejection via GET /scenes/by-bundle/{bundle_id} polling (the iOS path
+    never calls /ingest directly; it uploads to GCS and polls).
+    """
+    from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository
     bundle_bytes = _make_bundle(schema_version="99.0.0")
-    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes):
+    repo = InMemorySceneRepository()
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+        patch.object(server, "_scene_repo", repo),
+        patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+    ):
         resp = client.post(
             "/ingest",
             json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 200
     body = resp.json()
+    assert body["status"] == "failed_invalid"
     assert body["error"] == "unsupported_schema_version"
-    assert "99.0.0" in body["detail"]
+    # Scene created and in terminal failed_invalid state.
+    scenes = list(repo._store.values())
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED_INVALID
+    assert "unsupported_schema_version" in (scenes[0].last_error or "")
 
 
-def test_old_version_1_0_0_rejected(client: TestClient) -> None:
-    """Bundles carrying schema_version='1.0.0' (the pre-standardisation value)
-    are rejected.  Regression: '1.0.0' was the emitted value before decision 0031
-    standardised on '1'.  The realistic failure mode is an old build of the iOS
-    app or smoke tool that hasn't picked up the constant change."""
+def test_old_version_1_0_0_creates_failed_invalid_scene(client: TestClient) -> None:
+    """Bundles carrying schema_version='1.0.0' (pre-standardisation) → 200 + failed_invalid.
+
+    Regression for decision 0031: '1.0.0' was the emitted value before standardising
+    on '1'. The realistic failure mode is an old iOS build that hasn't updated.
+    Confirms the realistic rejected value (not just the synthetic '99.0.0') creates
+    a pollable failed_invalid Scene with a schema-rejection last_error.
+    """
+    from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository
     bundle_bytes = _make_bundle(schema_version="1.0.0")
-    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes):
+    repo = InMemorySceneRepository()
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+        patch.object(server, "_scene_repo", repo),
+        patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+    ):
         resp = client.post(
             "/ingest",
             json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 200
     body = resp.json()
+    assert body["status"] == "failed_invalid"
     assert body["error"] == "unsupported_schema_version"
-    assert "1.0.0" in body["detail"]
+    scenes = list(repo._store.values())
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED_INVALID
+    assert "1.0.0" in (scenes[0].last_error or "")
 
 
 def test_corrupt_quaternion_returns_400(client: TestClient) -> None:
@@ -304,22 +334,33 @@ def test_corrupt_quaternion_returns_400(client: TestClient) -> None:
     assert "frame 0" in body["detail"]
 
 
-def test_depth_on_arkit_only_tier_returns_400(client: TestClient) -> None:
-    """Bundle with depth frames but ARKIT_ONLY tier → 400 depth_requires_lidar_tier.
+def test_depth_on_arkit_only_tier_creates_failed_invalid_scene(client: TestClient) -> None:
+    """Bundle with depth frames but ARKIT_ONLY tier → 200 + failed_invalid Scene.
 
     Uses _make_bundle with add_depth=True but forces tier=ARKIT_ONLY to
-    trigger the tier-vs-depth consistency check.
+    trigger the tier-vs-depth consistency check. Returns 200 + Scene (not 400)
+    for the same reason as schema rejection: iOS clients poll, not call /ingest.
     """
+    from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository
     bundle_bytes = _make_bundle(frame_count=1, add_depth=True, tier=ARKIT_ONLY)
-    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes):
+    repo = InMemorySceneRepository()
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+        patch.object(server, "_scene_repo", repo),
+        patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+    ):
         resp = client.post(
             "/ingest",
             json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 200
     body = resp.json()
+    assert body["status"] == "failed_invalid"
     assert body["error"] == "depth_requires_lidar_tier"
-    assert "ARKIT_ONLY" in body["detail"]
+    scenes = list(repo._store.values())
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED_INVALID
+    assert "depth_requires_lidar_tier" in (scenes[0].last_error or "")
 
 
 def test_malformed_proto_returns_400(client: TestClient) -> None:

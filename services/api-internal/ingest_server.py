@@ -385,6 +385,38 @@ def _run_ingest(
     err = validate_bundle(bundle)
     if err:
         error_code, detail = err
+        # Create a FAILED_INVALID Scene so the iOS client can observe the rejection
+        # via GET /scenes/by-bundle/{bundle_id} polling. The iOS path never calls
+        # /ingest directly — it uploads bundle.pb to GCS and polls; without a Scene
+        # the client polls into the void with no terminal state.
+        #
+        # Returning 200 (not 400) prevents Pub/Sub retry storms on the Eventarc path:
+        # a non-2xx from /ingest/eventarc triggers redelivery, so a stale cohort
+        # sending "1.0.0" bundles at a schema bump would spin forever otherwise.
+        #
+        # Fallback to 400 only when we can't create a pollable Scene (no bundle_id
+        # extractable from the URI, or bundle carries no device identity).
+        if bundle_id:
+            try:
+                _rej_device_id, _rej_source = resolve_device_id(bundle, bundle_gcs_uri)
+            except ValueError:
+                _rej_device_id = None
+            if _rej_device_id is not None:
+                _handle_failed_invalid(
+                    bundle_gcs_uri=bundle_gcs_uri,
+                    bundle_id=bundle_id,
+                    device_id=_rej_device_id,
+                    device_id_source=_rej_source,
+                    invalid_blobs=[],
+                    repo=repo,
+                    existing_scene_id=existing_scene_id,
+                    rejection_kind=error_code,
+                    rejection_detail=detail,
+                )
+                return JSONResponse(
+                    status_code=200,
+                    content={"status": "failed_invalid", "error": error_code},
+                )
         return JSONResponse(
             status_code=400,
             content=IngestError(error=error_code, detail=detail).model_dump(),
@@ -580,23 +612,36 @@ def _handle_failed_invalid(
     invalid_blobs: list[dict],
     repo: SceneRepository,
     existing_scene_id: str | None,
+    rejection_kind: str = "invalid_blobs",
+    rejection_detail: str = "",
 ) -> None:
-    """Create (or update) a Scene to FAILED_INVALID and log the bad blobs.
+    """Create (or update) a Scene to FAILED_INVALID and emit a structured log.
 
-    FAILED_INVALID is terminal — corrupted or non-decodable blobs cannot be
-    fixed by re-uploading the same data. The Scene is created but never
-    dispatched to the GPU pipeline.
+    FAILED_INVALID is terminal — the bundle cannot be fixed by re-uploading.
+    The Scene is created but never dispatched to the GPU pipeline.
+
+    rejection_kind controls the log discriminator and last_error format:
+      "invalid_blobs"  — image-decode failure; invalid_blobs list is populated
+      anything else    — contract validation failure (e.g. "unsupported_schema_version");
+                         rejection_detail carries the human-readable reason
     """
+    if rejection_kind == "invalid_blobs":
+        last_error = f"invalid blobs: {[b['relative_path'] for b in invalid_blobs]}"
+        stored_blobs: list[dict] | None = invalid_blobs
+    else:
+        last_error = f"{rejection_kind}: {rejection_detail}"
+        stored_blobs = None
+
     if existing_scene_id:
         # existing_scene_id is only set when retrying a FAILED_INCOMPLETE scene,
         # which means blobs were previously absent but are now present. If they
-        # turn out to be non-decodable, transition to FAILED_INVALID directly.
+        # turn out to be invalid, transition to FAILED_INVALID directly.
         scene_id = existing_scene_id
         repo.update_status(
             scene_id,
             SceneStatus.FAILED_INVALID,
-            invalid_blobs=invalid_blobs,
-            last_error=f"invalid blobs: {[b['relative_path'] for b in invalid_blobs]}",
+            invalid_blobs=stored_blobs,
+            last_error=last_error,
         )
     else:
         scene_id = str(uuid.uuid4())
@@ -612,15 +657,25 @@ def _handle_failed_invalid(
         repo.update_status(
             scene_id,
             SceneStatus.FAILED_INVALID,
-            invalid_blobs=invalid_blobs,
-            last_error=f"invalid blobs: {[b['relative_path'] for b in invalid_blobs]}",
+            invalid_blobs=stored_blobs,
+            last_error=last_error,
         )
-    logger.warning(
-        "Scene %s failed_invalid: bundle_id=%s invalid_blobs=%s",
-        scene_id,
-        bundle_id,
-        invalid_blobs,
-    )
+
+    if rejection_kind == "invalid_blobs":
+        logger.warning(
+            "Scene %s failed_invalid: bundle_id=%s invalid_blobs=%s",
+            scene_id,
+            bundle_id,
+            invalid_blobs,
+        )
+    else:
+        logger.warning(
+            "Scene %s failed_invalid: bundle_id=%s reason=%s detail=%s",
+            scene_id,
+            bundle_id,
+            rejection_kind,
+            rejection_detail,
+        )
 
 
 # ---------------------------------------------------------------------------

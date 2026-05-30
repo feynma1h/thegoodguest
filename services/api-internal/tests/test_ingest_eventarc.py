@@ -3,6 +3,8 @@
 Covers:
   Eventarc endpoint:
     - Valid GCS finalize event → dispatches ingest and returns 200
+    - Schema-invalid bundle → 200 + failed_invalid Scene, no GPU dispatch
+      (200 prevents Pub/Sub retry; Scene makes rejection pollable — see decision 0031)
     - Missing 'bucket' or 'name' in event body → 400
     - object name that doesn't match captures/*/bundle.pb → 200 eventarc_ignored
       (not 400 — the trigger is bucket-wide; non-bundle.pb events must be
@@ -127,6 +129,63 @@ class TestIngestEventarc:
         body = resp.json()
         assert body["status"] == "queued"
         assert len(dispatcher.tasks) == 1
+
+    def test_bad_schema_version_creates_failed_invalid_scene(self, client: TestClient) -> None:
+        """Schema-invalid bundle via Eventarc → 200 + failed_invalid Scene, no GPU dispatch.
+
+        This is the load-bearing test for the schema-rejection path:
+          - HTTP 200 (not 400) so Pub/Sub acknowledges and does not retry.
+            A non-2xx would cause a retry storm across every stale iOS client
+            at a schema bump (see decision 0031).
+          - failed_invalid Scene created so the iOS client can observe the
+            rejection via GET /scenes/by-bundle/{bundle_id} polling.
+          - last_error names the rejection kind (operator discriminator —
+            both schema and image-decode share the failed_invalid bucket).
+          - Image-decode check (_validate_image_blobs) is never reached;
+            schema gate fires first.
+        """
+        bundle_id = str(uuid.uuid4())
+        eventarc_body = {"bucket": _BUCKET, "name": f"captures/{bundle_id}/bundle.pb"}
+
+        b = CaptureBundle()
+        b.schema_version = "1.0.0"   # the old value, rejected post-0031
+        b.bundle_id = bundle_id
+        b.user_id = "test-user"
+        b.device.hardware_id = "test-device"
+        b.tier = ARKIT_ONLY
+        b.started_at_device_us = 0
+        b.ended_at_device_us = 1
+        bad_bundle_bytes = b.SerializeToString()
+
+        repo = InMemorySceneRepository()
+        mock_image_check = MagicMock(return_value=[])
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bad_bundle_bytes),
+            patch.object(server, "_validate_image_blobs", mock_image_check),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+            patch.object(server, "_fcm_notifier", NullFcmNotifier()),
+        ):
+            resp = client.post("/ingest/eventarc", json=eventarc_body)
+
+        # Must be 200 — non-2xx triggers Pub/Sub redelivery.
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "failed_invalid"
+        assert body["error"] == "unsupported_schema_version"
+
+        # Scene must exist so the client can poll to a terminal state.
+        scenes = list(repo._store.values())
+        assert len(scenes) == 1
+        scene = scenes[0]
+        assert scene.status == SceneStatus.FAILED_INVALID
+        assert scene.bundle_id == bundle_id
+        # last_error names the rejection kind — operator discriminator.
+        assert "unsupported_schema_version" in (scene.last_error or "")
+
+        # Image-decode check must not have run — schema gate fires first.
+        mock_image_check.assert_not_called()
 
     def test_missing_bucket_returns_400(self, client: TestClient) -> None:
         resp = client.post("/ingest/eventarc", json={"name": f"captures/{_BUNDLE_ID}/bundle.pb"})
