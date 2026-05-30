@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 
-SUPPORTED_VERSIONS: frozenset[str] = frozenset({"1.0.0"})
+SUPPORTED_VERSIONS: frozenset[str] = frozenset({"1"})
 QUAT_NORM_TOLERANCE: float = 1e-3
 
 
