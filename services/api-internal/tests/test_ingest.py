@@ -255,6 +255,23 @@ def test_unsupported_schema_version_returns_400(client: TestClient) -> None:
     assert "99.0.0" in body["detail"]
 
 
+def test_old_version_1_0_0_rejected(client: TestClient) -> None:
+    """Bundles carrying schema_version='1.0.0' (the pre-standardisation value)
+    are rejected.  Regression: '1.0.0' was the emitted value before decision 0031
+    standardised on '1'.  The realistic failure mode is an old build of the iOS
+    app or smoke tool that hasn't picked up the constant change."""
+    bundle_bytes = _make_bundle(schema_version="1.0.0")
+    with patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes):
+        resp = client.post(
+            "/ingest",
+            json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
+        )
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["error"] == "unsupported_schema_version"
+    assert "1.0.0" in body["detail"]
+
+
 def test_corrupt_quaternion_returns_400(client: TestClient) -> None:
     """Bundle with a non-unit quaternion → 400 quaternion_norm_out_of_range.
 
