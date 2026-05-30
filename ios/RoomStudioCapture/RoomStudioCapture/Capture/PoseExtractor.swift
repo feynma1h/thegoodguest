@@ -9,6 +9,7 @@
 
 import ARKit
 import simd
+import SwiftProtobuf
 
 enum PoseExtractor {
 
