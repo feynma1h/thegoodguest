@@ -71,6 +71,12 @@ final class CaptureManager: NSObject, ObservableObject {
     /// Stable UUID for this capture session, generated at startCapture().
     private(set) var bundleId: UUID = UUID()
 
+    /// Lowercased UUID string. Use this — not bundleId.uuidString — whenever
+    /// constructing URL paths (upload session, GCS prefixes). The proto also
+    /// emits this value, so all three legs (proto, upload session, GCS) stay
+    /// consistent without each caller independently applying .lowercased().
+    var bundleIdString: String { bundleId.uuidString.lowercased() }
+
     /// Device-monotonic microseconds (CACurrentMediaTime) at capture start/stop.
     private(set) var startedAtDeviceUs: Int64 = 0
     private(set) var endedAtDeviceUs: Int64 = 0
