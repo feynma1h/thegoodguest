@@ -27,6 +27,19 @@ struct CapturedKeyframe {
     let intrinsics: RSIntrinsics
 }
 
+// MARK: - WriteStats
+
+/// Mutable counters for JPEG-write observability.
+/// Accessed exclusively from jpegQueue (serial DispatchQueue), which provides
+/// the synchronisation — no locks needed. Not actor-isolated by design.
+/// P2 note: promote to structured logging / surface in UI when write failures
+/// need operator visibility during real-bundle uploads.
+private final class WriteStats {
+    var written  = 0
+    var failures = 0
+    func reset() { written = 0; failures = 0 }
+}
+
 // MARK: - CaptureManager
 
 @MainActor
@@ -43,13 +56,14 @@ final class CaptureManager: NSObject, ObservableObject {
     /// Accumulated keyframes in acceptance order. Read by P2 to build CaptureBundle.
     private(set) var capturedFrames: [CapturedKeyframe] = []
 
-    private let arSession  = ARSession()
+    private let arSession   = ARSession()
     private var accumulator = KeyframeAccumulator()
 
     /// Dedicated queue for JPEG encoding; avoids blocking the main thread.
     /// CIContext is thread-safe for concurrent rendering and is reused across frames.
-    private let jpegQueue  = DispatchQueue(label: "com.roomstudio.capture.jpeg", qos: .utility)
-    private let ciContext  = CIContext()
+    private let jpegQueue   = DispatchQueue(label: "com.roomstudio.capture.jpeg", qos: .utility)
+    private let ciContext   = CIContext()
+    private let writeStats  = WriteStats()
 
     override init() {
         super.init()
@@ -68,13 +82,21 @@ final class CaptureManager: NSObject, ObservableObject {
         accumulator.reset()
         frameCount      = 0
         bundleOutputDir = makeOutputDir()
+        // Reset write counters on the queue so any straggler from a previous
+        // session has flushed before the new session's counts begin.
+        let stats = writeStats
+        jpegQueue.async { stats.reset() }
         arSession.run(config, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
     }
 
+    /// Pause the session and log a write-verification summary to the console.
+    /// The summary is enqueued on jpegQueue so it runs after all in-flight
+    /// writes complete — on-disk count reflects actual landed files, not dispatched count.
     func stopCapture() {
         arSession.pause()
         isRunning = false
+        logWriteSummary()
     }
 
     // MARK: - Private helpers
@@ -98,16 +120,25 @@ final class CaptureManager: NSObject, ObservableObject {
         let relativePath = String(format: "frames/%06d.jpg", index)
         let fileURL      = outputDir.appendingPathComponent(relativePath)
 
-        // Encode JPEG on the background queue. Capture ciContext by value to avoid
-        // crossing the @MainActor boundary inside the closure.
         let context = ciContext
+        let stats   = writeStats
         jpegQueue.async {
             let ci = CIImage(cvImageBuffer: pixelBuffer)
             guard
                 let cg   = context.createCGImage(ci, from: ci.extent),
                 let data = UIImage(cgImage: cg).jpegData(compressionQuality: 0.85)
-            else { return }
-            try? data.write(to: fileURL)
+            else {
+                print("[CaptureManager] JPEG encode failed: \(relativePath)")
+                stats.failures += 1
+                return
+            }
+            do {
+                try data.write(to: fileURL)
+                stats.written += 1
+            } catch {
+                print("[CaptureManager] JPEG write error: \(relativePath): \(error)")
+                stats.failures += 1
+            }
         }
 
         capturedFrames.append(CapturedKeyframe(
@@ -118,6 +149,32 @@ final class CaptureManager: NSObject, ObservableObject {
             intrinsics:      PoseExtractor.intrinsics(from: camera)
         ))
         frameCount = capturedFrames.count
+    }
+
+    private func logWriteSummary() {
+        let stats    = writeStats
+        let dir      = bundleOutputDir
+        let accepted = frameCount
+        // Enqueue on jpegQueue so this block runs after all in-flight writes finish.
+        jpegQueue.async {
+            let framesDir = dir?.appendingPathComponent("frames")
+            let onDisk: Int
+            if let framesDir {
+                onDisk = (try? FileManager.default.contentsOfDirectory(
+                    at: framesDir, includingPropertiesForKeys: nil
+                ).filter { $0.pathExtension == "jpg" }.count) ?? -1
+            } else {
+                onDisk = -1
+            }
+            print("""
+            [CaptureManager] stop — write verification
+              accepted : \(accepted)
+              written  : \(stats.written)
+              failures : \(stats.failures)
+              on-disk  : \(onDisk) .jpg files
+              temp-dir : \(framesDir?.path ?? "nil")
+            """)
+        }
     }
 }
 
