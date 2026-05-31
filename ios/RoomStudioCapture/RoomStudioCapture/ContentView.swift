@@ -1,20 +1,22 @@
 /// Capture UI: start/stop button, live frame counter, tracking-state indicator,
-/// and bundle-path readout after assembly.
+/// bundle-path readout, and upload-session status.
 ///
 /// P2 additions: tier badge, bundle.pb path shown after stop + assembly.
+/// P3 additions: upload session state badge; coordinator triggered when bundlePath is set.
 ///
-/// On-device verification checklist for P2 sign-off:
-///   □ Tier badge shows correct tier (ARKIT ONLY vs LIDAR ARKIT) for the device
-///   □ Frame counter climbs while walking; Stop → assembly → bundlePath text appears
-///   □ Console: "bundle.pb → <path>" printed; file exists at that path
-///   □ python tools/inspect_bundle.py <path> passes on the resulting bundle.pb
+/// On-device verification checklist for P3 sign-off:
+///   □ Auth badge shows "Authenticated" after launch (requires network + GoogleService-Info.plist)
+///   □ Stop → assembly → "bundle.pb ready" → upload status progresses to "Session ready"
+///   □ Console: "POST /captures/<id>/upload_session → 200" with manifest path count
+///   □ Session record persisted: verify with lldb or log
 
 import ARKit
 import SwiftUI
 
 struct ContentView: View {
 
-    @StateObject private var capture = CaptureManager()
+    @StateObject private var capture    = CaptureManager()
+    @StateObject private var coordinator = UploadCoordinator()
 
     var body: some View {
         VStack(spacing: 24) {
@@ -31,10 +33,16 @@ struct ContentView: View {
             Spacer()
 
             bundleReadout
+            uploadSessionBadge
 
             captureButton
                 .padding(.horizontal, 32)
                 .padding(.bottom, 48)
+        }
+        // Start upload session creation as soon as bundle.pb is ready.
+        .onChange(of: capture.bundlePath) { _, newPath in
+            guard newPath != nil else { return }
+            Task { await coordinator.beginUploadSession(for: capture) }
         }
     }
 
@@ -123,6 +131,27 @@ struct ContentView: View {
         }
     }
     #endif
+
+    /// Upload session status badge — shown after stop-capture triggers P3 pipeline.
+    @ViewBuilder
+    private var uploadSessionBadge: some View {
+        let (label, color): (String, Color) = switch coordinator.sessionState {
+        case .idle:              ("", .clear)
+        case .authenticating:    ("Authenticating…", .orange)
+        case .patchingBundle:    ("Patching bundle…", .orange)
+        case .buildingManifest:  ("Building manifest…", .orange)
+        case .creatingSession:   ("Creating session…", .orange)
+        case .ready:             ("Session ready ✓", .green)
+        case .failed(let msg):   ("Session error: \(msg)", .red)
+        }
+        if !label.isEmpty {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(color)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+        }
+    }
 
     // MARK: - Actions
 
