@@ -58,7 +58,8 @@ struct BundleAssembler {
 
         let data = try bundle.serializedData()
         let url  = outputDir.appendingPathComponent("bundle.pb")
-        try data.write(to: url)
+        // CAFUFA: consistent with frame/depth blobs and the session record (decisions 0042, 0043).
+        try data.write(to: url, options: .completeFileProtectionUntilFirstUserAuthentication)
         return url
     }
 

@@ -34,6 +34,11 @@ struct RoomStudioCaptureApp: App {
                     // signInIfNeeded() is a no-op if already signed in.
                     try? await AuthManager.shared.signInIfNeeded()
                 }
+                .task {
+                    // Reclaim orphaned capture session dirs from Application Support.
+                    // See CaptureStorageSweeper and decision 0043.
+                    await CaptureStorageSweeper.shared.sweep()
+                }
         }
     }
 }

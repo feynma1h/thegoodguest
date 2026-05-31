@@ -195,15 +195,33 @@ final class CaptureManager: NSObject, ObservableObject {
     // MARK: - Private helpers
 
     private func makeOutputDir(forLidar: Bool) -> URL {
-        let root = FileManager.default.temporaryDirectory
-                       .appendingPathComponent(UUID().uuidString)
+        // Write to Application Support, not temporaryDirectory. iOS can purge tmp while
+        // the app is not running; a 12h+ upload window crosses that boundary reliably.
+        // App Support survives kill/relaunch/storage-pressure (decision 0043).
+        let root = CaptureStorageSweeper.capturesRootURL()
+                       .appendingPathComponent(bundleIdString)
+
         var subdirs = ["frames"]
         if forLidar { subdirs += ["depth", "confidence"] }
-        for sub in subdirs {
+
+        // Create root + subdirs with explicit CAFUFA so background URLSession delivery
+        // can read blob files while the device is locked (decisions 0040 item 7, 0042).
+        for sub in ([""] + subdirs) {
+            let dir = sub.isEmpty ? root : root.appendingPathComponent(sub)
             try? FileManager.default.createDirectory(
-                at: root.appendingPathComponent(sub),
-                withIntermediateDirectories: true)
+                at: dir,
+                withIntermediateDirectories: true,
+                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+            )
         }
+
+        // Exclude from iCloud/iTunes backup: capture blobs are large and regenerable.
+        // Must be set on the directory itself (not inherited from parent).
+        var mutableRoot = root
+        var vals = URLResourceValues()
+        vals.isExcludedFromBackup = true
+        try? mutableRoot.setResourceValues(vals)
+
         return root
     }
 
@@ -232,7 +250,7 @@ final class CaptureManager: NSObject, ObservableObject {
                 return
             }
             do {
-                try data.write(to: fileURL)
+                try data.write(to: fileURL, options: .completeFileProtectionUntilFirstUserAuthentication)
                 stats.written += 1
             } catch {
                 print("[CaptureManager] JPEG write error: \(relativePath): \(error)")
@@ -290,7 +308,7 @@ final class CaptureManager: NSObject, ObservableObject {
             // Float32 raster: width*height*4 bytes, row-major, packed (no stride padding).
             if let bytes = Self.extractPackedBytes(depthMap, bytesPerPixel: 4) {
                 do {
-                    try bytes.write(to: depthURL)
+                    try bytes.write(to: depthURL, options: .completeFileProtectionUntilFirstUserAuthentication)
                 } catch {
                     print("[CaptureManager] depth write error: \(depthRelPath): \(error)")
                     stats.failures += 1
@@ -300,7 +318,7 @@ final class CaptureManager: NSObject, ObservableObject {
             if let conf = confMap,
                let bytes = Self.extractPackedBytes(conf, bytesPerPixel: 1) {
                 do {
-                    try bytes.write(to: confURL)
+                    try bytes.write(to: confURL, options: .completeFileProtectionUntilFirstUserAuthentication)
                 } catch {
                     print("[CaptureManager] confidence write error: \(confRelPath): \(error)")
                 }
