@@ -3,11 +3,11 @@
 /// Each record is stored as a JSON file at:
 ///   <Application Support>/<bundle-id>/upload_sessions/<bundle_id>.json
 ///
-/// Files are written with NSFileProtectionComplete (AES-256 at rest, inaccessible
-/// when the device is locked). See decision 0038 for the full at-rest protection
-/// rationale (session_uri is a short-lived GCS bearer capability, not a
-/// long-term credential; file + NSFileProtection is preferred over Keychain for
-/// this use case due to per-item size constraints).
+/// Files are written with NSFileProtectionCompleteUntilFirstUserAuthentication
+/// (AES-256 at rest, readable while locked after first unlock). See decisions
+/// 0037 and 0042 for rationale: CAFUFA is required so the background URLSession
+/// completion delegate can read the record while the device is locked (decision
+/// 0040 item 7); Complete would silently stall finalize until next unlock.
 ///
 /// The store is an actor so all read/write operations are serialised without
 /// explicit locking.
@@ -34,12 +34,12 @@ actor UploadSessionStore {
             )
             .appendingPathComponent("upload_sessions")
 
-        // Create directory with NSFileProtectionComplete so all files
-        // created inside inherit the protection class.
+        // Create directory with CAFUFA so files created inside inherit the class.
+        // Complete is incompatible with background-while-locked finalize (decision 0042).
         try? FileManager.default.createDirectory(
             at: dir,
             withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.complete]
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
         )
         self.directory = dir
 
@@ -58,7 +58,7 @@ actor UploadSessionStore {
         try? FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.complete]
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
         )
         self.directory = directory
         let enc = JSONEncoder()
@@ -76,8 +76,7 @@ actor UploadSessionStore {
     func save(_ record: UploadSessionRecord) throws {
         let url  = fileURL(for: record.bundleId)
         let data = try encoder.encode(record)
-        // .completeFileProtection sets NSFileProtectionComplete on the file.
-        try data.write(to: url, options: [.atomic, .completeFileProtection])
+        try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
     /// Load the session record for a bundle, or nil if none exists.
