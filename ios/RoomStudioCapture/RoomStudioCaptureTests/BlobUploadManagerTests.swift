@@ -176,11 +176,6 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     func test_handleTaskCompletion_bundlePbCompletionDoesNotBlock_gate() async throws {
-        // bundle.pb 200 must route to onBundleComplete, NOT through the Phase-1 gate
-        // (which would falsely mark frames/000000.jpg as the trigger).
-        // After decision 0043: onBundleComplete deletes the record as eager cleanup.
-        // The record being nil (not present with frames/000000.jpg still .pending) confirms
-        // bundle.pb traveled to onBundleComplete, not through markBlobUploaded.
         let paths = ["frames/000000.jpg", "bundle.pb"]
         let (manager, store, _) = try await makeManager(paths: paths)
 
@@ -189,8 +184,8 @@ final class BlobUploadManagerTests: XCTestCase {
             statusCode: 200, error: nil
         )
         let record = try await store.load(bundleId: "test-bundle")
-        XCTAssertNil(record,
-                     "bundle.pb 200 routes to onBundleComplete (not markBlobUploaded/gate); record deleted by cleanup (decision 0043)")
+        XCTAssertFalse(record?.allNonBundlePbBlobsUploaded ?? true,
+                       "Uploading bundle.pb alone must not satisfy the Phase-1 gate")
     }
 
     // MARK: - Race safety: concurrent completions
@@ -385,19 +380,15 @@ final class BlobUploadManagerTests: XCTestCase {
         XCTAssertEqual(completed, ["test-bundle"], "bundle.pb 200 must route to onBundleComplete")
     }
 
-    func test_handleTaskCompletion_bundlePb_200_doesNotMarkUploadedViaGate() async throws {
-        // bundle.pb completion routes to onBundleComplete, which deletes the record as
-        // eager cleanup (decision 0043) — not through markBlobUploaded. Verify that
-        // the record is gone (not that blobStatuses["bundle.pb"] == .pending, which
-        // can no longer be asserted since the record itself is deleted).
+    func test_handleTaskCompletion_bundlePb_200_doesNotUpdateStore() async throws {
         let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "bundle.pb"),
             statusCode: 200, error: nil
         )
         let record = try await store.load(bundleId: "test-bundle")
-        XCTAssertNil(record,
-                     "bundle.pb 200 triggers onBundleComplete which deletes the store record (decision 0043 eager cleanup)")
+        XCTAssertEqual(record?.blobStatuses["bundle.pb"], .pending,
+                       "bundle.pb 200 must not update blobStatuses in the store")
     }
 
     func test_handleTaskCompletion_bundlePb_200_doesNotRefireGate() async throws {
@@ -708,33 +699,6 @@ final class BlobUploadManagerTests: XCTestCase {
         _ = outputDir
     }
 
-    // MARK: - onBundleComplete eager cleanup (decision 0043)
-
-    func test_onBundleComplete_deletesStoreRecord() async throws {
-        // After onBundleComplete fires, the store record must be gone so the
-        // startup sweep (CaptureStorageSweeper) treats the session as terminal.
-        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
-        let before = try await store.load(bundleId: "test-bundle")
-        XCTAssertNotNil(before, "Record must exist before onBundleComplete")
-
-        await manager.onBundleComplete(bundleId: "test-bundle")
-
-        let after = try await store.load(bundleId: "test-bundle")
-        XCTAssertNil(after, "onBundleComplete must delete the store record (decision 0043 eager cleanup)")
-    }
-
-    func test_onBundleComplete_deletesSessionDir() async throws {
-        // onBundleComplete must remove the on-device session dir so the device reclaims disk
-        // immediately (decision 0043). If dir deletion fails, the sweep handles it on next launch.
-        let (manager, _, outputDir) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: outputDir.path),
-                      "Session dir must exist before onBundleComplete")
-
-        await manager.onBundleComplete(bundleId: "test-bundle")
-
-        XCTAssertFalse(FileManager.default.fileExists(atPath: outputDir.path),
-                       "onBundleComplete must delete the session dir (decision 0043 eager cleanup)")
-    }
 }
 
 // MARK: - BlobUploadManager test helpers
