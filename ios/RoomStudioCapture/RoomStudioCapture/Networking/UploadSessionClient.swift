@@ -93,7 +93,7 @@ actor UploadSessionClient {
     private let baseURL: URL
     private let urlSession: URLSession
 
-    // Retry policy for 5xx / network errors (decision 0037).
+    // Retry policy for 5xx / network errors (decision 0038).
     private let maxRetries      = 3
     private let baseDelaySec    = 1.0
     private let maxDelaySec     = 30.0
