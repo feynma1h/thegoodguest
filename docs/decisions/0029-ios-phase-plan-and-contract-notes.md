@@ -50,12 +50,13 @@ All mappings confirmed correct:
    dormant. P2 must not merge until `api-internal`'s ingest handler rejects
    unknown versions (board item 2). Both sides must ship together.
 
-2. **Depth intrinsics (LiDAR frames):** `Depth.intrinsics` is the depth raster's
-   own intrinsics, not the RGB frame's. Source:
-   `ARFrame.capturedDepthData.cameraCalibrationData.intrinsicMatrix` —
-   `[0][0]`=fx, `[1][1]`=fy, `[2][0]`=cx, `[2][1]`=cy. Depth resolution is
-   typically 256×192 vs RGB 1920×1440. P1 does not write depth; capture this
-   here so P2 doesn't have to re-derive.
+2. **Depth intrinsics (LiDAR frames):** ~~`ARFrame.capturedDepthData.cameraCalibrationData.intrinsicMatrix`~~
+   **CORRECTED in decision 0032 — this finding was wrong.** See 0032 for the
+   correct derivation. Short version: `ARDepthData` (from `frame.sceneDepth`,
+   the LiDAR rear sensor) carries no `cameraCalibrationData`; the correct depth
+   intrinsics are `camera.intrinsics` scaled by `(depth_w / rgb_w)` in x and
+   `(depth_h / rgb_h)` in y. `capturedDepthData` is the front TrueDepth camera,
+   nil for rear captures — do not use it for room scanning.
 
 ### Gravity and hardware_id rules
 

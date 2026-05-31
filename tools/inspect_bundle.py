@@ -112,6 +112,25 @@ def main() -> None:
         f"cx={intr.cx:.1f} cy={intr.cy:.1f} size={intr.width}x{intr.height}"
     )
 
+    # Depth intrinsics sanity — only meaningful for LiDAR bundles.
+    # fx should be ~fx_rgb * (depth_w / rgb_w). For 256-wide depth / 1920-wide
+    # RGB: expected ~200. If you see ~1500 the intrinsics are unscaled RGB — bug.
+    first_depth = next((f for f in b.frames if f.HasField("depth")), None)
+    if first_depth is not None:
+        di = first_depth.depth.intrinsics
+        print(
+            f"  depth  intrinsics (frame {first_depth.frame_index}): "
+            f"fx={di.fx:.1f} fy={di.fy:.1f} "
+            f"cx={di.cx:.1f} cy={di.cy:.1f} size={di.width}x{di.height}"
+        )
+        if intr.width > 0 and di.width > 0:
+            expected_fx = intr.fx * (di.width / intr.width)
+            if abs(di.fx - expected_fx) > expected_fx * 0.2:
+                print(
+                    f"    WARN: depth fx={di.fx:.1f} far from "
+                    f"scaled-RGB expected {expected_fx:.1f} — capture client bug?"
+                )
+
     # Quaternion unit-norm check. The proto contract requires unit-norm
     # quaternions within 1e-3; the orchestrator runs this on every ingest.
     quat_norms = np.array([quat_norm(pose_quat(f.camera_pose)) for f in b.frames])
