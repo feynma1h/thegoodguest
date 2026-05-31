@@ -1,6 +1,9 @@
 /// Manages an ARWorldTracking session and accumulates keyframes to a local temp directory.
 ///
 /// P2 scope: tier dispatch, depth capture (LiDAR devices), and bundle assembly.
+/// P3 scope: passes Firebase anonymous UID into bundle assembly; publishes
+///           assembledWithoutUserId for UploadCoordinator's backstop re-serialize.
+///
 /// On stop, all in-flight writes complete and BundleAssembler serializes bundle.pb
 /// into the session output directory. The resulting URL is published as `bundlePath`.
 ///
@@ -58,6 +61,11 @@ final class CaptureManager: NSObject, ObservableObject {
     /// before first stop.
     @Published private(set) var bundlePath: URL? = nil
 
+    /// True when bundle.pb was assembled without a Firebase UID (first-ever offline
+    /// launch). UploadCoordinator patches user_id in-place before building the manifest.
+    /// Reset to false at the start of each capture.
+    @Published private(set) var assembledWithoutUserId: Bool = false
+
     /// Root directory for this capture's output (temp, per-session UUID).
     /// Structure: <bundleOutputDir>/frames/NNNNNN.jpg
     ///            <bundleOutputDir>/depth/NNNNNN.f32     (LiDAR tier only)
@@ -105,6 +113,7 @@ final class CaptureManager: NSObject, ObservableObject {
 
     func startCapture() {
         bundlePath = nil
+        assembledWithoutUserId = false
         capturedFrames  = []
         accumulator.reset()
         frameCount      = 0
@@ -137,6 +146,10 @@ final class CaptureManager: NSObject, ObservableObject {
         endedAtDeviceUs = Int64(CACurrentMediaTime() * 1_000_000)
 
         // Snapshot immutable session state before hopping off MainActor.
+        // userId: read from Keychain-backed Firebase cache — offline-safe.
+        // Empty string on a first-ever offline launch (backstop handled by UploadCoordinator).
+        let userId    = AuthManager.shared.currentUID ?? ""
+        let noUid     = userId.isEmpty
         let frames    = capturedFrames
         let outDir    = bundleOutputDir!
         let assembler = BundleAssembler(
@@ -167,9 +180,12 @@ final class CaptureManager: NSObject, ObservableObject {
             """)
 
             do {
-                let url = try assembler.write()
-                print("[CaptureManager] bundle.pb → \(url.path)")
-                DispatchQueue.main.async { self?.bundlePath = url }
+                let url = try assembler.write(userId: userId)
+                print("[CaptureManager] bundle.pb → \(url.path) (user_id: \(userId.isEmpty ? "<none — backstop pending>" : userId))")
+                DispatchQueue.main.async {
+                    self?.bundlePath = url
+                    self?.assembledWithoutUserId = noUid
+                }
             } catch {
                 print("[CaptureManager] bundle assembly failed: \(error)")
             }

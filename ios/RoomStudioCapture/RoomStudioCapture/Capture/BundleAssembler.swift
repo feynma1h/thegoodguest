@@ -26,12 +26,18 @@ struct BundleAssembler {
     // MARK: - Public API
 
     /// Assemble the CaptureBundle proto and write it to outputDir/bundle.pb.
+    ///
+    /// - Parameter userId: Firebase anonymous UID. Pass the cached UID from
+    ///   AuthManager.shared.currentUID; pass "" if no UID is available yet
+    ///   (first-ever offline launch). UploadCoordinator patches a missing
+    ///   user_id in-place before building the manifest (see decision 0036).
+    ///
     /// Returns the URL of the written file.
-    func write() throws -> URL {
+    func write(userId: String) throws -> URL {
         var bundle               = RSCaptureBundle()
         bundle.schemaVersion     = "1"
         bundle.bundleID          = bundleId.uuidString.lowercased()
-        // user_id: populated in P3 after Firebase auth is wired.
+        bundle.userID            = userId
         bundle.device            = makeDevice()
         bundle.tier              = tier
         bundle.startedAtDeviceUs = startedAtDeviceUs
