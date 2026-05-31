@@ -37,9 +37,3 @@ token-refresh retry because token expiry (~1h) is the common transient cause.
 If api-public adds per-UID rate limiting (pre-launch gap b, 0015), a 429 ->
 respect Retry-After branch must be added. Manifest-violation status code is
 confirmed as 400 — the fatal-set mapping is correct and no change needed.
-
-## Note: stale cross-reference in code
-UploadSessionClient.swift line 96 reads `// Retry policy for 5xx / network
-errors (decision 0037).` — the reference should be 0038. The comment predates
-note numbering; it is cosmetically wrong but not load-bearing. Fix in the next
-incidental edit to that file.
