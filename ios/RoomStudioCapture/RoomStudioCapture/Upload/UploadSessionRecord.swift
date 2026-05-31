@@ -178,6 +178,28 @@ struct UploadSessionRecord: Codable, Sendable {
         )
     }
 
+    /// Return a new record with all non-bundle.pb blob statuses reset to .pending.
+    ///
+    /// Used by the staleness re-mint path (onSessionExpired with loopGuardEnabled: false)
+    /// to force re-upload of all blobs against fresh URIs. The age=1 GCS lifecycle rule
+    /// may have GC'd any blob uploaded more than 24h ago; resetting to .pending ensures
+    /// the Phase-1 gate re-closes only after every blob is confirmed re-delivered.
+    nonisolated func resettingNonBundlePbBlobsToPending() -> UploadSessionRecord {
+        var updated = blobStatuses
+        for key in updated.keys where key != "bundle.pb" {
+            updated[key] = .pending
+        }
+        return UploadSessionRecord(
+            bundleId:            bundleId,
+            tierRawValue:        tierRawValue,
+            clientMintTimestamp: clientMintTimestamp,
+            sessionEntries:      sessionEntries,
+            manifestPaths:       manifestPaths,
+            blobStatuses:        updated,
+            outputDir:           outputDir
+        )
+    }
+
     /// Return a new record with fresh session entries and an updated mint timestamp.
     ///
     /// Used by the 410 re-mint path (onSessionExpired) after /upload_session returns

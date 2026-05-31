@@ -539,8 +539,10 @@ final class BlobUploadManagerTests: XCTestCase {
         // CHECK 1 regression test.
         // Staleness guard fires (>12h), re-mint returns IDENTICAL URIs (server correctly
         // returned the still-valid stored entries — 12h < 7-day GCS window).
-        // Must NOT route to onFatalBlobError. Must proceed to enqueue bundle.pb and,
-        // after bundle.pb 200, route to onBundleComplete.
+        // Must NOT route to onFatalBlobError. All blobs are reset to .pending and re-enqueued.
+        // After directly simulating bundle.pb 200, onBundleComplete fires.
+        // (The full ordered path — blob re-upload → gate → enqueueBundlePb — is covered by
+        // test_stalenessRemint_afterRecompletion_bundlePbFinalized.)
         let fixedNow  = Date()
         let mintTime  = fixedNow.addingTimeInterval(-(12 * 3600 + 60))  // 12h01m ago → stale
         let (manager, _, _) = try await makeManager(
@@ -577,7 +579,7 @@ final class BlobUploadManagerTests: XCTestCase {
         let expired = await manager._sessionExpiredInvocations
         XCTAssertEqual(expired, ["test-bundle"])
 
-        // Simulate bundle.pb 200 (enqueued by enqueueBundlePb at end of staleness re-mint).
+        // Simulate bundle.pb 200 (directly — production path routes via re-enqueue → gate).
         await manager.handleTaskCompletion(
             taskDescription: BlobUploadManager.makeTaskDescription(
                 bundleId: "test-bundle", relativePath: "bundle.pb"),
@@ -624,6 +626,174 @@ final class BlobUploadManagerTests: XCTestCase {
         XCTAssertFalse(fatal.isEmpty, "Re-mint failure must route to onFatalBlobError")
         XCTAssertTrue(fatal.allSatisfy { $0.reason.contains("remint_failed") },
                       "Reason must be remint_failed; got: \(fatal.map(\.reason))")
+    }
+
+    // MARK: - Staleness re-upload: Check-3 (all blobs reset + re-enqueued)
+
+    func test_stalenessRemint_allBlobsResetToPending_bundlePbNotEnqueuedBeforeGateReCloses() async throws {
+        // Staleness fires (>12h). All blobs previously .uploaded.
+        // After staleness re-mint: all non-bundle.pb blobs must be .pending in the store,
+        // and bundle.pb must NOT be finalized until the gate re-closes via normal completion.
+        let fixedNow = Date()
+        let mintTime = fixedNow.addingTimeInterval(-(12 * 3600 + 60))  // 12h01m ago → stale
+        let paths = ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(
+            paths: paths, mintTimestamp: mintTime, clock: { fixedNow }
+        )
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000000.jpg")
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000001.jpg")
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertTrue(record.allNonBundlePbBlobsUploaded, "Pre-condition: gate must be true before staleness fires")
+
+        await manager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.example.com/f0"),
+                UploadSessionEntry(relativePath: "frames/000001.jpg", sessionUri: "https://fresh.example.com/f1"),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://fresh.example.com/bp"),
+            ]
+        }
+
+        // Staleness guard fires → all blobs reset to .pending, re-enqueued.
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+
+        let afterReset = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(afterReset.blobStatuses["frames/000000.jpg"], .pending,
+                       "frames/000000.jpg must be reset to .pending after staleness re-mint")
+        XCTAssertEqual(afterReset.blobStatuses["frames/000001.jpg"], .pending,
+                       "frames/000001.jpg must be reset to .pending after staleness re-mint")
+        let completed = await manager._bundleCompleteInvocations
+        XCTAssertTrue(completed.isEmpty,
+                      "bundle.pb must NOT be finalized before gate re-closes via normal completion")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "No fatal error expected on staleness re-mint with all files present")
+    }
+
+    func test_stalenessRemint_afterRecompletion_bundlePbFinalized() async throws {
+        // End-to-end: staleness fires → all blobs reset → re-uploaded → gate re-fires →
+        // bundle.pb enqueued → onBundleComplete. Verifies the full ordering guarantee.
+        let fixedNow = Date()
+        let mintTime = fixedNow.addingTimeInterval(-(12 * 3600 + 60))
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(
+            paths: paths, mintTimestamp: mintTime, clock: { fixedNow }
+        )
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000000.jpg")
+        let record = try await store.load(bundleId: "test-bundle")!
+
+        await manager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.example.com/f0"),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://fresh.example.com/bp"),
+            ]
+        }
+
+        // Staleness fires → blob reset to .pending, re-enqueued.
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+        let notYetCompleted = await manager._bundleCompleteInvocations
+        XCTAssertTrue(notYetCompleted.isEmpty,
+                      "bundle.pb must NOT be finalized before blob re-upload completes")
+
+        // Simulate re-upload of the frame blob → gate re-closes → onAllBlobsUploaded →
+        // clientMintTimestamp is now fixedNow (fresh), so staleness check passes → enqueueBundlePb.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 200, error: nil
+        )
+        // Simulate bundle.pb 200 → onBundleComplete.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "bundle.pb"),
+            statusCode: 200, error: nil
+        )
+
+        let completed = await manager._bundleCompleteInvocations
+        XCTAssertEqual(completed, ["test-bundle"],
+                       "Staleness re-mint → re-upload → gate → bundle.pb must finalize end-to-end")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "No fatal error expected on full staleness re-upload path")
+    }
+
+    func test_stalenessRemint_blobFileMissing_routesToFatalError() async throws {
+        // Staleness re-enqueue: blob file missing from disk (App Support dir cleared).
+        // Expect: onFatalBlobError("blob_file_missing_at_staleness_remint"), bundle.pb NOT finalized.
+        // Detection: FileManager.fileExists(atPath:) returns false for the missing file.
+        let fixedNow = Date()
+        let mintTime = fixedNow.addingTimeInterval(-(12 * 3600 + 60))
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, outputDir) = try await makeManager(
+            paths: paths, mintTimestamp: mintTime, clock: { fixedNow }
+        )
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000000.jpg")
+        let record = try await store.load(bundleId: "test-bundle")!
+
+        // Delete the blob file to simulate App Support loss.
+        try FileManager.default.removeItem(at: outputDir.appendingPathComponent("frames/000000.jpg"))
+
+        await manager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.example.com/f0"),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://fresh.example.com/bp"),
+            ]
+        }
+
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertFalse(fatal.isEmpty, "Missing blob file must route to onFatalBlobError")
+        XCTAssertTrue(
+            fatal.allSatisfy { $0.reason == "blob_file_missing_at_staleness_remint" },
+            "Reason must be blob_file_missing_at_staleness_remint; got: \(fatal.map(\.reason))"
+        )
+        let completed = await manager._bundleCompleteInvocations
+        XCTAssertTrue(completed.isEmpty, "bundle.pb must NOT be finalized when a blob file is missing")
+    }
+
+    func test_coldRelaunch_stalenessRemint_finalizesBundlePb() async throws {
+        // Cold-relaunch + staleness: fresh manager, only on-disk record present, >12h elapsed.
+        // Verifies that path reconstruction from outputDir in the persisted record works,
+        // all blobs are re-enqueued, and the full pipeline finalizes correctly.
+        let fixedNow = Date()
+        let mintTime = fixedNow.addingTimeInterval(-(12 * 3600 + 60))
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (_, store, _) = try await makeManager(
+            paths: paths, mintTimestamp: mintTime, clock: { fixedNow }
+        )
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000000.jpg")
+
+        // Cold-relaunch: fresh manager instance, no in-memory contexts.
+        let coldManager = BlobUploadManager(store: store, clock: { fixedNow })
+        await coldManager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.example.com/f0"),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://fresh.example.com/bp"),
+            ]
+        }
+
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertTrue(record.allNonBundlePbBlobsUploaded, "Pre-condition: gate must be true before staleness fires")
+        XCTAssertNotNil(record.outputDir, "Record must carry outputDir for cold-relaunch path reconstruction")
+
+        // Staleness fires → reset → re-enqueue (reconstructs paths from record.outputDir).
+        await coldManager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+
+        let afterReset = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(afterReset.blobStatuses["frames/000000.jpg"], .pending,
+                       "Cold-relaunch: blob must be reset to .pending after staleness re-mint")
+
+        // Simulate re-upload → gate → bundle.pb → onBundleComplete.
+        await coldManager.handleTaskCompletion(
+            taskDescription: BlobUploadManager.makeTaskDescription(bundleId: "test-bundle", relativePath: "frames/000000.jpg"),
+            statusCode: 200, error: nil
+        )
+        await coldManager.handleTaskCompletion(
+            taskDescription: BlobUploadManager.makeTaskDescription(bundleId: "test-bundle", relativePath: "bundle.pb"),
+            statusCode: 200, error: nil
+        )
+
+        let completed = await coldManager._bundleCompleteInvocations
+        XCTAssertEqual(completed, ["test-bundle"],
+                       "Cold-relaunch staleness re-mint must finalize bundle end-to-end")
+        let fatal = await coldManager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "Cold-relaunch staleness re-mint must not fatal")
     }
 
     // MARK: - Step 3: cold-relaunch correctness
