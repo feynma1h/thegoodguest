@@ -111,10 +111,14 @@ final class UploadSessionClientTests: XCTestCase {
 
     // MARK: - Manifest path violation
     //
-    // Contract: "server does NO semantic validation" on relative_path.
-    // Observed status code for a leading-slash path violation:
-    //   200 — server accepted the path without validation. (confirmed YYYY-MM-DD)
-    // Update the date above when this test is run against the live service.
+    // LIVE-VERIFIED 2026-05-31 against api-public-q62kcditqa-as.a.run.app:
+    //   Leading-slash path ("/frames/000000.jpg") → HTTP 400.
+    // The "server does NO semantic validation" framing in the original P3 contract
+    // notes was wrong for basic path-format checks. The server rejects leading
+    // slashes with 400. Decision notes 0035 (F3) and 0038 updated accordingly.
+    //
+    // The client-side rule ("client must enforce relative_path rules") remains
+    // correct — ManifestBuilder never emits leading-slash paths.
 
     func test_manifestPathViolation_observedStatusCode() async throws {
         guard ProcessInfo.processInfo.environment["RUN_INTEGRATION_TESTS"] == "1" else { return }
@@ -122,30 +126,25 @@ final class UploadSessionClientTests: XCTestCase {
         let authResult = try await Auth.auth().signInAnonymously()
         let user = authResult.user
 
-        // Path violation: leading slash (server contract says client must enforce).
+        // Path violation: leading slash.
         let manifest: [UploadManifestEntry] = [
             UploadManifestEntry(relativePath: "/frames/000000.jpg", expectedSizeBytes: 100),
             UploadManifestEntry(relativePath: "bundle.pb",          expectedSizeBytes: 50),
         ]
 
-        // If the server returns 200 for a path violation, entries are returned normally.
-        // If it returns 4xx, an UploadSessionError is thrown.
-        // This test documents whichever behaviour is observed.
         do {
-            let entries = try await client.createUploadSession(
+            _ = try await client.createUploadSession(
                 bundleId: bundleId,
                 manifest: manifest,
                 tokenProvider: { try await user.getIDToken() }
             )
-            // 200 path: server accepted. Confirm the entry is present.
-            let hasViolationPath = entries.contains { $0.relativePath == "/frames/000000.jpg" }
-            XCTAssertTrue(hasViolationPath,
-                          "Server returned 200 for leading-slash path — expected per contract.")
-            print("[UploadSessionClientTests] manifest path violation → 200 (server no-validate confirmed)")
-        } catch UploadSessionError.clientError(let code, _) {
-            // 4xx path: server validated after all.
-            print("[UploadSessionClientTests] manifest path violation → \(code) (server validated — update decision note)")
-            XCTFail("Update decision notes: server returned \(code) for path violation — contract comment is wrong.")
+            // If we reach here the server returned 200 — the validated behavior changed.
+            XCTFail("Expected 400 for leading-slash path; server returned 200. Update decision notes.")
+        } catch UploadSessionError.clientError(let code, let body) {
+            // Expected: server validates basic path format. Leading "/" → 400.
+            print("[UploadSessionClientTests] manifest path violation → \(code) body: \(body)")
+            XCTAssertEqual(code, 400,
+                           "Expected 400 for leading-slash path, got \(code). Body: \(body)")
         }
 
         try? Auth.auth().signOut()
