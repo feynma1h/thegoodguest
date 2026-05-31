@@ -24,6 +24,10 @@ struct ContentView: View {
             trackingStatusBadge
             frameCountDisplay
 
+            #if DEBUG
+            gravityDebugHUD
+            #endif
+
             Spacer()
 
             bundleReadout
@@ -107,6 +111,18 @@ struct ContentView: View {
         .tint(capture.isRunning ? .red : .blue)
         .animation(.easeInOut(duration: 0.15), value: capture.isRunning)
     }
+
+    #if DEBUG
+    /// Live gravity readout for on-device sign/axis eyeball check (chunk C sign-off).
+    @ViewBuilder
+    private var gravityDebugHUD: some View {
+        if let g = capture.lastGravity {
+            Text(String(format: "g_cam: (%+.2f, %+.2f, %+.2f)", g.x, g.y, g.z))
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+    #endif
 
     // MARK: - Actions
 
