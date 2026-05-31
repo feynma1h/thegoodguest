@@ -25,7 +25,18 @@ precisely because the server is not in flight. "Live contract" does not mean
 Effective upload window is bounded by the captures bucket lifecycle (age=1 day)
 and the upload_sessions Firestore TTL, NOT the 7-day GCS resumable-URI nominal.
 
+## F3 partial correction (live-verified 2026-05-31)
+The original framing — "server does NO semantic validation" — overstates the
+client's responsibility for basic path format. Live testing confirms: a leading
+slash in relative_path returns HTTP 400 with body
+  {"error":"invalid_manifest","detail":"path must be relative (no leading slash): '/frames/000000.jpg'"}
+So the server does validate basic path format. What remains unvalidated (F3's
+original scope): unknown extensions, tier/path consistency, blob-count vs.
+tier expectations. ManifestBuilder never emits invalid paths, so no client
+change is required; the note is updated for accuracy.
+
 ## What would change this decision
-If api-public adds expires_at (closes F1) or semantic manifest validation
-(closes F3), the client can lean on the server for those and drop the
-compensation. If the endpoint contract is revised, this note is superseded.
+If api-public adds expires_at (closes F1) or full semantic manifest validation
+(closes F3 fully), the client can lean on the server for those and drop the
+remaining compensation. If the endpoint contract is revised, this note is
+superseded.
