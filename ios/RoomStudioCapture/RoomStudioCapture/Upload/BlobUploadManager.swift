@@ -424,18 +424,26 @@ actor BlobUploadManager {
     /// The `clock` property provides "now" — inject a fixed Date in tests for deterministic
     /// staleness-guard behavior (decision 0041, Step 2).
     ///
-    /// PUT semantics are identical to Phase-1 blobs: single-shot whole-file
-    /// uploadTask(with:fromFile:), Content-Range set, Content-Length and Content-Type
-    /// omitted (URLSession and session URI handle them, respectively — F2).
-    ///
     /// Cold-relaunch safe: outputDir and sessionUri are both read from the persisted record.
     func onAllBlobsUploaded(bundleId: String, record: UploadSessionRecord) async {
         guard clock().timeIntervalSince(record.clientMintTimestamp) <= Self.stalenessThreshold else {
             print("[BlobUploadManager] ⚠ bundle \(bundleId) session stale (>12 h) — routing to re-mint")
-            await onSessionExpired(bundleId: bundleId)
+            // loopGuardEnabled: false — at 12 h, stored URIs are still valid (well within
+            // the 7-day GCS window). Identical returned URIs indicate the server correctly
+            // returned the still-live stored entries; treat as success, not as a 410 loop.
+            // The 410-triggered path uses the default loopGuardEnabled: true.
+            await onSessionExpired(bundleId: bundleId, loopGuardEnabled: false)
             return
         }
+        await enqueueBundlePb(bundleId: bundleId, record: record)
+    }
 
+    /// Enqueue a single-shot whole-file PUT task for bundle.pb against its session URI.
+    ///
+    /// Shared by onAllBlobsUploaded (fresh path) and onSessionExpired (post-staleness-remint
+    /// path). PUT semantics identical to Phase-1 blobs: Content-Range set, Content-Length
+    /// and Content-Type omitted (URLSession and session URI handle them — F2).
+    private func enqueueBundlePb(bundleId: String, record: UploadSessionRecord) async {
         guard let outputDir = record.outputDir else {
             print("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId)")
             await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
@@ -474,26 +482,39 @@ actor BlobUploadManager {
         }
     }
 
-    // MARK: - 410 re-mint
+    // MARK: - 410 re-mint / staleness re-mint (shared implementation)
 
-    /// Re-mint session URIs after a GCS 410 Gone response, then re-enqueue affected blobs.
+    /// Re-mint session URIs, then re-enqueue affected blobs or finalize bundle.pb.
     ///
-    /// Also called from the staleness guard in onAllBlobsUploaded (>12 h since mint).
+    /// Two callers — same re-mint implementation, different loop-guard semantics:
+    ///
+    ///   • 410-triggered (loopGuardEnabled: true, default):
+    ///       handleTaskCompletion routes here on a blob PUT returning 410 Gone.
+    ///       Identical returned URIs = Firestore doc still alive after 7-day TTL batch lag,
+    ///       still-dead GCS URIs stored → silent loop risk → fatal.
+    ///       Different URIs → persist fresh record, re-enqueue pending blobs.
+    ///       After blobs complete, the Phase-1 gate fires → onAllBlobsUploaded → bundle.pb.
+    ///
+    ///   • Staleness-guard (loopGuardEnabled: false):
+    ///       onAllBlobsUploaded routes here when >12 h since mint.
+    ///       At 12 h, stored URIs are still valid (well within the 7-day GCS window).
+    ///       Identical returned URIs = server correctly returned the still-live stored entries;
+    ///       treat as success and proceed to bundle.pb (do NOT fatal).
+    ///       After re-mint, all blobs are already .uploaded (gate was true), so the re-enqueue
+    ///       loop is a no-op; bundle.pb is enqueued directly via enqueueBundlePb.
     ///
     /// Re-mint flow:
-    ///   1. Load persisted record (cold-relaunch path: no in-memory context needed).
+    ///   1. Load persisted record (cold-relaunch safe: no in-memory context needed).
     ///   2. Call remintProvider with the stored manifest paths (expectedSizeBytes = 0,
-    ///      which the server accepts per gap F3). This reuses the full 0038 retry/backoff
-    ///      + 401 token-refresh policy implemented in UploadSessionClient.
-    ///   3. Loop prevention: if the server returned the SAME URIs as the persisted record
-    ///      (idempotency hit against still-live Firestore doc with dead GCS URIs), do NOT
-    ///      re-enqueue — route to onFatalBlobError("remint_returned_stale_uris"). A silent
-    ///      410 loop is worse than a clean failure.
-    ///   4. Persist the fresh record (new sessionEntries + fresh clientMintTimestamp).
-    ///   5. Re-enqueue only blobs not yet .uploaded, skipping bundle.pb (gate handles it).
+    ///      server accepts per gap F3). Reuses the full 0038 retry/backoff + 401
+    ///      token-refresh policy implemented in UploadSessionClient.
+    ///   3. Loop guard (410 path only): if returned URIs == persisted URIs → fatal.
+    ///   4. Persist fresh record (new sessionEntries + fresh clientMintTimestamp).
+    ///   5. Re-enqueue pending non-bundle.pb blobs (no-op for staleness path).
+    ///   6. Staleness path only: enqueue bundle.pb directly (Phase-1 already complete).
     ///
     /// Cold-relaunch safe: all state comes from the on-disk record; no UploadContext needed.
-    func onSessionExpired(bundleId: String) async {
+    func onSessionExpired(bundleId: String, loopGuardEnabled: Bool = true) async {
         _sessionExpiredInvocations.append(bundleId)
         print("[BlobUploadManager] ↺ session expired for bundle \(bundleId) — attempting re-mint")
 
@@ -527,13 +548,16 @@ actor BlobUploadManager {
             return
         }
 
-        // 3. Loop prevention: identical URIs = server returned stored dead URIs (Firestore
-        //    batch lag after 7-day TTL). Re-enqueuing with the same dead URIs loops on 410.
+        // 3. Loop guard (410-triggered path only).
+        //    Identical URIs = server returned stored dead URIs (Firestore batch lag after
+        //    7-day TTL). Re-enqueuing with dead URIs would loop on 410 immediately.
+        //    Not applied on the staleness path: at 12 h, stored URIs are still valid and
+        //    identical == correct server behaviour, not a dead-URI condition.
         let oldUriMap = record.sessionUriMap
         let newUriMap = Dictionary(
             uniqueKeysWithValues: freshEntries.map { ($0.relativePath, $0.sessionUri) }
         )
-        if newUriMap == oldUriMap {
+        if loopGuardEnabled && newUriMap == oldUriMap {
             print("[BlobUploadManager] ⚠ re-mint returned identical URIs for \(bundleId) — stale doc still in Firestore")
             await onFatalBlobError(bundleId: bundleId, relativePath: "*",
                                    reason: "remint_returned_stale_uris")
@@ -553,7 +577,8 @@ actor BlobUploadManager {
         }
 
         // 5. Re-enqueue blobs that are not yet .uploaded against the fresh URIs.
-        //    bundle.pb is skipped: it is only enqueued by onAllBlobsUploaded after the gate.
+        //    bundle.pb is skipped: it is only enqueued after the gate (or directly below).
+        //    On the staleness path all blobs are already .uploaded → this loop is a no-op.
         guard let outputDir = freshRecord.outputDir else {
             print("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId) — cannot re-enqueue")
             await onFatalBlobError(bundleId: bundleId, relativePath: "*",
@@ -583,6 +608,13 @@ actor BlobUploadManager {
             reenqueued += 1
         }
         print("[BlobUploadManager] 🔄 re-minted \(bundleId): re-enqueued \(reenqueued) blob(s)")
+
+        // 6. Staleness path: Phase-1 is already complete (gate was true when the staleness
+        //    guard fired). No blobs were re-enqueued above. Enqueue bundle.pb directly with
+        //    the fresh record, whose clientMintTimestamp now passes the staleness check.
+        if !loopGuardEnabled && freshRecord.allNonBundlePbBlobsUploaded {
+            await enqueueBundlePb(bundleId: bundleId, record: freshRecord)
+        }
     }
 
     // MARK: - Unbuilt seams
