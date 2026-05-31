@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		7E21B2FE2FCAFA4700823738 /* SwiftProtobuf in Frameworks */ = {isa = PBXBuildFile; productRef = 7E21B2FD2FCAFA4700823738 /* SwiftProtobuf */; };
+		7EAA00042FCBFF0000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7EAA00022FCBFF0000000001 /* FirebaseCore */; };
+		7EAA00052FCBFF0000000001 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 7EAA00032FCBFF0000000001 /* FirebaseAuth */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,6 +46,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				7E21B2FE2FCAFA4700823738 /* SwiftProtobuf in Frameworks */,
+				7EAA00042FCBFF0000000001 /* FirebaseCore in Frameworks */,
+				7EAA00052FCBFF0000000001 /* FirebaseAuth in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -96,6 +100,8 @@
 			name = RoomStudioCapture;
 			packageProductDependencies = (
 				7E21B2FD2FCAFA4700823738 /* SwiftProtobuf */,
+				7EAA00022FCBFF0000000001 /* FirebaseCore */,
+				7EAA00032FCBFF0000000001 /* FirebaseAuth */,
 			);
 			productName = RoomStudioCapture;
 			productReference = 7E1EC71B2FCA67820085D0D3 /* RoomStudioCapture.app */;
@@ -154,6 +160,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7E21B2FC2FCAFA4700823738 /* XCRemoteSwiftPackageReference "swift-protobuf" */,
+				7EAA00012FCBFF0000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7E1EC71C2FCA67820085D0D3 /* Products */;
@@ -481,6 +488,14 @@
 				minimumVersion = 1.38.0;
 			};
 		};
+		7EAA00012FCBFF0000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -488,6 +503,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 7E21B2FC2FCAFA4700823738 /* XCRemoteSwiftPackageReference "swift-protobuf" */;
 			productName = SwiftProtobuf;
+		};
+		7EAA00022FCBFF0000000001 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7EAA00012FCBFF0000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		7EAA00032FCBFF0000000001 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7EAA00012FCBFF0000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
