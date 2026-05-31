@@ -158,7 +158,8 @@ final class UploadCoordinator: ObservableObject {
             tierRawValue: capture.tier.rawValue,
             clientMintTimestamp: Date(),
             sessionEntries: entries,
-            manifestPaths: manifest.map(\.relativePath)
+            manifestPaths: manifest.map(\.relativePath),
+            outputDir: outputDir
         )
         do {
             try await store.save(record)

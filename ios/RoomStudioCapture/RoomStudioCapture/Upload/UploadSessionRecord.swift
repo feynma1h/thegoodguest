@@ -22,6 +22,16 @@
 ///                         UploadSessionStore.markBlobUploaded after each
 ///                         successful PUT. Pre-P4 records on disk (no
 ///                         blobStatuses key) decode as all .pending.
+///   outputDir           — absolute URL of the on-device capture output directory.
+///                         Persisted so that the cold-relaunch path (no in-memory
+///                         UploadContext) can reconstruct file URLs for blob PUTs
+///                         without any external state. Nil for pre-P4 records.
+///
+/// Note on nonisolated annotations:
+///   UploadSessionRecord participates in @MainActor UploadCoordinator's @Published
+///   state, causing Swift to infer some computed properties as @MainActor. The
+///   nonisolated annotation on each accessor corrects this: these properties
+///   contain no actor-isolated state and are safe to call from any context.
 
 import Foundation
 
@@ -42,7 +52,8 @@ struct UploadSessionRecord: Codable, Sendable {
     let bundleId: String
     /// RSCaptureTier raw value (Int — SwiftProtobuf enum rawValue). Convenience accessor: `tier`.
     let tierRawValue: Int
-    /// Client-side timestamp of when the session was created.
+    /// Client-side timestamp of when the session was created (or last re-minted).
+    /// Resets to Date() on each successful /upload_session re-mint (onSessionExpired path).
     let clientMintTimestamp: Date
     /// Server response entries. Map by relativePath; order is undefined.
     let sessionEntries: [UploadSessionEntry]
@@ -53,6 +64,10 @@ struct UploadSessionRecord: Codable, Sendable {
     /// UploadSessionStore.markBlobUploaded saves the updated copy atomically.
     /// Old records (pre-P4, no blobStatuses key) decode to all .pending.
     let blobStatuses: [String: BlobUploadStatus]
+    /// Absolute URL of the on-device capture output directory.
+    /// Nil for pre-P4 records that predate this field.
+    /// Used by the cold-relaunch path to reconstruct blob file URLs without in-memory UploadContext.
+    let outputDir: URL?
 
     // MARK: - Production init
 
@@ -63,7 +78,8 @@ struct UploadSessionRecord: Codable, Sendable {
         tierRawValue: Int,
         clientMintTimestamp: Date,
         sessionEntries: [UploadSessionEntry],
-        manifestPaths: [String]
+        manifestPaths: [String],
+        outputDir: URL? = nil
     ) {
         self.bundleId            = bundleId
         self.tierRawValue        = tierRawValue
@@ -73,16 +89,18 @@ struct UploadSessionRecord: Codable, Sendable {
         self.blobStatuses        = Dictionary(
             uniqueKeysWithValues: sessionEntries.map { ($0.relativePath, BlobUploadStatus.pending) }
         )
+        self.outputDir           = outputDir
     }
 
-    /// Private init used by markingBlobUploaded to produce an updated copy.
+    /// Private init used by functional mutation methods to produce updated copies.
     private init(
         bundleId: String,
         tierRawValue: Int,
         clientMintTimestamp: Date,
         sessionEntries: [UploadSessionEntry],
         manifestPaths: [String],
-        blobStatuses: [String: BlobUploadStatus]
+        blobStatuses: [String: BlobUploadStatus],
+        outputDir: URL?
     ) {
         self.bundleId            = bundleId
         self.tierRawValue        = tierRawValue
@@ -90,6 +108,7 @@ struct UploadSessionRecord: Codable, Sendable {
         self.sessionEntries      = sessionEntries
         self.manifestPaths       = manifestPaths
         self.blobStatuses        = blobStatuses
+        self.outputDir           = outputDir
     }
 
     // MARK: - Codable
@@ -101,6 +120,7 @@ struct UploadSessionRecord: Codable, Sendable {
         case sessionEntries
         case manifestPaths
         case blobStatuses
+        case outputDir
     }
 
     init(from decoder: Decoder) throws {
@@ -118,6 +138,8 @@ struct UploadSessionRecord: Codable, Sendable {
         ) ?? Dictionary(
             uniqueKeysWithValues: sessionEntries.map { ($0.relativePath, .pending) }
         )
+        // Pre-P4 records won't have outputDir. Nil → cold-relaunch paths route to fatal.
+        outputDir = try c.decodeIfPresent(URL.self, forKey: .outputDir)
     }
 
     // MARK: - Convenience accessors
@@ -126,12 +148,12 @@ struct UploadSessionRecord: Codable, Sendable {
     var tier: RSCaptureTier { RSCaptureTier(rawValue: tierRawValue) ?? .arkitOnly }
 
     /// session_uri lookup by relative_path. Returns nil for unknown paths.
-    func sessionUri(for relativePath: String) -> String? {
+    nonisolated func sessionUri(for relativePath: String) -> String? {
         sessionEntries.first { $0.relativePath == relativePath }?.sessionUri
     }
 
     /// Dictionary view of relativePath → sessionUri for bulk lookup.
-    var sessionUriMap: [String: String] {
+    nonisolated var sessionUriMap: [String: String] {
         Dictionary(uniqueKeysWithValues: sessionEntries.map { ($0.relativePath, $0.sessionUri) })
     }
 
@@ -151,7 +173,34 @@ struct UploadSessionRecord: Codable, Sendable {
             clientMintTimestamp: clientMintTimestamp,
             sessionEntries:      sessionEntries,
             manifestPaths:       manifestPaths,
-            blobStatuses:        updated
+            blobStatuses:        updated,
+            outputDir:           outputDir
+        )
+    }
+
+    /// Return a new record with fresh session entries and an updated mint timestamp.
+    ///
+    /// Used by the 410 re-mint path (onSessionExpired) after /upload_session returns
+    /// new session URIs. Preserves per-blob statuses: already-uploaded blobs keep
+    /// their .uploaded status so the re-mint path doesn't re-enqueue them.
+    /// Blobs present in the new entries but absent from blobStatuses default to .pending.
+    nonisolated func updatingSessionEntries(
+        _ newEntries: [UploadSessionEntry],
+        mintTimestamp: Date
+    ) -> UploadSessionRecord {
+        let updated = Dictionary(
+            uniqueKeysWithValues: newEntries.map { entry in
+                (entry.relativePath, blobStatuses[entry.relativePath] ?? .pending)
+            }
+        )
+        return UploadSessionRecord(
+            bundleId:            bundleId,
+            tierRawValue:        tierRawValue,
+            clientMintTimestamp: mintTimestamp,
+            sessionEntries:      newEntries,
+            manifestPaths:       manifestPaths,
+            blobStatuses:        updated,
+            outputDir:           outputDir
         )
     }
 
@@ -174,7 +223,7 @@ struct UploadSessionRecord: Codable, Sendable {
     ///
     /// Edge case: a manifest with no non-bundle.pb entries (pathological; never
     /// produced by ManifestBuilder in practice) returns true immediately.
-    var allNonBundlePbBlobsUploaded: Bool {
+    nonisolated var allNonBundlePbBlobsUploaded: Bool {
         let nonBundle = sessionEntries.filter { $0.relativePath != "bundle.pb" }
         guard !nonBundle.isEmpty else { return true }
         return nonBundle.allSatisfy { blobStatuses[$0.relativePath] == .uploaded }

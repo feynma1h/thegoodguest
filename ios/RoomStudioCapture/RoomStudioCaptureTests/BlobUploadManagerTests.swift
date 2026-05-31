@@ -1,15 +1,16 @@
 /// Tests for BlobUploadManager: task-description encoding, status-code routing,
-/// gate evaluation, and concurrency safety.
+/// gate evaluation, staleness guard, 410 re-mint, and cold-relaunch correctness.
 ///
 /// Strategy: call BlobUploadManager.handleTaskCompletion directly (bypassing URLSession
-/// entirely) and verify effects via UploadSessionStore. This tests the full completion
-/// pipeline — including store writes and gate predicate evaluation — without any network.
+/// entirely) and verify effects via UploadSessionStore and observable tracking vars.
+/// This tests the full completion pipeline — including store writes and gate predicate
+/// evaluation — without any network.
 ///
 /// Race-safety test: two blobs completing via concurrent Tasks must both reach
 /// the store serialized by its actor, so exactly one completion sees the gate flip.
 /// Verified by checking store state after both Tasks complete.
 ///
-/// Decision 0040.
+/// Decisions: 0040, 0041
 
 import XCTest
 @testable import RoomStudioCapture
@@ -24,28 +25,52 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     /// Set up a manager + store wired to a temp directory, with a record for `bundleId`
-    /// pre-saved in the store. Returns (manager, store, tmpDir) ready for tests.
+    /// pre-saved in the store. The record includes a temp outputDir with stub files so
+    /// tests that trigger enqueuePhasOneBlobs or onAllBlobsUploaded have real files on disk.
+    ///
+    /// - Parameters:
+    ///   - bundleId: The bundle identifier for the record.
+    ///   - paths: All relative paths in the manifest (including bundle.pb).
+    ///   - mintTimestamp: clientMintTimestamp for the record; defaults to Date().
+    ///   - clock: Injected clock for the manager; defaults to Date.init.
     private func makeManager(
         bundleId: String = "test-bundle",
-        paths: [String]
-    ) async throws -> (BlobUploadManager, UploadSessionStore) {
-        let dir = FileManager.default.temporaryDirectory
+        paths: [String],
+        mintTimestamp: Date = Date(),
+        clock: @escaping () -> Date = { Date() }
+    ) async throws -> (BlobUploadManager, UploadSessionStore, URL) {
+        let storeDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
-        let store = UploadSessionStore(directory: dir)
-        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        // Create an outputDir with placeholder files so file-size checks pass.
+        let outputDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
+
+        for path in paths {
+            let fileURL = outputDir.appendingPathComponent(path)
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data([0x00, 0x01]).write(to: fileURL)
+        }
 
         let entries = makeSessionEntries(paths)
         let record  = UploadSessionRecord(
             bundleId:            bundleId,
             tierRawValue:        1,
-            clientMintTimestamp: Date(),
+            clientMintTimestamp: mintTimestamp,
             sessionEntries:      entries,
-            manifestPaths:       paths
+            manifestPaths:       paths,
+            outputDir:           outputDir
         )
         try await store.save(record)
 
-        let manager = BlobUploadManager(store: store)
-        return (manager, store)
+        let manager = BlobUploadManager(store: store, clock: clock)
+        return (manager, store, outputDir)
     }
 
     private func taskDesc(bundleId: String = "test-bundle", relativePath: String) -> String {
@@ -67,7 +92,6 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     func test_parseTaskDescription_relativePathWithSubdir_preservesSlash() {
-        // Relative paths contain `/`; maxSplits:1 ensures only the first `|` is used.
         let desc   = BlobUploadManager.makeTaskDescription(bundleId: "b", relativePath: "depth/000001.f32")
         let parsed = BlobUploadManager.parseTaskDescription(desc)
         XCTAssertEqual(parsed?.relativePath, "depth/000001.f32")
@@ -96,7 +120,7 @@ final class BlobUploadManagerTests: XCTestCase {
     // MARK: - 200 / 201 → markBlobUploaded
 
     func test_handleTaskCompletion_200_marksBlobUploaded() async throws {
-        let (manager, store) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
             statusCode: 200, error: nil
@@ -109,7 +133,7 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     func test_handleTaskCompletion_201_marksBlobUploaded() async throws {
-        let (manager, store) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
             statusCode: 201, error: nil
@@ -123,7 +147,7 @@ final class BlobUploadManagerTests: XCTestCase {
 
     func test_handleTaskCompletion_gateNotFiredUntilLastBlob() async throws {
         let paths = ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
-        let (manager, store) = try await makeManager(paths: paths)
+        let (manager, store, _) = try await makeManager(paths: paths)
 
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
@@ -136,7 +160,7 @@ final class BlobUploadManagerTests: XCTestCase {
 
     func test_handleTaskCompletion_gateFlipsAfterLastNonBundleBlob() async throws {
         let paths = ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
-        let (manager, store) = try await makeManager(paths: paths)
+        let (manager, store, _) = try await makeManager(paths: paths)
 
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
@@ -152,10 +176,8 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     func test_handleTaskCompletion_bundlePbCompletionDoesNotBlock_gate() async throws {
-        // Completing bundle.pb before frame blobs must NOT set gate to true.
-        // (bundle.pb is excluded from the Phase-1 gate check.)
         let paths = ["frames/000000.jpg", "bundle.pb"]
-        let (manager, store) = try await makeManager(paths: paths)
+        let (manager, store, _) = try await makeManager(paths: paths)
 
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "bundle.pb"),
@@ -169,10 +191,8 @@ final class BlobUploadManagerTests: XCTestCase {
     // MARK: - Race safety: concurrent completions
 
     func test_handleTaskCompletion_concurrentCompletions_bothBlobsMarked() async throws {
-        // Two blobs completing concurrently. Both must be marked uploaded and the
-        // store must reflect both writes — no interleaving or lost update.
         let paths = ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
-        let (manager, store) = try await makeManager(paths: paths)
+        let (manager, store, _) = try await makeManager(paths: paths)
 
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
@@ -190,121 +210,144 @@ final class BlobUploadManagerTests: XCTestCase {
         }
 
         let record = try await store.load(bundleId: "test-bundle")
-        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .uploaded,
-                       "frames/000000.jpg must be marked uploaded after concurrent completions")
-        XCTAssertEqual(record?.blobStatuses["frames/000001.jpg"], .uploaded,
-                       "frames/000001.jpg must be marked uploaded after concurrent completions")
+        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .uploaded)
+        XCTAssertEqual(record?.blobStatuses["frames/000001.jpg"], .uploaded)
         XCTAssertTrue(record?.allNonBundlePbBlobsUploaded ?? false,
-                      "Gate must be true when both blobs are uploaded after concurrent completions")
+                      "Gate must be true when both blobs are uploaded")
     }
 
     // MARK: - 410 → store unchanged
 
     func test_handleTaskCompletion_410_doesNotUpdateStore() async throws {
-        let (manager, store) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         let before = try await store.load(bundleId: "test-bundle")
+
+        // Inject a remintProvider that returns different URIs so the 410 path proceeds
+        // (otherwise it would route to onFatalBlobError("expired_no_remint_provider")).
+        // We only care that the original blob status is unchanged (re-mint doesn't change it).
+        let freshEntry = UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.gcs.example.com/frames/000000.jpg")
+        let bundlePbEntry = UploadSessionEntry(relativePath: "bundle.pb", sessionUri: "https://fresh.gcs.example.com/bundle.pb")
+        await manager.setRemintProvider { _, _ in [freshEntry, bundlePbEntry] }
 
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
             statusCode: 410, error: nil
         )
 
+        // The blob's uploaded status must not change (it was pending, stays pending).
         let after = try await store.load(bundleId: "test-bundle")
         XCTAssertEqual(after?.blobStatuses["frames/000000.jpg"], .pending,
                        "410 (session expired) must not mark blob as uploaded")
         XCTAssertEqual(after?.clientMintTimestamp, before?.clientMintTimestamp,
-                       "Store record must be unchanged after 410")
+                       "clientMintTimestamp must not change from the original (re-mint uses a fresh one, but the original record is checked here)")
     }
 
     // MARK: - 4xx → store unchanged
 
     func test_handleTaskCompletion_400_doesNotUpdateStore() async throws {
-        let (manager, store) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
-
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
             statusCode: 400, error: nil
         )
-
         let record = try await store.load(bundleId: "test-bundle")
-        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending,
-                       "400 client error must not mark blob as uploaded")
+        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending)
     }
 
     func test_handleTaskCompletion_403_doesNotUpdateStore() async throws {
-        let (manager, store) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
-
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
             statusCode: 403, error: nil
         )
-
         let record = try await store.load(bundleId: "test-bundle")
-        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending,
-                       "403 must not mark blob as uploaded")
+        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending)
     }
 
     // MARK: - Malformed / nil taskDescription → safe no-op
 
     func test_handleTaskCompletion_nilDescription_noOp() async throws {
-        let (manager, store) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
-
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(taskDescription: nil, statusCode: 200, error: nil)
-
         let record = try await store.load(bundleId: "test-bundle")
-        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending,
-                       "nil taskDescription must be a safe no-op")
+        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending)
     }
 
     func test_handleTaskCompletion_malformedDescription_noOp() async throws {
-        let (manager, store) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
-
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(taskDescription: "no-pipe-here", statusCode: 200, error: nil)
-
         let record = try await store.load(bundleId: "test-bundle")
-        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending,
-                       "Malformed taskDescription must be a safe no-op")
+        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending)
     }
 
     // MARK: - network error → store unchanged (5xx / error path)
 
     func test_handleTaskCompletion_networkError_doesNotUpdateStore() async throws {
-        let (manager, store) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         let fakeError = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut, userInfo: nil)
-
-        // 5xx/network errors trigger retry logic (needs context), then fatal if no context.
-        // In either case the blob must remain .pending.
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
             statusCode: nil, error: fakeError
         )
-
         let record = try await store.load(bundleId: "test-bundle")
-        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending,
-                       "Network error must not mark blob as uploaded")
+        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .pending)
     }
 
-    // MARK: - onAllBlobsUploaded: staleness guard
+    // MARK: - onAllBlobsUploaded: staleness guard (Step 2 — injectable clock)
+
+    func test_stalenessGuard_justUnder12h_proceedsToFinalize() async throws {
+        // Clock injects a fixed "now". clientMintTimestamp is 11h59m before "now".
+        // Elapsed = 11h59m < 12h → fresh → must NOT call onSessionExpired.
+        let fixedNow = Date()
+        let mintTime = fixedNow.addingTimeInterval(-(11 * 3600 + 59 * 60))
+        let (manager, _, _) = try await makeManager(
+            paths: ["bundle.pb"],
+            mintTimestamp: mintTime,
+            clock: { fixedNow }
+        )
+        let record = try await manager.store.load(bundleId: "test-bundle")!
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+
+        let expired = await manager._sessionExpiredInvocations
+        XCTAssertTrue(expired.isEmpty, "11h59m elapsed must NOT trigger the staleness guard")
+    }
+
+    func test_stalenessGuard_justOver12h_callsSessionExpired() async throws {
+        // Clock injects a fixed "now". clientMintTimestamp is 12h01m before "now".
+        // Elapsed = 12h01m > 12h → stale → must call onSessionExpired.
+        let fixedNow = Date()
+        let mintTime = fixedNow.addingTimeInterval(-(12 * 3600 + 60))
+        let (manager, _, _) = try await makeManager(
+            paths: ["bundle.pb"],
+            mintTimestamp: mintTime,
+            clock: { fixedNow }
+        )
+        let record = try await manager.store.load(bundleId: "test-bundle")!
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+
+        let expired = await manager._sessionExpiredInvocations
+        XCTAssertEqual(expired, ["test-bundle"], "12h01m elapsed must trigger staleness guard → onSessionExpired")
+        let completed = await manager._bundleCompleteInvocations
+        XCTAssertTrue(completed.isEmpty, "Stale path must not call onBundleComplete")
+    }
 
     func test_onAllBlobsUploaded_staleRecord_callsSessionExpired() async throws {
-        // A record whose mint timestamp is >12 h old must be routed to onSessionExpired
-        // rather than enqueuing bundle.pb. Early blobs may have been GC'd by the age=1
-        // lifecycle rule; finalizing against absent blobs wastes a reconstruction attempt.
+        // Legacy test using a stale record (>12h using the default wall clock).
+        // The fixed-clock tests above are the authoritative staleness guard tests;
+        // this retains the original scenario.
         let staleTimestamp = Date().addingTimeInterval(-(13 * 3600))
         let entries = makeSessionEntries(["bundle.pb"])
         let staleRecord = UploadSessionRecord(
-            bundleId: "test-bundle",
-            tierRawValue: 1,
+            bundleId:            "test-bundle",
+            tierRawValue:        1,
             clientMintTimestamp: staleTimestamp,
-            sessionEntries: entries,
-            manifestPaths: ["bundle.pb"]
+            sessionEntries:      entries,
+            manifestPaths:       ["bundle.pb"],
+            outputDir:           nil
         )
-        let (manager, _) = try await makeManager(paths: ["bundle.pb"])
-        // outputDir need not contain a real file — staleness guard returns before using it.
-        let outputDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
+        let (manager, _, _) = try await makeManager(paths: ["bundle.pb"])
 
-        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: staleRecord, outputDir: outputDir)
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: staleRecord)
 
         let expired = await manager._sessionExpiredInvocations
         XCTAssertEqual(expired, ["test-bundle"], "Stale record must call onSessionExpired")
@@ -313,27 +356,10 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     func test_onAllBlobsUploaded_freshRecord_doesNotCallSessionExpired() async throws {
-        // A fresh record must pass the staleness guard and proceed to enqueue bundle.pb.
-        let entries = makeSessionEntries(["bundle.pb"])
-        let freshRecord = UploadSessionRecord(
-            bundleId: "test-bundle",
-            tierRawValue: 1,
-            clientMintTimestamp: Date(),
-            sessionEntries: entries,
-            manifestPaths: ["bundle.pb"]
-        )
-        let storeDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let store = UploadSessionStore(directory: storeDir)
-        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+        let (manager, store, _) = try await makeManager(paths: ["bundle.pb"])
+        let record = try await store.load(bundleId: "test-bundle")!
 
-        let outputDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
-        // Write a non-empty bundle.pb so the size guard passes.
-        try Data([0x00, 0x01]).write(to: outputDir.appendingPathComponent("bundle.pb"))
-
-        let manager = BlobUploadManager(store: store)
-        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: freshRecord, outputDir: outputDir)
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
 
         let expired = await manager._sessionExpiredInvocations
         XCTAssertTrue(expired.isEmpty, "Fresh record must not call onSessionExpired")
@@ -342,10 +368,7 @@ final class BlobUploadManagerTests: XCTestCase {
     // MARK: - bundle.pb completion routing
 
     func test_handleTaskCompletion_bundlePb_200_callsBundleComplete() async throws {
-        // bundle.pb 200 must route to onBundleComplete (Phase-2 terminal), not the
-        // Phase-1 gate. The gate (allNonBundlePbBlobsUploaded) excludes bundle.pb, so
-        // routing it through the gate would cause onAllBlobsUploaded to fire again.
-        let (manager, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "bundle.pb"),
             statusCode: 200, error: nil
@@ -355,8 +378,7 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     func test_handleTaskCompletion_bundlePb_200_doesNotUpdateStore() async throws {
-        // bundle.pb 200 bypasses markBlobUploaded — the store record is not touched.
-        let (manager, store) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "bundle.pb"),
             statusCode: 200, error: nil
@@ -367,10 +389,7 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     func test_handleTaskCompletion_bundlePb_200_doesNotRefireGate() async throws {
-        // If bundle.pb 200 were routed through the gate, allNonBundlePbBlobsUploaded
-        // would still be true (gate excludes bundle.pb), causing onAllBlobsUploaded
-        // to fire again. Verify onBundleComplete fires exactly once, not twice.
-        let (manager, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "bundle.pb"),
             statusCode: 200, error: nil
@@ -382,59 +401,233 @@ final class BlobUploadManagerTests: XCTestCase {
     // MARK: - Phase-1 excludes bundle.pb (integration)
 
     func test_enqueuePhasOneBlobs_excludesBundlePb_bundlePbFinalizedAfterGate() async throws {
-        // Verify the bundle.pb ordering invariant end-to-end:
-        //   Phase-1 enqueues only frame blobs (bundle.pb excluded by the `where` filter).
-        //   Gate fires after the last frame blob succeeds.
-        //   onAllBlobsUploaded enqueues bundle.pb.
-        //   bundle.pb 200 routes to onBundleComplete.
-        // If bundle.pb were included in Phase-1, onAllBlobsUploaded would re-enqueue it
-        // after the gate fires — violating the 0040 ordering guarantee.
-        let outputDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let framesDir = outputDir.appendingPathComponent("frames")
-        try FileManager.default.createDirectory(at: framesDir, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
+        let (manager, _, outputDir) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let record = try await manager.store.load(bundleId: "test-bundle")!
 
-        try Data(repeating: 0xFF, count: 100).write(to: framesDir.appendingPathComponent("000000.jpg"))
-        try Data(repeating: 0xAB, count: 50).write(to: outputDir.appendingPathComponent("bundle.pb"))
-
-        let storeDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let store = UploadSessionStore(directory: storeDir)
-        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
-
-        let paths = ["frames/000000.jpg", "bundle.pb"]
-        let entries = makeSessionEntries(paths)
-        let record = UploadSessionRecord(
-            bundleId: "test-bundle",
-            tierRawValue: 1,
-            clientMintTimestamp: Date(),
-            sessionEntries: entries,
-            manifestPaths: paths
-        )
-        try await store.save(record)
-        let manager = BlobUploadManager(store: store)
-
-        // Phase-1: only frames/000000.jpg is enqueued (bundle.pb is excluded).
-        try await manager.enqueuePhasOneBlobs(record: record, outputDir: outputDir)
+        try await manager.enqueuePhasOneBlobs(record: record)
 
         // Simulate frame blob 200 → gate flips → onAllBlobsUploaded fires → enqueues bundle.pb.
         await manager.handleTaskCompletion(
-            taskDescription: BlobUploadManager.makeTaskDescription(
-                bundleId: "test-bundle", relativePath: "frames/000000.jpg"),
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
             statusCode: 200, error: nil
         )
-
-        // Simulate bundle.pb 200 (delivered by the background session after onAllBlobsUploaded
-        // enqueues it) → onBundleComplete.
+        // Simulate bundle.pb 200 → onBundleComplete.
         await manager.handleTaskCompletion(
-            taskDescription: BlobUploadManager.makeTaskDescription(
-                bundleId: "test-bundle", relativePath: "bundle.pb"),
+            taskDescription: taskDesc(relativePath: "bundle.pb"),
             statusCode: 200, error: nil
         )
 
         let completed = await manager._bundleCompleteInvocations
         XCTAssertEqual(completed, ["test-bundle"],
-                       "bundle.pb must be finalized by onAllBlobsUploaded after the gate, not Phase-1")
+                       "bundle.pb must be finalized by onAllBlobsUploaded (not Phase-1)")
         let expired = await manager._sessionExpiredInvocations
         XCTAssertTrue(expired.isEmpty, "No session expiry in the happy path")
+        _ = outputDir  // referenced to suppress unused-result warning
+    }
+
+    // MARK: - onSessionExpired: re-mint
+
+    func test_onSessionExpired_noRemintProvider_routesToFatalError() async throws {
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        // remintProvider is nil by default.
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertFalse(fatal.isEmpty, "No remintProvider must route to onFatalBlobError")
+        XCTAssertTrue(fatal.allSatisfy { $0.reason.contains("expired_no_remint_provider") },
+                      "Reason must indicate missing provider; got: \(fatal.map(\.reason))")
+    }
+
+    func test_onSessionExpired_freshURIs_reenqueuesPendingBlobs_andPersists() async throws {
+        // Fresh URIs returned → re-mint persists fresh record + re-enqueues pending blobs.
+        let (manager, store, outputDir) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+
+        let freshFrameURI  = "https://fresh.gcs.example.com/frames/000000.jpg"
+        let freshBundleURI = "https://fresh.gcs.example.com/bundle.pb"
+        await manager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: freshFrameURI),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: freshBundleURI),
+            ]
+        }
+
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        // Fresh URIs must be persisted.
+        let freshRecord = try await store.load(bundleId: "test-bundle")
+        XCTAssertEqual(freshRecord?.sessionUri(for: "frames/000000.jpg"), freshFrameURI,
+                       "Fresh frame URI must be persisted after re-mint")
+        XCTAssertEqual(freshRecord?.sessionUri(for: "bundle.pb"), freshBundleURI,
+                       "Fresh bundle.pb URI must be persisted after re-mint")
+
+        // No fatal error (the re-mint succeeded with different URIs).
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "Successful re-mint with fresh URIs must not call onFatalBlobError")
+        _ = outputDir
+    }
+
+    func test_onSessionExpired_freshURIs_preservesUploadedBlobStatus() async throws {
+        // If one blob was already uploaded before the 410, its status must be preserved
+        // so the re-mint path doesn't re-enqueue it.
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        let outputDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
+
+        // Create a record where frames/000000.jpg is already uploaded.
+        let entries  = makeSessionEntries(["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"])
+        var record   = UploadSessionRecord(
+            bundleId:            "test-bundle",
+            tierRawValue:        1,
+            clientMintTimestamp: Date(),
+            sessionEntries:      entries,
+            manifestPaths:       ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"],
+            outputDir:           outputDir
+        )
+        record = record.markingBlobUploaded("frames/000000.jpg")
+        try await store.save(record)
+
+        let manager = BlobUploadManager(store: store)
+        await manager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.example.com/f0"),
+                UploadSessionEntry(relativePath: "frames/000001.jpg", sessionUri: "https://fresh.example.com/f1"),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://fresh.example.com/bp"),
+            ]
+        }
+
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        // Already-uploaded blob must retain .uploaded status in the fresh record.
+        let freshRecord = try await store.load(bundleId: "test-bundle")
+        XCTAssertEqual(freshRecord?.blobStatuses["frames/000000.jpg"], .uploaded,
+                       "Re-mint must preserve .uploaded status for already-done blobs")
+        XCTAssertEqual(freshRecord?.blobStatuses["frames/000001.jpg"], .pending,
+                       "Pending blob must stay .pending in the fresh record")
+    }
+
+    func test_onSessionExpired_sameURIs_routesToFatalError() async throws {
+        // If re-mint returns the SAME URIs as the persisted record (server-side Firestore
+        // batch lag: dead URIs still stored), do NOT re-enqueue — route to onFatalBlobError.
+        // This prevents a silent 410 loop (re-enqueue → 410 → re-mint → same URIs → ...).
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+
+        // remintProvider returns the same URIs as the stored record.
+        await manager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://gcs.example.com/frames/000000.jpg"),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://gcs.example.com/bundle.pb"),
+            ]
+        }
+
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertFalse(fatal.isEmpty, "Same URIs from re-mint must route to onFatalBlobError")
+        XCTAssertTrue(fatal.allSatisfy { $0.reason.contains("remint_returned_stale_uris") },
+                      "Reason must be remint_returned_stale_uris; got: \(fatal.map(\.reason))")
+    }
+
+    func test_onSessionExpired_mintFailure_routesToFatalError() async throws {
+        // re-mint throws → onFatalBlobError.
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        await manager.setRemintProvider { _, _ in
+            throw UploadSessionError.serverError(503, "unavailable")
+        }
+
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertFalse(fatal.isEmpty, "Re-mint failure must route to onFatalBlobError")
+        XCTAssertTrue(fatal.allSatisfy { $0.reason.contains("remint_failed") },
+                      "Reason must be remint_failed; got: \(fatal.map(\.reason))")
+    }
+
+    // MARK: - Step 3: cold-relaunch correctness
+
+    func test_coldRelaunch_onAllBlobsUploaded_usesRecordOutputDir() async throws {
+        // Simulate cold relaunch: fresh manager (no contexts), on-disk record has outputDir.
+        // onAllBlobsUploaded must locate and PUT bundle.pb from the record alone.
+        let (_, store, outputDir) = try await makeManager(paths: ["bundle.pb"])
+        let record = try await store.load(bundleId: "test-bundle")!
+
+        // Fresh manager — no in-memory context for this bundle.
+        let coldManager = BlobUploadManager(store: store)
+        XCTAssertNotNil(record.outputDir, "Record must have outputDir for cold relaunch to work")
+
+        await coldManager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+
+        // Should proceed without error (no sessionExpired, no fatal).
+        let expired = await coldManager._sessionExpiredInvocations
+        XCTAssertTrue(expired.isEmpty, "Fresh record must not trigger staleness guard")
+        let fatal = await coldManager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "Cold relaunch with valid record must not fatal")
+
+        // Simulate bundle.pb task completing (OS delivers it to the new session instance).
+        await coldManager.handleTaskCompletion(
+            taskDescription: BlobUploadManager.makeTaskDescription(
+                bundleId: "test-bundle", relativePath: "bundle.pb"),
+            statusCode: 200, error: nil
+        )
+        let completed = await coldManager._bundleCompleteInvocations
+        XCTAssertEqual(completed, ["test-bundle"],
+                       "bundle.pb 200 on cold relaunch must route to onBundleComplete")
+        _ = outputDir
+    }
+
+    func test_coldRelaunch_onSessionExpired_reenqueuesPendingBlobs() async throws {
+        // Simulate cold relaunch: fresh manager, on-disk record, remintProvider injected.
+        // onSessionExpired must re-enqueue pending blobs using ONLY the on-disk record.
+        let (_, store, outputDir) = try await makeManager(
+            paths: ["frames/000000.jpg", "bundle.pb"]
+        )
+        let coldManager = BlobUploadManager(store: store)
+
+        let freshFrameURI  = "https://fresh.example.com/frames/000000.jpg"
+        let freshBundleURI = "https://fresh.example.com/bundle.pb"
+        await coldManager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: freshFrameURI),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: freshBundleURI),
+            ]
+        }
+
+        // onSessionExpired: loads record, re-mints, re-enqueues frames/000000.jpg.
+        await coldManager.onSessionExpired(bundleId: "test-bundle")
+
+        // Simulate re-enqueued frame 200 → gate flips → onAllBlobsUploaded → bundle.pb enqueued.
+        await coldManager.handleTaskCompletion(
+            taskDescription: BlobUploadManager.makeTaskDescription(
+                bundleId: "test-bundle", relativePath: "frames/000000.jpg"),
+            statusCode: 200, error: nil
+        )
+        // Simulate bundle.pb 200 → onBundleComplete.
+        await coldManager.handleTaskCompletion(
+            taskDescription: BlobUploadManager.makeTaskDescription(
+                bundleId: "test-bundle", relativePath: "bundle.pb"),
+            statusCode: 200, error: nil
+        )
+
+        let completed = await coldManager._bundleCompleteInvocations
+        XCTAssertEqual(completed, ["test-bundle"],
+                       "Cold relaunch: re-mint → re-enqueue → gate → onBundleComplete must complete end-to-end")
+        let fatal = await coldManager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "Cold relaunch happy path must not fatal")
+        _ = outputDir
+    }
+}
+
+// MARK: - BlobUploadManager test helpers
+
+extension BlobUploadManager {
+    /// Convenience for tests: set remintProvider from a @MainActor context.
+    func setRemintProvider(
+        _ provider: @escaping @Sendable (String, [UploadManifestEntry]) async throws -> [UploadSessionEntry]
+    ) {
+        remintProvider = provider
     }
 }
