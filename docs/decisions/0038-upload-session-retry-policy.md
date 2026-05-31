@@ -26,11 +26,17 @@ with the same path set returns the stored URIs without re-minting. 4xx (except
 wastes the bounded budget and can mask the bug. 401 is the one 4xx worth a single
 token-refresh retry because token expiry (~1h) is the common transient cause.
 
+## Live-verified status codes (2026-05-31, api-public-q62kcditqa-as.a.run.app)
+- 200 happy path: confirmed.
+- 400 manifest path violation (leading slash): confirmed.
+  Body: {"error":"invalid_manifest","detail":"path must be relative (no leading slash): '...'"}
+- 401 invalid token: confirmed (FirebaseTokenVerifier in production).
+- Idempotency (same path-set → same URIs): confirmed.
+
 ## What would change this decision
 If api-public adds per-UID rate limiting (pre-launch gap b, 0015), a 429 ->
-respect Retry-After branch must be added. If manifest-violation responses turn
-out to use a code other than 400/422 (to be confirmed on the live run), update
-the fatal set accordingly.
+respect Retry-After branch must be added. Manifest-violation status code is
+confirmed as 400 — the fatal-set mapping is correct and no change needed.
 
 ## Note: stale cross-reference in code
 UploadSessionClient.swift line 96 reads `// Retry policy for 5xx / network
