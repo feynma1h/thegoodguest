@@ -499,9 +499,12 @@ actor BlobUploadManager {
     ///       onAllBlobsUploaded routes here when >12 h since mint.
     ///       At 12 h, stored URIs are still valid (well within the 7-day GCS window).
     ///       Identical returned URIs = server correctly returned the still-live stored entries;
-    ///       treat as success and proceed to bundle.pb (do NOT fatal).
-    ///       After re-mint, all blobs are already .uploaded (gate was true), so the re-enqueue
-    ///       loop is a no-op; bundle.pb is enqueued directly via enqueueBundlePb.
+    ///       treat as success (do NOT fatal).
+    ///       ALL non-bundle.pb blob statuses are reset to .pending and re-enqueued — the
+    ///       age=1 GCS lifecycle rule may have GC'd any blob uploaded more than 24h ago.
+    ///       If any blob file is missing from disk, routes to onFatalBlobError (abort).
+    ///       bundle.pb is NOT enqueued directly; it is finalized via the Phase-1 gate once
+    ///       all re-uploads complete.
     ///
     /// Re-mint flow:
     ///   1. Load persisted record (cold-relaunch safe: no in-memory context needed).
@@ -510,8 +513,10 @@ actor BlobUploadManager {
     ///      token-refresh policy implemented in UploadSessionClient.
     ///   3. Loop guard (410 path only): if returned URIs == persisted URIs → fatal.
     ///   4. Persist fresh record (new sessionEntries + fresh clientMintTimestamp).
-    ///   5. Re-enqueue pending non-bundle.pb blobs (no-op for staleness path).
-    ///   6. Staleness path only: enqueue bundle.pb directly (Phase-1 already complete).
+    ///   5. Re-enqueue blobs against the fresh URIs.
+    ///      Staleness: reset ALL non-bundle.pb statuses to .pending + re-enqueue all
+    ///                 (abort on missing file). bundle.pb deferred to gate path.
+    ///      410: re-enqueue only non-uploaded blobs. bundle.pb deferred to gate path.
     ///
     /// Cold-relaunch safe: all state comes from the on-disk record; no UploadContext needed.
     func onSessionExpired(bundleId: String, loopGuardEnabled: Bool = true) async {
@@ -576,9 +581,14 @@ actor BlobUploadManager {
             return
         }
 
-        // 5. Re-enqueue blobs that are not yet .uploaded against the fresh URIs.
-        //    bundle.pb is skipped: it is only enqueued after the gate (or directly below).
-        //    On the staleness path all blobs are already .uploaded → this loop is a no-op.
+        // 5. Re-enqueue blobs against the fresh URIs.
+        //    The two callers have different semantics here:
+        //      Staleness path (!loopGuardEnabled): ALL blobs may have been GC'd by the age=1
+        //        rule. Reset every non-bundle.pb status to .pending and re-enqueue all.
+        //        Missing blob file = abort (cannot finalize against a gone-locally blob).
+        //        bundle.pb is NOT enqueued here; the Phase-1 gate re-fires via normal path.
+        //      410 path (loopGuardEnabled): only re-enqueue blobs not yet .uploaded.
+        //        Already-done blobs are preserved; bundle.pb deferred to gate path.
         guard let outputDir = freshRecord.outputDir else {
             print("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId) — cannot re-enqueue")
             await onFatalBlobError(bundleId: bundleId, relativePath: "*",
@@ -586,6 +596,52 @@ actor BlobUploadManager {
             return
         }
 
+        if !loopGuardEnabled {
+            // STALENESS PATH: reset all non-bundle.pb blobs to .pending, re-enqueue all.
+            let resetRecord = freshRecord.resettingNonBundlePbBlobsToPending()
+            do {
+                try await store.save(resetRecord)
+            } catch {
+                print("[BlobUploadManager] ⚠ failed to persist reset record for \(bundleId): \(error)")
+                await onFatalBlobError(bundleId: bundleId, relativePath: "*",
+                                       reason: "staleness_reset_persist_failed: \(error)")
+                return
+            }
+            var reenqueued = 0
+            for entry in resetRecord.sessionEntries where entry.relativePath != "bundle.pb" {
+                let fileURL = outputDir.appendingPathComponent(entry.relativePath)
+                // Detection: FileManager.fileExists is the authoritative check for the
+                // blob-missing edge case (App Support dir somehow cleared post-0043).
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    print("[BlobUploadManager] ✗ blob file missing at staleness re-enqueue: \(entry.relativePath)")
+                    await onFatalBlobError(bundleId: bundleId, relativePath: entry.relativePath,
+                                           reason: "blob_file_missing_at_staleness_remint")
+                    return
+                }
+                guard let sessionURL = URL(string: entry.sessionUri) else { continue }
+                guard
+                    let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+                    let sz = resources.fileSize, sz > 0
+                else { continue }
+                var req = URLRequest(url: sessionURL)
+                req.httpMethod = "PUT"
+                req.setValue("bytes 0-\(sz - 1)/\(sz)", forHTTPHeaderField: "Content-Range")
+                let task = session.uploadTask(with: req, fromFile: fileURL)
+                task.taskDescription = Self.makeTaskDescription(
+                    bundleId: bundleId, relativePath: entry.relativePath
+                )
+                task.resume()
+                reenqueued += 1
+            }
+            print("[BlobUploadManager] 🔄 staleness re-mint \(bundleId): reset all blobs, re-enqueued \(reenqueued) blob(s)")
+            // bundle.pb is NOT enqueued here. When all re-uploads complete (200/201),
+            // the Phase-1 gate fires → onAllBlobsUploaded → enqueueBundlePb.
+            // clientMintTimestamp is now freshRecord's clock() value, so the staleness
+            // check in the next onAllBlobsUploaded call passes immediately.
+            return
+        }
+
+        // 410 PATH: re-enqueue only blobs that are not yet .uploaded.
         var reenqueued = 0
         for entry in freshRecord.sessionEntries where entry.relativePath != "bundle.pb" {
             guard freshRecord.blobStatuses[entry.relativePath] != .uploaded else { continue }
@@ -596,7 +652,6 @@ actor BlobUploadManager {
                 let sz = resources.fileSize,
                 sz > 0
             else { continue }
-
             var req = URLRequest(url: sessionURL)
             req.httpMethod = "PUT"
             req.setValue("bytes 0-\(sz - 1)/\(sz)", forHTTPHeaderField: "Content-Range")
@@ -608,13 +663,6 @@ actor BlobUploadManager {
             reenqueued += 1
         }
         print("[BlobUploadManager] 🔄 re-minted \(bundleId): re-enqueued \(reenqueued) blob(s)")
-
-        // 6. Staleness path: Phase-1 is already complete (gate was true when the staleness
-        //    guard fired). No blobs were re-enqueued above. Enqueue bundle.pb directly with
-        //    the fresh record, whose clientMintTimestamp now passes the staleness check.
-        if !loopGuardEnabled && freshRecord.allNonBundlePbBlobsUploaded {
-            await enqueueBundlePb(bundleId: bundleId, record: freshRecord)
-        }
     }
 
     // MARK: - Unbuilt seams
