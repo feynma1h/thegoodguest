@@ -108,7 +108,7 @@ final class UploadCoordinator: ObservableObject {
                 if proto.userID.isEmpty {
                     proto.userID = uid
                     bundleData   = try proto.serializedData()
-                    try bundleData.write(to: bundlePbURL, options: .atomic)
+                    try bundleData.write(to: bundlePbURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
                     print("[UploadCoordinator] backstop: patched user_id in bundle.pb")
                 }
             } catch {
