@@ -27,7 +27,7 @@ struct CapturedKeyframe {
     let intrinsics: RSIntrinsics
     /// Zero vector in P2; formula filled in chunk C (decision 0030).
     let gravity: RSGravity
-    /// Set iff LiDAR tier and capturedDepthData was present. Contains relative
+    /// Set iff LiDAR tier and frame.sceneDepth was non-nil. Contains relative
     /// paths ("depth/000000.f32", "confidence/000000.png") and depth intrinsics.
     let depth: RSDepth?
 }
@@ -223,7 +223,7 @@ final class CaptureManager: NSObject, ObservableObject {
 
         // Capture depth for LiDAR frames.
         let depth: RSDepth? = depthData.flatMap { dd in
-            captureDepth(dd, index: index, outputDir: outputDir, stats: stats)
+            captureDepth(dd, camera: camera, index: index, outputDir: outputDir, stats: stats)
         }
 
         capturedFrames.append(CapturedKeyframe(
@@ -240,8 +240,13 @@ final class CaptureManager: NSObject, ObservableObject {
 
     /// Build an RSDepth value and schedule the raster writes on jpegQueue.
     /// Returns nil if pixel buffer access fails.
+    ///
+    /// depthData comes from frame.sceneDepth (ARDepthData — LiDAR rear sensor).
+    /// camera is the RGB ARCamera for the same frame; its intrinsics are scaled
+    /// to the depth buffer dimensions to produce depth-raster intrinsics.
     private func captureDepth(
         _ depthData:  ARDepthData,
+        camera:       ARCamera,
         index:        UInt32,
         outputDir:    URL,
         stats:        WriteStats
@@ -249,14 +254,14 @@ final class CaptureManager: NSObject, ObservableObject {
         let depthRelPath = String(format: "depth/%06d.f32",  index)
         let confRelPath  = String(format: "confidence/%06d.png", index)
 
-        // Extract intrinsics and dimensions on the calling thread (MainActor).
-        // depthData is reference-counted; pixel buffers are valid while held.
-        let intrinsics = PoseExtractor.depthIntrinsics(from: depthData)
+        let depthMap = depthData.depthMap       // DepthFloat32 CVPixelBuffer
+        let confMap  = depthData.confidenceMap  // OneComponent8 CVPixelBuffer?
+
+        // Compute intrinsics on the calling thread (MainActor).
+        // depthData is ref-counted; pixel buffers are valid while held.
+        let intrinsics = PoseExtractor.depthIntrinsics(from: camera, depthMap: depthMap)
         let w = intrinsics.width
         let h = intrinsics.height
-
-        let depthMap   = depthData.depthMap
-        let confMap    = depthData.confidenceMap   // CVPixelBuffer?
         let depthURL   = outputDir.appendingPathComponent(depthRelPath)
         let confURL    = outputDir.appendingPathComponent(confRelPath)
 
@@ -326,10 +331,12 @@ extension CaptureManager: ARSessionDelegate {
 
         // Extract values on the ARKit thread before hopping to MainActor.
         // ARFrame and its pixel buffers are ref-counted and remain valid while held.
-        let camera     = frame.camera
+        let camera      = frame.camera
         let pixelBuffer = frame.capturedImage
-        let timestamp  = frame.timestamp
-        let depthData  = frame.capturedDepthData   // ARDepthData? — nil on non-LiDAR
+        let timestamp   = frame.timestamp
+        // sceneDepth: ARDepthData? — LiDAR rear sensor, nil on non-LiDAR devices.
+        // capturedDepthData is the front TrueDepth camera; do NOT use it here.
+        let depthData   = frame.sceneDepth
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else { return }

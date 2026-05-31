@@ -8,7 +8,6 @@
 /// below compiles but is marked with a TODO so P2 doesn't silently ship wrong gravity.
 
 import ARKit
-import AVFoundation
 import simd
 import SwiftProtobuf
 
@@ -65,24 +64,31 @@ enum PoseExtractor {
         return RSGravity()
     }
 
-    /// Intrinsics for the depth raster from an ARDepthData frame.
+    /// Intrinsics for the LiDAR depth raster, derived by scaling the RGB
+    /// camera's intrinsics to the depth buffer's resolution.
     ///
-    /// Source: cameraCalibrationData.intrinsicMatrix — same column-major layout as
-    /// ARCamera.intrinsics: fx=[0][0], fy=[1][1], cx=[2][0], cy=[2][1].
-    /// Width and height are the actual depth pixel buffer dimensions (typically
-    /// 256×192), NOT the referencing dimensions in cameraCalibrationData.
-    /// See decision 0029 mapping table.
-    static func depthIntrinsics(from depthData: ARDepthData) -> RSIntrinsics {
-        let m  = depthData.cameraCalibrationData.intrinsicMatrix
-        let w  = UInt32(CVPixelBufferGetWidth(depthData.depthMap))
-        let h  = UInt32(CVPixelBufferGetHeight(depthData.depthMap))
+    /// ARFrame.sceneDepth (ARDepthData) carries no intrinsics object — unlike
+    /// AVDepthData (the front TrueDepth camera), ARDepthData has only depthMap
+    /// and confidenceMap. The LiDAR depth raster is registered to the wide RGB
+    /// camera, so the correct depth intrinsics are camera.intrinsics scaled by
+    /// (depth_w / rgb_w) in x and (depth_h / rgb_h) in y. For a typical
+    /// 256×192 depth map against a 1920×1440 RGB frame, sx ≈ 0.133, giving
+    /// fx_depth ≈ 192 — not ~1500 (which would mean unscaled RGB intrinsics
+    /// in a depth-sized field). See decision 0032 for the correction history.
+    static func depthIntrinsics(from camera: ARCamera,
+                                depthMap: CVPixelBuffer) -> RSIntrinsics {
+        let dW = CVPixelBufferGetWidth(depthMap)
+        let dH = CVPixelBufferGetHeight(depthMap)
+        let sx = Float(dW) / Float(camera.imageResolution.width)
+        let sy = Float(dH) / Float(camera.imageResolution.height)
+        let K  = camera.intrinsics
         return RSIntrinsics.with {
-            $0.fx     = m.columns.0.x
-            $0.fy     = m.columns.1.y
-            $0.cx     = m.columns.2.x
-            $0.cy     = m.columns.2.y
-            $0.width  = w
-            $0.height = h
+            $0.fx     = K.columns.0.x * sx
+            $0.fy     = K.columns.1.y * sy
+            $0.cx     = K.columns.2.x * sx
+            $0.cy     = K.columns.2.y * sy
+            $0.width  = UInt32(dW)
+            $0.height = UInt32(dH)
         }
     }
 }
