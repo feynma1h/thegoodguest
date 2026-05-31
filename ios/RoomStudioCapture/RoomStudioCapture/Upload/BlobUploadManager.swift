@@ -619,23 +619,12 @@ actor BlobUploadManager {
 
     // MARK: - Unbuilt seams
 
-    /// P5 seam: upload pipeline terminal state.
-    /// Future unit: surface bundle upload completion to UI / polling / FCM.
-    ///
-    /// Eager cleanup: deletes the on-device session dir and the store record so the
-    /// startup sweep (CaptureStorageSweeper) doesn't encounter a "no record" false
-    /// positive on next launch. Errors are non-fatal — the sweep is the safety net.
+    /// UNBUILT — P5 seam: upload pipeline terminal state.
+    /// Future unit: surface bundle upload completion to UI / polling / FCM,
+    /// delete the on-device session dir, and remove the UploadSessionRecord.
     func onBundleComplete(bundleId: String) async {
         _bundleCompleteInvocations.append(bundleId)
-        print("[BlobUploadManager] ✓ bundle \(bundleId) fully uploaded — running cleanup")
-
-        // Eager cleanup: remove session dir + store record.
-        // Errors are non-fatal: CaptureStorageSweeper handles leftovers on next launch.
-        if let record = try? await store.load(bundleId: bundleId),
-           let dir = record.outputDir {
-            try? FileManager.default.removeItem(at: dir)
-        }
-        try? await store.delete(bundleId: bundleId)
+        print("[BlobUploadManager] TODO onBundleComplete(\(bundleId)) — P5 not yet built")
     }
 
     /// UNBUILT — fatal blob error handler.

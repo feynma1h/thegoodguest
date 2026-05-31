@@ -48,18 +48,25 @@ Move capture blob output from `temporaryDirectory` to `applicationSupportDirecto
    and fully regenerable — including them in iCloud/iTunes backup would waste backup quota
    and slow syncs with zero user benefit.
 
-4. **Cleanup — two-layer design** (Application Support does NOT auto-purge like tmp):
+4. **Cleanup** (Application Support does NOT auto-purge like tmp):
 
-   a. *Eager on success*: `onBundleComplete` (stub, P5 seam) deletes the session dir and
-      the store record. The record deletion is what makes the sweep effective: the sweep
-      identifies terminal sessions by the absence of a store record.
+   *Current mechanism — startup sweep only*: `CaptureStorageSweeper.sweep()` runs at app
+   launch. It enumerates `captures/`, checks each UUID-named subdir against
+   `UploadSessionStore`, and deletes any dir whose record is absent. A 300-second age
+   threshold skips dirs created too recently to have a record yet (race guard: capture dir
+   exists briefly before POST /upload_session persists the record).
 
-   b. *Startup sweep*: `CaptureStorageSweeper.sweep()` runs at app launch. It enumerates
-      `captures/`, checks each UUID-named subdir against `UploadSessionStore`, and deletes
-      any dir whose record is absent (abandoned capture or a session already cleaned by
-      `onBundleComplete`). A 300-second age threshold skips dirs created too recently
-      to have a record yet (race guard: capture dir exists briefly before
-      POST /upload_session persists the record).
+   The sweep covers *abandoned* captures (app killed before POST /upload_session returned;
+   no record was ever written). It does NOT currently reclaim dirs for *completed* bundles,
+   because `onBundleComplete` is an unbuilt P5 stub and does not delete the record. A
+   completed bundle's dir therefore persists in App Support until P5 ships. This is a
+   known, bounded gap: one directory per completed capture session, accumulating until P5
+   cleanup lands. Disk growth is proportional to completed captures, not unbounded within
+   a single launch.
+
+   *Future mechanism — P5 onBundleComplete*: when built, `onBundleComplete` will delete
+   the store record and session dir on successful upload. Once the record is gone, the
+   next-launch sweep will also reclaim any dir that escaped the eager delete.
 
 ## Why
 
@@ -74,10 +81,10 @@ Move capture blob output from `temporaryDirectory` to `applicationSupportDirecto
   incompatible with the 0040 item 7 guarantee by construction. Aligning blobs with their
   session index (0042) removes the last asymmetry: previously tmp blobs were CAFUFA by iOS
   default but that was incidental, not deliberate.
-- **Sweep instead of relying solely on onBundleComplete**: `onBundleComplete` is an unbuilt
-  P5 seam. Even when built, a crash between record deletion and directory deletion would
-  leave an orphan. The sweep provides a deterministic reclaim path that requires no
-  in-flight state and runs at every launch.
+- **Sweep as current sole cleanup**: `onBundleComplete` is an unbuilt P5 stub that does
+  not mutate store state. The sweep provides a deterministic reclaim path for abandoned
+  captures that requires no in-flight state and runs at every launch. Completed bundles
+  accumulate in App Support until P5 ships — a bounded, known gap (one dir per capture).
 
 ## What would change this decision
 
