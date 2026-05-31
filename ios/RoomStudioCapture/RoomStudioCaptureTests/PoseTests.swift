@@ -7,6 +7,7 @@
 
 import XCTest
 import simd
+@testable import RoomStudioCapture
 
 final class PoseTests: XCTestCase {
 
@@ -51,6 +52,60 @@ final class PoseTests: XCTestCase {
         XCTAssertEqual(v.y, 0,        accuracy: 1e-5, "quat_y")
         XCTAssertEqual(v.z, expected, accuracy: 1e-5, "quat_z")
         XCTAssertEqual(v.w, expected, accuracy: 1e-5, "quat_w (real part)")
+    }
+
+    // MARK: - Depth intrinsics scaling
+
+    /// Pins scaleIntrinsics against hand-computed literals for a realistic device bundle.
+    ///
+    /// Inputs: fx=1471.8, fy=1471.8, cx=924.2, cy=721.1, rgb=1920×1440, depth=256×192.
+    /// sx = sy = 256/1920 = 192/1440 = 0.13333…
+    /// Expected (hand-computed, NOT re-derived via the same expression):
+    ///   fx: 1471.8 × 0.13333 = 196.24  → assert ≈196.2
+    ///   fy: 1471.8 × 0.13333 = 196.24  → assert ≈196.2
+    ///   cx:  924.2 × 0.13333 = 123.23  → assert ≈123.2
+    ///   cy:  721.1 × 0.13333 =  96.15  → assert ≈96.1
+    ///   width=256, height=192 (exact)
+    func testScaleIntrinsics_realisticDevice() {
+        let result = PoseExtractor.scaleIntrinsics(
+            fx: 1471.8, fy: 1471.8,
+            cx: 924.2,  cy: 721.1,
+            rgbWidth: 1920, rgbHeight: 1440,
+            depthWidth: 256, depthHeight: 192
+        )
+        XCTAssertEqual(result.fx,     196.2, accuracy: 0.2, "fx_depth")
+        XCTAssertEqual(result.fy,     196.2, accuracy: 0.2, "fy_depth")
+        XCTAssertEqual(result.cx,     123.2, accuracy: 0.2, "cx_depth")
+        XCTAssertEqual(result.cy,      96.1, accuracy: 0.2, "cy_depth")
+        XCTAssertEqual(result.width,   256,               "depth width")
+        XCTAssertEqual(result.height,  192,               "depth height")
+    }
+
+    // MARK: - Gravity
+
+    /// Pins gravityInCameraFrame against two hand-derived canonical orientations.
+    ///
+    /// Identity (camera upright, looking toward horizon):
+    ///   q maps world→camera as identity; world-down (0,-1,0) stays (0,-1,0).
+    ///
+    /// Pitched 90° about -X (camera looking straight down at floor):
+    ///   Rotating -90° about world-X carries world-Y down into world-Z:
+    ///   world-down (0,-1,0) maps to (0,0,-1) in camera frame.
+    func testGravityInCameraFrame_canonicalOrientations() {
+        // Identity: camera upright, g_cam should equal world-down
+        let qIdentity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+        let gIdentity = PoseExtractor.gravityInCameraFrame(qIdentity)
+        XCTAssertEqual(gIdentity.x,  0, accuracy: 1e-5, "identity gx")
+        XCTAssertEqual(gIdentity.y, -1, accuracy: 1e-5, "identity gy")
+        XCTAssertEqual(gIdentity.z,  0, accuracy: 1e-5, "identity gz")
+
+        // Pitched 90° toward floor (rotation about -X axis by 90°)
+        let r = Float(1.0 / 2.0.squareRoot())
+        let qPitched = simd_quatf(ix: -r, iy: 0, iz: 0, r: r)
+        let gPitched = PoseExtractor.gravityInCameraFrame(qPitched)
+        XCTAssertEqual(gPitched.x,  0, accuracy: 1e-5, "pitched gx")
+        XCTAssertEqual(gPitched.y,  0, accuracy: 1e-5, "pitched gy")
+        XCTAssertEqual(gPitched.z, -1, accuracy: 1e-5, "pitched gz")
     }
 
     // MARK: - Helpers

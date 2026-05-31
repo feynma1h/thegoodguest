@@ -54,14 +54,46 @@ enum PoseExtractor {
         }
     }
 
-    /// Gravity vector in the camera's local frame.
-    ///
-    /// TODO (P2→P3 gate): formula reviewed in Chat (decision 0030); implementation
-    /// deferred to chunk C. Returns zero vector so the proto field is present but
-    /// the backend ignores it until C ships the real value.
+    /// World-down (0,-1,0) carried into the camera's local frame via the INVERSE
+    /// (world->camera) rotation. `q` is camera->world (same quaternion as Pose.quat_*),
+    /// so its inverse maps world vectors into camera-local. This is R^T * worldDown.
+    /// world-down is (0,-1,0) ONLY under .gravity world alignment; it breaks under
+    /// .camera alignment.
+    static func gravityInCameraFrame(_ q: simd_quatf) -> simd_float3 {
+        return q.inverse.act(simd_float3(0, -1, 0))
+    }
+
+    /// Gravity vector in the camera's local frame. Unit vector.
+    /// Thin wrapper over gravityInCameraFrame — see that function's docstring.
     static func gravity(from camera: ARCamera) -> RSGravity {
-        _ = camera
-        return RSGravity()
+        let g = gravityInCameraFrame(simd_quaternion(camera.transform))
+        return RSGravity.with {
+            $0.x = g.x
+            $0.y = g.y
+            $0.z = g.z
+        }
+    }
+
+    /// Pure scaling arithmetic for depth intrinsics — no ARKit types, unit-testable.
+    ///
+    /// sx = depthWidth / rgbWidth, sy = depthHeight / rgbHeight. Each intrinsic
+    /// scalar is scaled independently: fx/cx use sx, fy/cy use sy. Width/height
+    /// are set to the depth raster dimensions. See decision 0032 for why scaling
+    /// is required (unscaled RGB intrinsics in a depth-sized field would give
+    /// fx_depth ≈ 1500 instead of the correct ≈196 for a 256×192 depth map).
+    static func scaleIntrinsics(fx: Float, fy: Float, cx: Float, cy: Float,
+                                rgbWidth: Float, rgbHeight: Float,
+                                depthWidth: Int, depthHeight: Int) -> RSIntrinsics {
+        let sx = Float(depthWidth)  / rgbWidth
+        let sy = Float(depthHeight) / rgbHeight
+        return RSIntrinsics.with {
+            $0.fx     = fx * sx
+            $0.fy     = fy * sy
+            $0.cx     = cx * sx
+            $0.cy     = cy * sy
+            $0.width  = UInt32(depthWidth)
+            $0.height = UInt32(depthHeight)
+        }
     }
 
     /// Intrinsics for the LiDAR depth raster, derived by scaling the RGB
@@ -71,24 +103,19 @@ enum PoseExtractor {
     /// AVDepthData (the front TrueDepth camera), ARDepthData has only depthMap
     /// and confidenceMap. The LiDAR depth raster is registered to the wide RGB
     /// camera, so the correct depth intrinsics are camera.intrinsics scaled by
-    /// (depth_w / rgb_w) in x and (depth_h / rgb_h) in y. For a typical
-    /// 256×192 depth map against a 1920×1440 RGB frame, sx ≈ 0.133, giving
-    /// fx_depth ≈ 192 — not ~1500 (which would mean unscaled RGB intrinsics
-    /// in a depth-sized field). See decision 0032 for the correction history.
+    /// (depth_w / rgb_w) in x and (depth_h / rgb_h) in y. Pure math lives in
+    /// scaleIntrinsics; this wrapper pulls the values from ARKit types.
     static func depthIntrinsics(from camera: ARCamera,
                                 depthMap: CVPixelBuffer) -> RSIntrinsics {
-        let dW = CVPixelBufferGetWidth(depthMap)
-        let dH = CVPixelBufferGetHeight(depthMap)
-        let sx = Float(dW) / Float(camera.imageResolution.width)
-        let sy = Float(dH) / Float(camera.imageResolution.height)
         let K  = camera.intrinsics
-        return RSIntrinsics.with {
-            $0.fx     = K.columns.0.x * sx
-            $0.fy     = K.columns.1.y * sy
-            $0.cx     = K.columns.2.x * sx
-            $0.cy     = K.columns.2.y * sy
-            $0.width  = UInt32(dW)
-            $0.height = UInt32(dH)
-        }
+        let sz = camera.imageResolution
+        return scaleIntrinsics(
+            fx: K.columns.0.x, fy: K.columns.1.y,
+            cx: K.columns.2.x, cy: K.columns.2.y,
+            rgbWidth:    Float(sz.width),
+            rgbHeight:   Float(sz.height),
+            depthWidth:  CVPixelBufferGetWidth(depthMap),
+            depthHeight: CVPixelBufferGetHeight(depthMap)
+        )
     }
 }

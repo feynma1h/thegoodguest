@@ -10,6 +10,7 @@
 import ARKit
 import Darwin
 import Foundation
+import SwiftProtobuf
 import UIKit
 
 struct BundleAssembler {

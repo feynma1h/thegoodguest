@@ -51,6 +51,9 @@ final class CaptureManager: NSObject, ObservableObject {
     @Published private(set) var frameCount: Int = 0
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var trackingState: ARCamera.TrackingState = .notAvailable
+    /// Most recent gravity vector in camera frame. Updated each accepted keyframe.
+    /// Nil before first keyframe. Debug HUD reads this to eyeball sign/axis on device.
+    @Published private(set) var lastGravity: SIMD3<Float>? = nil
     /// Set after stopCapture() and bundle assembly completes. Nil while capturing or
     /// before first stop.
     @Published private(set) var bundlePath: URL? = nil
@@ -226,15 +229,17 @@ final class CaptureManager: NSObject, ObservableObject {
             captureDepth(dd, camera: camera, index: index, outputDir: outputDir, stats: stats)
         }
 
+        let gravityProto = PoseExtractor.gravity(from: camera)
         capturedFrames.append(CapturedKeyframe(
             index:           index,
             timestampUs:     Int64(timestamp * 1_000_000),
             rgbRelativePath: relativePath,
             pose:            PoseExtractor.pose(from: camera),
             intrinsics:      PoseExtractor.intrinsics(from: camera),
-            gravity:         PoseExtractor.gravity(from: camera),
+            gravity:         gravityProto,
             depth:           depth
         ))
+        lastGravity = SIMD3<Float>(gravityProto.x, gravityProto.y, gravityProto.z)
         frameCount = capturedFrames.count
     }
 
