@@ -88,6 +88,24 @@ actor UploadSessionStore {
         return try decoder.decode(UploadSessionRecord.self, from: data)
     }
 
+    /// Mark a blob as uploaded and persist the updated record atomically.
+    ///
+    /// Called by the background URLSession delegate after each successful blob PUT
+    /// (HTTP 200 or 201 from GCS). The actor serializes concurrent delegate calls for
+    /// the same bundle so no two completions race on disk.
+    ///
+    /// Returns the updated record so the caller can immediately evaluate
+    /// `record.allNonBundlePbBlobsUploaded` without a second load call.
+    /// Returns nil if no record exists for bundleId (should not occur in normal flow;
+    /// log and skip enqueuing bundle.pb if encountered).
+    @discardableResult
+    func markBlobUploaded(bundleId: String, relativePath: String) throws -> UploadSessionRecord? {
+        guard let existing = try load(bundleId: bundleId) else { return nil }
+        let updated = existing.markingBlobUploaded(relativePath)
+        try save(updated)
+        return updated
+    }
+
     /// Delete the session record for a bundle (called by P4 cleanup on success).
     func delete(bundleId: String) throws {
         let url = fileURL(for: bundleId)
