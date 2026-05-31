@@ -216,17 +216,18 @@ final class BlobUploadManagerTests: XCTestCase {
                       "Gate must be true when both blobs are uploaded")
     }
 
-    // MARK: - 410 → store unchanged
+    // MARK: - 410 → blob status unchanged, fresh URIs persisted
 
-    func test_handleTaskCompletion_410_doesNotUpdateStore() async throws {
+    func test_handleTaskCompletion_410_doesNotMarkBlobUploaded() async throws {
+        // 410 must not mark the blob as uploaded — the re-mint re-enqueues it, but the
+        // completion delegate hasn't fired again yet.
         let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
-        let before = try await store.load(bundleId: "test-bundle")
 
-        // Inject a remintProvider that returns different URIs so the 410 path proceeds
-        // (otherwise it would route to onFatalBlobError("expired_no_remint_provider")).
-        // We only care that the original blob status is unchanged (re-mint doesn't change it).
-        let freshEntry = UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.gcs.example.com/frames/000000.jpg")
-        let bundlePbEntry = UploadSessionEntry(relativePath: "bundle.pb", sessionUri: "https://fresh.gcs.example.com/bundle.pb")
+        // Inject different URIs so the loop guard passes (different == fresh).
+        let freshEntry    = UploadSessionEntry(relativePath: "frames/000000.jpg",
+                                              sessionUri: "https://fresh.gcs.example.com/frames/000000.jpg")
+        let bundlePbEntry = UploadSessionEntry(relativePath: "bundle.pb",
+                                              sessionUri: "https://fresh.gcs.example.com/bundle.pb")
         await manager.setRemintProvider { _, _ in [freshEntry, bundlePbEntry] }
 
         await manager.handleTaskCompletion(
@@ -234,12 +235,14 @@ final class BlobUploadManagerTests: XCTestCase {
             statusCode: 410, error: nil
         )
 
-        // The blob's uploaded status must not change (it was pending, stays pending).
+        // Blob status must still be .pending (not marked uploaded by the re-mint).
         let after = try await store.load(bundleId: "test-bundle")
         XCTAssertEqual(after?.blobStatuses["frames/000000.jpg"], .pending,
-                       "410 (session expired) must not mark blob as uploaded")
-        XCTAssertEqual(after?.clientMintTimestamp, before?.clientMintTimestamp,
-                       "clientMintTimestamp must not change from the original (re-mint uses a fresh one, but the original record is checked here)")
+                       "410 re-mint must not mark blob as uploaded")
+        // Fresh URIs must have been persisted (re-mint succeeded with different URIs).
+        XCTAssertEqual(after?.sessionUri(for: "frames/000000.jpg"),
+                       "https://fresh.gcs.example.com/frames/000000.jpg",
+                       "Fresh session URI must be persisted after re-mint")
     }
 
     // MARK: - 4xx → store unchanged
@@ -510,26 +513,102 @@ final class BlobUploadManagerTests: XCTestCase {
                        "Pending blob must stay .pending in the fresh record")
     }
 
-    func test_onSessionExpired_sameURIs_routesToFatalError() async throws {
-        // If re-mint returns the SAME URIs as the persisted record (server-side Firestore
-        // batch lag: dead URIs still stored), do NOT re-enqueue — route to onFatalBlobError.
-        // This prevents a silent 410 loop (re-enqueue → 410 → re-mint → same URIs → ...).
+    // test_410Remint_identicalURIs_stillRoutesToFatalError (below) supersedes this scenario;
+    // keeping the original as a direct onSessionExpired call without the staleness path.
+    func test_onSessionExpired_directCall_sameURIs_routesToFatalError() async throws {
+        // Direct call to onSessionExpired (default loopGuardEnabled: true, i.e. 410 path).
+        // If re-mint returns identical URIs, must route to onFatalBlobError (loop prevention).
         let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
-
-        // remintProvider returns the same URIs as the stored record.
         await manager.setRemintProvider { _, _ in
             [
-                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://gcs.example.com/frames/000000.jpg"),
-                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://gcs.example.com/bundle.pb"),
+                UploadSessionEntry(relativePath: "frames/000000.jpg",
+                                   sessionUri: "https://gcs.example.com/frames/000000.jpg"),
+                UploadSessionEntry(relativePath: "bundle.pb",
+                                   sessionUri: "https://gcs.example.com/bundle.pb"),
             ]
         }
-
         await manager.onSessionExpired(bundleId: "test-bundle")
 
         let fatal = await manager._fatalBlobErrorInvocations
-        XCTAssertFalse(fatal.isEmpty, "Same URIs from re-mint must route to onFatalBlobError")
+        XCTAssertFalse(fatal.isEmpty, "Same URIs from re-mint (410 path) must route to onFatalBlobError")
         XCTAssertTrue(fatal.allSatisfy { $0.reason.contains("remint_returned_stale_uris") },
                       "Reason must be remint_returned_stale_uris; got: \(fatal.map(\.reason))")
+    }
+
+    func test_stalenessRemint_identicalValidURIs_proceedsToBundlePb() async throws {
+        // CHECK 1 regression test.
+        // Staleness guard fires (>12h), re-mint returns IDENTICAL URIs (server correctly
+        // returned the still-valid stored entries — 12h < 7-day GCS window).
+        // Must NOT route to onFatalBlobError. Must proceed to enqueue bundle.pb and,
+        // after bundle.pb 200, route to onBundleComplete.
+        let fixedNow  = Date()
+        let mintTime  = fixedNow.addingTimeInterval(-(12 * 3600 + 60))  // 12h01m ago → stale
+        let (manager, _, _) = try await makeManager(
+            paths: ["frames/000000.jpg", "bundle.pb"],
+            mintTimestamp: mintTime,
+            clock: { fixedNow }
+        )
+
+        // Mark the frame blob as uploaded (simulating completed Phase-1 before staleness fires).
+        _ = try await manager.store.markBlobUploaded(
+            bundleId: "test-bundle", relativePath: "frames/000000.jpg"
+        )
+        let record = try await manager.store.load(bundleId: "test-bundle")!
+
+        // remintProvider returns the SAME URIs (server-side idempotency, still-valid at 12h).
+        await manager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg",
+                                   sessionUri: "https://gcs.example.com/frames/000000.jpg"),
+                UploadSessionEntry(relativePath: "bundle.pb",
+                                   sessionUri: "https://gcs.example.com/bundle.pb"),
+            ]
+        }
+
+        // onAllBlobsUploaded → staleness guard fires → onSessionExpired(loopGuardEnabled: false).
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+
+        // No fatal error: identical URIs must be treated as valid on the staleness path.
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty,
+                      "Staleness re-mint with identical valid URIs must NOT fatal; got: \(fatal.map(\.reason))")
+
+        // onSessionExpired was invoked (staleness guard routed correctly).
+        let expired = await manager._sessionExpiredInvocations
+        XCTAssertEqual(expired, ["test-bundle"])
+
+        // Simulate bundle.pb 200 (enqueued by enqueueBundlePb at end of staleness re-mint).
+        await manager.handleTaskCompletion(
+            taskDescription: BlobUploadManager.makeTaskDescription(
+                bundleId: "test-bundle", relativePath: "bundle.pb"),
+            statusCode: 200, error: nil
+        )
+        let completed = await manager._bundleCompleteInvocations
+        XCTAssertEqual(completed, ["test-bundle"],
+                       "Staleness re-mint must proceed to bundle.pb finalization")
+    }
+
+    func test_410Remint_identicalURIs_stillRoutesToFatalError() async throws {
+        // CHECK 1: The loop guard must STILL fire on the 410-triggered path when
+        // re-mint returns identical URIs (dead URIs still in Firestore → 410 loop risk).
+        // This test confirms the fix didn't break the 410 path.
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        // remintProvider returns the same URIs as the stored record.
+        await manager.setRemintProvider { _, _ in
+            [
+                UploadSessionEntry(relativePath: "frames/000000.jpg",
+                                   sessionUri: "https://gcs.example.com/frames/000000.jpg"),
+                UploadSessionEntry(relativePath: "bundle.pb",
+                                   sessionUri: "https://gcs.example.com/bundle.pb"),
+            ]
+        }
+        // Call directly with default loopGuardEnabled: true (the 410 path).
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertFalse(fatal.isEmpty, "410 re-mint with identical URIs must still fatal")
+        XCTAssertTrue(fatal.allSatisfy { $0.reason.contains("remint_returned_stale_uris") },
+                      "reason must be remint_returned_stale_uris; got: \(fatal.map(\.reason))")
     }
 
     func test_onSessionExpired_mintFailure_routesToFatalError() async throws {
