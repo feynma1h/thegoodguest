@@ -714,8 +714,10 @@ final class BlobUploadManagerTests: XCTestCase {
 
     func test_stalenessRemint_blobFileMissing_routesToFatalError() async throws {
         // Staleness re-enqueue: blob file missing from disk (App Support dir cleared).
-        // Expect: onFatalBlobError("blob_file_missing_at_staleness_remint"), bundle.pb NOT finalized.
-        // Detection: FileManager.fileExists(atPath:) returns false for the missing file.
+        // NEW ORDERING: the pre-pass checks all files before mutating any state, so a
+        // missing-file abort must leave the store untouched and start zero uploads.
+        // Expect: onFatalBlobError("blob_file_missing_at_staleness_remint") fired once;
+        //         no blob status reset to .pending; bundle.pb NOT finalized.
         let fixedNow = Date()
         let mintTime = fixedNow.addingTimeInterval(-(12 * 3600 + 60))
         let paths = ["frames/000000.jpg", "bundle.pb"]
@@ -745,6 +747,16 @@ final class BlobUploadManagerTests: XCTestCase {
         )
         let completed = await manager._bundleCompleteInvocations
         XCTAssertTrue(completed.isEmpty, "bundle.pb must NOT be finalized when a blob file is missing")
+
+        // KEY ZERO-SIDE-EFFECTS ASSERTIONS (new pre-pass ordering guarantee):
+        // The pre-pass aborts before resettingNonBundlePbBlobsToPending is called,
+        // so the store must reflect exactly the pre-call state — no status mutation,
+        // no reset record persisted, zero URLSession tasks enqueued.
+        let afterAbort = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(afterAbort.blobStatuses["frames/000000.jpg"], .uploaded,
+                       "Pre-pass abort must NOT reset blob status to .pending (zero state mutation)")
+        XCTAssertEqual(afterAbort.blobStatuses["bundle.pb"], .pending,
+                       "bundle.pb status must remain .pending after abort (unchanged from pre-call)")
     }
 
     func test_coldRelaunch_stalenessRemint_finalizesBundlePb() async throws {
