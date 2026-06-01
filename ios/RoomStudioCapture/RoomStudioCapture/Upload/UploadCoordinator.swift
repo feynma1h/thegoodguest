@@ -14,10 +14,15 @@
 
 import Combine
 import Foundation
+import os
 import SwiftProtobuf
 
 @MainActor
 final class UploadCoordinator: ObservableObject {
+
+    // Logging privacy policy: UUIDs, blob paths, and enum values may be .public;
+    // user identifiers and error payloads stay default-private (redacted in shipped logs).
+    private let logger = Logger(subsystem: "com.roomstudio.RoomStudioCapture", category: "Coordinator")
 
     // MARK: - Published state
 
@@ -109,7 +114,7 @@ final class UploadCoordinator: ObservableObject {
                     proto.userID = uid
                     bundleData   = try proto.serializedData()
                     try bundleData.write(to: bundlePbURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-                    print("[UploadCoordinator] backstop: patched user_id in bundle.pb")
+                    logger.info("[UploadCoordinator] backstop: patched user_id in bundle.pb")
                 }
             } catch {
                 sessionState = .failed("Bundle patch failed: \(error.localizedDescription)")
@@ -144,7 +149,7 @@ final class UploadCoordinator: ObservableObject {
             return
         } catch UploadSessionError.clientError(let code, let body) {
             // Client bug — log loudly; do not retry.
-            print("[UploadCoordinator] PROGRAMMING ERROR — \(code): \(body)")
+            logger.info("[UploadCoordinator] PROGRAMMING ERROR — \(code): \(body)")
             sessionState = .failed("Client error \(code): \(body)")
             return
         } catch {
@@ -166,7 +171,7 @@ final class UploadCoordinator: ObservableObject {
         } catch {
             // Persistence failure is non-fatal — session URIs are in the record
             // in memory; P4 can proceed. Log and continue.
-            print("[UploadCoordinator] WARNING — persistence failed: \(error)")
+            logger.info("[UploadCoordinator] WARNING — persistence failed: \(error.localizedDescription)")
         }
 
         sessionState = .ready(record)
