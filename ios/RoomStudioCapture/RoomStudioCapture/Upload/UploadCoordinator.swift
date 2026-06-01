@@ -86,6 +86,18 @@ final class UploadCoordinator: ObservableObject {
         // Fast path: session record already persisted (e.g. app relaunched mid-upload).
         if let existing = try? await store.load(bundleId: bundleId) {
             sessionState = .ready(existing)
+            logger.info("[UploadCoordinator] → handing off to BlobUploadManager for bundle \(bundleId, privacy: .public)")
+            if existing.allNonBundlePbBlobsUploaded {
+                // Phase-1 already complete; route to bundle.pb finalize.
+                // onAllBlobsUploaded carries the staleness guard (>12h → re-mint).
+                await BlobUploadManager.shared.onAllBlobsUploaded(bundleId: bundleId, record: existing)
+            } else {
+                do {
+                    try await BlobUploadManager.shared.enqueuePhasOneBlobs(record: existing)
+                } catch {
+                    logger.info("[UploadCoordinator] ✗ Phase-1 enqueue failed: \(error)")
+                }
+            }
             return
         }
 
@@ -175,5 +187,11 @@ final class UploadCoordinator: ObservableObject {
         }
 
         sessionState = .ready(record)
+        logger.info("[UploadCoordinator] → handing off to BlobUploadManager for bundle \(bundleId, privacy: .public)")
+        do {
+            try await BlobUploadManager.shared.enqueuePhasOneBlobs(record: record)
+        } catch {
+            logger.info("[UploadCoordinator] ✗ Phase-1 enqueue failed: \(error)")
+        }
     }
 }
