@@ -35,6 +35,7 @@
 /// Decisions: 0040, 0041
 
 import Foundation
+import os
 
 // MARK: - UploadContext
 
@@ -71,6 +72,10 @@ actor BlobUploadManager {
     private static let maxDelaySec:  TimeInterval = 30.0
 
     // MARK: - Stored properties
+
+    // Logging privacy policy: UUIDs, blob paths, and enum values may be .public;
+    // user identifiers and error payloads stay default-private (redacted in shipped logs).
+    private let logger = Logger(subsystem: "com.roomstudio.RoomStudioCapture", category: "BlobUpload")
 
     private let session: URLSession
     let store: UploadSessionStore                     // internal (not private) for tests
@@ -217,7 +222,7 @@ actor BlobUploadManager {
             task.resume()
             enqueued += 1
         }
-        print("[BlobUploadManager] enqueued \(enqueued) Phase-1 task(s) for bundle \(bundleId)")
+        logger.info("[BlobUploadManager] enqueued \(enqueued) Phase-1 task(s) for bundle \(bundleId, privacy: .public)")
     }
 
     // MARK: - Completion routing (0040 item 4)
@@ -242,7 +247,7 @@ actor BlobUploadManager {
             let desc = taskDescription,
             let (bundleId, relativePath) = Self.parseTaskDescription(desc)
         else {
-            print("[BlobUploadManager] ⚠ malformed taskDescription '\(taskDescription ?? "nil")' — skipping")
+            logger.info("[BlobUploadManager] ⚠ malformed taskDescription '\(taskDescription ?? "nil", privacy: .public)' — skipping")
             return
         }
 
@@ -286,7 +291,7 @@ actor BlobUploadManager {
         // would still be true (gate excludes bundle.pb from its check), causing
         // onAllBlobsUploaded to fire again — an incorrect re-entry.
         if relativePath == "bundle.pb" {
-            print("[BlobUploadManager] ✓ bundle.pb uploaded for bundle \(bundleId)")
+            logger.info("[BlobUploadManager] ✓ bundle.pb uploaded for bundle \(bundleId, privacy: .public)")
             await onBundleComplete(bundleId: bundleId)
             return
         }
@@ -295,10 +300,10 @@ actor BlobUploadManager {
             guard let record = try await store.markBlobUploaded(
                 bundleId: bundleId, relativePath: relativePath
             ) else {
-                print("[BlobUploadManager] ⚠ markBlobUploaded returned nil for \(bundleId)/\(relativePath)")
+                logger.info("[BlobUploadManager] ⚠ markBlobUploaded returned nil for \(bundleId, privacy: .public)/\(relativePath, privacy: .public)")
                 return
             }
-            print("[BlobUploadManager] ✓ uploaded \(relativePath) for bundle \(bundleId)")
+            logger.debug("[BlobUploadManager] ✓ uploaded \(relativePath, privacy: .public) for bundle \(bundleId, privacy: .public)")
 
             if record.allNonBundlePbBlobsUploaded {
                 // Phase-1 complete. Hand off to bundle.pb finalizer.
@@ -306,7 +311,7 @@ actor BlobUploadManager {
                 await onAllBlobsUploaded(bundleId: bundleId, record: record)
             }
         } catch {
-            print("[BlobUploadManager] ⚠ store update failed for \(bundleId)/\(relativePath): \(error)")
+            logger.info("[BlobUploadManager] ⚠ store update failed for \(bundleId, privacy: .public)/\(relativePath, privacy: .public): \(error.localizedDescription)")
         }
     }
 
@@ -329,7 +334,7 @@ actor BlobUploadManager {
         contexts[bundleId] = ctx
         do {
             try await enqueueReput(bundleId: bundleId, relativePath: relativePath)
-            print("[BlobUploadManager] 308 → re-PUT \(relativePath) (first attempt)")
+            logger.info("[BlobUploadManager] 308 → re-PUT \(relativePath, privacy: .public) (first attempt)")
         } catch {
             await onFatalBlobError(bundleId: bundleId, relativePath: relativePath,
                                    reason: "308_reput_failed: \(error)")
@@ -368,7 +373,7 @@ actor BlobUploadManager {
 
         let jitter = Double.random(in: 0..<1.0)
         let delay  = min(Self.baseDelaySec * pow(2.0, Double(attempts)) + jitter, Self.maxDelaySec)
-        print("[BlobUploadManager] retry \(attempts + 1)/\(Self.maxRetries) for \(relativePath) in \(String(format: "%.2f", delay))s")
+        logger.info("[BlobUploadManager] retry \(attempts + 1)/\(Self.maxRetries) for \(relativePath, privacy: .public) in \(String(format: "%.2f", delay))s")
         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         do {
             try await enqueueReput(bundleId: bundleId, relativePath: relativePath)
@@ -427,7 +432,7 @@ actor BlobUploadManager {
     /// Cold-relaunch safe: outputDir and sessionUri are both read from the persisted record.
     func onAllBlobsUploaded(bundleId: String, record: UploadSessionRecord) async {
         guard clock().timeIntervalSince(record.clientMintTimestamp) <= Self.stalenessThreshold else {
-            print("[BlobUploadManager] ⚠ bundle \(bundleId) session stale (>12 h) — routing to re-mint")
+            logger.info("[BlobUploadManager] ⚠ bundle \(bundleId, privacy: .public) session stale (>12 h) — routing to re-mint")
             // loopGuardEnabled: false — at 12 h, stored URIs are still valid (well within
             // the 7-day GCS window). Identical returned URIs indicate the server correctly
             // returned the still-live stored entries; treat as success, not as a 410 loop.
@@ -445,7 +450,7 @@ actor BlobUploadManager {
     /// and Content-Type omitted (URLSession and session URI handle them — F2).
     private func enqueueBundlePb(bundleId: String, record: UploadSessionRecord) async {
         guard let outputDir = record.outputDir else {
-            print("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId)")
+            logger.info("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId, privacy: .public)")
             await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
                                    reason: "missing_output_dir")
             return
@@ -453,7 +458,7 @@ actor BlobUploadManager {
 
         guard let sessionUri = record.sessionUri(for: "bundle.pb"),
               let sessionURL = URL(string: sessionUri) else {
-            print("[BlobUploadManager] ⚠ no bundle.pb session URI for \(bundleId)")
+            logger.info("[BlobUploadManager] ⚠ no bundle.pb session URI for \(bundleId, privacy: .public)")
             await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
                                    reason: "missing_bundle_pb_uri")
             return
@@ -475,7 +480,7 @@ actor BlobUploadManager {
             let task = session.uploadTask(with: req, fromFile: fileURL)
             task.taskDescription = Self.makeTaskDescription(bundleId: bundleId, relativePath: "bundle.pb")
             task.resume()
-            print("[BlobUploadManager] → enqueued bundle.pb PUT for bundle \(bundleId)")
+            logger.info("[BlobUploadManager] → enqueued bundle.pb PUT for bundle \(bundleId, privacy: .public)")
         } catch {
             await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
                                    reason: "bundle_pb_read_failed: \(error)")
@@ -521,11 +526,11 @@ actor BlobUploadManager {
     /// Cold-relaunch safe: all state comes from the on-disk record; no UploadContext needed.
     func onSessionExpired(bundleId: String, loopGuardEnabled: Bool = true) async {
         _sessionExpiredInvocations.append(bundleId)
-        print("[BlobUploadManager] ↺ session expired for bundle \(bundleId) — attempting re-mint")
+        logger.info("[BlobUploadManager] ↺ session expired for bundle \(bundleId, privacy: .public) — attempting re-mint")
 
         // 1. Load persisted record.
         guard let record = try? await store.load(bundleId: bundleId) else {
-            print("[BlobUploadManager] ⚠ onSessionExpired: no record for \(bundleId)")
+            logger.info("[BlobUploadManager] ⚠ onSessionExpired: no record for \(bundleId, privacy: .public)")
             await onFatalBlobError(bundleId: bundleId, relativePath: "*",
                                    reason: "expired_no_record")
             return
@@ -533,7 +538,7 @@ actor BlobUploadManager {
 
         // 2. Re-mint via /upload_session (reuses 0038 retry/backoff + 401 token-refresh).
         guard let mintFn = remintProvider else {
-            print("[BlobUploadManager] ⚠ remintProvider not wired for \(bundleId)")
+            logger.info("[BlobUploadManager] ⚠ remintProvider not wired for \(bundleId, privacy: .public)")
             await onFatalBlobError(bundleId: bundleId, relativePath: "*",
                                    reason: "expired_no_remint_provider")
             return
@@ -547,7 +552,7 @@ actor BlobUploadManager {
         do {
             freshEntries = try await mintFn(bundleId, manifestEntries)
         } catch {
-            print("[BlobUploadManager] ⚠ re-mint failed for \(bundleId): \(error)")
+            logger.info("[BlobUploadManager] ⚠ re-mint failed for \(bundleId, privacy: .public): \(error.localizedDescription)")
             await onFatalBlobError(bundleId: bundleId, relativePath: "*",
                                    reason: "remint_failed: \(error)")
             return
@@ -563,7 +568,7 @@ actor BlobUploadManager {
             uniqueKeysWithValues: freshEntries.map { ($0.relativePath, $0.sessionUri) }
         )
         if loopGuardEnabled && newUriMap == oldUriMap {
-            print("[BlobUploadManager] ⚠ re-mint returned identical URIs for \(bundleId) — stale doc still in Firestore")
+            logger.info("[BlobUploadManager] ⚠ re-mint returned identical URIs for \(bundleId, privacy: .public) — stale doc still in Firestore")
             await onFatalBlobError(bundleId: bundleId, relativePath: "*",
                                    reason: "remint_returned_stale_uris")
             return
@@ -575,7 +580,7 @@ actor BlobUploadManager {
         do {
             try await store.save(freshRecord)
         } catch {
-            print("[BlobUploadManager] ⚠ failed to persist fresh record for \(bundleId): \(error)")
+            logger.info("[BlobUploadManager] ⚠ failed to persist fresh record for \(bundleId, privacy: .public): \(error.localizedDescription)")
             await onFatalBlobError(bundleId: bundleId, relativePath: "*",
                                    reason: "remint_persist_failed: \(error)")
             return
@@ -590,7 +595,7 @@ actor BlobUploadManager {
         //      410 path (loopGuardEnabled): only re-enqueue blobs not yet .uploaded.
         //        Already-done blobs are preserved; bundle.pb deferred to gate path.
         guard let outputDir = freshRecord.outputDir else {
-            print("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId) — cannot re-enqueue")
+            logger.info("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId, privacy: .public) — cannot re-enqueue")
             await onFatalBlobError(bundleId: bundleId, relativePath: "*",
                                    reason: "remint_no_output_dir")
             return
@@ -606,7 +611,7 @@ actor BlobUploadManager {
             for entry in nonBundleEntries {
                 let fileURL = outputDir.appendingPathComponent(entry.relativePath)
                 guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                    print("[BlobUploadManager] ✗ blob file missing at staleness re-enqueue: \(entry.relativePath)")
+                    logger.info("[BlobUploadManager] ✗ blob file missing at staleness re-enqueue: \(entry.relativePath, privacy: .public)")
                     // Called once for the first missing path; returns without touching
                     // blob statuses, the reset record, or any URLSession task.
                     await onFatalBlobError(bundleId: bundleId, relativePath: entry.relativePath,
@@ -620,7 +625,7 @@ actor BlobUploadManager {
             do {
                 try await store.save(resetRecord)
             } catch {
-                print("[BlobUploadManager] ⚠ failed to persist reset record for \(bundleId): \(error)")
+                logger.info("[BlobUploadManager] ⚠ failed to persist reset record for \(bundleId, privacy: .public): \(error.localizedDescription)")
                 await onFatalBlobError(bundleId: bundleId, relativePath: "*",
                                        reason: "staleness_reset_persist_failed: \(error)")
                 return
@@ -645,7 +650,7 @@ actor BlobUploadManager {
                 task.resume()
                 reenqueued += 1
             }
-            print("[BlobUploadManager] 🔄 staleness re-mint \(bundleId): reset all blobs, re-enqueued \(reenqueued) blob(s)")
+            logger.info("[BlobUploadManager] 🔄 staleness re-mint \(bundleId, privacy: .public): reset all blobs, re-enqueued \(reenqueued) blob(s)")
             // bundle.pb is NOT enqueued here. When all re-uploads complete (200/201),
             // the Phase-1 gate fires → onAllBlobsUploaded → enqueueBundlePb.
             // clientMintTimestamp is now freshRecord's clock() value, so the staleness
@@ -674,7 +679,7 @@ actor BlobUploadManager {
             task.resume()
             reenqueued += 1
         }
-        print("[BlobUploadManager] 🔄 re-minted \(bundleId): re-enqueued \(reenqueued) blob(s)")
+        logger.info("[BlobUploadManager] 🔄 re-minted \(bundleId, privacy: .public): re-enqueued \(reenqueued) blob(s)")
     }
 
     // MARK: - Unbuilt seams
@@ -684,14 +689,14 @@ actor BlobUploadManager {
     /// delete the on-device session dir, and remove the UploadSessionRecord.
     func onBundleComplete(bundleId: String) async {
         _bundleCompleteInvocations.append(bundleId)
-        print("[BlobUploadManager] TODO onBundleComplete(\(bundleId)) — P5 not yet built")
+        logger.info("[BlobUploadManager] TODO onBundleComplete(\(bundleId, privacy: .public)) — P5 not yet built")
     }
 
     /// UNBUILT — fatal blob error handler.
     /// Future unit: mark bundle failed in the store, surface to UI / FCM.
     func onFatalBlobError(bundleId: String, relativePath: String, reason: String) async {
         _fatalBlobErrorInvocations.append((bundleId: bundleId, relativePath: relativePath, reason: reason))
-        print("[BlobUploadManager] ✗ fatal blob error: \(bundleId)/\(relativePath) reason=\(reason)")
+        logger.info("[BlobUploadManager] ✗ fatal blob error: \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
     }
 }
 

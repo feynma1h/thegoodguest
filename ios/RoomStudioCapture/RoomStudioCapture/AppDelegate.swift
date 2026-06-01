@@ -20,9 +20,14 @@
 ///
 /// Decisions: 0040 (background URLSession relaunch), 0041 (D2 AppDelegate wiring seam)
 
+import os
 import UIKit
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
+
+    // Logging privacy policy: UUIDs, blob paths, and enum values may be .public;
+    // user identifiers and error payloads stay default-private (redacted in shipped logs).
+    private let logger = Logger(subsystem: "com.roomstudio.RoomStudioCapture", category: "AppDelegate")
 
     /// Called by the system when the app is relaunched to deliver background URLSession events.
     ///
@@ -36,6 +41,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         completionHandler: @escaping () -> Void
     ) {
         guard identifier == BlobUploadManager.backgroundSessionIdentifier else { return }
+        logger.info("[AppDelegate] OS relaunch for background URLSession: \(identifier, privacy: .public)")
         // Apple requires the system-provided completionHandler to be called on the main queue.
         // Wrap before storing so drainBackgroundSessionEvents can invoke it directly.
         let mainQueueHandler: () -> Void = {

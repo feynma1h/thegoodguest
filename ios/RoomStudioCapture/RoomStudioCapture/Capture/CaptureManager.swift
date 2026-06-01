@@ -13,6 +13,7 @@
 import ARKit
 import Combine
 import CoreImage
+import os
 import UIKit
 
 // MARK: - CapturedKeyframe
@@ -104,6 +105,10 @@ final class CaptureManager: NSObject, ObservableObject {
     private let ciContext   = CIContext()
     private let writeStats  = WriteStats()
 
+    // Logging privacy policy: UUIDs, blob paths, and enum values may be .public;
+    // user identifiers and error payloads stay default-private (redacted in shipped logs).
+    private let logger = Logger(subsystem: "com.roomstudio.RoomStudioCapture", category: "Capture")
+
     override init() {
         super.init()
         arSession.delegate = self
@@ -136,6 +141,7 @@ final class CaptureManager: NSObject, ObservableObject {
             config.frameSemantics.insert(.sceneDepth)
         }
         arSession.run(config, options: [.resetTracking, .removeExistingAnchors])
+        logger.info("[CaptureManager] capture started: bundleId=\(self.bundleIdString, privacy: .public) tier=\(String(describing: self.tier), privacy: .public)")
         isRunning = true
     }
 
@@ -165,29 +171,30 @@ final class CaptureManager: NSObject, ObservableObject {
         let accepted  = frameCount
 
         // Enqueue on jpegQueue — this block runs after all in-flight JPEG/depth writes.
+        let log = logger
         jpegQueue.async { [weak self] in
             let framesDir = outDir.appendingPathComponent("frames")
             let onDisk = (try? FileManager.default.contentsOfDirectory(
                 at: framesDir, includingPropertiesForKeys: nil
             ).filter { $0.pathExtension == "jpg" }.count) ?? -1
-            print("""
+            log.info("""
             [CaptureManager] stop — write verification
               accepted : \(accepted)
               written  : \(stats.written)
               failures : \(stats.failures)
               on-disk  : \(onDisk) .jpg files
-              temp-dir : \(framesDir.path)
+              temp-dir : \(framesDir.path, privacy: .public)
             """)
 
             do {
                 let url = try assembler.write(userId: userId)
-                print("[CaptureManager] bundle.pb → \(url.path) (user_id: \(userId.isEmpty ? "<none — backstop pending>" : userId))")
+                log.info("[CaptureManager] bundle.pb → \(url.path, privacy: .public) (user_id: \(userId.isEmpty ? "<none — backstop pending>" : userId))")
                 DispatchQueue.main.async {
                     self?.bundlePath = url
                     self?.assembledWithoutUserId = noUid
                 }
             } catch {
-                print("[CaptureManager] bundle assembly failed: \(error)")
+                log.info("[CaptureManager] bundle assembly failed: \(error.localizedDescription)")
             }
         }
     }
@@ -239,13 +246,14 @@ final class CaptureManager: NSObject, ObservableObject {
         // Write JPEG on jpegQueue.
         let context = ciContext
         let stats   = writeStats
+        let log = logger
         jpegQueue.async {
             let ci = CIImage(cvImageBuffer: pixelBuffer)
             guard
                 let cg   = context.createCGImage(ci, from: ci.extent),
                 let data = UIImage(cgImage: cg).jpegData(compressionQuality: 0.85)
             else {
-                print("[CaptureManager] JPEG encode failed: \(relativePath)")
+                log.info("[CaptureManager] JPEG encode failed: \(relativePath, privacy: .public)")
                 stats.failures += 1
                 return
             }
@@ -253,7 +261,7 @@ final class CaptureManager: NSObject, ObservableObject {
                 try data.write(to: fileURL, options: .completeFileProtectionUntilFirstUserAuthentication)
                 stats.written += 1
             } catch {
-                print("[CaptureManager] JPEG write error: \(relativePath): \(error)")
+                log.info("[CaptureManager] JPEG write error: \(relativePath, privacy: .public): \(error.localizedDescription)")
                 stats.failures += 1
             }
         }
@@ -303,6 +311,7 @@ final class CaptureManager: NSObject, ObservableObject {
         let h = intrinsics.height
         let depthURL   = outputDir.appendingPathComponent(depthRelPath)
         let confURL    = outputDir.appendingPathComponent(confRelPath)
+        let log = logger
 
         jpegQueue.async {
             // Float32 raster: width*height*4 bytes, row-major, packed (no stride padding).
@@ -310,7 +319,7 @@ final class CaptureManager: NSObject, ObservableObject {
                 do {
                     try bytes.write(to: depthURL, options: .completeFileProtectionUntilFirstUserAuthentication)
                 } catch {
-                    print("[CaptureManager] depth write error: \(depthRelPath): \(error)")
+                    log.info("[CaptureManager] depth write error: \(depthRelPath, privacy: .public): \(error.localizedDescription)")
                     stats.failures += 1
                 }
             }
@@ -320,7 +329,7 @@ final class CaptureManager: NSObject, ObservableObject {
                 do {
                     try bytes.write(to: confURL, options: .completeFileProtectionUntilFirstUserAuthentication)
                 } catch {
-                    print("[CaptureManager] confidence write error: \(confRelPath): \(error)")
+                    log.info("[CaptureManager] confidence write error: \(confRelPath, privacy: .public): \(error.localizedDescription)")
                 }
             }
         }
