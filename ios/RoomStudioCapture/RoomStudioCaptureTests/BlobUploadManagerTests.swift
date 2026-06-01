@@ -881,6 +881,63 @@ final class BlobUploadManagerTests: XCTestCase {
         _ = outputDir
     }
 
+    // MARK: - Background completion handler (D2 AppDelegate seam)
+
+    /// Verifies the store/drain/clear lifecycle for the backgroundSessionCompletionHandler.
+    /// The effect tested here (handler stored → drain called → handler cleared) is the
+    /// seam that AppDelegate.application(_:handleEventsForBackgroundURLSession:completionHandler:)
+    /// relies on; the on-device behaviour (actual OS relaunch, delivery of background events)
+    /// is untestable in simulator and is covered by on-device gates 2 & 3 (decision 0041).
+
+    func test_setBackgroundCompletionHandler_storesHandler() async {
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+        let manager = BlobUploadManager(store: store)
+
+        let beforeSet = await manager.backgroundSessionCompletionHandler
+        XCTAssertNil(beforeSet, "Handler must be nil before set")
+
+        await manager.setBackgroundCompletionHandler { }
+
+        let afterSet = await manager.backgroundSessionCompletionHandler
+        XCTAssertNotNil(afterSet, "Handler must be non-nil after set")
+    }
+
+    func test_drainBackgroundSessionEvents_clearsHandler() async {
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+        let manager = BlobUploadManager(store: store)
+
+        await manager.setBackgroundCompletionHandler { }
+        let beforeDrain = await manager.backgroundSessionCompletionHandler
+        XCTAssertNotNil(beforeDrain, "Pre-condition: handler must be stored before drain")
+
+        await manager.drainBackgroundSessionEvents()
+
+        let afterDrain = await manager.backgroundSessionCompletionHandler
+        XCTAssertNil(afterDrain, "Handler must be cleared after drain so a second drain is a no-op")
+    }
+
+    func test_drainBackgroundSessionEvents_secondDrain_isNoOp() async {
+        // Drain with no stored handler must not crash and must leave handler nil.
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+        let manager = BlobUploadManager(store: store)
+
+        await manager.setBackgroundCompletionHandler { }
+        await manager.drainBackgroundSessionEvents()  // first drain — clears handler
+        await manager.drainBackgroundSessionEvents()  // second drain — must be a no-op
+
+        let afterSecondDrain = await manager.backgroundSessionCompletionHandler
+        XCTAssertNil(afterSecondDrain, "Handler must remain nil after second drain (no-op)")
+    }
+
 }
 
 // MARK: - BlobUploadManager test helpers

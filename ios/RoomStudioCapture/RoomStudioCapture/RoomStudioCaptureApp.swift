@@ -13,6 +13,8 @@ import SwiftUI
 @main
 struct RoomStudioCaptureApp: App {
 
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     init() {
         // Reads GoogleService-Info.plist from the app bundle.
         // Skipped gracefully if the plist is absent (simulator tests without the file).
