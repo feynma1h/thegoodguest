@@ -597,7 +597,25 @@ actor BlobUploadManager {
         }
 
         if !loopGuardEnabled {
-            // STALENESS PATH: reset all non-bundle.pb blobs to .pending, re-enqueue all.
+            // STALENESS PATH — three strictly ordered phases.
+            //
+            // Phase 1: read-only pre-pass. Confirm every non-bundle.pb file exists before
+            // mutating any state or starting any upload. A missing-file abort must leave the
+            // store untouched and start zero URLSession tasks (decision 0043 follow-up).
+            let nonBundleEntries = freshRecord.sessionEntries.filter { $0.relativePath != "bundle.pb" }
+            for entry in nonBundleEntries {
+                let fileURL = outputDir.appendingPathComponent(entry.relativePath)
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    print("[BlobUploadManager] ✗ blob file missing at staleness re-enqueue: \(entry.relativePath)")
+                    // Called once for the first missing path; returns without touching
+                    // blob statuses, the reset record, or any URLSession task.
+                    await onFatalBlobError(bundleId: bundleId, relativePath: entry.relativePath,
+                                           reason: "blob_file_missing_at_staleness_remint")
+                    return
+                }
+            }
+
+            // Phase 2: all files confirmed present — reset statuses and persist.
             let resetRecord = freshRecord.resettingNonBundlePbBlobsToPending()
             do {
                 try await store.save(resetRecord)
@@ -607,17 +625,11 @@ actor BlobUploadManager {
                                        reason: "staleness_reset_persist_failed: \(error)")
                 return
             }
+
+            // Phase 3: enqueue all PUT tasks.
             var reenqueued = 0
             for entry in resetRecord.sessionEntries where entry.relativePath != "bundle.pb" {
                 let fileURL = outputDir.appendingPathComponent(entry.relativePath)
-                // Detection: FileManager.fileExists is the authoritative check for the
-                // blob-missing edge case (App Support dir somehow cleared post-0043).
-                guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                    print("[BlobUploadManager] ✗ blob file missing at staleness re-enqueue: \(entry.relativePath)")
-                    await onFatalBlobError(bundleId: bundleId, relativePath: entry.relativePath,
-                                           reason: "blob_file_missing_at_staleness_remint")
-                    return
-                }
                 guard let sessionURL = URL(string: entry.sessionUri) else { continue }
                 guard
                     let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
