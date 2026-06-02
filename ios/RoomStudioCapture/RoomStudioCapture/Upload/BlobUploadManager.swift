@@ -156,20 +156,12 @@ actor BlobUploadManager {
     /// Store the system-provided background-session completion handler and route through
     /// the fire gate. Decision 0044.
     ///
-    /// Two cases:
-    ///   New round (handlerFired == true): previous round's handler already fired;
-    ///     reset drainObserved/handlerFired so this round starts clean. Handler will
-    ///     fire after drain + last-decrement both trigger.
-    ///   Handler-stored-late (handlerFired == false): drain + last-decrement already
-    ///     completed in this round before AppDelegate's Task hop executed. Do NOT reset
-    ///     drainObserved; fireCompletionHandlerIfReady sees drainObserved true and fires
-    ///     immediately. Handles the AppDelegate race flagged in decision 0044.
+    /// Clears handlerFired so a previously-fired round doesn't block the new one.
+    /// drainObserved is NOT reset here — it is cleared in fireCompletionHandlerIfReady
+    /// at fire-time, so any drain that arrived before this call (AppDelegate Task-hop-
+    /// delayed handler-stored-late path) remains visible and fires the handler immediately.
     func setBackgroundCompletionHandler(_ handler: @escaping () -> Void) {
-        if handlerFired {
-            // Previous round complete — prepare for new delivery round.
-            drainObserved = false
-            handlerFired  = false
-        }
+        handlerFired = false
         backgroundSessionCompletionHandler = handler
         fireCompletionHandlerIfReady()
     }
@@ -197,7 +189,8 @@ actor BlobUploadManager {
               let handler = backgroundSessionCompletionHandler,
               !handlerFired
         else { return }
-        handlerFired = true
+        handlerFired  = true
+        drainObserved = false   // cleared at fire-time so no stale true bleeds into next round
         backgroundSessionCompletionHandler = nil
         handler()
     }
