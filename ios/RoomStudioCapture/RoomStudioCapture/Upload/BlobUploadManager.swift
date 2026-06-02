@@ -84,6 +84,19 @@ actor BlobUploadManager {
     /// Set by the AppDelegate background-session hook; called in urlSessionDidFinishEvents.
     var backgroundSessionCompletionHandler: (() -> Void)?
 
+    // Part B (M2 fix): counts handleTaskCompletion invocations in-flight. Incremented
+    // synchronously in BlobUploadDelegate.didCompleteWithError before Task spawn;
+    // decremented in handleTaskCompletion's defer. OSAllocatedUnfairLock: readable from
+    // any thread without an actor hop. Decision 0044.
+    private let _pendingCount = OSAllocatedUnfairLock<Int>(initialState: 0)
+
+    /// True once urlSessionDidFinishEvents has been observed for the current delivery round.
+    private var drainObserved = false
+
+    /// True once the system completion handler has been called; prevents double-fire from
+    /// the three trigger paths (drain, last-decrement, handler-stored-late). Decision 0044.
+    private var handlerFired = false
+
     // MARK: - Injectable dependencies
 
     /// Returns "now". Inject a fixed Date in tests for deterministic staleness-guard behavior.
@@ -104,6 +117,12 @@ actor BlobUploadManager {
     var _bundleCompleteInvocations: [String] = []
     /// Populated by onFatalBlobError. Tests read via await to confirm routing.
     var _fatalBlobErrorInvocations: [(bundleId: String, relativePath: String, reason: String)] = []
+
+    // Part B test observability — nonisolated so tests can read without await.
+    nonisolated var _pendingCompletionsCount: Int { _pendingCount.withLock { $0 } }
+    /// Actor-isolated; read with await.
+    var _drainObserved: Bool { drainObserved }
+    var _handlerFired: Bool  { handlerFired }
 
     // MARK: - Init
 
@@ -134,15 +153,75 @@ actor BlobUploadManager {
 
     // MARK: - Background session lifecycle
 
+    /// Store the system-provided background-session completion handler and route through
+    /// the fire gate. Decision 0044.
+    ///
+    /// Two cases:
+    ///   New round (handlerFired == true): previous round's handler already fired;
+    ///     reset drainObserved/handlerFired so this round starts clean. Handler will
+    ///     fire after drain + last-decrement both trigger.
+    ///   Handler-stored-late (handlerFired == false): drain + last-decrement already
+    ///     completed in this round before AppDelegate's Task hop executed. Do NOT reset
+    ///     drainObserved; fireCompletionHandlerIfReady sees drainObserved true and fires
+    ///     immediately. Handles the AppDelegate race flagged in decision 0044.
     func setBackgroundCompletionHandler(_ handler: @escaping () -> Void) {
+        if handlerFired {
+            // Previous round complete — prepare for new delivery round.
+            drainObserved = false
+            handlerFired  = false
+        }
         backgroundSessionCompletionHandler = handler
+        fireCompletionHandlerIfReady()
     }
 
     /// Called by BlobUploadDelegate.urlSessionDidFinishEvents(forBackgroundURLSession:).
-    /// Invokes the stored completion handler so the system can suspend the app.
+    /// Sets the drainObserved flag and routes through the fire gate. The stored handler
+    /// fires only after BOTH this flag is true AND the pending-completions counter reaches
+    /// zero — preventing premature suspend before in-flight handleTaskCompletion chains
+    /// (including markBlobUploaded and enqueueBundlePb) have resolved. Decision 0044.
     func drainBackgroundSessionEvents() {
-        backgroundSessionCompletionHandler?()
+        drainObserved = true
+        fireCompletionHandlerIfReady()
+    }
+
+    /// Fire the system-provided completion handler exactly once, iff all three conditions
+    /// are met: (a) urlSessionDidFinishEvents observed, (b) no handleTaskCompletion chains
+    /// in flight (pending count == 0), (c) a handler is stored and has not already fired.
+    ///
+    /// Three trigger sites funnel here — drainBackgroundSessionEvents, the last
+    /// decrementPendingCompletions, and setBackgroundCompletionHandler — so the actor
+    /// serializes all three without a race. Decision 0044.
+    private func fireCompletionHandlerIfReady() {
+        guard drainObserved,
+              _pendingCount.withLock({ $0 }) == 0,
+              let handler = backgroundSessionCompletionHandler,
+              !handlerFired
+        else { return }
+        handlerFired = true
         backgroundSessionCompletionHandler = nil
+        handler()
+    }
+
+    // MARK: - Drain-gate counter (Part B)
+
+    /// Increment the in-flight counter. Call synchronously in the OS delegate callback,
+    /// before spawning the Task, so the count is non-zero when urlSessionDidFinishEvents
+    /// fires. Safe to call from any thread (OSAllocatedUnfairLock). Decision 0044.
+    nonisolated func incrementPendingCompletions() {
+        _pendingCount.withLock { $0 += 1 }
+    }
+
+    /// Decrement the in-flight counter. Called from handleTaskCompletion's defer.
+    /// If the count reaches zero, spawns a Task to call fireCompletionHandlerIfReady —
+    /// the last-decrement trigger path. Decision 0044.
+    nonisolated func decrementPendingCompletions() {
+        let remaining = _pendingCount.withLock { (n: inout Int) -> Int in
+            n -= 1
+            return n
+        }
+        if remaining == 0 {
+            Task { await self.fireCompletionHandlerIfReady() }
+        }
     }
 
     // MARK: - Task description encoding (stable across kill/relaunch)
@@ -241,8 +320,19 @@ actor BlobUploadManager {
     func handleTaskCompletion(
         taskDescription: String?,
         statusCode: Int?,
-        error: Error?
+        error: Error?,
+        backgroundTaskToken: BackgroundTaskHandle? = nil
     ) async {
+        // Single defer covers every exit path (Q2 map, decision 0044):
+        // malformed-desc early return, all onFatalBlobError routing sites, markBlobUploaded
+        // nil/throw, gate-not-fired return, onBundleComplete routing, enqueueReput/task.resume
+        // success, onAllBlobsUploaded→enqueueBundlePb, onSessionExpired all terminals.
+        // Re-enqueue paths (308/5xx/410 success) start a new URLSession task whose own
+        // didCompleteWithError callback acquires its own token and increments its own counter.
+        defer {
+            backgroundTaskToken?.endIfNeeded()
+            decrementPendingCompletions()
+        }
         guard
             let desc = taskDescription,
             let (bundleId, relativePath) = Self.parseTaskDescription(desc)
@@ -697,6 +787,36 @@ actor BlobUploadManager {
     func onFatalBlobError(bundleId: String, relativePath: String, reason: String) async {
         _fatalBlobErrorInvocations.append((bundleId: bundleId, relativePath: relativePath, reason: reason))
         logger.info("[BlobUploadManager] ✗ fatal blob error: \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
+    }
+}
+
+// MARK: - BackgroundTaskHandle
+
+/// Guards a UIBackgroundTask assertion against double-end from two call paths:
+///   (1) the OS expiration handler (fires on the main thread if the background window expires),
+///   (2) the defer in handleTaskCompletion (fires on the actor executor at normal exit).
+///
+/// The end action is injected at creation time; production passes a closure that calls
+/// UIApplication.endBackgroundTask(token). Tests inject a recording closure.
+///
+/// Thread-safety: OSAllocatedUnfairLock ensures exactly-once semantics regardless of
+/// which path fires first. Decision 0044.
+final class BackgroundTaskHandle: @unchecked Sendable {
+    private let _lock = OSAllocatedUnfairLock(initialState: false)
+    private let _endAction: @Sendable () -> Void
+
+    init(_ endAction: @escaping @Sendable () -> Void) {
+        self._endAction = endAction
+    }
+
+    func endIfNeeded() {
+        let shouldEnd = _lock.withLock { (done: inout Bool) -> Bool in
+            guard !done else { return false }
+            done = true
+            return true
+        }
+        guard shouldEnd else { return }
+        _endAction()
     }
 }
 

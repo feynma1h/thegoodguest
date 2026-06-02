@@ -5,17 +5,23 @@
 /// `Task { await BlobUploadManager.shared.someMethod(...) }`.
 ///
 /// urlSession(_:task:didCompleteWithError:)
-///   Maps each completing upload task to BlobUploadManager.handleTaskCompletion.
-///   status code is extracted from task.response as? HTTPURLResponse; may be nil
-///   for network-layer failures (error != nil).
+///   Part A (M1 fix): acquires a UIBackgroundTask assertion synchronously BEFORE the
+///   Task{} spawn. Without this, iOS can suspend the process in the window between
+///   this callback and HOP 1 (the Task→BlobUploadManager actor crossing), starving
+///   the handleTaskCompletion chain. The BackgroundTaskHandle guards against double-end
+///   from both the expiration path and the defer in handleTaskCompletion.
+///
+///   Part B (M2 fix): increments the drain-gate counter synchronously before Task spawn.
+///   The OS guarantees urlSessionDidFinishEvents fires after all didCompleteWithError
+///   callbacks on the same serial delegate queue, so all increments are visible before
+///   drainBackgroundSessionEvents observes the count.
 ///
 /// urlSessionDidFinishEvents(forBackgroundURLSession:)
-///   Signals that all queued events for the session have been delivered. Calls
-///   BlobUploadManager.shared.drainBackgroundSessionEvents(), which invokes the
-///   completion handler stored by the AppDelegate background-session hook so the
-///   system can suspend the app.
+///   Sets drainObserved and calls fireCompletionHandlerIfReady(). The stored system
+///   completion handler fires only after BOTH the drain flag is set AND the pending-
+///   completions counter reaches zero, preventing premature app suspend.
 ///
-///   AppDelegate wiring (not yet added — requires @UIApplicationDelegateAdaptor):
+/// AppDelegate wiring (via @UIApplicationDelegateAdaptor in RoomStudioCaptureApp):
 ///     func application(_:handleEventsForBackgroundURLSession:completionHandler:) {
 ///         if identifier == BlobUploadManager.backgroundSessionIdentifier {
 ///             Task {
@@ -24,9 +30,9 @@
 ///         }
 ///     }
 ///
-/// Decisions: 0040
+/// Decisions: 0040, 0044
 
-import Foundation
+@preconcurrency import UIKit
 
 final class BlobUploadDelegate: NSObject, URLSessionTaskDelegate {
 
@@ -37,15 +43,38 @@ final class BlobUploadDelegate: NSObject, URLSessionTaskDelegate {
         task: URLSessionTask,
         didCompleteWithError error: Error?
     ) {
-        // Extract HTTP status code from the response (nil if error is a network failure).
         let statusCode = (task.response as? HTTPURLResponse)?.statusCode
         let desc = task.taskDescription
 
+        // Part A: acquire the UIBackgroundTask assertion synchronously on the OS delegate
+        // queue, BEFORE the Task{} spawn. UIApplication.beginBackgroundTask is documented
+        // thread-safe despite its @MainActor annotation; @preconcurrency suppresses the
+        // Swift 6 isolation check at this call site.
+        //
+        // var + forward-reference in expiration closure: safe because the OS cannot fire
+        // the expiration handler before beginBackgroundTask returns — the assignment on
+        // the next line always precedes any expiration-handler invocation.
+        var handle: BackgroundTaskHandle!
+        let token = UIApplication.shared.beginBackgroundTask(withName: "blob-upload-completion") {
+            handle.endIfNeeded()
+        }
+        handle = BackgroundTaskHandle {
+            // Token .invalid means beginBackgroundTask failed (e.g. app extension context).
+            // Calling endBackgroundTask(.invalid) is a documented no-op but guard explicitly.
+            guard token != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(token)
+        }
+
+        // Part B: increment before spawn so urlSessionDidFinishEvents never observes
+        // count == 0 while handleTaskCompletion chains are still pending.
+        BlobUploadManager.shared.incrementPendingCompletions()
+
         Task {
             await BlobUploadManager.shared.handleTaskCompletion(
-                taskDescription: desc,
-                statusCode:      statusCode,
-                error:           error
+                taskDescription:     desc,
+                statusCode:          statusCode,
+                error:               error,
+                backgroundTaskToken: handle
             )
         }
     }

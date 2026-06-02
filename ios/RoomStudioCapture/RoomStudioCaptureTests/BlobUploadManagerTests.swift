@@ -13,6 +13,7 @@
 /// Decisions: 0040, 0041
 
 import XCTest
+import os
 @testable import RoomStudioCapture
 
 @MainActor
@@ -936,6 +937,300 @@ final class BlobUploadManagerTests: XCTestCase {
 
         let afterSecondDrain = await manager.backgroundSessionCompletionHandler
         XCTAssertNil(afterSecondDrain, "Handler must remain nil after second drain (no-op)")
+    }
+
+    // MARK: - Group A: drain-gate counter balance (Part B)
+    //
+    // Strategy: call incrementPendingCompletions() before handleTaskCompletion to mirror
+    // production flow (BlobUploadDelegate increments before Task spawn). Verify counter
+    // returns to 0 after handleTaskCompletion's defer fires on every exit path.
+
+    private func makeManagerAndIncrement(
+        paths: [String] = ["frames/000000.jpg", "bundle.pb"]
+    ) async throws -> (BlobUploadManager, UploadSessionStore) {
+        let (manager, store, _) = try await makeManager(paths: paths)
+        return (manager, store)
+    }
+
+    func test_counter_malformedDescription_balances() async throws {
+        let (manager, _) = try await makeManagerAndIncrement()
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: "no-pipe", statusCode: 200, error: nil)
+        XCTAssertEqual(manager._pendingCompletionsCount, 0, "Counter must return to 0 after malformed-desc early return")
+    }
+
+    func test_counter_200Success_gateNotFired_balances() async throws {
+        // Two blobs; first 200 doesn't fire the gate. Counter must still balance.
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"])
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+                                           statusCode: 200, error: nil)
+        XCTAssertEqual(manager._pendingCompletionsCount, 0)
+    }
+
+    func test_counter_200Success_gateFires_balances() async throws {
+        // Single non-bundle blob; 200 fires the gate → onAllBlobsUploaded → enqueueBundlePb. Counter balances.
+        let (manager, _) = try await makeManagerAndIncrement()
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+                                           statusCode: 200, error: nil)
+        XCTAssertEqual(manager._pendingCompletionsCount, 0)
+    }
+
+    func test_counter_bundlePb200_balances() async throws {
+        let (manager, _) = try await makeManagerAndIncrement()
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: taskDesc(relativePath: "bundle.pb"),
+                                           statusCode: 200, error: nil)
+        XCTAssertEqual(manager._pendingCompletionsCount, 0)
+    }
+
+    func test_counter_4xxFatal_balances() async throws {
+        let (manager, _) = try await makeManagerAndIncrement()
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+                                           statusCode: 403, error: nil)
+        XCTAssertEqual(manager._pendingCompletionsCount, 0)
+    }
+
+    func test_counter_410NoRemint_balances() async throws {
+        let (manager, _) = try await makeManagerAndIncrement()
+        // remintProvider nil → routes to onFatalBlobError → defer still fires.
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+                                           statusCode: 410, error: nil)
+        XCTAssertEqual(manager._pendingCompletionsCount, 0)
+    }
+
+    func test_counter_410Remint_success_balances() async throws {
+        let (manager, _) = try await makeManagerAndIncrement()
+        await manager.setRemintProvider { _, _ in
+            [UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.example.com/f0"),
+             UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://fresh.example.com/bp")]
+        }
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+                                           statusCode: 410, error: nil)
+        // 410 re-mint starts a new URLSession task; THIS call's counter must have decremented.
+        XCTAssertEqual(manager._pendingCompletionsCount, 0)
+    }
+
+    func test_counter_networkError_noContext_balances() async throws {
+        let (manager, _) = try await makeManagerAndIncrement()
+        let err = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+                                           statusCode: nil, error: err)
+        XCTAssertEqual(manager._pendingCompletionsCount, 0)
+    }
+
+    func test_counter_multipleParallelCompletions_allBalance() async throws {
+        let paths = ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
+        let (manager, _, _) = try await makeManager(paths: paths)
+        manager.incrementPendingCompletions()
+        manager.incrementPendingCompletions()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await manager.handleTaskCompletion(
+                    taskDescription: self.taskDesc(relativePath: "frames/000000.jpg"),
+                    statusCode: 200, error: nil as Error?
+                )
+            }
+            group.addTask {
+                await manager.handleTaskCompletion(
+                    taskDescription: self.taskDesc(relativePath: "frames/000001.jpg"),
+                    statusCode: 200, error: nil as Error?
+                )
+            }
+        }
+        XCTAssertEqual(manager._pendingCompletionsCount, 0, "All parallel completions must decrement to 0")
+    }
+
+    // MARK: - Group B: drain-gate fire conditions (Part B)
+    //
+    // "spy" helpers below capture call counts through OSAllocatedUnfairLock so the closure
+    // is @Sendable-compatible and safe from the actor executor.
+
+    private func makeSpy() -> (handler: () -> Void, callCount: () -> Int) {
+        let lock = OSAllocatedUnfairLock(initialState: 0)
+        let handler: () -> Void = { lock.withLock { $0 += 1 } }
+        let callCount: () -> Int = { lock.withLock { $0 } }
+        return (handler, callCount)
+    }
+
+    private func makeMinimalManager() -> BlobUploadManager {
+        let storeDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+        return BlobUploadManager(store: store)
+    }
+
+    func test_gate_decrement_withoutDrain_doesNotFireHandler() async {
+        // Counter reaches 0 but drainObserved is false → handler must NOT fire.
+        let manager = makeMinimalManager()
+        let (spy, count) = makeSpy()
+        await manager.setBackgroundCompletionHandler(spy)
+        // Simulate one in-flight completion: increment, then decrement via handleTaskCompletion.
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
+        // Yield so any spawned Task from decrementPendingCompletions can run.
+        await Task.yield()
+        XCTAssertEqual(count(), 0, "Handler must not fire when drainObserved is false")
+        let drainSeen = await manager._drainObserved
+        XCTAssertFalse(drainSeen, "drainObserved must remain false")
+    }
+
+    func test_gate_drain_counterAlreadyZero_firesImmediately() async {
+        // drain arrives when count is already 0 → fires synchronously in drainBackgroundSessionEvents.
+        let manager = makeMinimalManager()
+        let (spy, count) = makeSpy()
+        await manager.setBackgroundCompletionHandler(spy)
+        await manager.drainBackgroundSessionEvents()
+        XCTAssertEqual(count(), 1, "Handler must fire immediately when drain arrives with count == 0")
+        let handlerStored = await manager.backgroundSessionCompletionHandler
+        XCTAssertNil(handlerStored, "Handler must be cleared after firing")
+    }
+
+    func test_gate_lastDecrement_afterDrain_firesHandler() async {
+        // drain arrives first (count still > 0), then last decrement → fires on decrement.
+        let manager = makeMinimalManager()
+        let (spy, count) = makeSpy()
+        await manager.setBackgroundCompletionHandler(spy)
+        manager.incrementPendingCompletions()
+        // Drain arrives while one completion is still in-flight.
+        await manager.drainBackgroundSessionEvents()
+        XCTAssertEqual(count(), 0, "Handler must not fire: count > 0 despite drain observed")
+        // Last handleTaskCompletion completes → counter → 0 → fires.
+        await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
+        await Task.yield()
+        XCTAssertEqual(count(), 1, "Handler must fire after last decrement when drain already observed")
+    }
+
+    func test_gate_multipleDecrements_handlerFiredExactlyOnce() async {
+        // N completions all decrement to 0 concurrently; handler fires exactly once.
+        let manager = makeMinimalManager()
+        let (spy, count) = makeSpy()
+        await manager.setBackgroundCompletionHandler(spy)
+        manager.incrementPendingCompletions()
+        manager.incrementPendingCompletions()
+        await manager.drainBackgroundSessionEvents()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil) }
+            group.addTask { await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil) }
+        }
+        await Task.yield()
+        XCTAssertEqual(count(), 1, "Handler must fire exactly once regardless of concurrency")
+    }
+
+    func test_gate_noHandlerStored_decrementToZero_isNoOp() async {
+        // No completion handler stored; decrement to zero must not crash.
+        let manager = makeMinimalManager()
+        manager.incrementPendingCompletions()
+        await manager.drainBackgroundSessionEvents()
+        await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
+        await Task.yield()
+        let fired = await manager._handlerFired
+        XCTAssertFalse(fired, "handlerFired must remain false when no handler was stored")
+    }
+
+    func test_gate_handlerStoredLate_firesOnce() async {
+        // drain + last decrement both complete BEFORE setBackgroundCompletionHandler is called.
+        // When the handler is stored, fireCompletionHandlerIfReady fires it immediately.
+        let manager = makeMinimalManager()
+        let (spy, count) = makeSpy()
+        manager.incrementPendingCompletions()
+        await manager.drainBackgroundSessionEvents()
+        // Decrement to 0 (no handler yet).
+        await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
+        await Task.yield()
+        XCTAssertEqual(count(), 0, "No handler stored yet — must not have fired")
+        // Handler arrives late.
+        await manager.setBackgroundCompletionHandler(spy)
+        XCTAssertEqual(count(), 1, "Handler must fire immediately on setBackgroundCompletionHandler when drain + count == 0")
+    }
+
+    // MARK: - Group C: BackgroundTaskHandle exactly-once semantics
+
+    func test_backgroundTaskHandle_endCalledOnce_normalPath() async throws {
+        // endIfNeeded called once → end action fires once.
+        var callCount = 0
+        let handle = BackgroundTaskHandle { callCount += 1 }
+        handle.endIfNeeded()
+        XCTAssertEqual(callCount, 1)
+    }
+
+    func test_backgroundTaskHandle_endCalledOnce_doubleEnd() async throws {
+        // endIfNeeded called twice → end action fires exactly once.
+        var callCount = 0
+        let handle = BackgroundTaskHandle { callCount += 1 }
+        handle.endIfNeeded()
+        handle.endIfNeeded()
+        XCTAssertEqual(callCount, 1, "Double endIfNeeded must fire end action exactly once")
+    }
+
+    func test_backgroundTaskHandle_concurrentEnd_exactlyOnce() async {
+        // Two concurrent callers race to end; exactly one must win.
+        let lock = OSAllocatedUnfairLock(initialState: 0)
+        let handle = BackgroundTaskHandle { lock.withLock { $0 += 1 } }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { handle.endIfNeeded() }
+            group.addTask { handle.endIfNeeded() }
+        }
+        XCTAssertEqual(lock.withLock { $0 }, 1, "Concurrent endIfNeeded must fire exactly once")
+    }
+
+    func test_backgroundTaskHandle_endCalledAfterHandleTaskCompletion_200Path() async throws {
+        // Pass a handle to handleTaskCompletion; defer must call endIfNeeded.
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let lock = OSAllocatedUnfairLock(initialState: 0)
+        let handle = BackgroundTaskHandle { lock.withLock { $0 += 1 } }
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 200, error: nil,
+            backgroundTaskToken: handle
+        )
+        XCTAssertEqual(lock.withLock { $0 }, 1, "Defer must end background task on 200 path")
+    }
+
+    func test_backgroundTaskHandle_endCalledAfterHandleTaskCompletion_fatalPath() async throws {
+        // 4xx path → onFatalBlobError (stub) → defer ends the task.
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let lock = OSAllocatedUnfairLock(initialState: 0)
+        let handle = BackgroundTaskHandle { lock.withLock { $0 += 1 } }
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 400, error: nil,
+            backgroundTaskToken: handle
+        )
+        XCTAssertEqual(lock.withLock { $0 }, 1, "Defer must end background task on fatal (4xx) path")
+    }
+
+    func test_backgroundTaskHandle_endCalledAfterHandleTaskCompletion_malformedDesc() async throws {
+        // Malformed taskDescription → early return → defer still ends the task.
+        let manager = makeMinimalManager()
+        let lock = OSAllocatedUnfairLock(initialState: 0)
+        let handle = BackgroundTaskHandle { lock.withLock { $0 += 1 } }
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(
+            taskDescription: "malformed-no-pipe",
+            statusCode: 200, error: nil,
+            backgroundTaskToken: handle
+        )
+        XCTAssertEqual(lock.withLock { $0 }, 1, "Defer must end background task even on malformed-desc early return")
+    }
+
+    func test_backgroundTaskHandle_nilToken_noOp() async throws {
+        // nil token: handleTaskCompletion must not crash and must still decrement counter.
+        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 200, error: nil,
+            backgroundTaskToken: nil
+        )
+        XCTAssertEqual(manager._pendingCompletionsCount, 0, "nil token must still decrement counter")
     }
 
 }
