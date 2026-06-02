@@ -1149,6 +1149,53 @@ final class BlobUploadManagerTests: XCTestCase {
         XCTAssertEqual(count(), 1, "Handler must fire immediately on setBackgroundCompletionHandler when drain + count == 0")
     }
 
+    func test_gate_secondRound_drainBeforeHandlerStore_firesOnce() async {
+        // Regression test for the stranded-handler bug (scenario-a FAIL from the Step 0 analysis).
+        //
+        // Pre-fix behaviour (handlerFired-gated reset in setBackgroundCompletionHandler):
+        //   After round 1 fires, handlerFired=true. Round 2's drain fires and count reaches 0
+        //   before setBackgroundCompletionHandler is called (AppDelegate Task-hop-loses-the-race
+        //   ordering). setBackgroundCompletionHandler sees handlerFired=true → resets
+        //   drainObserved=false → handler is stranded, never fires. FAIL.
+        //
+        // Post-fix behaviour (drainObserved cleared in fireCompletionHandlerIfReady at fire-time):
+        //   After round 1 fires, drainObserved=false (cleared at fire). Round 2's drain sets it
+        //   to true; count reaches 0. setBackgroundCompletionHandler only clears handlerFired;
+        //   drainObserved=true survives → fires immediately. PASS.
+        let manager = makeMinimalManager()
+        let (spy1, count1) = makeSpy()
+        let (spy2, count2) = makeSpy()
+
+        // ── Round 1: complete a full round so handlerFired=true ──────────────────────────────
+        await manager.setBackgroundCompletionHandler(spy1)
+        // No completions in round 1; drain arrives with count already 0.
+        await manager.drainBackgroundSessionEvents()
+        // spy1 must have fired (drain + count==0 + handler stored).
+        XCTAssertEqual(count1(), 1, "Round 1: handler must fire when drain arrives with count==0")
+        let fired1 = await manager._handlerFired
+        let drain1 = await manager._drainObserved
+        // Post-fix: after fire, drainObserved=false and handlerFired=true.
+        XCTAssertTrue(fired1,  "Round 1: handlerFired must be true after handler fires")
+        XCTAssertFalse(drain1, "Round 1: drainObserved must be false after handler fires (cleared at fire-time)")
+
+        // ── Round 2: simulate the AppDelegate-Task-hop-loses-the-race ordering ───────────────
+        // 1. Completions arrive and process.
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
+        // 2. Drain fires (urlSessionDidFinishEvents delivered).
+        await manager.drainBackgroundSessionEvents()
+        // 3. Yield to let any Tasks from decrementPendingCompletions run.
+        await Task.yield()
+        // At this point: drainObserved=true, count=0, but NO handler stored yet.
+        XCTAssertEqual(count2(), 0, "Round 2: handler must not have fired before setBackgroundCompletionHandler is called")
+        // 4. AppDelegate Task hop finally executes — handler arrives late.
+        await manager.setBackgroundCompletionHandler(spy2)
+        // Must fire immediately because drain + count==0 pre-conditions are already met.
+        XCTAssertEqual(count2(), 1, "Round 2: handler must fire immediately on setBackgroundCompletionHandler when drain + count already settled (handler-stored-late in second round)")
+        // spy1 must not have been called again.
+        XCTAssertEqual(count1(), 1, "Round 1 handler must not fire again in round 2")
+    }
+
     // MARK: - Group C: BackgroundTaskHandle exactly-once semantics
 
     func test_backgroundTaskHandle_endCalledOnce_normalPath() async throws {
