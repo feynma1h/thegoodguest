@@ -16,6 +16,7 @@ import Combine
 import Foundation
 import os
 import SwiftProtobuf
+import UIKit
 
 @MainActor
 final class UploadCoordinator: ObservableObject {
@@ -82,6 +83,23 @@ final class UploadCoordinator: ObservableObject {
         }
 
         let bundleId = capture.bundleIdString
+
+        // Acquire UIBackgroundTask assertion before the first await. UploadCoordinator is
+        // @MainActor so UIApplication.shared is directly accessible (no @preconcurrency needed).
+        // var + forward-reference in expiration closure: safe because the OS cannot fire the
+        // expiration handler before beginBackgroundTask returns — the assignment always precedes
+        // any expiration-handler invocation.
+        var handle: BackgroundTaskHandle!
+        let bgToken = UIApplication.shared.beginBackgroundTask(withName: "upload-session-\(bundleId)") {
+            handle.endIfNeeded()
+        }
+        handle = BackgroundTaskHandle {
+            // Token .invalid means beginBackgroundTask failed (e.g. app extension context).
+            guard bgToken != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(bgToken)
+        }
+        // Single defer covers every exit path from here through sessionState = .ready(_).
+        defer { handle.endIfNeeded() }
 
         // Fast path: session record already persisted (e.g. app relaunched mid-upload).
         if let existing = try? await store.load(bundleId: bundleId) {
