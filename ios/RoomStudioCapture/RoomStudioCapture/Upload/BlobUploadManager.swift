@@ -64,6 +64,10 @@ actor BlobUploadManager {
 
     static let backgroundSessionIdentifier = "com.roomstudio.capture.blobUpload"
     static let maxRetries = 3
+    /// Maximum number of cross-launch retry attempts before a DEFERRED-TRANSIENT error
+    /// escalates to a permanent terminal failure. Counted by deferTransientBlobError;
+    /// reset to 0 on any successful blob upload (markingBlobUploaded). Decision 0045.
+    static let maxCrossLaunchRetries = 10
     /// Sessions older than this threshold may have had early blobs GC'd by the
     /// age=1 lifecycle rule. Re-mint rather than finalizing against absent blobs.
     static let stalenessThreshold: TimeInterval = 12 * 3600
@@ -101,6 +105,21 @@ actor BlobUploadManager {
     /// True once the system completion handler has been called; prevents double-fire from
     /// the three trigger paths (drain, last-decrement, handler-stored-late). Decision 0044.
     private var handlerFired = false
+
+    /// Per-process identity token. UUID assigned once at init; never persisted.
+    /// Exists as a stable anchor for the per-launch idempotency semantics in
+    /// deferTransientBlobError (see transientCountedThisLaunch). Decision 0045.
+    private let launchToken: UUID = UUID()
+    /// BundleIds whose permanent fatal error was determined within this process.
+    /// Prevents re-entry into handleTaskCompletion dispatch for cancelled-sibling
+    /// completions that arrive after onFatalBlobError ran. Not persisted: the
+    /// cross-launch guard uses uploadPhase == .failed in the store record.
+    private var failedBundles: Set<String> = []
+    /// BundleIds that have already had their crossLaunchRetryCount bumped within
+    /// this process. Ensures at most one counter increment per bundle per launch,
+    /// preventing a retry storm from exhausting the N=10 cross-launch budget.
+    /// Cleared for a bundle when a blob upload succeeds (progress resets the guard).
+    private var transientCountedThisLaunch: Set<String> = []
 
     // MARK: - Injectable dependencies
 
@@ -382,6 +401,14 @@ actor BlobUploadManager {
             return
         }
 
+        // Re-entry guard: drop completions for bundles whose fatal error already fired this
+        // process. Fires for cancelled-sibling didCompleteWithError callbacks that arrive after
+        // onFatalBlobError ran. Defer (endIfNeeded + decrementPendingCompletions) fires regardless.
+        if failedBundles.contains(bundleId) {
+            logger.info("[BlobUploadManager] ⚑ dropping completion for failed bundle \(bundleId, privacy: .public)/\(relativePath, privacy: .public)")
+            return
+        }
+
         if let error {
             await handleNetworkError(bundleId: bundleId, relativePath: relativePath, error: error)
             return
@@ -402,7 +429,21 @@ actor BlobUploadManager {
             if relativePath == "bundle.pb" { bundlePbEnqueueInFlight.remove(bundleId) }
             await onSessionExpired(bundleId: bundleId)
 
+        case 408, 429:
+            // DEFERRED-TRANSIENT: transient GCS rate-limit (429) or request-timeout (408).
+            // Retry-After honoring is a pre-launch gap (0038) — not built here.
+            // Load record for counter. If no record, route to fatal (can't track budget).
+            if let record = try? await store.load(bundleId: bundleId) {
+                await deferTransientBlobError(bundleId: bundleId, relativePath: relativePath,
+                                              reason: "http_\(statusCode!)", record: record)
+            } else {
+                await onFatalBlobError(bundleId: bundleId, relativePath: relativePath,
+                                       reason: "http_\(statusCode!)_no_record")
+            }
+
         case let code where (400..<500).contains(code ?? -1):
+            // TERMINAL: deterministic 4xx (400/401/403/404/409/422/…).
+            // 410 is handled by the case above; 408/429 are handled by the case above.
             await onFatalBlobError(
                 bundleId: bundleId, relativePath: relativePath,
                 reason: "http_\(code!)"
@@ -444,6 +485,10 @@ actor BlobUploadManager {
                 return
             }
             logger.debug("[BlobUploadManager] ✓ uploaded \(relativePath, privacy: .public) for bundle \(bundleId, privacy: .public)")
+            // Progress: clear per-launch idempotency guard so a subsequent transient error
+            // in the same launch can re-count. crossLaunchRetryCount is reset to 0 by
+            // markingBlobUploaded (via markBlobUploaded → markingBlobUploaded). Decision 0045.
+            transientCountedThisLaunch.remove(bundleId)
 
             if record.allNonBundlePbBlobsUploaded {
                 // Phase-1 complete. Hand off to bundle.pb finalizer.
@@ -459,8 +504,10 @@ actor BlobUploadManager {
 
     private func handleResumeIncomplete(bundleId: String, relativePath: String) async {
         guard var ctx = contexts[bundleId] else {
-            await onFatalBlobError(bundleId: bundleId, relativePath: relativePath,
-                                   reason: "308_no_context")
+            // DEFERRED-INTERRUPTED: context absent because this process was killed/relaunched.
+            // The persisted record preserves the session URI; relaunch re-enqueues from the
+            // on-disk record. No counter bump (this is a process-restart artifact, not a failure).
+            logger.info("[BlobUploadManager] ↩ deferred (no-context): \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=308_no_context")
             return
         }
         if ctx.reputtedPaths.contains(relativePath) {
@@ -495,9 +542,11 @@ actor BlobUploadManager {
         networkError: Error? = nil
     ) async {
         guard var ctx = contexts[bundleId] else {
+            // DEFERRED-INTERRUPTED: context absent because this process was killed/relaunched.
+            // Blob stays .pending; relaunch re-enqueues from the persisted record. No counter bump.
             let reason = networkError.map { "network_no_context: \($0)" }
                 ?? "http_\(statusCode)_no_context"
-            await onFatalBlobError(bundleId: bundleId, relativePath: relativePath, reason: reason)
+            logger.info("[BlobUploadManager] ↩ deferred (no-context): \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
             return
         }
         let attempts = ctx.retryCount[relativePath, default: 0]
@@ -505,7 +554,14 @@ actor BlobUploadManager {
             contexts[bundleId] = ctx
             let reason = networkError.map { "network_exhausted: \($0)" }
                 ?? "http_\(statusCode)_exhausted"
-            await onFatalBlobError(bundleId: bundleId, relativePath: relativePath, reason: reason)
+            // DEFERRED-TRANSIENT: in-process retries exhausted. Bump cross-launch counter;
+            // blob stays .pending. Relaunch path re-enqueues via enqueuePhasOneBlobs.
+            if let record = try? await store.load(bundleId: bundleId) {
+                await deferTransientBlobError(bundleId: bundleId, relativePath: relativePath,
+                                              reason: reason, record: record)
+            } else {
+                await onFatalBlobError(bundleId: bundleId, relativePath: relativePath, reason: reason)
+            }
             return
         }
         ctx.retryCount[relativePath] = attempts + 1
@@ -729,8 +785,10 @@ actor BlobUploadManager {
             freshEntries = try await mintFn(bundleId, manifestEntries)
         } catch {
             logger.info("[BlobUploadManager] ⚠ re-mint failed for \(bundleId, privacy: .public): \(error.localizedDescription)")
-            await onFatalBlobError(bundleId: bundleId, relativePath: "*",
-                                   reason: "remint_failed: \(error)")
+            // DEFERRED-TRANSIENT: transient network/server failure from /upload_session.
+            // Blobs stay .pending; relaunch retries the full onSessionExpired path.
+            await deferTransientBlobError(bundleId: bundleId, relativePath: "*",
+                                          reason: "remint_failed: \(error)", record: record)
             return
         }
 
@@ -757,8 +815,12 @@ actor BlobUploadManager {
             try await store.save(freshRecord)
         } catch {
             logger.info("[BlobUploadManager] ⚠ failed to persist fresh record for \(bundleId, privacy: .public): \(error.localizedDescription)")
-            await onFatalBlobError(bundleId: bundleId, relativePath: "*",
-                                   reason: "remint_persist_failed: \(error)")
+            // DEFERRED-TRANSIENT: transient disk/IO error persisting fresh URIs.
+            // freshRecord has the correct new URIs but wasn't saved; blobs stay .pending.
+            // If the counter bump save also fails (same IO error), count is not advanced —
+            // tolerable: conservative, allows one extra attempt on the next launch.
+            await deferTransientBlobError(bundleId: bundleId, relativePath: "*",
+                                          reason: "remint_persist_failed: \(error)", record: freshRecord)
             return
         }
 
@@ -802,8 +864,10 @@ actor BlobUploadManager {
                 try await store.save(resetRecord)
             } catch {
                 logger.info("[BlobUploadManager] ⚠ failed to persist reset record for \(bundleId, privacy: .public): \(error.localizedDescription)")
-                await onFatalBlobError(bundleId: bundleId, relativePath: "*",
-                                       reason: "staleness_reset_persist_failed: \(error)")
+                // DEFERRED-TRANSIENT: transient disk/IO error persisting staleness-reset record.
+                // freshRecord is the last successfully persisted version; bump its counter.
+                await deferTransientBlobError(bundleId: bundleId, relativePath: "*",
+                                              reason: "staleness_reset_persist_failed: \(error)", record: freshRecord)
                 return
             }
 
@@ -868,11 +932,89 @@ actor BlobUploadManager {
         logger.info("[BlobUploadManager] TODO onBundleComplete(\(bundleId, privacy: .public)) — P5 not yet built")
     }
 
-    /// UNBUILT — fatal blob error handler.
-    /// Future unit: mark bundle failed in the store, surface to UI / FCM.
+    // MARK: - Terminal fatal handler (P5 unit b)
+
+    /// Permanent, unrecoverable error for a bundle. Marks the record .failed in the store,
+    /// inserts the bundleId into failedBundles (re-entry guard), cancels sibling URLSession
+    /// tasks for this bundle, and cleans up in-memory state.
+    ///
+    /// Classification: called ONLY for TERMINAL errors (deterministic failures that retry
+    /// cannot recover: http_400/401/403/404, 308_persistent, empty_bundle_pb, …).
+    /// For DEFERRED-TRANSIENT (exhausted retries) use deferTransientBlobError.
+    /// For DEFERRED-INTERRUPTED (no-context, relaunch-recoverable) log inline, return.
+    ///
+    /// Decision 0045 (Fork C = R, unit b).
     func onFatalBlobError(bundleId: String, relativePath: String, reason: String) async {
         _fatalBlobErrorInvocations.append((bundleId: bundleId, relativePath: relativePath, reason: reason))
-        logger.info("[BlobUploadManager] ✗ fatal blob error: \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
+        logger.info("[BlobUploadManager] ✗ fatal: \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
+
+        // 1. Set in-process guard FIRST: cancelled-sibling completions that arrive after this
+        //    return are dropped by the re-entry guard in handleTaskCompletion.
+        failedBundles.insert(bundleId)
+
+        // 2. Clean up in-memory state so no dangling references remain.
+        bundlePbEnqueueInFlight.remove(bundleId)
+        contexts.removeValue(forKey: bundleId)
+        transientCountedThisLaunch.remove(bundleId)
+
+        // 3. Persist .failed phase + reason so the relaunch path (unit a) skips this bundle.
+        if let current = try? await store.load(bundleId: bundleId) {
+            try? await store.save(current.markingPhase(.failed, failureReason: reason))
+        }
+
+        // 4. Cancel sibling URLSession tasks for this bundle.
+        //    .cancel() fires didCompleteWithError(NSURLErrorCancelled); the re-entry guard
+        //    (step 1, already set) drops those callbacks without re-entering dispatch.
+        let tasks = await getAllTasks()
+        for task in tasks {
+            guard let parsed = Self.parseTaskDescription(task.taskDescription ?? "") else { continue }
+            if parsed.bundleId == bundleId { task.cancel() }
+        }
+
+        // TODO P5: surface terminal failure to UI / FCM.
+    }
+
+    // MARK: - Deferred transient error handler (P5 unit b)
+
+    /// Cross-launch retry budgeting for DEFERRED-TRANSIENT errors. Called when an error is
+    /// transient (network/server/IO) but in-process retries are exhausted, so recovery must
+    /// wait for the next launch.
+    ///
+    /// Per-launch idempotent bump: at most one crossLaunchRetryCount increment per bundle
+    /// per process launch (transientCountedThisLaunch guard). Prevents a retry storm within
+    /// one launch from exhausting the N=10 cross-launch budget in a single session.
+    ///
+    /// Bound enforcement: if crossLaunchRetryCount would exceed maxCrossLaunchRetries,
+    /// escalates to onFatalBlobError (permanent failure). The bundle is then marked .failed.
+    ///
+    /// On normal (non-escalating) deferral: saves record with incremented counter, leaves
+    /// all blob statuses unchanged (.pending). The relaunch path (unit a) re-enqueues from
+    /// the saved record on the next launch.
+    ///
+    /// Decision 0045 (Fork C = R, unit b).
+    private func deferTransientBlobError(
+        bundleId: String,
+        relativePath: String,
+        reason: String,
+        record: UploadSessionRecord
+    ) async {
+        // Per-launch idempotent-bump guard: only count one transient deferral per bundle per launch.
+        if transientCountedThisLaunch.contains(bundleId) {
+            logger.info("[BlobUploadManager] ↩ deferred (transient, already counted this launch): \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
+            // No counter bump. Blob stays .pending. Relaunch path re-enqueues from stored record.
+            return
+        }
+        let newCount = record.crossLaunchRetryCount + 1
+        guard newCount <= Self.maxCrossLaunchRetries else {
+            logger.info("[BlobUploadManager] ⚑ cross-launch retry bound (\(Self.maxCrossLaunchRetries)) exceeded for \(bundleId, privacy: .public) — escalating to fatal")
+            await onFatalBlobError(bundleId: bundleId, relativePath: relativePath, reason: reason)
+            return
+        }
+        let bumped = record.bumpingCrossLaunchRetryCount()
+        try? await store.save(bumped)
+        transientCountedThisLaunch.insert(bundleId)
+        logger.info("[BlobUploadManager] ↩ deferred (transient, attempt \(newCount)/\(Self.maxCrossLaunchRetries)): \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
+        // Blob stays .pending in blobStatuses. Relaunch path re-enqueues via enqueuePhasOneBlobs.
     }
 }
 

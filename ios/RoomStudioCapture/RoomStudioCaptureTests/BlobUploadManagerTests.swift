@@ -614,9 +614,13 @@ final class BlobUploadManagerTests: XCTestCase {
                       "reason must be remint_returned_stale_uris; got: \(fatal.map(\.reason))")
     }
 
-    func test_onSessionExpired_mintFailure_routesToFatalError() async throws {
-        // re-mint throws → onFatalBlobError.
-        let (manager, _, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+    func test_onSessionExpired_mintFailure_defersToCrossLaunchRetry() async throws {
+        // remint_failed is DEFERRED-TRANSIENT (decision 0045 unit b): transient network/server
+        // error from /upload_session. Must NOT route to onFatalBlobError. Instead:
+        //   • blob stays .pending (uploadPhase unchanged)
+        //   • crossLaunchRetryCount bumped to 1
+        //   • relaunch path retries on next launch
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.setRemintProvider { _, _ in
             throw UploadSessionError.serverError(503, "unavailable")
         }
@@ -624,9 +628,14 @@ final class BlobUploadManagerTests: XCTestCase {
         await manager.onSessionExpired(bundleId: "test-bundle")
 
         let fatal = await manager._fatalBlobErrorInvocations
-        XCTAssertFalse(fatal.isEmpty, "Re-mint failure must route to onFatalBlobError")
-        XCTAssertTrue(fatal.allSatisfy { $0.reason.contains("remint_failed") },
-                      "Reason must be remint_failed; got: \(fatal.map(\.reason))")
+        XCTAssertTrue(fatal.isEmpty,
+                      "remint_failed must route to deferred (not fatal); got: \(fatal.map(\.reason))")
+
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertNotEqual(record.uploadPhase, .failed,
+                          "remint_failed must NOT mark bundle .failed")
+        XCTAssertEqual(record.crossLaunchRetryCount, 1,
+                       "remint_failed must bump crossLaunchRetryCount to 1")
     }
 
     // MARK: - Staleness re-upload: Check-3 (all blobs reset + re-enqueued)
@@ -1440,6 +1449,420 @@ final class BlobUploadManagerTests: XCTestCase {
                        "Setting .complete phase must not alter bundle.pb blobStatus")
         XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .uploaded,
                        "Frame blob status must remain .uploaded after bundle.pb success")
+    }
+
+    // MARK: - P5 unit (b): onFatalBlobError reclassification (decision 0045)
+
+    // MARK: TERMINAL routing
+
+    func test_400_terminal_marksFailedPhaseInStore() async throws {
+        // 400 → TERMINAL → onFatalBlobError → uploadPhase == .failed persisted.
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 400, error: nil
+        )
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(record.uploadPhase, .failed, "400 must mark bundle .failed")
+        XCTAssertEqual(record.failureReason, "http_400", "failureReason must be set to http_400")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertFalse(fatal.isEmpty, "400 must route through onFatalBlobError")
+    }
+
+    func test_308persistent_terminal_marksFailedPhaseInStore() async throws {
+        // 308_persistent → TERMINAL → .failed.
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        await manager.setGetAllTasksProvider { [] }
+        let record = try await store.load(bundleId: "test-bundle")!
+        try await manager.enqueuePhasOneBlobs(record: record)
+
+        // First 308 → reputtedPaths gains entry (no fatal yet).
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 308, error: nil
+        )
+        // Second 308 for same path → 308_persistent → TERMINAL.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 308, error: nil
+        )
+        let stored = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(stored.uploadPhase, .failed, "308_persistent must mark bundle .failed")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.contains { $0.reason == "308_persistent" },
+                      "Reason must be 308_persistent; got: \(fatal.map(\.reason))")
+    }
+
+    func test_bundlePbReadFailed_terminal_marksFailedPhaseInStore() async throws {
+        // bundle_pb_read_failed → TERMINAL → .failed.
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        let outputDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
+        // Create frames blob but NOT bundle.pb — its absence causes resourceValues to throw.
+        let framePath = outputDir.appendingPathComponent("frames/000000.jpg")
+        try FileManager.default.createDirectory(at: framePath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([0x00]).write(to: framePath)
+
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let entries = makeSessionEntries(paths)
+        let record = UploadSessionRecord(
+            bundleId: "test-bundle",
+            tierRawValue: 1,
+            clientMintTimestamp: Date(),
+            sessionEntries: entries,
+            manifestPaths: paths,
+            outputDir: outputDir
+        )
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000000.jpg")
+        // Save record with frame uploaded so the gate fires.
+        let uploaded = record.markingBlobUploaded("frames/000000.jpg")
+        try await store.save(uploaded)
+
+        let manager = BlobUploadManager(store: store)
+        await manager.setGetAllTasksProvider { [] }
+        // Trigger onAllBlobsUploaded → enqueueBundlePb → resourceValues throws (file missing).
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: uploaded)
+
+        let stored = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(stored.uploadPhase, .failed,
+                       "bundle_pb_read_failed must mark bundle .failed")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.contains { $0.reason.hasPrefix("bundle_pb_read_failed") },
+                      "Reason must start with bundle_pb_read_failed; got: \(fatal.map(\.reason))")
+    }
+
+    // MARK: TERMINAL → re-entry guard
+
+    func test_terminal_reentryGuardDropsSubsequentCompletions() async throws {
+        // After a fatal, subsequent handleTaskCompletion calls for the same bundle are
+        // dropped by the re-entry guard (failedBundles set). Fatal count stays at 1.
+        let (manager, store, _) = try await makeManager(
+            paths: ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
+        )
+        // Fatal on first blob.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 400, error: nil
+        )
+        let fatalCount1 = await manager._fatalBlobErrorInvocations.count
+        XCTAssertEqual(fatalCount1, 1)
+
+        // Subsequent completion for the same bundle → re-entry guard drops it.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000001.jpg"),
+            statusCode: 200, error: nil
+        )
+        let fatalCount2 = await manager._fatalBlobErrorInvocations.count
+        XCTAssertEqual(fatalCount2, 1, "Re-entry guard must not increase fatal count")
+
+        // The second blob must NOT be marked uploaded (dropped before markBlobUploaded).
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(record.blobStatuses["frames/000001.jpg"], .pending,
+                       "Re-entry guard must prevent markBlobUploaded from running")
+    }
+
+    func test_terminal_reentryGuardDrop_drainCounterDecrement() async throws {
+        // Re-entry guard drop must still decrement the drain counter (defer fires on return).
+        let (manager, _, _) = try await makeManager(
+            paths: ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
+        )
+        // Fatal.
+        manager.incrementPendingCompletions()
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 400, error: nil
+        )
+        XCTAssertEqual(manager._pendingCompletionsCount, 0)
+
+        // Simulate a cancelled-sibling completion arriving.
+        manager.incrementPendingCompletions()
+        let cancelErr = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000001.jpg"),
+            statusCode: nil, error: cancelErr
+        )
+        XCTAssertEqual(manager._pendingCompletionsCount, 0,
+                       "Re-entry guard return must still decrement drain counter")
+    }
+
+    // MARK: DEFERRED-INTERRUPTED: no-context re-routes (no counter, no .failed)
+
+    func test_308noContext_deferredInterrupted_doesNotFatal_doesNotBumpCounter() async throws {
+        // 308 arrives with no in-memory context (killed/relaunched process).
+        // Must NOT route to onFatalBlobError; blob stays .pending; counter stays 0.
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        // Do NOT call enqueuePhasOneBlobs → contexts[bundleId] is nil.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 308, error: nil
+        )
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(record.uploadPhase, .uploadingBlobs,
+                       "308_no_context must NOT mark bundle .failed")
+        XCTAssertEqual(record.crossLaunchRetryCount, 0,
+                       "308_no_context must NOT bump crossLaunchRetryCount")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "308_no_context must not route to onFatalBlobError")
+    }
+
+    func test_networkNoContext_deferredInterrupted_doesNotFatal_doesNotBumpCounter() async throws {
+        // Network error with no context (killed/relaunched).
+        // DEFERRED-INTERRUPTED: inline log, no counter, no .failed.
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let err = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+        // No enqueuePhasOneBlobs → no context.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: nil, error: err
+        )
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(record.uploadPhase, .uploadingBlobs,
+                       "network_no_context must NOT mark bundle .failed")
+        XCTAssertEqual(record.crossLaunchRetryCount, 0,
+                       "network_no_context must NOT bump crossLaunchRetryCount")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "network_no_context must not route to onFatalBlobError")
+    }
+
+    // MARK: DEFERRED-TRANSIENT: counter bump (408, 429, exhausted, remint variants)
+
+    func test_408_deferredTransient_bumpsCounter_notFatal() async throws {
+        // 408 → DEFERRED-TRANSIENT (transient GCS timeout).
+        // crossLaunchRetryCount bumped to 1; uploadPhase NOT .failed.
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 408, error: nil
+        )
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(record.uploadPhase, .uploadingBlobs, "408 must NOT mark bundle .failed")
+        XCTAssertEqual(record.crossLaunchRetryCount, 1, "408 must bump crossLaunchRetryCount")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "408 must route to deferred, not fatal")
+    }
+
+    func test_429_deferredTransient_bumpsCounter_notFatal() async throws {
+        // 429 → DEFERRED-TRANSIENT (transient GCS rate limit).
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 429, error: nil
+        )
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(record.uploadPhase, .uploadingBlobs, "429 must NOT mark bundle .failed")
+        XCTAssertEqual(record.crossLaunchRetryCount, 1, "429 must bump crossLaunchRetryCount")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "429 must route to deferred, not fatal")
+    }
+
+    func test_networkExhausted_deferredTransient_bumpsCounter_notFatal() async throws {
+        // network_exhausted (in-process maxRetries exhausted) → DEFERRED-TRANSIENT.
+        // Requires a context to exist (enqueuePhasOneBlobs) and maxRetries failures.
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        await manager.setGetAllTasksProvider { [] }
+        let record = try await store.load(bundleId: "test-bundle")!
+        try await manager.enqueuePhasOneBlobs(record: record)
+
+        let err = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+        // Drive maxRetries network failures → on the (maxRetries+1)th error, routes deferred.
+        for _ in 0...BlobUploadManager.maxRetries {
+            await manager.handleTaskCompletion(
+                taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+                statusCode: nil, error: err
+            )
+        }
+        let stored = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(stored.uploadPhase, .uploadingBlobs,
+                       "network_exhausted must NOT mark bundle .failed")
+        XCTAssertEqual(stored.crossLaunchRetryCount, 1,
+                       "network_exhausted must bump crossLaunchRetryCount to 1")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "network_exhausted must route to deferred, not fatal")
+    }
+
+    // MARK: Per-launch idempotent bump
+
+    func test_transient_perLaunchIdempotentBump_sameBundle_countsOnce() async throws {
+        // Two remint_failed events in the same launch for the same bundle.
+        // crossLaunchRetryCount must advance exactly once (per-launch idempotent bump).
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        await manager.setRemintProvider { _, _ in
+            throw UploadSessionError.serverError(503, "unavailable")
+        }
+
+        // First onSessionExpired → remint_failed → deferTransient → count 0→1.
+        await manager.onSessionExpired(bundleId: "test-bundle")
+        let after1 = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(after1.crossLaunchRetryCount, 1,
+                       "First transient in launch must bump count to 1")
+
+        // Second onSessionExpired → remint_failed → transientCountedThisLaunch hit → no bump.
+        await manager.onSessionExpired(bundleId: "test-bundle")
+        let after2 = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(after2.crossLaunchRetryCount, 1,
+                       "Second same-launch transient must NOT bump count (idempotent)")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "Idempotent deferred must not route to fatal")
+    }
+
+    func test_transient_progressResetsCountedSet_allowsRebump() async throws {
+        // Blob success resets crossLaunchRetryCount (via markingBlobUploaded → 0) AND
+        // clears transientCountedThisLaunch. A subsequent transient in the same launch can re-count.
+        let paths = ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        await manager.setRemintProvider { _, _ in
+            throw UploadSessionError.serverError(503, "unavailable")
+        }
+
+        // Transient deferral → count 0→1, bundle is in transientCountedThisLaunch.
+        await manager.onSessionExpired(bundleId: "test-bundle")
+        let afterDefer = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(afterDefer.crossLaunchRetryCount, 1, "Pre-condition: count must be 1")
+
+        // Blob success → count reset to 0, transientCountedThisLaunch cleared.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 200, error: nil
+        )
+        let afterSuccess = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(afterSuccess.crossLaunchRetryCount, 0,
+                       "Blob success must reset crossLaunchRetryCount to 0")
+
+        // Now another transient in the same launch → counted-set was cleared → can re-count.
+        await manager.onSessionExpired(bundleId: "test-bundle")
+        let afterRebump = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(afterRebump.crossLaunchRetryCount, 1,
+                       "After progress reset, transient can re-count in same launch (→ 1)")
+    }
+
+    // MARK: Counter bound → escalate to fatal
+
+    func test_transient_atBound_escalatesToFatal() async throws {
+        // Record starts at crossLaunchRetryCount == maxCrossLaunchRetries (10).
+        // Next transient → newCount == 11 > 10 → escalates to onFatalBlobError → .failed.
+        let storeDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        let outputDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        for path in paths {
+            let fileURL = outputDir.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data([0x00, 0x01]).write(to: fileURL)
+        }
+        let entries = makeSessionEntries(paths)
+        var record = UploadSessionRecord(
+            bundleId: "test-bundle",
+            tierRawValue: 1,
+            clientMintTimestamp: Date(),
+            sessionEntries: entries,
+            manifestPaths: paths,
+            outputDir: outputDir
+        )
+        // Bump to exactly the bound.
+        for _ in 0..<BlobUploadManager.maxCrossLaunchRetries {
+            record = record.bumpingCrossLaunchRetryCount()
+        }
+        XCTAssertEqual(record.crossLaunchRetryCount, BlobUploadManager.maxCrossLaunchRetries,
+                       "Pre-condition: count must equal bound")
+        try await store.save(record)
+
+        // Fresh manager (new process — no transientCountedThisLaunch entry for this bundle).
+        let manager = BlobUploadManager(store: store)
+        await manager.setRemintProvider { _, _ in
+            throw UploadSessionError.serverError(503, "unavailable")
+        }
+
+        // Transient: newCount = maxCrossLaunchRetries + 1 > max → escalate to fatal.
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        let stored = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(stored.uploadPhase, .failed,
+                       "Transient at bound must escalate and mark bundle .failed")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertFalse(fatal.isEmpty, "Transient at bound must route through onFatalBlobError")
+    }
+
+    func test_transient_atBoundMinusOne_defers_notTerminal() async throws {
+        // Record at maxCrossLaunchRetries - 1 → next transient bumps to max (deferred, not fatal).
+        let storeDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        let outputDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        for path in paths {
+            let fileURL = outputDir.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data([0x00, 0x01]).write(to: fileURL)
+        }
+        let entries = makeSessionEntries(paths)
+        var record = UploadSessionRecord(
+            bundleId: "test-bundle",
+            tierRawValue: 1,
+            clientMintTimestamp: Date(),
+            sessionEntries: entries,
+            manifestPaths: paths,
+            outputDir: outputDir
+        )
+        // Bump to bound - 1.
+        for _ in 0..<(BlobUploadManager.maxCrossLaunchRetries - 1) {
+            record = record.bumpingCrossLaunchRetryCount()
+        }
+        try await store.save(record)
+
+        let manager = BlobUploadManager(store: store)
+        await manager.setRemintProvider { _, _ in
+            throw UploadSessionError.serverError(503, "unavailable")
+        }
+
+        // Transient: newCount = max (still within bound) → deferred, NOT fatal.
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        let stored = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(stored.crossLaunchRetryCount, BlobUploadManager.maxCrossLaunchRetries,
+                       "Count at bound-1 → bump to bound (deferred)")
+        XCTAssertNotEqual(stored.uploadPhase, .failed,
+                          "Count at bound-1 must defer, not escalate to fatal")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty,
+                      "Count at bound-1 → deferred, not fatal")
+    }
+
+    // MARK: Counter reset on progress
+
+    func test_progressResetsCounter() async throws {
+        // After a blob upload succeeds, crossLaunchRetryCount is reset to 0
+        // via markingBlobUploaded (which passes crossLaunchRetryCount: 0 to the private init).
+        let (manager, store, _) = try await makeManager(
+            paths: ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
+        )
+
+        // Plant count == 3 in the store.
+        var record = try await store.load(bundleId: "test-bundle")!
+        for _ in 0..<3 { record = record.bumpingCrossLaunchRetryCount() }
+        try await store.save(record)
+
+        // Blob 200 → markBlobUploaded → crossLaunchRetryCount reset to 0.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 200, error: nil
+        )
+        let after = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(after.crossLaunchRetryCount, 0,
+                       "Blob success must reset crossLaunchRetryCount to 0")
+        XCTAssertEqual(after.blobStatuses["frames/000000.jpg"], .uploaded,
+                       "Blob status must be .uploaded after success")
     }
 
 }

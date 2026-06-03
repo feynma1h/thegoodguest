@@ -246,6 +246,80 @@ final class UploadBlobStateTests: XCTestCase {
                        "Legacy record with all frame blobs uploaded must decode as .uploadingBundlePb")
     }
 
+    func test_markingPhase_preservesCrossLaunchRetryCount() {
+        // Functional mutations via markingPhase must preserve crossLaunchRetryCount.
+        let base = makeRecord(paths: ["frames/000000.jpg", "bundle.pb"])
+        // Plant a non-zero count via bumpingCrossLaunchRetryCount.
+        let bumped = base.bumpingCrossLaunchRetryCount().bumpingCrossLaunchRetryCount()
+        XCTAssertEqual(bumped.crossLaunchRetryCount, 2, "Two bumps must yield count == 2")
+
+        let phaseChanged = bumped.markingPhase(.uploadingBundlePb)
+        XCTAssertEqual(phaseChanged.crossLaunchRetryCount, 2,
+                       "markingPhase must preserve crossLaunchRetryCount")
+        XCTAssertEqual(phaseChanged.uploadPhase, .uploadingBundlePb)
+    }
+
+    func test_bumpingCrossLaunchRetryCount_incrementsAndPreservesOtherFields() {
+        let base   = makeRecord(paths: ["frames/000000.jpg", "bundle.pb"])
+        let bumped = base.bumpingCrossLaunchRetryCount()
+        XCTAssertEqual(bumped.crossLaunchRetryCount, 1)
+        XCTAssertEqual(bumped.bundleId,         base.bundleId)
+        XCTAssertEqual(bumped.uploadPhase,      base.uploadPhase)
+        XCTAssertEqual(bumped.sessionEntries.count, base.sessionEntries.count)
+        XCTAssertEqual(bumped.blobStatuses,     base.blobStatuses)
+    }
+
+    func test_markingBlobUploaded_resetsCrossLaunchRetryCount() {
+        // markingBlobUploaded must reset crossLaunchRetryCount to 0 (reset on progress).
+        var record = makeRecord(paths: ["frames/000000.jpg", "bundle.pb"])
+        record = record.bumpingCrossLaunchRetryCount().bumpingCrossLaunchRetryCount()
+        XCTAssertEqual(record.crossLaunchRetryCount, 2, "Pre-condition: count must be 2")
+
+        let updated = record.markingBlobUploaded("frames/000000.jpg")
+        XCTAssertEqual(updated.crossLaunchRetryCount, 0,
+                       "markingBlobUploaded must reset crossLaunchRetryCount to 0")
+        XCTAssertEqual(updated.blobStatuses["frames/000000.jpg"], .uploaded)
+    }
+
+    func test_crossLaunchRetryCount_codableRoundTrip() throws {
+        let base   = makeRecord(paths: ["frames/000000.jpg", "bundle.pb"])
+        let bumped = base.bumpingCrossLaunchRetryCount().bumpingCrossLaunchRetryCount()
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let data    = try encoder.encode(bumped)
+        let decoded = try decoder.decode(UploadSessionRecord.self, from: data)
+
+        XCTAssertEqual(decoded.crossLaunchRetryCount, 2,
+                       "crossLaunchRetryCount must survive encode/decode round-trip")
+    }
+
+    func test_crossLaunchRetryCount_legacyDecode_defaultsToZero() throws {
+        // Records written before unit (b) have no crossLaunchRetryCount key.
+        // Must decode to 0 (no retries charged).
+        let legacyJSON = """
+        {
+            "bundleId": "legacy-bundle",
+            "tierRawValue": 1,
+            "clientMintTimestamp": "2026-05-31T00:00:00Z",
+            "sessionEntries": [
+                {"relative_path": "frames/000000.jpg", "session_uri": "https://example.com/f0"},
+                {"relative_path": "bundle.pb",         "session_uri": "https://example.com/bp"}
+            ],
+            "manifestPaths": ["frames/000000.jpg", "bundle.pb"]
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let record = try decoder.decode(UploadSessionRecord.self, from: Data(legacyJSON.utf8))
+
+        XCTAssertEqual(record.crossLaunchRetryCount, 0,
+                       "Legacy record missing crossLaunchRetryCount key must decode as 0")
+    }
+
     func test_uploadPhase_legacyDecode_neverComplete() throws {
         // Even if blobStatuses shows all blobs uploaded (including bundle.pb), the conservative
         // default must NEVER produce .complete for a record lacking the uploadPhase key.
