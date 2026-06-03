@@ -1,0 +1,179 @@
+# 0045 — P5 relaunch-recovery cluster design (c shipped, b/a scoped)
+
+**Date:** 2026-06-03
+**Status:** Decided
+
+## Context
+
+Gate-2b (decision 0044) confirmed the root cause: when the app is force-quit or
+OS-killed after bundle.pb is enqueued but before it completes, the recovery path is
+unreachable on relaunch. The sole existing trigger (`ContentView.onChange(of:
+capture.bundlePath)`) fires only when a new capture stops — not on a bare reopen.
+The result is a stranded bundle: `bundle.pb` status `.pending`, record on disk, but
+no code path that notices and resumes.
+
+The fix is a three-unit cluster, designed together because the units share an
+interface: **(a) launch-time rehydration**, **(b) onFatalBlobError reclassification**,
+**(c) idempotency hardening**. Decision 0044 established that (c) is a firm
+prerequisite for (a): without idempotent enqueue, the rehydration trigger would
+double-enqueue blobs and bundle.pb, corrupting retry state.
+
+This decision records the full cluster design so units (b) and (a) don't re-derive
+it. Unit (c) shipped in commit 5bb07c9.
+
+## What we tried
+
+### Fork B — what to persist vs. derive for relaunch correctness
+
+**B1 (chosen):** Persist durable facts; derive volatile ones at runtime.
+`UploadPhase` (`uploadingBlobs` / `uploadingBundlePb` / `complete` / `failed`) is
+persisted on the record. In-flight/orphaned status is *derived* at runtime via
+`getAllTasks` keyed on the kill-surviving `taskDescription` — never stored.
+The in-process latch (`bundlePbEnqueueInFlight`) is intentionally in-memory and
+per-process: it must die on relaunch, because re-enqueue across process death is
+the desired recovery. Only `.complete` (persisted) is permanently terminal.
+
+**B2 (rejected):** Store `.inFlight` or `.orphaned` as blobStatus cases.
+Violates the principle: a persisted `.inFlight` lies the instant the process dies
+(the task is no longer in-flight from the new process's perspective). It would still
+require `getAllTasks` reconciliation to clean up the stale state, adding complexity
+without removing any. A persisted latch specifically would block the very recovery
+we're trying to build.
+
+One concrete finding that reinforced B1: `bundle.pb`'s `blobStatuses` entry is
+initialized `.pending` and *never* advanced to `.uploaded` — `markBlobUploaded` is
+never called for `bundle.pb` (by design, to keep the Phase-1 gate clean). This is
+why `UploadPhase` exists as a separate field rather than reusing
+`blobStatuses["bundle.pb"]`.
+
+### Fork C — onFatalBlobError reclassification strategy (for unit b)
+
+**C1 (chosen):** Classify by root cause. Deterministic fatals
+(`http_400`/`403`, `empty_bundle_pb`, `missing_bundle_pb_uri`) → permanent `.failed`;
+record poisoned, no retry. Circumstantial `*_no_context` fatals
+(`network_no_context`, `308_no_context`, `bundle_pb_read_failed` from a missing file)
+are fatal *only because in-memory context died on relaunch* — across relaunch, the
+context can be reconstructed from the persisted record. These must route to a
+retriable state, not permanent death. The `*_no_context` callers are the exact
+OS-kill route identified in Gate-2b recon.
+
+**C2 (rejected):** Uniform persist-and-retry for all fatals. Can't distinguish
+genuinely dead situations (malformed server response, server-side 403) from
+recoverable ones (missing in-memory state after relaunch). Retrying a 403 is an
+infinite loop; the distinction matters.
+
+Unit (b) must also cancel sibling in-flight blob URLSession tasks when transitioning
+to `.failed` — these are in different code paths from the `*_no_context` cluster
+and share no common ancestor, so cancellation must be explicit, not structural.
+
+### Fork A — launch-time rehydration trigger (for unit a)
+
+**A1 (chosen):** `.task` modifier on `ContentView` (or a peer `AppDelegate` hook) as
+the primary rehydration trigger, reading all persisted records on every launch and
+resuming any bundle not yet `.complete`. This is the only option that covers the
+*swipe-up force-quit* route: after a force-quit, no `URLSession` drain hook fires —
+the app simply relaunches from scratch on next open. `.task` fires on a standard
+foreground relaunch.
+
+For the *OS-kill* route (background URLSession events trigger a background
+relaunch), `.task` on `ContentView` may also fire if the background-launched
+`WindowGroup` instantiates the view hierarchy — this is asserted by prior recon but
+**unverified as an on-device gate**: it is a SwiftUI lifecycle claim about whether
+`.task` runs when the app is relaunched purely to process background URL session
+events and never enters the foreground. This must be proven with a staged on-device
+test before unit (a) ships. If `.task` does NOT fire on background OS-relaunch, a
+co-trigger via `AppDelegate.handleEventsForBackgroundURLSession` is required as
+belt-and-suspenders.
+
+Unit (c)'s idempotency hardening (`bundlePbEnqueueInFlight` latch + `getAllTasks`
+reconciliation + `uploadPhase == .complete` terminal guard) makes a second trigger
+entirely safe: a drain hook added later is belt-and-suspenders, not the hazard that
+decision 0044 feared about double-enqueue.
+
+**A2 (rejected):** Trigger only on `scenePhase == .active`. Background OS-relaunches
+may transition through `.background` and exit without ever reaching `.active`; the
+recovery would never run on the OS-kill route.
+
+**A3 (rejected as sole trigger):** AppDelegate drain hook alone. Covers the OS-kill
+background-relaunch route but misses the force-quit/swipe-up route entirely (no
+drain event fires after force-quit).
+
+**CAFUFA re-confirmed:** Decision 0042's choice of
+`NSFileProtectionCompleteUntilFirstUserAuthentication` for the upload session store
+was re-verified this session. CAFUFA allows reading the persisted record while the
+device is locked (after first unlock), which is the exact condition for a background
+OS-relaunch. `NSFileProtectionComplete` would silently stall reads until the next
+unlock — the lock-safe read required by launch-time rehydration depends on CAFUFA
+remaining in place.
+
+## What we chose
+
+Cluster design: persist `UploadPhase`, derive in-flight status at runtime, classify
+fatals by root cause, trigger rehydration from `.task` on launch (with on-device
+verification of the background OS-relaunch path still required before shipping unit a).
+
+**Unit (c) shipped (commit 5bb07c9):**
+- `UploadPhase` enum on `UploadSessionRecord` — Codable legacy-safe; conservative
+  decode default never yields `.complete`; `.complete` written on bundle.pb 200/201.
+- In-process one-shot latch (`bundlePbEnqueueInFlight`) — synchronous check-and-set
+  before the first `await` in `enqueueBundlePb`; cleared on success, 410 re-mint,
+  and all fatal early-returns; intentionally dies on relaunch.
+- `getAllTasks` reconciliation — cross-process guard in both `enqueuePhasOneBlobs`
+  and `enqueueBundlePb`; keyed on `taskDescription` which survives process death per
+  Apple docs.
+- Context-preserve fix — `enqueuePhasOneBlobs` no longer unconditionally overwrites
+  `contexts[bundleId]`, which zeroed `retryCount`/`reputtedPaths` on a second call
+  while first-wave tasks were still in flight.
+- `enqueuePhasOneBlobs` promoted from `throws` to `async throws` to admit the
+  `getAllTasks` await; existing call sites already used `try await` so no callers
+  changed.
+
+**Unit (b) still open:** `onFatalBlobError` reclassification; setting `.failed` on
+the record; sibling-task cancellation on fatal. Must also build the
+`UploadSessionStore.updatePhase` or equivalent mutation path used by (b).
+
+**Unit (a) still open:** Launch-trigger wiring in `ContentView`/`AppDelegate`;
+`handleEventsForBackgroundURLSession` reading the persisted record and routing to
+`BlobUploadManager`; idempotency hardening (unit c) is the stated prerequisite.
+On-device gate required: verify `.task` fires on background OS-relaunch before
+shipping (a). The diagnostic branch `diag-bundlepb-reason-public` (`5bdd12f`) is
+parked as the tool to read the redacted `reason=` on the OS-kill route — do not
+delete it before (a) is staged.
+
+**`onBundleComplete` stub intentionally untouched:** record/dir cleanup is the
+separate disk-accumulation unit (CLAUDE.md "completed-capture disk accumulation"
+gap). It must not be conflated with (a)/(b)/(c).
+
+## Why
+
+The latch dies on relaunch *by design*: a live-process latch that prevents
+double-enqueue within a single execution is exactly what's needed for the
+`onAllBlobsUploaded` concurrent-task scenario. Across a relaunch, re-enqueue is
+the goal. Storing `.inFlight` to survive restarts would require cleaning up stale
+persisted state on every launch — more complexity, same outcome as `getAllTasks`.
+
+The `getAllTasks` reconciliation is the right cross-process guard because
+`taskDescription` is explicitly documented by Apple as surviving kill/relaunch
+(unlike `taskIdentifier`). It requires no extra persistence and is self-consistent:
+if a task truly exists in the URLSession, it will complete and call
+`handleTaskCompletion`; if it doesn't, the blob is safely re-enqueued.
+
+The conservative Codable default (never `.complete`) ensures that any legacy record
+— or any record whose phase field was corrupted — is always re-reconciled rather
+than silently assumed done. The cost of an unnecessary re-enqueue attempt is one
+`getAllTasks` call; the cost of a false `.complete` is a silently dropped upload.
+
+## What would change this decision
+
+- **On-device repro showing `.task` does NOT fire on background OS-relaunch**: unit
+  (a) would need `AppDelegate.handleEventsForBackgroundURLSession` as a co-trigger
+  (not a replacement; belt-and-suspenders alongside `.task`).
+- **A backend finalize/commit endpoint**: if the server could confirm which blobs it
+  has received for a given bundle, recovery could lean on server-side blob-presence
+  instead of client heuristics — `getAllTasks` reconciliation would be optional and
+  the client-side phase signal could be simplified.
+- **Swift strict-concurrency enforcement (Swift 6 errors mode)**: the current
+  `Sendable` warning on `CVImageBuffer` across the `DispatchQueue.main.async`
+  boundary (flagged in P1, deferred) would need resolving before enabling strict
+  concurrency in the iOS target — that pass should be done before (a) ships to avoid
+  compounding the surface.
