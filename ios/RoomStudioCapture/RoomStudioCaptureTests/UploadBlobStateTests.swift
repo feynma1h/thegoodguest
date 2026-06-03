@@ -156,6 +156,123 @@ final class UploadBlobStateTests: XCTestCase {
 
     // MARK: - Backward-compatible decode (pre-P4 records)
 
+    // MARK: - UploadPhase defaults and round-trip (decision 0045)
+
+    func test_newRecord_uploadPhaseIsUploadingBlobs() {
+        let record = makeRecord(paths: ["frames/000000.jpg", "bundle.pb"])
+        XCTAssertEqual(record.uploadPhase, .uploadingBlobs,
+                       "New record must default to .uploadingBlobs")
+        XCTAssertNil(record.failureReason, "New record must have nil failureReason")
+    }
+
+    func test_markingPhase_roundTrip() {
+        let record = makeRecord(paths: ["frames/000000.jpg", "bundle.pb"])
+        let updated = record.markingPhase(.uploadingBundlePb)
+        XCTAssertEqual(updated.uploadPhase, .uploadingBundlePb)
+        XCTAssertNil(updated.failureReason)
+
+        let completed = updated.markingPhase(.complete)
+        XCTAssertEqual(completed.uploadPhase, .complete)
+        XCTAssertNil(completed.failureReason)
+
+        // Functional mutations preserve other fields.
+        XCTAssertEqual(completed.bundleId, record.bundleId)
+        XCTAssertEqual(completed.sessionEntries.count, record.sessionEntries.count)
+        XCTAssertEqual(completed.blobStatuses, record.blobStatuses)
+    }
+
+    func test_uploadPhase_codableRoundTrip_preservesValue() throws {
+        let record = makeRecord(paths: ["frames/000000.jpg", "bundle.pb"])
+            .markingPhase(.uploadingBundlePb)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let data    = try encoder.encode(record)
+        let decoded = try decoder.decode(UploadSessionRecord.self, from: data)
+
+        XCTAssertEqual(decoded.uploadPhase, .uploadingBundlePb,
+                       "uploadPhase must survive encode/decode round-trip")
+        XCTAssertNil(decoded.failureReason, "failureReason must remain nil after round-trip")
+    }
+
+    func test_uploadPhase_legacyDecode_blobsPending_isUploadingBlobs() throws {
+        // Legacy record (no uploadPhase key) with all blobs .pending → conservative default.
+        let legacyJSON = """
+        {
+            "bundleId": "legacy-bundle",
+            "tierRawValue": 1,
+            "clientMintTimestamp": "2026-05-31T00:00:00Z",
+            "sessionEntries": [
+                {"relative_path": "frames/000000.jpg", "session_uri": "https://example.com/f0"},
+                {"relative_path": "bundle.pb",         "session_uri": "https://example.com/bp"}
+            ],
+            "manifestPaths": ["frames/000000.jpg", "bundle.pb"]
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let record = try decoder.decode(UploadSessionRecord.self, from: Data(legacyJSON.utf8))
+
+        XCTAssertEqual(record.uploadPhase, .uploadingBlobs,
+                       "Legacy record with pending blobs must decode as .uploadingBlobs")
+    }
+
+    func test_uploadPhase_legacyDecode_allBlobsUploaded_isUploadingBundlePb() throws {
+        // Legacy record with all non-bundle.pb blobs explicitly .uploaded → .uploadingBundlePb.
+        let legacyJSON = """
+        {
+            "bundleId": "legacy-bundle",
+            "tierRawValue": 1,
+            "clientMintTimestamp": "2026-05-31T00:00:00Z",
+            "sessionEntries": [
+                {"relative_path": "frames/000000.jpg", "session_uri": "https://example.com/f0"},
+                {"relative_path": "bundle.pb",         "session_uri": "https://example.com/bp"}
+            ],
+            "manifestPaths": ["frames/000000.jpg", "bundle.pb"],
+            "blobStatuses": {
+                "frames/000000.jpg": "uploaded",
+                "bundle.pb": "pending"
+            }
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let record = try decoder.decode(UploadSessionRecord.self, from: Data(legacyJSON.utf8))
+
+        XCTAssertEqual(record.uploadPhase, .uploadingBundlePb,
+                       "Legacy record with all frame blobs uploaded must decode as .uploadingBundlePb")
+    }
+
+    func test_uploadPhase_legacyDecode_neverComplete() throws {
+        // Even if blobStatuses shows all blobs uploaded (including bundle.pb), the conservative
+        // default must NEVER produce .complete for a record lacking the uploadPhase key.
+        let legacyJSON = """
+        {
+            "bundleId": "legacy-bundle",
+            "tierRawValue": 1,
+            "clientMintTimestamp": "2026-05-31T00:00:00Z",
+            "sessionEntries": [
+                {"relative_path": "bundle.pb", "session_uri": "https://example.com/bp"}
+            ],
+            "manifestPaths": ["bundle.pb"],
+            "blobStatuses": { "bundle.pb": "uploaded" }
+        }
+        """
+        // bundle.pb-only manifest: nonBundle is empty → phaseBlobsAllUploaded is false
+        // → default is .uploadingBlobs, never .complete.
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let record = try decoder.decode(UploadSessionRecord.self, from: Data(legacyJSON.utf8))
+
+        XCTAssertNotEqual(record.uploadPhase, .complete,
+                          "Conservative default must never yield .complete for a legacy record")
+    }
+
+    // MARK: - Backward-compatible decode (pre-P4 records)
+
     func test_decode_missingBlobStatuses_treatsAllAsPending() throws {
         // Simulate a pre-P4 record persisted without the blobStatuses key.
         let legacyJSON = """
