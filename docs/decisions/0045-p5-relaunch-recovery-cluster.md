@@ -49,13 +49,16 @@ why `UploadPhase` exists as a separate field rather than reusing
 ### Fork C — onFatalBlobError reclassification strategy (for unit b)
 
 **C1 (chosen):** Classify by root cause. Deterministic fatals
-(`http_400`/`403`, `empty_bundle_pb`, `missing_bundle_pb_uri`) → permanent `.failed`;
-record poisoned, no retry. Circumstantial `*_no_context` fatals
-(`network_no_context`, `308_no_context`, `bundle_pb_read_failed` from a missing file)
-are fatal *only because in-memory context died on relaunch* — across relaunch, the
-context can be reconstructed from the persisted record. These must route to a
-retriable state, not permanent death. The `*_no_context` callers are the exact
-OS-kill route identified in Gate-2b recon.
+(`http_400`/`403`, `empty_bundle_pb`, `missing_bundle_pb_uri`, `bundle_pb_read_failed`)
+→ permanent `.failed`; record poisoned, no retry. `bundle_pb_read_failed` is TERMINAL
+from the upload layer: BlobUploadManager cannot regenerate bundle.pb — that is the
+capture/BundleAssembler layer. Unit (a) MUST existence-check bundle.pb before routing
+to `enqueueBundlePb`; this terminal site is then the should-never-fire-post-(a)
+backstop (defense in depth), not a recovery path. Circumstantial `*_no_context` fatals
+(`network_no_context`, `308_no_context`) are fatal *only because in-memory context
+died on relaunch* — across relaunch, the context can be reconstructed from the
+persisted record. These must route to a retriable state, not permanent death. The
+`*_no_context` callers are the exact OS-kill route identified in Gate-2b recon.
 
 **C2 (rejected):** Uniform persist-and-retry for all fatals. Can't distinguish
 genuinely dead situations (malformed server response, server-side 403) from
@@ -112,6 +115,39 @@ Cluster design: persist `UploadPhase`, derive in-flight status at runtime, class
 fatals by root cause, trigger rehydration from `.task` on launch (with on-device
 verification of the background OS-relaunch path still required before shipping unit a).
 
+### Bounded cross-launch retry (shipped in P5(b))
+
+Fatal call sites are classified into three buckets:
+
+- **TERMINAL** (deterministic; retry can't help): non-410/408/429 4xx, `308_persistent`,
+  `308_reput_failed`, `reput_failed`, `empty/missing_bundle_pb/output_dir`,
+  `bundle_pb_read_failed`, `expired_no_record/no_remint_provider/no_output_dir`,
+  `remint_returned_stale_uris`, `blob_file_missing_at_staleness_remint`. Sets
+  `uploadPhase = .failed` + `failureReason` on the persisted record; arms an in-process
+  `failedBundles` guard; clears `contexts`/latch/counted-set; cancels in-flight sibling
+  URLSession tasks.
+
+- **DEFERRED-INTERRUPTED** (`no_context` family — `network_no_context`,
+  `308_no_context`): fatal only because in-memory context died on relaunch. Leaves blobs
+  `.pending`; logs and returns without mutating the record. Relaunch re-enqueues. No
+  strand.
+
+- **DEFERRED-TRANSIENT** (408/429, network/5xx exhausted, remint/persist transients):
+  bounded cross-launch retry. 408/429 are definitionally transient — 429 is the server
+  explicitly saying retry-later; decision 0038 already anticipated a Retry-After branch.
+  Mechanism: new persisted `crossLaunchRetryCount` field; bumped at most once per launch
+  (via in-memory launch token + `transientCountedThisLaunch` counted-set, so the bound
+  counts launches, not blobs); reset to 0 on blob progress. At `maxCrossLaunchRetries =
+  10` escalates to terminal. Re-entry guard drops cancelled-sibling completions that
+  arrive after the drain-counter `defer` fires.
+
+**Relationship to settled decisions:** this EXTENDS 0038/0040's in-process bounded-retry
+(seconds-scale transport blips) with an outer launches-scale tier. It does not overturn
+them. Retry-After honoring remains the 0038 pre-launch gap — deliberately NOT pulled
+forward here. The 12h staleness re-mint + the age=1day GCS lifecycle rule backstop the
+bounded retry: a zombie capture that exhausts all 10 cross-launch retries is poisoned to
+`.failed` and swept on the next launch.
+
 **Unit (c) shipped (commit 5bb07c9):**
 - `UploadPhase` enum on `UploadSessionRecord` — Codable legacy-safe; conservative
   decode default never yields `.complete`; `.complete` written on bundle.pb 200/201.
@@ -128,17 +164,24 @@ verification of the background OS-relaunch path still required before shipping u
   `getAllTasks` await; existing call sites already used `try await` so no callers
   changed.
 
-**Unit (b) still open:** `onFatalBlobError` reclassification; setting `.failed` on
-the record; sibling-task cancellation on fatal. Must also build the
-`UploadSessionStore.updatePhase` or equivalent mutation path used by (b).
+**Unit (b) shipped (commit cc7aba5):** `onFatalBlobError` reclassification into
+TERMINAL / DEFERRED-INTERRUPTED / DEFERRED-TRANSIENT; `.failed` + `failureReason`
+written to the persisted record on terminal paths; sibling-task cancellation on
+terminal; `crossLaunchRetryCount` persisted and bounded.
 
 **Unit (a) still open:** Launch-trigger wiring in `ContentView`/`AppDelegate`;
 `handleEventsForBackgroundURLSession` reading the persisted record and routing to
-`BlobUploadManager`; idempotency hardening (unit c) is the stated prerequisite.
+`BlobUploadManager`; idempotency hardening (unit c) is the stated prerequisite (met).
 On-device gate required: verify `.task` fires on background OS-relaunch before
 shipping (a). The diagnostic branch `diag-bundlepb-reason-public` (`5bdd12f`) is
 parked as the tool to read the redacted `reason=` on the OS-kill route — do not
 delete it before (a) is staged.
+
+Unit (a) must existence-check bundle.pb before routing to `enqueueBundlePb` (see Fork
+C fix above). The in-process guards (`failedBundles`, `transientCountedThisLaunch`,
+launch token, `contexts`) are per-process by design — cross-launch terminal state is
+carried by the persisted `uploadPhase == .failed`, which (a)'s rehydration must read
+and skip.
 
 **`onBundleComplete` stub intentionally untouched:** record/dir cleanup is the
 separate disk-accumulation unit (CLAUDE.md "completed-capture disk accumulation"
