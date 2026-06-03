@@ -91,6 +91,12 @@ struct UploadSessionRecord: Codable, Sendable {
     let uploadPhase: UploadPhase
     /// Failure reason string. Reserved for unit (b); always nil in unit (c).
     let failureReason: String?
+    /// Cross-launch retry counter. Bumped at most once per bundle per process launch by
+    /// DEFERRED-TRANSIENT error paths (network_exhausted, remint_failed, etc.).
+    /// Reset to 0 on any blob-upload success (markingBlobUploaded).
+    /// When this exceeds BlobUploadManager.maxCrossLaunchRetries, the next transient
+    /// deferral escalates to permanent failure. Unit (b) only — always 0 in unit (c).
+    let crossLaunchRetryCount: Int
 
     // MARK: - Production init
 
@@ -112,9 +118,10 @@ struct UploadSessionRecord: Codable, Sendable {
         self.blobStatuses        = Dictionary(
             uniqueKeysWithValues: sessionEntries.map { ($0.relativePath, BlobUploadStatus.pending) }
         )
-        self.outputDir           = outputDir
-        self.uploadPhase         = .uploadingBlobs
-        self.failureReason       = nil
+        self.outputDir              = outputDir
+        self.uploadPhase            = .uploadingBlobs
+        self.failureReason          = nil
+        self.crossLaunchRetryCount  = 0
     }
 
     /// Private init used by functional mutation methods to produce updated copies.
@@ -128,17 +135,19 @@ struct UploadSessionRecord: Codable, Sendable {
         blobStatuses: [String: BlobUploadStatus],
         outputDir: URL?,
         uploadPhase: UploadPhase = .uploadingBlobs,
-        failureReason: String? = nil
+        failureReason: String? = nil,
+        crossLaunchRetryCount: Int = 0
     ) {
-        self.bundleId            = bundleId
-        self.tierRawValue        = tierRawValue
-        self.clientMintTimestamp = clientMintTimestamp
-        self.sessionEntries      = sessionEntries
-        self.manifestPaths       = manifestPaths
-        self.blobStatuses        = blobStatuses
-        self.outputDir           = outputDir
-        self.uploadPhase         = uploadPhase
-        self.failureReason       = failureReason
+        self.bundleId               = bundleId
+        self.tierRawValue           = tierRawValue
+        self.clientMintTimestamp    = clientMintTimestamp
+        self.sessionEntries         = sessionEntries
+        self.manifestPaths          = manifestPaths
+        self.blobStatuses           = blobStatuses
+        self.outputDir              = outputDir
+        self.uploadPhase            = uploadPhase
+        self.failureReason          = failureReason
+        self.crossLaunchRetryCount  = crossLaunchRetryCount
     }
 
     // MARK: - Codable
@@ -153,6 +162,7 @@ struct UploadSessionRecord: Codable, Sendable {
         case outputDir
         case uploadPhase
         case failureReason
+        case crossLaunchRetryCount
     }
 
     init(from decoder: Decoder) throws {
@@ -183,16 +193,19 @@ struct UploadSessionRecord: Codable, Sendable {
         let decodedUploadPhase = try c.decodeIfPresent(UploadPhase.self, forKey: .uploadPhase)
             ?? (phaseBlobsAllUploaded ? .uploadingBundlePb : .uploadingBlobs)
         let decodedFailureReason = try c.decodeIfPresent(String.self, forKey: .failureReason)
+        // Pre-unit-(b) records won't have crossLaunchRetryCount. Default to 0 (no retries charged).
+        let decodedCrossLaunchRetryCount = try c.decodeIfPresent(Int.self, forKey: .crossLaunchRetryCount) ?? 0
         // Assign all stored properties at the end (no closures capture self after this point).
-        bundleId            = decodedBundleId
-        tierRawValue        = decodedTierRawValue
-        clientMintTimestamp = decodedClientMintTimestamp
-        sessionEntries      = decodedSessionEntries
-        manifestPaths       = decodedManifestPaths
-        blobStatuses        = decodedBlobStatuses
-        outputDir           = decodedOutputDir
-        uploadPhase         = decodedUploadPhase
-        failureReason       = decodedFailureReason
+        bundleId               = decodedBundleId
+        tierRawValue           = decodedTierRawValue
+        clientMintTimestamp    = decodedClientMintTimestamp
+        sessionEntries         = decodedSessionEntries
+        manifestPaths          = decodedManifestPaths
+        blobStatuses           = decodedBlobStatuses
+        outputDir              = decodedOutputDir
+        uploadPhase            = decodedUploadPhase
+        failureReason          = decodedFailureReason
+        crossLaunchRetryCount  = decodedCrossLaunchRetryCount
     }
 
     // MARK: - Convenience accessors
@@ -221,15 +234,16 @@ struct UploadSessionRecord: Codable, Sendable {
         var updated = blobStatuses
         updated[relativePath] = .uploaded
         return UploadSessionRecord(
-            bundleId:            bundleId,
-            tierRawValue:        tierRawValue,
-            clientMintTimestamp: clientMintTimestamp,
-            sessionEntries:      sessionEntries,
-            manifestPaths:       manifestPaths,
-            blobStatuses:        updated,
-            outputDir:           outputDir,
-            uploadPhase:         uploadPhase,
-            failureReason:       failureReason
+            bundleId:              bundleId,
+            tierRawValue:          tierRawValue,
+            clientMintTimestamp:   clientMintTimestamp,
+            sessionEntries:        sessionEntries,
+            manifestPaths:         manifestPaths,
+            blobStatuses:          updated,
+            outputDir:             outputDir,
+            uploadPhase:           uploadPhase,
+            failureReason:         failureReason,
+            crossLaunchRetryCount: 0  // reset on progress: any successful upload clears the retry debt
         )
     }
 
@@ -245,15 +259,16 @@ struct UploadSessionRecord: Codable, Sendable {
             updated[key] = .pending
         }
         return UploadSessionRecord(
-            bundleId:            bundleId,
-            tierRawValue:        tierRawValue,
-            clientMintTimestamp: clientMintTimestamp,
-            sessionEntries:      sessionEntries,
-            manifestPaths:       manifestPaths,
-            blobStatuses:        updated,
-            outputDir:           outputDir,
-            uploadPhase:         .uploadingBlobs,  // reset with blobs: all blobs need re-upload
-            failureReason:       failureReason
+            bundleId:              bundleId,
+            tierRawValue:          tierRawValue,
+            clientMintTimestamp:   clientMintTimestamp,
+            sessionEntries:        sessionEntries,
+            manifestPaths:         manifestPaths,
+            blobStatuses:          updated,
+            outputDir:             outputDir,
+            uploadPhase:           .uploadingBlobs,  // reset with blobs: all blobs need re-upload
+            failureReason:         failureReason,
+            crossLaunchRetryCount: crossLaunchRetryCount  // preserved: staleness reset is not a new error
         )
     }
 
@@ -273,15 +288,16 @@ struct UploadSessionRecord: Codable, Sendable {
             }
         )
         return UploadSessionRecord(
-            bundleId:            bundleId,
-            tierRawValue:        tierRawValue,
-            clientMintTimestamp: mintTimestamp,
-            sessionEntries:      newEntries,
-            manifestPaths:       manifestPaths,
-            blobStatuses:        updated,
-            outputDir:           outputDir,
-            uploadPhase:         uploadPhase,
-            failureReason:       failureReason
+            bundleId:              bundleId,
+            tierRawValue:          tierRawValue,
+            clientMintTimestamp:   mintTimestamp,
+            sessionEntries:        newEntries,
+            manifestPaths:         manifestPaths,
+            blobStatuses:          updated,
+            outputDir:             outputDir,
+            uploadPhase:           uploadPhase,
+            failureReason:         failureReason,
+            crossLaunchRetryCount: crossLaunchRetryCount  // preserved: remint doesn't clear the retry debt
         )
     }
 
@@ -291,19 +307,27 @@ struct UploadSessionRecord: Codable, Sendable {
     /// Unit (c) only calls this with `.uploadingBundlePb` and `.complete`.
     nonisolated func markingPhase(
         _ phase: UploadPhase,
-        failureReason newReason: String? = nil
+        failureReason newReason: String? = nil,
+        crossLaunchRetryCount newCount: Int? = nil
     ) -> UploadSessionRecord {
         UploadSessionRecord(
-            bundleId:            bundleId,
-            tierRawValue:        tierRawValue,
-            clientMintTimestamp: clientMintTimestamp,
-            sessionEntries:      sessionEntries,
-            manifestPaths:       manifestPaths,
-            blobStatuses:        blobStatuses,
-            outputDir:           outputDir,
-            uploadPhase:         phase,
-            failureReason:       newReason ?? failureReason
+            bundleId:              bundleId,
+            tierRawValue:          tierRawValue,
+            clientMintTimestamp:   clientMintTimestamp,
+            sessionEntries:        sessionEntries,
+            manifestPaths:         manifestPaths,
+            blobStatuses:          blobStatuses,
+            outputDir:             outputDir,
+            uploadPhase:           phase,
+            failureReason:         newReason ?? failureReason,
+            crossLaunchRetryCount: newCount ?? crossLaunchRetryCount
         )
+    }
+
+    /// Return a new record with crossLaunchRetryCount incremented by 1, phase unchanged.
+    /// Used by deferTransientBlobError to persist the cross-launch retry budget.
+    nonisolated func bumpingCrossLaunchRetryCount() -> UploadSessionRecord {
+        markingPhase(uploadPhase, crossLaunchRetryCount: crossLaunchRetryCount + 1)
     }
 
     // MARK: - Phase-1→Phase-2 gate predicate
