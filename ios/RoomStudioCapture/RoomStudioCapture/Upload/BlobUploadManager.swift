@@ -80,6 +80,11 @@ actor BlobUploadManager {
     private let session: URLSession
     let store: UploadSessionStore                     // internal (not private) for tests
     private var contexts: [String: UploadContext] = [:]
+    /// In-process one-shot latch: bundleIds whose bundle.pb enqueue is currently in flight.
+    /// Prevents a second onAllBlobsUploaded call (from a concurrent actor task) from double-
+    /// enqueuing bundle.pb within the same process. Cleared on task completion or fatal exit.
+    /// Empty on every relaunch — cross-process guard uses getAllTasks instead (decision 0045).
+    private var bundlePbEnqueueInFlight: Set<String> = []
 
     /// Set by the AppDelegate background-session hook; called in urlSessionDidFinishEvents.
     var backgroundSessionCompletionHandler: (() -> Void)?
@@ -109,6 +114,10 @@ actor BlobUploadManager {
     /// Nil means "not wired" — routes to onFatalBlobError.
     var remintProvider: (@Sendable (String, [UploadManifestEntry]) async throws -> [UploadSessionEntry])?
 
+    /// Returns all tasks in the background URLSession.
+    /// Production: nil (uses session.getAllTasks). Tests: inject a stub for reconciliation tests.
+    var getAllTasksProvider: (@Sendable () async -> [URLSessionTask])?
+
     // MARK: - Test observability
 
     /// Populated by onSessionExpired. Tests read via await to confirm routing.
@@ -117,6 +126,11 @@ actor BlobUploadManager {
     var _bundleCompleteInvocations: [String] = []
     /// Populated by onFatalBlobError. Tests read via await to confirm routing.
     var _fatalBlobErrorInvocations: [(bundleId: String, relativePath: String, reason: String)] = []
+    /// Incremented at task.resume() in enqueueBundlePb. Tests verify latch prevents double-enqueue.
+    var _bundlePbTasksCreatedCount: Int = 0
+    /// Set to the count of blobs enqueued by the last enqueuePhasOneBlobs call.
+    /// Tests verify reconciliation skips blobs whose live task is already in the URLSession.
+    var _phase1BlobsEnqueuedCount: Int = 0
 
     // Part B test observability — nonisolated so tests can read without await.
     nonisolated var _pendingCompletionsCount: Int { _pendingCount.withLock { $0 } }
@@ -241,6 +255,19 @@ actor BlobUploadManager {
         return (bundleId, relativePath)
     }
 
+    // MARK: - getAllTasks wrapper
+
+    /// Fetch all tasks in the background URLSession.
+    /// Uses getAllTasksProvider if injected (tests), otherwise calls session.getAllTasks.
+    private func getAllTasks() async -> [URLSessionTask] {
+        if let provider = getAllTasksProvider {
+            return await provider()
+        }
+        return await withCheckedContinuation { continuation in
+            session.getAllTasks { continuation.resume(returning: $0) }
+        }
+    }
+
     // MARK: - Phase-1 enqueue
 
     /// Create one background uploadTask per non-bundle.pb blob not yet uploaded.
@@ -260,19 +287,39 @@ actor BlobUploadManager {
     ///
     /// Stores an UploadContext for this bundle in memory (retryCount + reputtedPaths only;
     /// outputDir is now in the persisted record). Context is NOT persisted.
-    func enqueuePhasOneBlobs(record: UploadSessionRecord) throws {
+    func enqueuePhasOneBlobs(record: UploadSessionRecord) async throws {
         guard let outputDir = record.outputDir else {
             throw BlobUploadError.missingOutputDir(record.bundleId)
         }
         let bundleId = record.bundleId
-        contexts[bundleId] = UploadContext()
+
+        // Preserve existing context if one exists (retryCount + reputtedPaths intact).
+        // Only create a fresh UploadContext for the very first call for this bundle.
+        // Unconditional overwrite would zero retry/308 state mid-flight (decision 0045).
+        if contexts[bundleId] == nil {
+            contexts[bundleId] = UploadContext()
+        }
+
+        // Fetch live tasks once. Skip any blob whose task is already in the URLSession —
+        // prevents duplicate PUTs when called again while first-wave tasks are still running
+        // (same-process and cross-process guard for Phase-1 blobs, decision 0045).
+        let liveTasks = await getAllTasks()
+        let liveDescriptions = Set(liveTasks.compactMap(\.taskDescription))
 
         var enqueued = 0
+        _phase1BlobsEnqueuedCount = 0
         // bundle.pb is excluded here: the Phase-1→Phase-2 gate (allNonBundlePbBlobsUploaded)
         // ensures bundle.pb is enqueued by onAllBlobsUploaded only after all other blobs
         // succeed. Including bundle.pb here would violate the 0040 ordering guarantee.
         for entry in record.sessionEntries where entry.relativePath != "bundle.pb" {
             guard record.blobStatuses[entry.relativePath] != .uploaded else { continue }
+
+            // Skip if a live URLSession task already exists for this blob.
+            let taskDesc = Self.makeTaskDescription(bundleId: bundleId, relativePath: entry.relativePath)
+            guard !liveDescriptions.contains(taskDesc) else {
+                logger.info("[BlobUploadManager] ⚠ live task exists for \(entry.relativePath, privacy: .public) in bundle \(bundleId, privacy: .public) — skipping")
+                continue
+            }
 
             let fileURL = outputDir.appendingPathComponent(entry.relativePath)
             guard let sessionURL = URL(string: entry.sessionUri) else {
@@ -290,10 +337,11 @@ actor BlobUploadManager {
             // Content-Type: omitted — session URI controls the stored type (F2).
 
             let task = session.uploadTask(with: req, fromFile: fileURL)
-            task.taskDescription = Self.makeTaskDescription(bundleId: bundleId, relativePath: entry.relativePath)
+            task.taskDescription = taskDesc
             task.resume()
             enqueued += 1
         }
+        _phase1BlobsEnqueuedCount = enqueued
         logger.info("[BlobUploadManager] enqueued \(enqueued) Phase-1 task(s) for bundle \(bundleId, privacy: .public)")
     }
 
@@ -349,6 +397,9 @@ actor BlobUploadManager {
 
         case 410:
             // GCS resumable session expired. Re-mint via onSessionExpired.
+            // For bundle.pb: clear the in-process latch so the re-mint path can re-enqueue
+            // bundle.pb after blobs are re-uploaded and the Phase-1 gate re-fires.
+            if relativePath == "bundle.pb" { bundlePbEnqueueInFlight.remove(bundleId) }
             await onSessionExpired(bundleId: bundleId)
 
         case let code where (400..<500).contains(code ?? -1):
@@ -374,6 +425,12 @@ actor BlobUploadManager {
         // would still be true (gate excludes bundle.pb from its check), causing
         // onAllBlobsUploaded to fire again — an incorrect re-entry.
         if relativePath == "bundle.pb" {
+            // Persist .complete phase. Does NOT delete the record or session dir —
+            // that is reserved for the disk-accumulation unit (P5 onBundleComplete).
+            if let current = try? await store.load(bundleId: bundleId) {
+                try? await store.save(current.markingPhase(.complete))
+            }
+            bundlePbEnqueueInFlight.remove(bundleId)
             logger.info("[BlobUploadManager] ✓ bundle.pb uploaded for bundle \(bundleId, privacy: .public)")
             await onBundleComplete(bundleId: bundleId)
             return
@@ -532,8 +589,34 @@ actor BlobUploadManager {
     /// path). PUT semantics identical to Phase-1 blobs: Content-Range set, Content-Length
     /// and Content-Type omitted (URLSession and session URI handle them — F2).
     private func enqueueBundlePb(bundleId: String, record: UploadSessionRecord) async {
+        // ── In-process latch + terminal guard (no await before this block) ──────────────────
+        // Check-and-set is synchronous on the actor executor, so no second task can interleave
+        // between the guard and the insert (decision 0045).
+        guard !bundlePbEnqueueInFlight.contains(bundleId) else {
+            logger.info("[BlobUploadManager] ⚠ enqueueBundlePb: in-process latch hit for \(bundleId, privacy: .public) — skipping")
+            return
+        }
+        guard record.uploadPhase != .complete else {
+            logger.info("[BlobUploadManager] ⚠ enqueueBundlePb: phase=complete for \(bundleId, privacy: .public) — skipping")
+            return
+        }
+        bundlePbEnqueueInFlight.insert(bundleId)
+        // ─────────────────────────────────────────────────────────────────────────────────────
+
+        // Cross-process guard: skip if a live URLSession task for bundle.pb already exists.
+        // This catches the case where the OS redelivered events from a previous process that
+        // created a task before dying. The in-process latch cannot cover this (decision 0045).
+        let bundlePbDesc = Self.makeTaskDescription(bundleId: bundleId, relativePath: "bundle.pb")
+        let liveTasks = await getAllTasks()
+        if liveTasks.contains(where: { $0.taskDescription == bundlePbDesc }) {
+            logger.info("[BlobUploadManager] ⚠ enqueueBundlePb: live URLSession task exists for \(bundleId, privacy: .public) — skipping")
+            bundlePbEnqueueInFlight.remove(bundleId)
+            return
+        }
+
         guard let outputDir = record.outputDir else {
             logger.info("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId, privacy: .public)")
+            bundlePbEnqueueInFlight.remove(bundleId)
             await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
                                    reason: "missing_output_dir")
             return
@@ -542,6 +625,7 @@ actor BlobUploadManager {
         guard let sessionUri = record.sessionUri(for: "bundle.pb"),
               let sessionURL = URL(string: sessionUri) else {
             logger.info("[BlobUploadManager] ⚠ no bundle.pb session URI for \(bundleId, privacy: .public)")
+            bundlePbEnqueueInFlight.remove(bundleId)
             await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
                                    reason: "missing_bundle_pb_uri")
             return
@@ -551,20 +635,29 @@ actor BlobUploadManager {
         do {
             let size = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             guard size > 0 else {
+                bundlePbEnqueueInFlight.remove(bundleId)
                 await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
                                        reason: "empty_bundle_pb")
                 return
             }
+
+            // Persist .uploadingBundlePb before creating the task.
+            if let current = try? await store.load(bundleId: bundleId) {
+                try? await store.save(current.markingPhase(.uploadingBundlePb))
+            }
+
             var req = URLRequest(url: sessionURL)
             req.httpMethod = "PUT"
             req.setValue("bytes 0-\(size - 1)/\(size)", forHTTPHeaderField: "Content-Range")
             // Content-Length: URLSession sets from file. Content-Type: omitted (F2).
 
             let task = session.uploadTask(with: req, fromFile: fileURL)
-            task.taskDescription = Self.makeTaskDescription(bundleId: bundleId, relativePath: "bundle.pb")
+            task.taskDescription = bundlePbDesc
             task.resume()
+            _bundlePbTasksCreatedCount += 1
             logger.info("[BlobUploadManager] → enqueued bundle.pb PUT for bundle \(bundleId, privacy: .public)")
         } catch {
+            bundlePbEnqueueInFlight.remove(bundleId)
             await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
                                    reason: "bundle_pb_read_failed: \(error)")
         }

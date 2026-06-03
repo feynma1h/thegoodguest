@@ -1280,6 +1280,168 @@ final class BlobUploadManagerTests: XCTestCase {
         XCTAssertEqual(manager._pendingCompletionsCount, 0, "nil token must still decrement counter")
     }
 
+    // MARK: - Idempotency hardening (unit c, decision 0045)
+
+    // MARK: Latch: in-process double-enqueue prevention
+
+    func test_latch_doubleOnAllBlobsUploaded_enqueuesBundlePbOnce() async throws {
+        // Two sequential calls to onAllBlobsUploaded (fresh + in-flight) must produce exactly
+        // one bundle.pb URLSession task via enqueueBundlePb. The in-process latch blocks
+        // the second call since the first has already inserted the bundleId.
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000000.jpg")
+        let record = try await store.load(bundleId: "test-bundle")!
+        // Stub getAllTasks → [] so the cross-process check doesn't interfere.
+        await manager.setGetAllTasksProvider { [] }
+
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+
+        let created = await manager._bundlePbTasksCreatedCount
+        XCTAssertEqual(created, 1, "Latch must prevent second enqueueBundlePb from creating a task")
+    }
+
+    func test_latch_completedRecord_skipsBundlePbEnqueue() async throws {
+        // If the persisted record already has uploadPhase == .complete, enqueueBundlePb
+        // must be a no-op (terminal guard). Simulates the relaunch scenario where unit (a)
+        // loads a completed record and (mistakenly) calls onAllBlobsUploaded.
+        let (manager, store, outputDir) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000000.jpg")
+        let record = try await store.load(bundleId: "test-bundle")!
+        // Mark the record as complete in the store and in the local copy.
+        let completedRecord = record.markingPhase(.complete)
+        try await store.save(completedRecord)
+        await manager.setGetAllTasksProvider { [] }
+
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: completedRecord)
+
+        let created = await manager._bundlePbTasksCreatedCount
+        XCTAssertEqual(created, 0, "uploadPhase == .complete must skip enqueueBundlePb entirely")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "Skipping a completed record must not call onFatalBlobError")
+        _ = outputDir
+    }
+
+    // MARK: getAllTasks reconciliation
+
+    func test_reconciliation_pendingBlobWithLiveTask_isNotReenqueued() async throws {
+        // When getAllTasks returns a task whose description matches a pending blob,
+        // enqueuePhasOneBlobs must skip that blob (not create a duplicate PUT task).
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        let record = try await store.load(bundleId: "test-bundle")!
+
+        // Simulate a live task for frames/000000.jpg.
+        let fakeTask = URLSession.shared.dataTask(with: URL(string: "https://example.com")!)
+        fakeTask.taskDescription = BlobUploadManager.makeTaskDescription(
+            bundleId: "test-bundle", relativePath: "frames/000000.jpg"
+        )
+        await manager.setGetAllTasksProvider { [fakeTask] in [fakeTask] }
+
+        try await manager.enqueuePhasOneBlobs(record: record)
+
+        let enqueued = await manager._phase1BlobsEnqueuedCount
+        XCTAssertEqual(enqueued, 0, "Pending blob with a live task must NOT be re-enqueued")
+    }
+
+    func test_reconciliation_orphanedPendingBlob_isEnqueued() async throws {
+        // When getAllTasks returns [] (no live tasks), a pending blob IS enqueued.
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        let record = try await store.load(bundleId: "test-bundle")!
+        await manager.setGetAllTasksProvider { [] }
+
+        try await manager.enqueuePhasOneBlobs(record: record)
+
+        let enqueued = await manager._phase1BlobsEnqueuedCount
+        XCTAssertEqual(enqueued, 1, "Orphaned pending blob (no live task) must be enqueued")
+    }
+
+    // MARK: Context preserve: second enqueuePhasOneBlobs must not zero retryCount/reputtedPaths
+
+    func test_contextPreserve_secondEnqueueKeeps308ReputtedState() async throws {
+        // Regression test for the unconditional `contexts[bundleId] = UploadContext()` overwrite.
+        //
+        // Protocol: (1) enqueuePhasOneBlobs creates context; (2) 308 → reputtedPaths gains entry;
+        // (3) enqueuePhasOneBlobs again — with the fix, context is preserved; (4) second 308 for
+        // the same path → "308_persistent" fatal (only possible if reputtedPaths was preserved).
+        // Without the fix, context is zeroed in step 3 and step 4 treats it as a first 308.
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        let record = try await store.load(bundleId: "test-bundle")!
+        await manager.setGetAllTasksProvider { [] }
+
+        // Step 1: create context.
+        try await manager.enqueuePhasOneBlobs(record: record)
+
+        // Step 2: first 308 → reputtedPaths gains "frames/000000.jpg".
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 308, error: nil
+        )
+
+        // Step 3: second enqueuePhasOneBlobs (simulates re-call e.g. from UploadCoordinator
+        // on re-entry). With fix: context preserved. Without fix: context zeroed.
+        try await manager.enqueuePhasOneBlobs(record: record)
+
+        // Step 4: second 308 for the same path. If reputtedPaths is preserved → "308_persistent"
+        // fatal. If context was zeroed → first-308 branch (re-PUT attempt, no fatal yet).
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 308, error: nil
+        )
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        let persistent308 = fatal.filter { $0.reason == "308_persistent" }
+        XCTAssertFalse(persistent308.isEmpty,
+                       "Context must be preserved across second enqueuePhasOneBlobs: second 308 must be '308_persistent'. Got: \(fatal.map(\.reason))")
+    }
+
+    // MARK: Phase persistence on bundle.pb success
+
+    func test_phase_bundlePbSuccess_setsCompletePhaseInStore() async throws {
+        // After bundle.pb PUT returns 200, the persisted record's uploadPhase must be .complete.
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        await manager.setGetAllTasksProvider { [] }
+
+        // Simulate the full happy path: frame → gate → onAllBlobsUploaded → enqueueBundlePb → 200.
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 200, error: nil
+        )
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "bundle.pb"),
+            statusCode: 200, error: nil
+        )
+
+        let record = try await store.load(bundleId: "test-bundle")
+        XCTAssertEqual(record?.uploadPhase, .complete,
+                       "bundle.pb 200 must persist uploadPhase == .complete")
+        let completed = await manager._bundleCompleteInvocations
+        XCTAssertEqual(completed, ["test-bundle"], "onBundleComplete must still be called")
+    }
+
+    func test_phase_bundlePbSuccess_doesNotChangeBlobStatuses() async throws {
+        // Setting .complete phase must NOT alter blobStatuses (separate concern).
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        await manager.setGetAllTasksProvider { [] }
+
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 200, error: nil
+        )
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "bundle.pb"),
+            statusCode: 200, error: nil
+        )
+
+        let record = try await store.load(bundleId: "test-bundle")
+        XCTAssertEqual(record?.blobStatuses["bundle.pb"], .pending,
+                       "Setting .complete phase must not alter bundle.pb blobStatus")
+        XCTAssertEqual(record?.blobStatuses["frames/000000.jpg"], .uploaded,
+                       "Frame blob status must remain .uploaded after bundle.pb success")
+    }
+
 }
 
 // MARK: - BlobUploadManager test helpers
@@ -1290,5 +1452,10 @@ extension BlobUploadManager {
         _ provider: @escaping @Sendable (String, [UploadManifestEntry]) async throws -> [UploadSessionEntry]
     ) {
         remintProvider = provider
+    }
+
+    /// Convenience for tests: inject a getAllTasks stub for reconciliation tests.
+    func setGetAllTasksProvider(_ provider: @escaping @Sendable () async -> [URLSessionTask]) {
+        getAllTasksProvider = provider
     }
 }

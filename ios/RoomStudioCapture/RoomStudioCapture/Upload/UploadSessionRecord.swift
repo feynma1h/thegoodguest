@@ -45,6 +45,24 @@ enum BlobUploadStatus: String, Codable, Sendable {
     case uploaded
 }
 
+// MARK: - UploadPhase
+
+/// Bundle-level upload lifecycle phase. Persisted so recovery paths can determine
+/// the correct re-entry point without re-examining all blob statuses.
+///
+/// `.failed` is defined here for unit (b) to use; unit (c) only ever sets
+/// `.uploadingBlobs`, `.uploadingBundlePb`, and `.complete`.
+enum UploadPhase: String, Codable, Sendable {
+    /// Phase-1 blobs are being uploaded (initial state).
+    case uploadingBlobs
+    /// All Phase-1 blobs uploaded; bundle.pb PUT is in flight or about to be enqueued.
+    case uploadingBundlePb
+    /// bundle.pb PUT completed 200/201 — upload fully done.
+    case complete
+    /// Fatal error; populated by unit (b). Unit (c) never sets this.
+    case failed
+}
+
 // MARK: - UploadSessionRecord
 
 struct UploadSessionRecord: Codable, Sendable {
@@ -68,6 +86,11 @@ struct UploadSessionRecord: Codable, Sendable {
     /// Nil for pre-P4 records that predate this field.
     /// Used by the cold-relaunch path to reconstruct blob file URLs without in-memory UploadContext.
     let outputDir: URL?
+    /// Bundle-level upload lifecycle phase. Defaults to `.uploadingBlobs` on new records.
+    /// Persisted so relaunch paths can resume at the correct stage.
+    let uploadPhase: UploadPhase
+    /// Failure reason string. Reserved for unit (b); always nil in unit (c).
+    let failureReason: String?
 
     // MARK: - Production init
 
@@ -90,17 +113,22 @@ struct UploadSessionRecord: Codable, Sendable {
             uniqueKeysWithValues: sessionEntries.map { ($0.relativePath, BlobUploadStatus.pending) }
         )
         self.outputDir           = outputDir
+        self.uploadPhase         = .uploadingBlobs
+        self.failureReason       = nil
     }
 
     /// Private init used by functional mutation methods to produce updated copies.
-    private init(
+    /// nonisolated: called from nonisolated methods; contains no actor-isolated state.
+    private nonisolated init(
         bundleId: String,
         tierRawValue: Int,
         clientMintTimestamp: Date,
         sessionEntries: [UploadSessionEntry],
         manifestPaths: [String],
         blobStatuses: [String: BlobUploadStatus],
-        outputDir: URL?
+        outputDir: URL?,
+        uploadPhase: UploadPhase = .uploadingBlobs,
+        failureReason: String? = nil
     ) {
         self.bundleId            = bundleId
         self.tierRawValue        = tierRawValue
@@ -109,6 +137,8 @@ struct UploadSessionRecord: Codable, Sendable {
         self.manifestPaths       = manifestPaths
         self.blobStatuses        = blobStatuses
         self.outputDir           = outputDir
+        self.uploadPhase         = uploadPhase
+        self.failureReason       = failureReason
     }
 
     // MARK: - Codable
@@ -121,25 +151,48 @@ struct UploadSessionRecord: Codable, Sendable {
         case manifestPaths
         case blobStatuses
         case outputDir
+        case uploadPhase
+        case failureReason
     }
 
     init(from decoder: Decoder) throws {
+        // Use local variables throughout to avoid capturing self in closures before
+        // all stored properties are initialized (Swift two-phase init requirement).
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        bundleId            = try c.decode(String.self,               forKey: .bundleId)
-        tierRawValue        = try c.decode(Int.self,                  forKey: .tierRawValue)
-        clientMintTimestamp = try c.decode(Date.self,                 forKey: .clientMintTimestamp)
-        sessionEntries      = try c.decode([UploadSessionEntry].self, forKey: .sessionEntries)
-        manifestPaths       = try c.decode([String].self,             forKey: .manifestPaths)
+        let decodedBundleId            = try c.decode(String.self,               forKey: .bundleId)
+        let decodedTierRawValue        = try c.decode(Int.self,                  forKey: .tierRawValue)
+        let decodedClientMintTimestamp = try c.decode(Date.self,                 forKey: .clientMintTimestamp)
+        let decodedSessionEntries      = try c.decode([UploadSessionEntry].self, forKey: .sessionEntries)
+        let decodedManifestPaths       = try c.decode([String].self,             forKey: .manifestPaths)
         // Pre-P4 records on disk won't have blobStatuses. Treat all as .pending so the
         // upload restarts cleanly on relaunch rather than falsely gating to Phase 2.
-        blobStatuses = try c.decodeIfPresent(
+        let decodedBlobStatuses = try c.decodeIfPresent(
             [String: BlobUploadStatus].self,
             forKey: .blobStatuses
         ) ?? Dictionary(
-            uniqueKeysWithValues: sessionEntries.map { ($0.relativePath, .pending) }
+            uniqueKeysWithValues: decodedSessionEntries.map { ($0.relativePath, .pending) }
         )
         // Pre-P4 records won't have outputDir. Nil → cold-relaunch paths route to fatal.
-        outputDir = try c.decodeIfPresent(URL.self, forKey: .outputDir)
+        let decodedOutputDir = try c.decodeIfPresent(URL.self, forKey: .outputDir)
+        // Conservative uploadPhase default: never .complete, so a legacy record is
+        // always re-reconciled rather than assumed done. Infer .uploadingBundlePb only
+        // when all non-bundle.pb blobs are confirmed uploaded in blobStatuses.
+        let nonBundle = decodedSessionEntries.filter { $0.relativePath != "bundle.pb" }
+        let phaseBlobsAllUploaded = !nonBundle.isEmpty
+            && nonBundle.allSatisfy { decodedBlobStatuses[$0.relativePath] == .uploaded }
+        let decodedUploadPhase = try c.decodeIfPresent(UploadPhase.self, forKey: .uploadPhase)
+            ?? (phaseBlobsAllUploaded ? .uploadingBundlePb : .uploadingBlobs)
+        let decodedFailureReason = try c.decodeIfPresent(String.self, forKey: .failureReason)
+        // Assign all stored properties at the end (no closures capture self after this point).
+        bundleId            = decodedBundleId
+        tierRawValue        = decodedTierRawValue
+        clientMintTimestamp = decodedClientMintTimestamp
+        sessionEntries      = decodedSessionEntries
+        manifestPaths       = decodedManifestPaths
+        blobStatuses        = decodedBlobStatuses
+        outputDir           = decodedOutputDir
+        uploadPhase         = decodedUploadPhase
+        failureReason       = decodedFailureReason
     }
 
     // MARK: - Convenience accessors
@@ -174,7 +227,9 @@ struct UploadSessionRecord: Codable, Sendable {
             sessionEntries:      sessionEntries,
             manifestPaths:       manifestPaths,
             blobStatuses:        updated,
-            outputDir:           outputDir
+            outputDir:           outputDir,
+            uploadPhase:         uploadPhase,
+            failureReason:       failureReason
         )
     }
 
@@ -196,7 +251,9 @@ struct UploadSessionRecord: Codable, Sendable {
             sessionEntries:      sessionEntries,
             manifestPaths:       manifestPaths,
             blobStatuses:        updated,
-            outputDir:           outputDir
+            outputDir:           outputDir,
+            uploadPhase:         .uploadingBlobs,  // reset with blobs: all blobs need re-upload
+            failureReason:       failureReason
         )
     }
 
@@ -222,7 +279,30 @@ struct UploadSessionRecord: Codable, Sendable {
             sessionEntries:      newEntries,
             manifestPaths:       manifestPaths,
             blobStatuses:        updated,
-            outputDir:           outputDir
+            outputDir:           outputDir,
+            uploadPhase:         uploadPhase,
+            failureReason:       failureReason
+        )
+    }
+
+    // MARK: - Phase mutation
+
+    /// Return a new record with the given upload phase (and optionally a failure reason).
+    /// Unit (c) only calls this with `.uploadingBundlePb` and `.complete`.
+    nonisolated func markingPhase(
+        _ phase: UploadPhase,
+        failureReason newReason: String? = nil
+    ) -> UploadSessionRecord {
+        UploadSessionRecord(
+            bundleId:            bundleId,
+            tierRawValue:        tierRawValue,
+            clientMintTimestamp: clientMintTimestamp,
+            sessionEntries:      sessionEntries,
+            manifestPaths:       manifestPaths,
+            blobStatuses:        blobStatuses,
+            outputDir:           outputDir,
+            uploadPhase:         phase,
+            failureReason:       newReason ?? failureReason
         )
     }
 
