@@ -1,4 +1,4 @@
-# 0045 — P5 relaunch-recovery cluster design (c shipped, b/a scoped)
+# 0045 — P5 relaunch-recovery cluster design (c/b/a code-complete, OS-kill gate remains)
 
 **Date:** 2026-06-03
 **Status:** Decided
@@ -93,6 +93,15 @@ reconciliation + `uploadPhase == .complete` terminal guard) makes a second trigg
 entirely safe: a drain hook added later is belt-and-suspenders, not the hazard that
 decision 0044 feared about double-enqueue.
 
+**AppDelegate OS-kill fallback ordering constraint (if/when built):** If the on-device
+gate shows `.task` does NOT fire on background OS-relaunch, the `AppDelegate`
+co-trigger is required. When wiring it, rehydration must START its enqueues before
+the background-completion handler is handed back to the OS — if `rehydrateAllUnfinishedBundles`
+runs after `urlSessionDidFinishEvents` fires, the OS drain races or obviates the
+rehydration enqueues. `getAllTasks` reconciliation keeps this SAFE (no duplicate PUTs
+regardless of ordering), but wrong ordering makes the rehydration enqueues pointless.
+Do not build until the on-device gate confirms the need.
+
 **A2 (rejected):** Trigger only on `scenePhase == .active`. Background OS-relaunches
 may transition through `.background` and exit without ever reaching `.active`; the
 recovery would never run on the OS-kill route.
@@ -112,8 +121,8 @@ remaining in place.
 ## What we chose
 
 Cluster design: persist `UploadPhase`, derive in-flight status at runtime, classify
-fatals by root cause, trigger rehydration from `.task` on launch (with on-device
-verification of the background OS-relaunch path still required before shipping unit a).
+fatals by root cause, trigger rehydration from `.task` on launch (on-device OS-kill
+gate verification pending; AppDelegate fallback deferred pending that gate).
 
 ### Bounded cross-launch retry (shipped in P5(b))
 
@@ -122,7 +131,8 @@ Fatal call sites are classified into three buckets:
 - **TERMINAL** (deterministic; retry can't help): non-410/408/429 4xx, `308_persistent`,
   `308_reput_failed`, `reput_failed`, `empty/missing_bundle_pb/output_dir`,
   `bundle_pb_read_failed`, `expired_no_record/no_remint_provider/no_output_dir`,
-  `remint_returned_stale_uris`, `blob_file_missing_at_staleness_remint`. Sets
+  `remint_returned_stale_uris`, `blob_file_missing_at_staleness_remint`,
+  `missing_bundle_pb_at_relaunch`, `missing_blob_at_relaunch` (both added by unit (a); see below). Sets
   `uploadPhase = .failed` + `failureReason` on the persisted record; arms an in-process
   `failedBundles` guard; clears `contexts`/latch/counted-set; cancels in-flight sibling
   URLSession tasks.
@@ -169,23 +179,46 @@ TERMINAL / DEFERRED-INTERRUPTED / DEFERRED-TRANSIENT; `.failed` + `failureReason
 written to the persisted record on terminal paths; sibling-task cancellation on
 terminal; `crossLaunchRetryCount` persisted and bounded.
 
-**Unit (a) still open:** Launch-trigger wiring in `ContentView`/`AppDelegate`;
-`handleEventsForBackgroundURLSession` reading the persisted record and routing to
-`BlobUploadManager`; idempotency hardening (unit c) is the stated prerequisite (met).
-On-device gate required: verify `.task` fires on background OS-relaunch before
-shipping (a). The diagnostic branch `diag-bundlepb-reason-public` (`5bdd12f`) is
-parked as the tool to read the redacted `reason=` on the OS-kill route — do not
-delete it before (a) is staged.
+**Unit (a) built + verified in suite (commits 658cc4a + test-pin bd8b86f):**
+`rehydrateAllUnfinishedBundles()` + `rehydrateBundle(bundleId:record:)` on
+`BlobUploadManager`; trigger = a `.task` modifier in `RoomStudioCaptureApp`
+(foreground/swipe-up path); record-driven (no live `CaptureManager`). On every
+launch: loads all `UploadSessionStore` records via `allBundleIds()` (scans
+`upload_sessions/` for UUID-named `.json` files), skips `uploadPhase == .failed`/
+`.complete`, routes Phase-2 (`allNonBundlePbBlobsUploaded == true`: `onAllBlobsUploaded`
+→ `enqueueBundlePb`) or Phase-1 (blobs pending: `enqueuePhasOneBlobs`) through the
+(c)-idempotent path. CAFUFA load failure (pre-first-unlock on background OS-relaunch)
+is a silent skip — never routes to `onFatalBlobError`, never mutates state for the
+unloadable bundle.
 
-Unit (a) must existence-check bundle.pb before routing to `enqueueBundlePb` (see Fork
-C fix above). The in-process guards (`failedBundles`, `transientCountedThisLaunch`,
-launch token, `contexts`) are per-process by design — cross-launch terminal state is
-carried by the persisted `uploadPhase == .failed`, which (a)'s rehydration must read
-and skip.
+Two new TERMINAL reasons added by (a) — both route to the (b) `onFatalBlobError`
+(sets `uploadPhase = .failed`; NOT transient; never bumps `crossLaunchRetryCount`):
+- `missing_bundle_pb_at_relaunch`: Phase-2 pre-check in `rehydrateBundle` — `bundle.pb`
+  file absent on disk at relaunch time.
+- `missing_blob_at_relaunch`: Phase-1 pre-check in `rehydrateBundle` — non-`bundle.pb`
+  blob file absent on disk; closes the `enqueuePhasOneBlobs` throw-mid-loop silent
+  strand (S0b). The missing-blob → `.failed` persisted → skipped-on-next-relaunch loop
+  is assertion-pinned:
+  `test_rehydrate_phase1_missingBlob_persistsFailed_andSkippedOnSecondRehydrate`.
+
+The in-process guards (`failedBundles`, `transientCountedThisLaunch`, launch token,
+`contexts`) are per-process by design — cross-launch terminal state is carried by the
+persisted `uploadPhase == .failed`, which rehydration reads and skips.
 
 **`onBundleComplete` stub intentionally untouched:** record/dir cleanup is the
 separate disk-accumulation unit (CLAUDE.md "completed-capture disk accumulation"
 gap). It must not be conflated with (a)/(b)/(c).
+
+**Cluster status: code-complete, 162-green in suite.**
+(c) `5bb07c9`, (b) `cc7aba5`, (a) `658cc4a`, test-pin `bd8b86f`.
+The one remaining close item is the on-device OS-kill hardware gate: stage a
+force-quit after all blobs are uploaded and `bundle.pb` PUT is enqueued; reopen;
+confirm `bundle.pb` reaches GCS with no user interaction, GCS-authoritative,
+verified from Mac during the locked interval. Also verify `.task` fires on background
+OS-relaunch. `diag-bundlepb-reason-public` (`5bdd12f`) is the parked tool for
+reading the redacted `reason=` on that route — do not delete.
+
+**Code-complete ≠ Gate-2b closed. The hardware gate is the close.**
 
 ## Why
 
