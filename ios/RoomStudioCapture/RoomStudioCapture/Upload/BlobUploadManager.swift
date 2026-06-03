@@ -932,6 +932,106 @@ actor BlobUploadManager {
         logger.info("[BlobUploadManager] TODO onBundleComplete(\(bundleId, privacy: .public)) — P5 not yet built")
     }
 
+    // MARK: - Launch-time rehydration (P5 unit a, decision 0045)
+
+    /// Recover all unfinished bundle uploads on app launch.
+    ///
+    /// Called at launch via a .task modifier in RoomStudioCaptureApp. Loads all persisted
+    /// upload session records from the store and resumes any bundle whose uploadPhase is
+    /// not yet terminal (.failed) or complete (.complete).
+    ///
+    /// A load failure for any individual record is a silent skip — expected when the device
+    /// is locked and CAFUFA has not been unlocked (background OS-relaunch path). Never
+    /// routes to onFatalBlobError for a load failure; never mutates state for that bundle.
+    ///
+    /// Safe on every launch: onAllBlobsUploaded / enqueuePhasOneBlobs are idempotent under
+    /// unit (c)'s guards (latch + getAllTasks reconciliation).
+    ///
+    /// Decision 0045 (Fork A = A1, unit a).
+    func rehydrateAllUnfinishedBundles() async {
+        guard let bundleIds = try? await store.allBundleIds() else {
+            logger.info("[BlobUploadManager] ⚠ rehydrateAll: failed to enumerate bundle IDs")
+            return
+        }
+        guard !bundleIds.isEmpty else { return }
+        logger.info("[BlobUploadManager] ↩ rehydrateAll: \(bundleIds.count) record(s) found on launch")
+        for bundleId in bundleIds {
+            // Load failure = CAFUFA pre-first-unlock or corrupt record — silent skip.
+            // Never fatal, never mutates state for the unloadable bundle.
+            guard let record = try? await store.load(bundleId: bundleId) else {
+                logger.info("[BlobUploadManager] ⚠ rehydrateAll: could not load \(bundleId, privacy: .public) — skipping")
+                continue
+            }
+            await rehydrateBundle(bundleId: bundleId, record: record)
+        }
+    }
+
+    /// Resume a single upload bundle from its persisted record.
+    ///
+    /// Skips terminal (.failed) and completed (.complete) records. For active bundles:
+    ///   • Phase-2 (allNonBundlePbBlobsUploaded == true): existence-pre-checks bundle.pb,
+    ///     then routes to onAllBlobsUploaded (which handles the staleness guard and enqueues).
+    ///   • Phase-1 (blobs still pending): existence-pre-checks all pending blob files to
+    ///     prevent a mid-loop throw in enqueuePhasOneBlobs from leaving a partially-enqueued
+    ///     bundle with no terminal state (S0b finding). Then calls enqueuePhasOneBlobs, which
+    ///     applies getAllTasks reconciliation (unit c) to skip any blobs with live tasks.
+    ///
+    /// Pre-checks are symmetric with the staleness re-mint pre-pass (onSessionExpired) and
+    /// the bundle_pb_read_failed backstop in enqueueBundlePb. A missing file is immediately
+    /// terminal: there is nothing to upload from a client-side perspective.
+    ///
+    /// Decision 0045 (Fork A = A1, pre-check from Fork C, unit a).
+    func rehydrateBundle(bundleId: String, record: UploadSessionRecord) async {
+        guard record.uploadPhase != .failed, record.uploadPhase != .complete else {
+            logger.info("[BlobUploadManager] ⏩ rehydrate: skip \(bundleId, privacy: .public) — phase=\(record.uploadPhase.rawValue, privacy: .public)")
+            return
+        }
+
+        guard let outputDir = record.outputDir else {
+            await onFatalBlobError(bundleId: bundleId, relativePath: "*",
+                                   reason: "missing_output_dir_at_relaunch")
+            return
+        }
+
+        logger.info("[BlobUploadManager] ↩ rehydrate: resuming \(bundleId, privacy: .public) — phase=\(record.uploadPhase.rawValue, privacy: .public)")
+
+        if record.allNonBundlePbBlobsUploaded {
+            // Phase-2: bundle.pb not yet sent.
+            // Pre-check it exists before routing to onAllBlobsUploaded. The
+            // bundle_pb_read_failed site in enqueueBundlePb is defence-in-depth; this
+            // pre-check is the explicit relaunch gate (decision 0045 Fork C).
+            guard FileManager.default.fileExists(
+                atPath: outputDir.appendingPathComponent("bundle.pb").path
+            ) else {
+                await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
+                                       reason: "missing_bundle_pb_at_relaunch")
+                return
+            }
+            await onAllBlobsUploaded(bundleId: bundleId, record: record)
+        } else {
+            // Phase-1: blobs still pending.
+            // Pre-check all pending blob files exist. A missing file causes enqueuePhasOneBlobs
+            // to throw mid-loop (after resuming earlier tasks), stranding the bundle with no
+            // terminal state and no retry path — permanent silent strand (S0b).
+            for entry in record.sessionEntries where entry.relativePath != "bundle.pb" {
+                guard record.blobStatuses[entry.relativePath] != .uploaded else { continue }
+                guard FileManager.default.fileExists(
+                    atPath: outputDir.appendingPathComponent(entry.relativePath).path
+                ) else {
+                    logger.info("[BlobUploadManager] ✗ rehydrate: blob file missing: \(entry.relativePath, privacy: .public) for \(bundleId, privacy: .public)")
+                    await onFatalBlobError(bundleId: bundleId, relativePath: entry.relativePath,
+                                           reason: "missing_blob_at_relaunch")
+                    return
+                }
+            }
+            do {
+                try await enqueuePhasOneBlobs(record: record)
+            } catch {
+                logger.info("[BlobUploadManager] ✗ rehydrate: Phase-1 enqueue failed for \(bundleId, privacy: .public): \(error)")
+            }
+        }
+    }
+
     // MARK: - Terminal fatal handler (P5 unit b)
 
     /// Permanent, unrecoverable error for a bundle. Marks the record .failed in the store,

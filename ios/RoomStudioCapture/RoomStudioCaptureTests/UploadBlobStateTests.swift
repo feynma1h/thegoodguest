@@ -374,4 +374,71 @@ final class UploadBlobStateTests: XCTestCase {
         XCTAssertFalse(record.allNonBundlePbBlobsUploaded,
                        "Pre-P4 record must start with gate = false (all pending)")
     }
+
+    // MARK: - UploadSessionStore.allBundleIds (P5 unit a, decision 0045)
+
+    func test_allBundleIds_returnsAllSavedBundleIds() async throws {
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        let id1 = "00000000-0000-0000-0000-000000000001"
+        let id2 = "00000000-0000-0000-0000-000000000002"
+        try await store.save(UploadSessionRecord(bundleId: id1, tierRawValue: 1,
+                                                 clientMintTimestamp: Date(),
+                                                 sessionEntries: [], manifestPaths: []))
+        try await store.save(UploadSessionRecord(bundleId: id2, tierRawValue: 1,
+                                                 clientMintTimestamp: Date(),
+                                                 sessionEntries: [], manifestPaths: []))
+
+        let ids = try await store.allBundleIds()
+        XCTAssertEqual(Set(ids), Set([id1, id2]), "allBundleIds must return all saved bundle IDs")
+    }
+
+    func test_allBundleIds_emptyDir_returnsEmpty() async throws {
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        let ids = try await store.allBundleIds()
+        XCTAssertTrue(ids.isEmpty, "allBundleIds on an empty store must return []")
+    }
+
+    func test_allBundleIds_ignoresNonUUIDFilenames() async throws {
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        let validId = "00000000-0000-0000-0000-000000000001"
+        try await store.save(UploadSessionRecord(bundleId: validId, tierRawValue: 1,
+                                                 clientMintTimestamp: Date(),
+                                                 sessionEntries: [], manifestPaths: []))
+        // Write a non-UUID JSON file directly.
+        try Data("{}".utf8).write(to: storeDir.appendingPathComponent("not-a-uuid.json"))
+
+        let ids = try await store.allBundleIds()
+        XCTAssertEqual(ids, [validId], "allBundleIds must skip non-UUID filenames")
+    }
+
+    func test_allBundleIds_ignoresNonJSONFiles() async throws {
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        let validId = "00000000-0000-0000-0000-000000000001"
+        try await store.save(UploadSessionRecord(bundleId: validId, tierRawValue: 1,
+                                                 clientMintTimestamp: Date(),
+                                                 sessionEntries: [], manifestPaths: []))
+        // Write a UUID-named non-.json file directly.
+        try Data([0x00]).write(
+            to: storeDir.appendingPathComponent("00000000-0000-0000-0000-000000000002.pb")
+        )
+
+        let ids = try await store.allBundleIds()
+        XCTAssertEqual(ids, [validId], "allBundleIds must skip non-.json files")
+    }
 }

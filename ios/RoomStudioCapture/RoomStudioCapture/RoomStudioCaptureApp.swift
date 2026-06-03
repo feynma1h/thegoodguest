@@ -41,6 +41,13 @@ struct RoomStudioCaptureApp: App {
                     // See CaptureStorageSweeper and decision 0043.
                     await CaptureStorageSweeper.shared.sweep()
                 }
+                .task {
+                    // Resume any in-flight bundle uploads from prior sessions.
+                    // Covers the swipe-up force-quit path (view appears → .task fires).
+                    // The OS-kill background-relaunch path (.task on background launch) is
+                    // the on-device gate from decision 0045 — verify before shipping.
+                    await BlobUploadManager.shared.rehydrateAllUnfinishedBundles()
+                }
         }
     }
 }
