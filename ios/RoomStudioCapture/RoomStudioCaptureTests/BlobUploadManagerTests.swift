@@ -1988,6 +1988,52 @@ final class BlobUploadManagerTests: XCTestCase {
         XCTAssertEqual(p1Enqueued, 0, "Pre-check abort must produce zero enqueued blobs")
     }
 
+    func test_rehydrate_phase1_missingBlob_persistsFailed_andSkippedOnSecondRehydrate() async throws {
+        // Closes the store-write leg of the missing-blob terminalization chain (R4b gap):
+        //   1. rehydrateBundle with a missing Phase-1 blob fires onFatalBlobError and enqueues nothing.
+        //   2. onFatalBlobError persists uploadPhase == .failed to the store (previously only implied).
+        //   3. A second rehydrateBundle call with the reloaded .failed record is a no-op — terminal
+        //      across launches, not re-stranded on each open.
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, outputDir) = try await makeManager(paths: paths)
+        let record = try await store.load(bundleId: "test-bundle")!
+        try FileManager.default.removeItem(
+            at: outputDir.appendingPathComponent("frames/000000.jpg"))
+
+        // Act 1: rehydrate with the missing blob on disk.
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: record)
+
+        // Assert 1: onFatalBlobError fired, no partial enqueue — mirrors existing missingBlob test.
+        let fatalAfterAct1 = await manager._fatalBlobErrorInvocations
+        let p1EnqueuedAfterAct1 = await manager._phase1BlobsEnqueuedCount
+        XCTAssertFalse(fatalAfterAct1.isEmpty, "Missing Phase-1 blob must call onFatalBlobError")
+        XCTAssertTrue(
+            fatalAfterAct1.allSatisfy { $0.reason == "missing_blob_at_relaunch" },
+            "Reason must be missing_blob_at_relaunch; got: \(fatalAfterAct1.map(\.reason))"
+        )
+        XCTAssertEqual(p1EnqueuedAfterAct1, 0, "Pre-check abort must produce zero enqueued blobs")
+
+        // Assert 2 (THE GAP): the store-write leg — onFatalBlobError must have persisted .failed.
+        let storedRecord = try await store.load(bundleId: "test-bundle")
+        XCTAssertEqual(storedRecord?.uploadPhase, .failed,
+                       "onFatalBlobError must persist uploadPhase == .failed to the store")
+        XCTAssertEqual(storedRecord?.failureReason, "missing_blob_at_relaunch",
+                       "onFatalBlobError must persist the failure reason to the store")
+
+        // Act 2: rehydrate again with the now-.failed record (simulates next-launch reopen).
+        let reloadedRecord = try XCTUnwrap(storedRecord, "Store must contain a record after fatal")
+        let fatalCountBeforeAct2 = fatalAfterAct1.count
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: reloadedRecord)
+
+        // Assert 3: top guard skipped the .failed record — no new fatal, no new enqueue.
+        let fatalAfterAct2 = await manager._fatalBlobErrorInvocations
+        let p1EnqueuedAfterAct2 = await manager._phase1BlobsEnqueuedCount
+        XCTAssertEqual(fatalAfterAct2.count, fatalCountBeforeAct2,
+                       ".failed record must not trigger a second onFatalBlobError call")
+        XCTAssertEqual(p1EnqueuedAfterAct2, 0,
+                       ".failed record must not enqueue any Phase-1 blobs")
+    }
+
     func test_rehydrate_doubleTrigger_noDoubleEnqueue() async throws {
         // Two rehydrateBundle calls (simulating double trigger: .task + AppDelegate belt-and-suspenders).
         // Second call must skip all blobs whose tasks are already live (getAllTasks reconciliation).
