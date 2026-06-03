@@ -1865,6 +1865,257 @@ final class BlobUploadManagerTests: XCTestCase {
                        "Blob status must be .uploaded after success")
     }
 
+    // MARK: - Launch-time rehydration (P5 unit a, decision 0045)
+
+    // MARK: rehydrateBundle: phase-skip guard
+
+    func test_rehydrate_failedRecord_isSkipped() async throws {
+        // uploadPhase == .failed → rehydrateBundle is a no-op.
+        // No enqueuePhasOneBlobs, no onAllBlobsUploaded, no onFatalBlobError.
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let failed = try await store.load(bundleId: "test-bundle")!
+            .markingPhase(.failed, failureReason: "http_400")
+        try await store.save(failed)
+
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: failed)
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        let pbCreated = await manager._bundlePbTasksCreatedCount
+        let p1Enqueued = await manager._phase1BlobsEnqueuedCount
+        XCTAssertTrue(fatal.isEmpty, ".failed record must not call onFatalBlobError")
+        XCTAssertEqual(pbCreated, 0, ".failed record must not enqueue bundle.pb")
+        XCTAssertEqual(p1Enqueued, 0, ".failed record must not enqueue Phase-1 blobs")
+    }
+
+    func test_rehydrate_completeRecord_isSkipped() async throws {
+        // uploadPhase == .complete → rehydrateBundle is a no-op.
+        let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        let completed = try await store.load(bundleId: "test-bundle")!.markingPhase(.complete)
+        try await store.save(completed)
+
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: completed)
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        let pbCreated = await manager._bundlePbTasksCreatedCount
+        let p1Enqueued = await manager._phase1BlobsEnqueuedCount
+        XCTAssertTrue(fatal.isEmpty, ".complete record must not call onFatalBlobError")
+        XCTAssertEqual(pbCreated, 0, ".complete record must not enqueue bundle.pb")
+        XCTAssertEqual(p1Enqueued, 0, ".complete record must not enqueue Phase-1 blobs")
+    }
+
+    // MARK: rehydrateBundle: Phase-2 path
+
+    func test_rehydrate_phase2_bundlePbPresent_enqueuesBundlePb() async throws {
+        // allNonBundlePbBlobsUploaded == true, bundle.pb file present →
+        // routes to onAllBlobsUploaded → enqueueBundlePb → _bundlePbTasksCreatedCount == 1.
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle",
+                                             relativePath: "frames/000000.jpg")
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertTrue(record.allNonBundlePbBlobsUploaded, "Pre-condition: gate must be true")
+        await manager.setGetAllTasksProvider { [] }
+
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: record)
+
+        let pbCreated = await manager._bundlePbTasksCreatedCount
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertEqual(pbCreated, 1,
+                       "Phase-2 rehydrate with bundle.pb present must enqueue bundle.pb PUT")
+        XCTAssertTrue(fatal.isEmpty, "Phase-2 with all files present must not fatal")
+    }
+
+    func test_rehydrate_phase2_bundlePbMissing_callsFatal() async throws {
+        // allNonBundlePbBlobsUploaded == true, bundle.pb file absent →
+        // onFatalBlobError("missing_bundle_pb_at_relaunch").
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, outputDir) = try await makeManager(paths: paths)
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle",
+                                             relativePath: "frames/000000.jpg")
+        let record = try await store.load(bundleId: "test-bundle")!
+        try FileManager.default.removeItem(at: outputDir.appendingPathComponent("bundle.pb"))
+
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: record)
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        let pbCreated = await manager._bundlePbTasksCreatedCount
+        XCTAssertFalse(fatal.isEmpty, "Missing bundle.pb must call onFatalBlobError")
+        XCTAssertTrue(
+            fatal.allSatisfy { $0.reason == "missing_bundle_pb_at_relaunch" },
+            "Reason must be missing_bundle_pb_at_relaunch; got: \(fatal.map(\.reason))"
+        )
+        XCTAssertEqual(pbCreated, 0, "bundle.pb PUT must not be enqueued when file is missing")
+    }
+
+    // MARK: rehydrateBundle: Phase-1 path
+
+    func test_rehydrate_phase1_allBlobsPresent_enqueuesBlobs() async throws {
+        // allNonBundlePbBlobsUploaded == false, all blob files present →
+        // enqueuePhasOneBlobs enqueues blobs; _phase1BlobsEnqueuedCount == 2.
+        let paths = ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertFalse(record.allNonBundlePbBlobsUploaded, "Pre-condition: gate must be false")
+        await manager.setGetAllTasksProvider { [] }
+
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: record)
+
+        let p1Enqueued = await manager._phase1BlobsEnqueuedCount
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertEqual(p1Enqueued, 2, "Phase-1 rehydrate must enqueue all pending blobs")
+        XCTAssertTrue(fatal.isEmpty, "Phase-1 with all files present must not fatal")
+    }
+
+    func test_rehydrate_phase1_missingBlob_callsFatal_noPartialEnqueue() async throws {
+        // Phase-1 path: one pending blob file missing on disk (S0b finding) →
+        // onFatalBlobError("missing_blob_at_relaunch"). Pre-check fires before enqueuePhasOneBlobs;
+        // zero blobs must be enqueued (no partial-enqueue strand).
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, outputDir) = try await makeManager(paths: paths)
+        let record = try await store.load(bundleId: "test-bundle")!
+        try FileManager.default.removeItem(
+            at: outputDir.appendingPathComponent("frames/000000.jpg"))
+
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: record)
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        let p1Enqueued = await manager._phase1BlobsEnqueuedCount
+        XCTAssertFalse(fatal.isEmpty, "Missing Phase-1 blob must call onFatalBlobError")
+        XCTAssertTrue(
+            fatal.allSatisfy { $0.reason == "missing_blob_at_relaunch" },
+            "Reason must be missing_blob_at_relaunch; got: \(fatal.map(\.reason))"
+        )
+        XCTAssertEqual(p1Enqueued, 0, "Pre-check abort must produce zero enqueued blobs")
+    }
+
+    func test_rehydrate_doubleTrigger_noDoubleEnqueue() async throws {
+        // Two rehydrateBundle calls (simulating double trigger: .task + AppDelegate belt-and-suspenders).
+        // Second call must skip all blobs whose tasks are already live (getAllTasks reconciliation).
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        let record = try await store.load(bundleId: "test-bundle")!
+
+        // First call: no live tasks → blob is enqueued.
+        await manager.setGetAllTasksProvider { [] }
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: record)
+        let firstEnqueued = await manager._phase1BlobsEnqueuedCount
+        XCTAssertEqual(firstEnqueued, 1,
+                       "Pre-condition: first rehydrate must enqueue the blob")
+
+        // Second call: live task for the blob → reconciliation skips it.
+        let fakeTask = URLSession.shared.dataTask(with: URL(string: "https://example.com")!)
+        fakeTask.taskDescription = BlobUploadManager.makeTaskDescription(
+            bundleId: "test-bundle", relativePath: "frames/000000.jpg"
+        )
+        await manager.setGetAllTasksProvider { [fakeTask] }
+        await manager.rehydrateBundle(bundleId: "test-bundle", record: record)
+
+        let secondEnqueued = await manager._phase1BlobsEnqueuedCount
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertEqual(secondEnqueued, 0,
+                       "Double-trigger: second rehydrate must not re-enqueue blob with a live task")
+        XCTAssertTrue(fatal.isEmpty, "Double-trigger rehydrate must not fatal")
+    }
+
+    // MARK: rehydrateAllUnfinishedBundles
+
+    func test_rehydrateAll_skipsFailedBundle_processesActiveBundle() async throws {
+        // Two records: one .failed (skipped), one .uploadingBlobs (processed).
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        // Active bundle with real files.
+        let activeId = "00000000-0000-0000-0000-000000000001"
+        let outputDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
+        for path in ["frames/000000.jpg", "bundle.pb"] {
+            let fileURL = outputDir.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try Data([0x00, 0x01]).write(to: fileURL)
+        }
+        let activeRecord = UploadSessionRecord(
+            bundleId: activeId, tierRawValue: 1, clientMintTimestamp: Date(),
+            sessionEntries: makeSessionEntries(["frames/000000.jpg", "bundle.pb"]),
+            manifestPaths: ["frames/000000.jpg", "bundle.pb"],
+            outputDir: outputDir
+        )
+        try await store.save(activeRecord)
+
+        // Failed bundle (no real files needed — skipped before any file check).
+        let failedId = "00000000-0000-0000-0000-000000000002"
+        let failedRecord = UploadSessionRecord(
+            bundleId: failedId, tierRawValue: 1, clientMintTimestamp: Date(),
+            sessionEntries: makeSessionEntries(["frames/000000.jpg", "bundle.pb"]),
+            manifestPaths: ["frames/000000.jpg", "bundle.pb"]
+        ).markingPhase(.failed, failureReason: "http_400")
+        try await store.save(failedRecord)
+
+        let manager = BlobUploadManager(store: store)
+        await manager.setGetAllTasksProvider { [] }
+        await manager.rehydrateAllUnfinishedBundles()
+
+        let p1Enqueued = await manager._phase1BlobsEnqueuedCount
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertGreaterThan(p1Enqueued, 0,
+                             "Active bundle must have Phase-1 blobs enqueued")
+        XCTAssertTrue(fatal.filter { $0.bundleId == activeId }.isEmpty,
+                      "Active bundle must not fatal during rehydration")
+    }
+
+    func test_rehydrateAll_loadFailure_silentSkip_doesNotFatal() async throws {
+        // One record has corrupted JSON (simulating CAFUFA-locked read → load returns nil).
+        // One record is valid and .uploadingBlobs.
+        // Corrupted bundle: silently skipped (no onFatalBlobError, no state mutation).
+        // Valid bundle: processed normally.
+        let storeDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let store = UploadSessionStore(directory: storeDir)
+        addTeardownBlock { try? FileManager.default.removeItem(at: storeDir) }
+
+        // Valid bundle with real files.
+        let validId = "00000000-0000-0000-0000-000000000001"
+        let outputDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
+        for path in ["frames/000000.jpg", "bundle.pb"] {
+            let fileURL = outputDir.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try Data([0x00, 0x01]).write(to: fileURL)
+        }
+        let validRecord = UploadSessionRecord(
+            bundleId: validId, tierRawValue: 1, clientMintTimestamp: Date(),
+            sessionEntries: makeSessionEntries(["frames/000000.jpg", "bundle.pb"]),
+            manifestPaths: ["frames/000000.jpg", "bundle.pb"],
+            outputDir: outputDir
+        )
+        try await store.save(validRecord)
+
+        // Corrupted record: write invalid JSON with a UUID filename directly to the store dir.
+        // allBundleIds() returns this ID; store.load() throws on decode; try? returns nil.
+        let corruptId = "00000000-0000-0000-0000-000000000002"
+        try Data("not valid json".utf8).write(
+            to: storeDir.appendingPathComponent("\(corruptId).json")
+        )
+
+        let manager = BlobUploadManager(store: store)
+        await manager.setGetAllTasksProvider { [] }
+        await manager.rehydrateAllUnfinishedBundles()
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        let p1Enqueued = await manager._phase1BlobsEnqueuedCount
+        // Corrupted bundle must produce no fatal.
+        XCTAssertTrue(fatal.filter { $0.bundleId == corruptId }.isEmpty,
+                      "Load failure must be silently skipped, not routed to onFatalBlobError")
+        // Valid bundle must have been processed.
+        XCTAssertGreaterThan(p1Enqueued, 0,
+                             "Valid bundle must be processed even when a peer record fails to load")
+    }
+
 }
 
 // MARK: - BlobUploadManager test helpers

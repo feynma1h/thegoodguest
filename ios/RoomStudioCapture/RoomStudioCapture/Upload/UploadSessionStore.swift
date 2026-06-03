@@ -112,6 +112,24 @@ actor UploadSessionStore {
         try FileManager.default.removeItem(at: url)
     }
 
+    /// Return all bundle IDs that have a persisted record in the upload_sessions directory.
+    ///
+    /// Used by BlobUploadManager.rehydrateAllUnfinishedBundles to enumerate all records
+    /// on launch without requiring a known bundle ID. Scans the directory for <uuid>.json
+    /// files and returns the UUID string (sans extension) for each.
+    ///
+    /// Returns [] if the directory does not exist (first launch, no records yet).
+    func allBundleIds() throws -> [String] {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        return files.compactMap { filename -> String? in
+            guard filename.hasSuffix(".json") else { return nil }
+            let candidateId = String(filename.dropLast(5))   // strip ".json"
+            guard UUID(uuidString: candidateId) != nil else { return nil }
+            return candidateId
+        }
+    }
+
     // MARK: - Private
 
     private func fileURL(for bundleId: String) -> URL {
