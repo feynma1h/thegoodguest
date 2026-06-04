@@ -3,6 +3,9 @@
 **Date:** 2026-06-04
 **Status:** Decided
 
+> Companion: 0047 — the failed_incomplete recoverable-terminal taxonomy and
+> the inner/outer timing-layer reasoning. Read alongside this note.
+
 ## Context
 
 P5(a) builds a foreground scene-status poller against the deployed `GET
