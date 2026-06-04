@@ -930,6 +930,10 @@ actor BlobUploadManager {
     func onBundleComplete(bundleId: String) async {
         _bundleCompleteInvocations.append(bundleId)
         logger.info("[BlobUploadManager] TODO onBundleComplete(\(bundleId, privacy: .public)) — P5 not yet built")
+        // A-nudge kick (decision 0045 P8 route A): notify the foreground poller if visible.
+        // The .complete record is already on disk (handleSuccess writes it before this call),
+        // so SceneStatusView.onAppear can find it independently if the app is backgrounded.
+        Task { await MainActor.run { ScenePoller.shared.notifyBundleComplete(bundleId: bundleId) } }
     }
 
     // MARK: - Launch-time rehydration (P5 unit a, decision 0045)
