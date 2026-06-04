@@ -15,8 +15,9 @@ import SwiftUI
 
 struct ContentView: View {
 
-    @StateObject private var capture    = CaptureManager()
+    @StateObject private var capture     = CaptureManager()
     @StateObject private var coordinator = UploadCoordinator()
+    @ObservedObject private var poller   = ScenePoller.shared
 
     var body: some View {
         VStack(spacing: 24) {
@@ -34,6 +35,11 @@ struct ContentView: View {
 
             bundleReadout
             uploadSessionBadge
+
+            if poller.pollState != .idle {
+                SceneStatusView()
+                    .transition(.opacity)
+            }
 
             captureButton
                 .padding(.horizontal, 32)
