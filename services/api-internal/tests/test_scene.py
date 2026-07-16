@@ -281,11 +281,11 @@ class TestInMemoryRepository:
         with pytest.raises(ValueError, match="already exists"):
             repo.create(s)
 
-    def test_create_returns_isolated_copy(self, repo):
-        """Mutating the returned scene must not affect the stored scene."""
+    def test_create_stores_isolated_copy(self, repo):
+        """Mutating the input scene after create must not affect the stored scene."""
         s = _scene()
-        returned = repo.create(s)
-        returned.status = SceneStatus.PROCESSING
+        repo.create(s)
+        s.status = SceneStatus.PROCESSING
         assert repo.get(s.scene_id).status == SceneStatus.QUEUED
 
     def test_get_returns_isolated_copy(self, repo):
