@@ -69,6 +69,7 @@ from validation import validate_bundle  # noqa: E402
 from scene import DeviceIdSource, SceneStatus, new_scene  # noqa: E402
 from repository import SceneRepository, InMemorySceneRepository  # noqa: E402
 import blob_validator  # noqa: E402
+import gcs_client  # noqa: E402
 from dispatcher import TaskDispatcher, InMemoryTaskDispatcher  # noqa: E402
 from fcm import FcmNotifier, NullFcmNotifier  # noqa: E402
 from roomstudio_api_core.upload_session_repo import (  # noqa: E402
@@ -245,14 +246,11 @@ MAX_BUNDLE_BYTES: int = 10 * 1024 * 1024  # 10 MiB — proto metadata only
 
 def _fetch_bundle_bytes(gcs_uri: str) -> bytes:
     """Download bundle bytes from GCS. Patched out in tests."""
-    from google.cloud import storage  # deferred
-
     if not gcs_uri.startswith("gs://"):
         raise ValueError(f"Expected gs:// URI, got: {gcs_uri!r}")
     without_scheme = gcs_uri[5:]
     bucket_name, blob_path = without_scheme.split("/", 1)
-    client = storage.Client()
-    blob = client.bucket(bucket_name).blob(blob_path)
+    blob = gcs_client.get_client().bucket(bucket_name).blob(blob_path)
     blob.reload()
     if blob.size is not None and blob.size > MAX_BUNDLE_BYTES:
         raise ValueError(
@@ -269,9 +267,7 @@ def _fetch_bundle_bytes(gcs_uri: str) -> bytes:
 
 def _blob_exists(bucket_name: str, blob_path: str) -> bool:
     """Return True if the GCS blob exists. Patched in tests."""
-    from google.cloud import storage  # deferred
-
-    return storage.Client().bucket(bucket_name).blob(blob_path).exists()
+    return gcs_client.get_client().bucket(bucket_name).blob(blob_path).exists()
 
 
 def _collect_bundle_blob_paths(bundle) -> list[str]:

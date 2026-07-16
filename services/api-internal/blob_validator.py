@@ -33,6 +33,8 @@ from typing import Optional
 
 from roomstudio_api_core.scene import InvalidBlobReason
 
+import gcs_client
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -74,9 +76,7 @@ def _fetch_blob_header(bucket_name: str, blob_path: str) -> tuple[int, bytes]:
     Returns (0, b"") for blobs that are reported as 0 bytes (should not happen
     for finalized GCS objects, but handled defensively).
     """
-    from google.cloud import storage  # deferred: safe to import only in non-test paths
-
-    blob = storage.Client().bucket(bucket_name).blob(blob_path)
+    blob = gcs_client.get_client().bucket(bucket_name).blob(blob_path)
     blob.reload()
     size = blob.size or 0
     if size == 0:
