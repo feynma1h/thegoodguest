@@ -8,7 +8,7 @@ reconstruction.
 
 Design constraints:
   - Size is the PRIMARY check: catches zero-byte uploads, truncated uploads,
-    and the synthetic 21-byte test fixture. The minimum (1024 bytes) is
+    and tiny synthetic test-fixture blobs. The minimum (1024 bytes) is
     intentionally conservative — valid JPEG/PNG images are at least several KB.
   - Magic-byte check is SECONDARY: catches format-consistency failures (file
     named .jpg but containing PNG data, or arbitrary non-image data that
@@ -39,8 +39,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-# 1 KiB. Valid JPEG and PNG images are at minimum several KB; synthetic
-# test-fixture blobs are 21 bytes. This threshold is the primary check that
+# 1 KiB. Valid JPEG and PNG images are at minimum several KB, while synthetic
+# test-fixture blobs are far smaller. This threshold is the primary check that
 # catches zero-byte, truncated, and synthetic-fixture blobs.
 MIN_IMAGE_SIZE_BYTES: int = 1024
 

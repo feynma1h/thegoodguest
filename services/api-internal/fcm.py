@@ -14,7 +14,8 @@ without the library installed or Firebase credentials configured.
 
 NullFcmNotifier is used in tests; FirebaseFcmNotifier is used in production.
 
-Consumers: server.py (POST /ingest/eventarc existence-check failure path).
+Consumers: ingest_server.py (_handle_failed_incomplete, the existence-check
+failure path).
 """
 from __future__ import annotations
 
@@ -62,7 +63,9 @@ class FirebaseFcmNotifier(FcmNotifier):
     the iOS client can surface a diagnostic and re-upload the right files.
 
     The app is initialized from ADC; if firebase-admin was already initialized
-    (e.g. by auth.py) the existing app is reused.
+    the existing app is reused. (Nothing else in api-internal initializes
+    firebase_admin — the service is Cloud Run IAM-gated, not Firebase-JWT
+    verified — so the reuse branch is defensive only.)
 
     firebase-admin is imported lazily.
     """
