@@ -347,7 +347,7 @@ final class BlobUploadManagerTests: XCTestCase {
             clientMintTimestamp: staleTimestamp,
             sessionEntries:      entries,
             manifestPaths:       ["bundle.pb"],
-            outputDir:           nil
+            outputDir:           FileManager.default.temporaryDirectory
         )
         let (manager, _, _) = try await makeManager(paths: ["bundle.pb"])
 
@@ -2096,7 +2096,8 @@ final class BlobUploadManagerTests: XCTestCase {
         let failedRecord = UploadSessionRecord(
             bundleId: failedId, tierRawValue: 1, clientMintTimestamp: Date(),
             sessionEntries: makeSessionEntries(["frames/000000.jpg", "bundle.pb"]),
-            manifestPaths: ["frames/000000.jpg", "bundle.pb"]
+            manifestPaths: ["frames/000000.jpg", "bundle.pb"],
+            outputDir: FileManager.default.temporaryDirectory
         ).markingPhase(.failed, failureReason: "http_400")
         try await store.save(failedRecord)
 

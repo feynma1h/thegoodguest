@@ -1,4 +1,8 @@
-/// Background URLSession manager for Phase-1 and Phase-2 blob uploads (P4, decision 0040).
+/// Background URLSession manager for capture-bundle uploads (decision 0040).
+///
+/// Upload ordering: all non-bundle.pb blobs first ("Phase-1" in method names
+/// and comments below), then bundle.pb alone ("Phase-2") — the arrival of
+/// bundle.pb in GCS is the backend's ingest signal, so it must always land last.
 ///
 /// One shared instance per app. A single background URLSession (identifier:
 /// BlobUploadManager.backgroundSessionIdentifier) persists across app suspension
@@ -11,28 +15,21 @@
 ///   handleTaskCompletion(taskDescription:statusCode:error:) — called by BlobUploadDelegate;
 ///       also the entry point for unit tests (call directly, bypassing URLSession)
 ///   setBackgroundCompletionHandler(_:) — called by the AppDelegate background-session hook
+///       (application(_:handleEventsForBackgroundURLSession:completionHandler:))
 ///
-/// Injectable dependencies (set after init for production, or via testing init):
+/// Injectable dependencies:
 ///   remintProvider  — called by onSessionExpired to re-POST /upload_session.
-///                     Wraps UploadSessionClient + AuthManager in production.
-///                     Tests inject a stub. Nil → routes to onFatalBlobError.
+///                     The production init wires it to UploadSessionClient +
+///                     AuthManager; tests inject a stub. Nil → routes to
+///                     onFatalBlobError.
 ///   clock           — returns "now"; default Date.init. Inject a fixed Date in tests
-///                     for deterministic staleness-guard behavior (Step 2, decision 0041).
+///                     for deterministic staleness-guard behavior (decision 0041).
 ///
 /// Task description format:
 ///   "\(bundleId)|\(relativePath)"
 ///   Stable across kill/relaunch per Apple docs ("The system preserves this property even
 ///   after you restart the app"). taskIdentifier is ephemeral — a new Int is assigned per
 ///   session instance. NEVER use taskIdentifier for cross-launch association.
-///
-/// Unbuilt seams (Chat-scoped future units):
-///   onFatalBlobError(bundleId:relativePath:reason:) — surface error to UI / FCM
-///
-/// AppDelegate hook (not yet wired — requires @UIApplicationDelegateAdaptor):
-///   application(_:handleEventsForBackgroundURLSession:completionHandler:)
-///   → Task { await BlobUploadManager.shared.setBackgroundCompletionHandler(handler) }
-///
-/// Decisions: 0040, 0041
 
 import Foundation
 import os
@@ -93,7 +90,7 @@ actor BlobUploadManager {
     /// Set by the AppDelegate background-session hook; called in urlSessionDidFinishEvents.
     var backgroundSessionCompletionHandler: (() -> Void)?
 
-    // Part B (M2 fix): counts handleTaskCompletion invocations in-flight. Incremented
+    // Counts handleTaskCompletion invocations in-flight. Incremented
     // synchronously in BlobUploadDelegate.didCompleteWithError before Task spawn;
     // decremented in handleTaskCompletion's defer. OSAllocatedUnfairLock: readable from
     // any thread without an actor hop. Decision 0044.
@@ -106,10 +103,6 @@ actor BlobUploadManager {
     /// the three trigger paths (drain, last-decrement, handler-stored-late). Decision 0044.
     private var handlerFired = false
 
-    /// Per-process identity token. UUID assigned once at init; never persisted.
-    /// Exists as a stable anchor for the per-launch idempotency semantics in
-    /// deferTransientBlobError (see transientCountedThisLaunch). Decision 0045.
-    private let launchToken: UUID = UUID()
     /// BundleIds whose permanent fatal error was determined within this process.
     /// Prevents re-entry into handleTaskCompletion dispatch for cancelled-sibling
     /// completions that arrive after onFatalBlobError ran. Not persisted: the
@@ -128,9 +121,10 @@ actor BlobUploadManager {
 
     /// Called by onSessionExpired to re-POST /upload_session.
     /// Receives (bundleId, manifestEntries) and returns fresh [UploadSessionEntry].
-    /// Production: wrap UploadSessionClient.shared.createUploadSession + AuthManager.shared.
-    /// Tests: inject a stub that returns predetermined entries or throws.
-    /// Nil means "not wired" — routes to onFatalBlobError.
+    /// The production init wires this to UploadSessionClient.shared +
+    /// AuthManager.shared (reusing the full retry/backoff + 401 token-refresh
+    /// policy). Tests inject a stub that returns predetermined entries or
+    /// throws. Nil means "not wired" — routes to onFatalBlobError.
     var remintProvider: (@Sendable (String, [UploadManifestEntry]) async throws -> [UploadSessionEntry])?
 
     /// Returns all tasks in the background URLSession.
@@ -151,7 +145,7 @@ actor BlobUploadManager {
     /// Tests verify reconciliation skips blobs whose live task is already in the URLSession.
     var _phase1BlobsEnqueuedCount: Int = 0
 
-    // Part B test observability — nonisolated so tests can read without await.
+    // Drain-gate test observability — nonisolated so tests can read without await.
     nonisolated var _pendingCompletionsCount: Int { _pendingCount.withLock { $0 } }
     /// Actor-isolated; read with await.
     var _drainObserved: Bool { drainObserved }
@@ -159,7 +153,8 @@ actor BlobUploadManager {
 
     // MARK: - Init
 
-    /// Production singleton: creates the background URLSession.
+    /// Production singleton: creates the background URLSession and wires the
+    /// re-mint provider to the real /upload_session client.
     private init() {
         let del = BlobUploadDelegate()
         let cfg = URLSessionConfiguration.background(
@@ -170,6 +165,13 @@ actor BlobUploadManager {
         cfg.allowsCellularAccess     = true
         self.store   = .shared
         self.session = URLSession(configuration: cfg, delegate: del, delegateQueue: nil)
+        self.remintProvider = { bundleId, manifestEntries in
+            try await UploadSessionClient.shared.createUploadSession(
+                bundleId: bundleId,
+                manifest: manifestEntries,
+                tokenProvider: { try await AuthManager.shared.currentIDToken() }
+            )
+        }
     }
 
     /// Testing init: accepts injected store, URLSession, and clock.
@@ -228,7 +230,7 @@ actor BlobUploadManager {
         handler()
     }
 
-    // MARK: - Drain-gate counter (Part B)
+    // MARK: - Drain-gate counter
 
     /// Increment the in-flight counter. Call synchronously in the OS delegate callback,
     /// before spawning the Task, so the count is non-zero when urlSessionDidFinishEvents
@@ -294,22 +296,17 @@ actor BlobUploadManager {
     /// - Skips blobs already .uploaded in the persisted record (relaunch resume path).
     /// - Excludes bundle.pb: it is enqueued by onAllBlobsUploaded after the gate fires,
     ///   never by this loop. This is the load-bearing ordering guarantee (decision 0040).
-    /// - Derives outputDir from record.outputDir; throws missingOutputDir if absent
-    ///   (pre-P4 records without the field cannot participate in Phase-1).
     /// - Sets Content-Range: bytes 0-{size-1}/{size} (required by GCS single-shot resumable PUT).
     /// - Does NOT set Content-Length: URLSession computes it from the file URL automatically.
     /// - Does NOT set Content-Type: the session_uri was minted with
-    ///   X-Upload-Content-Type: application/octet-stream; the server controls the stored type
-    ///   (gap F2, decision 0040 item 2).
+    ///   X-Upload-Content-Type: application/octet-stream; the server controls the stored type.
     /// - task.taskDescription = makeTaskDescription(bundleId:relativePath:) for stable
     ///   cross-relaunch association.
     ///
-    /// Stores an UploadContext for this bundle in memory (retryCount + reputtedPaths only;
-    /// outputDir is now in the persisted record). Context is NOT persisted.
+    /// Stores an UploadContext for this bundle in memory (retryCount + reputtedPaths).
+    /// Context is NOT persisted.
     func enqueuePhasOneBlobs(record: UploadSessionRecord) async throws {
-        guard let outputDir = record.outputDir else {
-            throw BlobUploadError.missingOutputDir(record.bundleId)
-        }
+        let outputDir = record.outputDir
         let bundleId = record.bundleId
 
         // Preserve existing context if one exists (retryCount + reputtedPaths intact).
@@ -353,7 +350,7 @@ actor BlobUploadManager {
             req.httpMethod = "PUT"
             req.setValue("bytes 0-\(size - 1)/\(size)", forHTTPHeaderField: "Content-Range")
             // Content-Length: omitted — URLSession sets it from the file.
-            // Content-Type: omitted — session URI controls the stored type (F2).
+            // Content-Type: omitted — session URI controls the stored type.
 
             let task = session.uploadTask(with: req, fromFile: fileURL)
             task.taskDescription = taskDesc
@@ -364,9 +361,9 @@ actor BlobUploadManager {
         logger.info("[BlobUploadManager] enqueued \(enqueued) Phase-1 task(s) for bundle \(bundleId, privacy: .public)")
     }
 
-    // MARK: - Completion routing (0040 item 4)
+    // MARK: - Completion routing
 
-    /// Map a completing task to the decision-0040 action table and dispatch.
+    /// Map a completed task to the decision-0040 action table and dispatch.
     ///
     /// Call surface for BlobUploadDelegate (via Task { await ... }) and directly
     /// for unit tests. The `statusCode` parameter is nil when `error` is non-nil
@@ -383,7 +380,7 @@ actor BlobUploadManager {
         error: Error?,
         backgroundTaskToken: BackgroundTaskHandle? = nil
     ) async {
-        // Single defer covers every exit path (Q2 map, decision 0044):
+        // Single defer covers every exit path (decision 0044):
         // malformed-desc early return, all onFatalBlobError routing sites, markBlobUploaded
         // nil/throw, gate-not-fired return, onBundleComplete routing, enqueueReput/task.resume
         // success, onAllBlobsUploaded→enqueueBundlePb, onSessionExpired all terminals.
@@ -467,7 +464,7 @@ actor BlobUploadManager {
         // onAllBlobsUploaded to fire again — an incorrect re-entry.
         if relativePath == "bundle.pb" {
             // Persist .complete phase. Does NOT delete the record or session dir —
-            // that is reserved for the disk-accumulation unit (P5 onBundleComplete).
+            // that is reserved for the unbuilt onBundleComplete cleanup work.
             if let current = try? await store.load(bundleId: bundleId) {
                 try? await store.save(current.markingPhase(.complete))
             }
@@ -512,7 +509,6 @@ actor BlobUploadManager {
         }
         if ctx.reputtedPaths.contains(relativePath) {
             // Already re-PUT once and received another 308 → persistent → fatal.
-            contexts[bundleId] = ctx
             await onFatalBlobError(bundleId: bundleId, relativePath: relativePath,
                                    reason: "308_persistent")
             return
@@ -588,9 +584,7 @@ actor BlobUploadManager {
         guard let record = try await store.load(bundleId: bundleId) else {
             throw BlobUploadError.missingContext(bundleId)
         }
-        guard let outputDir = record.outputDir else {
-            throw BlobUploadError.missingOutputDir(bundleId)
-        }
+        let outputDir = record.outputDir
         let sessionUri = record.sessionUri(for: relativePath)
         guard let sessionUri, let sessionURL = URL(string: sessionUri) else {
             throw BlobUploadError.invalidSessionUri(relativePath)
@@ -613,8 +607,8 @@ actor BlobUploadManager {
 
     /// Enqueue the bundle.pb PUT, completing Phase-2.
     ///
-    /// Called when the Phase-1 gate fires (all non-bundle.pb blobs uploaded) or by the
-    /// relaunch path in UploadCoordinator (not yet built) when the persisted record already
+    /// Called when the ordering gate fires (all non-bundle.pb blobs uploaded) or by
+    /// the relaunch path (rehydrateBundle) when the persisted record already
     /// satisfies allNonBundlePbBlobsUploaded on app restart.
     ///
     /// Staleness guard (0040 item 6): if elapsed since the persisted mint timestamp exceeds
@@ -642,8 +636,8 @@ actor BlobUploadManager {
     /// Enqueue a single-shot whole-file PUT task for bundle.pb against its session URI.
     ///
     /// Shared by onAllBlobsUploaded (fresh path) and onSessionExpired (post-staleness-remint
-    /// path). PUT semantics identical to Phase-1 blobs: Content-Range set, Content-Length
-    /// and Content-Type omitted (URLSession and session URI handle them — F2).
+    /// path). PUT semantics identical to the other blobs: Content-Range set, Content-Length
+    /// and Content-Type omitted (URLSession and session URI handle them).
     private func enqueueBundlePb(bundleId: String, record: UploadSessionRecord) async {
         // ── In-process latch + terminal guard (no await before this block) ──────────────────
         // Check-and-set is synchronous on the actor executor, so no second task can interleave
@@ -670,14 +664,6 @@ actor BlobUploadManager {
             return
         }
 
-        guard let outputDir = record.outputDir else {
-            logger.info("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId, privacy: .public)")
-            bundlePbEnqueueInFlight.remove(bundleId)
-            await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
-                                   reason: "missing_output_dir")
-            return
-        }
-
         guard let sessionUri = record.sessionUri(for: "bundle.pb"),
               let sessionURL = URL(string: sessionUri) else {
             logger.info("[BlobUploadManager] ⚠ no bundle.pb session URI for \(bundleId, privacy: .public)")
@@ -687,7 +673,7 @@ actor BlobUploadManager {
             return
         }
 
-        let fileURL = outputDir.appendingPathComponent("bundle.pb")
+        let fileURL = record.outputDir.appendingPathComponent("bundle.pb")
         do {
             let size = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             guard size > 0 else {
@@ -705,7 +691,7 @@ actor BlobUploadManager {
             var req = URLRequest(url: sessionURL)
             req.httpMethod = "PUT"
             req.setValue("bytes 0-\(size - 1)/\(size)", forHTTPHeaderField: "Content-Range")
-            // Content-Length: URLSession sets from file. Content-Type: omitted (F2).
+            // Content-Length: URLSession sets from file. Content-Type: omitted.
 
             let task = session.uploadTask(with: req, fromFile: fileURL)
             task.taskDescription = bundlePbDesc
@@ -746,7 +732,7 @@ actor BlobUploadManager {
     /// Re-mint flow:
     ///   1. Load persisted record (cold-relaunch safe: no in-memory context needed).
     ///   2. Call remintProvider with the stored manifest paths (expectedSizeBytes = 0,
-    ///      server accepts per gap F3). Reuses the full 0038 retry/backoff + 401
+    ///      the server accepts size 0). Reuses the full 0038 retry/backoff + 401
     ///      token-refresh policy implemented in UploadSessionClient.
     ///   3. Loop guard (410 path only): if returned URIs == persisted URIs → fatal.
     ///   4. Persist fresh record (new sessionEntries + fresh clientMintTimestamp).
@@ -775,7 +761,7 @@ actor BlobUploadManager {
                                    reason: "expired_no_remint_provider")
             return
         }
-        // Send expectedSizeBytes = 0; server accepts per gap F3 and the path-set alone
+        // Send expectedSizeBytes = 0; the server accepts size 0 and the path-set alone
         // is the idempotency key. We cannot reconstruct exact sizes from the record.
         let manifestEntries = record.manifestPaths.map {
             UploadManifestEntry(relativePath: $0, expectedSizeBytes: 0)
@@ -797,6 +783,13 @@ actor BlobUploadManager {
         //    7-day TTL). Re-enqueuing with dead URIs would loop on 410 immediately.
         //    Not applied on the staleness path: at 12 h, stored URIs are still valid and
         //    identical == correct server behaviour, not a dead-URI condition.
+        //
+        //    Fatal (not wait-and-retry) is deliberate: GCS has declared the session
+        //    dead, so identical URIs are guaranteed to 410 again; the only thing a
+        //    bounded wait could buy is the Firestore TTL firing (up to ~72 h of lag),
+        //    days of silent background churn for a capture whose already-uploaded
+        //    blobs the age=1d lifecycle rule has long since deleted anyway. A
+        //    terminal .failed surfaces the problem instead. See decision 0049.
         let oldUriMap = record.sessionUriMap
         let newUriMap = Dictionary(
             uniqueKeysWithValues: freshEntries.map { ($0.relativePath, $0.sessionUri) }
@@ -817,8 +810,14 @@ actor BlobUploadManager {
             logger.info("[BlobUploadManager] ⚠ failed to persist fresh record for \(bundleId, privacy: .public): \(error.localizedDescription)")
             // DEFERRED-TRANSIENT: transient disk/IO error persisting fresh URIs.
             // freshRecord has the correct new URIs but wasn't saved; blobs stay .pending.
-            // If the counter bump save also fails (same IO error), count is not advanced —
-            // tolerable: conservative, allows one extra attempt on the next launch.
+            //
+            // Accepted risk: if saves consistently fail, the counter bump inside
+            // deferTransientBlobError also fails, so the N=10 cross-launch budget
+            // never advances and the bundle retries on every launch indefinitely.
+            // That is the intended behaviour, not a gap: with persistence down,
+            // escalating to fatal couldn't durably record .failed either, work per
+            // launch stays bounded (one deferral count per bundle per launch), and
+            // the budget resumes counting as soon as the store heals. Decision 0049.
             await deferTransientBlobError(bundleId: bundleId, relativePath: "*",
                                           reason: "remint_persist_failed: \(error)", record: freshRecord)
             return
@@ -832,19 +831,14 @@ actor BlobUploadManager {
         //        bundle.pb is NOT enqueued here; the Phase-1 gate re-fires via normal path.
         //      410 path (loopGuardEnabled): only re-enqueue blobs not yet .uploaded.
         //        Already-done blobs are preserved; bundle.pb deferred to gate path.
-        guard let outputDir = freshRecord.outputDir else {
-            logger.info("[BlobUploadManager] ⚠ no outputDir in record for \(bundleId, privacy: .public) — cannot re-enqueue")
-            await onFatalBlobError(bundleId: bundleId, relativePath: "*",
-                                   reason: "remint_no_output_dir")
-            return
-        }
+        let outputDir = freshRecord.outputDir
 
         if !loopGuardEnabled {
             // STALENESS PATH — three strictly ordered phases.
             //
             // Phase 1: read-only pre-pass. Confirm every non-bundle.pb file exists before
             // mutating any state or starting any upload. A missing-file abort must leave the
-            // store untouched and start zero URLSession tasks (decision 0043 follow-up).
+            // store untouched and start zero URLSession tasks.
             let nonBundleEntries = freshRecord.sessionEntries.filter { $0.relativePath != "bundle.pb" }
             for entry in nonBundleEntries {
                 let fileURL = outputDir.appendingPathComponent(entry.relativePath)
@@ -866,20 +860,32 @@ actor BlobUploadManager {
                 logger.info("[BlobUploadManager] ⚠ failed to persist reset record for \(bundleId, privacy: .public): \(error.localizedDescription)")
                 // DEFERRED-TRANSIENT: transient disk/IO error persisting staleness-reset record.
                 // freshRecord is the last successfully persisted version; bump its counter.
+                // Same accepted persistent-save-failure risk as the remint_persist_failed
+                // site above: bounded per launch, self-heals with the store. Decision 0049.
                 await deferTransientBlobError(bundleId: bundleId, relativePath: "*",
                                               reason: "staleness_reset_persist_failed: \(error)", record: freshRecord)
                 return
             }
 
-            // Phase 3: enqueue all PUT tasks.
+            // Phase 3: enqueue all PUT tasks. A malformed fresh URI or an unreadable/
+            // zero-size file is deterministic — silently skipping would strand the blob
+            // as permanently .pending with no terminal state, so both route to fatal.
             var reenqueued = 0
             for entry in resetRecord.sessionEntries where entry.relativePath != "bundle.pb" {
                 let fileURL = outputDir.appendingPathComponent(entry.relativePath)
-                guard let sessionURL = URL(string: entry.sessionUri) else { continue }
+                guard let sessionURL = URL(string: entry.sessionUri) else {
+                    await onFatalBlobError(bundleId: bundleId, relativePath: entry.relativePath,
+                                           reason: "invalid_remint_uri")
+                    return
+                }
                 guard
                     let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
                     let sz = resources.fileSize, sz > 0
-                else { continue }
+                else {
+                    await onFatalBlobError(bundleId: bundleId, relativePath: entry.relativePath,
+                                           reason: "blob_unreadable_at_staleness_remint")
+                    return
+                }
                 var req = URLRequest(url: sessionURL)
                 req.httpMethod = "PUT"
                 req.setValue("bytes 0-\(sz - 1)/\(sz)", forHTTPHeaderField: "Content-Range")
@@ -899,16 +905,26 @@ actor BlobUploadManager {
         }
 
         // 410 PATH: re-enqueue only blobs that are not yet .uploaded.
+        // As on the staleness path, a malformed fresh URI or unreadable file is
+        // deterministic and would otherwise strand the blob — route to fatal.
         var reenqueued = 0
         for entry in freshRecord.sessionEntries where entry.relativePath != "bundle.pb" {
             guard freshRecord.blobStatuses[entry.relativePath] != .uploaded else { continue }
-            guard let sessionURL = URL(string: entry.sessionUri) else { continue }
+            guard let sessionURL = URL(string: entry.sessionUri) else {
+                await onFatalBlobError(bundleId: bundleId, relativePath: entry.relativePath,
+                                       reason: "invalid_remint_uri")
+                return
+            }
             let fileURL = outputDir.appendingPathComponent(entry.relativePath)
             guard
                 let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
                 let sz = resources.fileSize,
                 sz > 0
-            else { continue }
+            else {
+                await onFatalBlobError(bundleId: bundleId, relativePath: entry.relativePath,
+                                       reason: "blob_unreadable_at_remint")
+                return
+            }
             var req = URLRequest(url: sessionURL)
             req.httpMethod = "PUT"
             req.setValue("bytes 0-\(sz - 1)/\(sz)", forHTTPHeaderField: "Content-Range")
@@ -924,19 +940,19 @@ actor BlobUploadManager {
 
     // MARK: - Unbuilt seams
 
-    /// UNBUILT — P5 seam: upload pipeline terminal state.
+    /// UNBUILT seam: upload pipeline terminal state.
     /// Future unit: surface bundle upload completion to UI / polling / FCM,
     /// delete the on-device session dir, and remove the UploadSessionRecord.
     func onBundleComplete(bundleId: String) async {
         _bundleCompleteInvocations.append(bundleId)
-        logger.info("[BlobUploadManager] TODO onBundleComplete(\(bundleId, privacy: .public)) — P5 not yet built")
-        // A-nudge kick (decision 0045 P8 route A): notify the foreground poller if visible.
+        logger.info("[BlobUploadManager] TODO onBundleComplete(\(bundleId, privacy: .public)) — not yet built")
+        // Notify the foreground poller if visible (decision 0045).
         // The .complete record is already on disk (handleSuccess writes it before this call),
         // so SceneStatusView.onAppear can find it independently if the app is backgrounded.
         Task { await MainActor.run { ScenePoller.shared.notifyBundleComplete(bundleId: bundleId) } }
     }
 
-    // MARK: - Launch-time rehydration (P5 unit a, decision 0045)
+    // MARK: - Launch-time rehydration (decision 0045)
 
     /// Recover all unfinished bundle uploads on app launch.
     ///
@@ -948,10 +964,10 @@ actor BlobUploadManager {
     /// is locked and CAFUFA has not been unlocked (background OS-relaunch path). Never
     /// routes to onFatalBlobError for a load failure; never mutates state for that bundle.
     ///
-    /// Safe on every launch: onAllBlobsUploaded / enqueuePhasOneBlobs are idempotent under
-    /// unit (c)'s guards (latch + getAllTasks reconciliation).
+    /// Safe on every launch: onAllBlobsUploaded / enqueuePhasOneBlobs are idempotent
+    /// under the enqueue guards (in-process latch + getAllTasks reconciliation).
     ///
-    /// Decision 0045 (Fork A = A1, unit a).
+    /// Decision 0045.
     func rehydrateAllUnfinishedBundles() async {
         guard let bundleIds = try? await store.allBundleIds() else {
             logger.info("[BlobUploadManager] ⚠ rehydrateAll: failed to enumerate bundle IDs")
@@ -973,37 +989,34 @@ actor BlobUploadManager {
     /// Resume a single upload bundle from its persisted record.
     ///
     /// Skips terminal (.failed) and completed (.complete) records. For active bundles:
-    ///   • Phase-2 (allNonBundlePbBlobsUploaded == true): existence-pre-checks bundle.pb,
-    ///     then routes to onAllBlobsUploaded (which handles the staleness guard and enqueues).
-    ///   • Phase-1 (blobs still pending): existence-pre-checks all pending blob files to
-    ///     prevent a mid-loop throw in enqueuePhasOneBlobs from leaving a partially-enqueued
-    ///     bundle with no terminal state (S0b finding). Then calls enqueuePhasOneBlobs, which
-    ///     applies getAllTasks reconciliation (unit c) to skip any blobs with live tasks.
+    ///   • Finalize stage (allNonBundlePbBlobsUploaded == true): existence-pre-checks
+    ///     bundle.pb, then routes to onAllBlobsUploaded (which handles the staleness
+    ///     guard and enqueues).
+    ///   • Blob stage (blobs still pending): existence-pre-checks all pending blob files
+    ///     to prevent a mid-loop throw in enqueuePhasOneBlobs from leaving a partially-
+    ///     enqueued bundle with no terminal state. Then calls enqueuePhasOneBlobs, which
+    ///     applies getAllTasks reconciliation to skip any blobs with live tasks.
     ///
     /// Pre-checks are symmetric with the staleness re-mint pre-pass (onSessionExpired) and
     /// the bundle_pb_read_failed backstop in enqueueBundlePb. A missing file is immediately
     /// terminal: there is nothing to upload from a client-side perspective.
     ///
-    /// Decision 0045 (Fork A = A1, pre-check from Fork C, unit a).
+    /// Decision 0045.
     func rehydrateBundle(bundleId: String, record: UploadSessionRecord) async {
         guard record.uploadPhase != .failed, record.uploadPhase != .complete else {
             logger.info("[BlobUploadManager] ⏩ rehydrate: skip \(bundleId, privacy: .public) — phase=\(record.uploadPhase.rawValue, privacy: .public)")
             return
         }
 
-        guard let outputDir = record.outputDir else {
-            await onFatalBlobError(bundleId: bundleId, relativePath: "*",
-                                   reason: "missing_output_dir_at_relaunch")
-            return
-        }
+        let outputDir = record.outputDir
 
         logger.info("[BlobUploadManager] ↩ rehydrate: resuming \(bundleId, privacy: .public) — phase=\(record.uploadPhase.rawValue, privacy: .public)")
 
         if record.allNonBundlePbBlobsUploaded {
-            // Phase-2: bundle.pb not yet sent.
+            // Finalize stage: bundle.pb not yet sent.
             // Pre-check it exists before routing to onAllBlobsUploaded. The
             // bundle_pb_read_failed site in enqueueBundlePb is defence-in-depth; this
-            // pre-check is the explicit relaunch gate (decision 0045 Fork C).
+            // pre-check is the explicit relaunch gate (decision 0045).
             guard FileManager.default.fileExists(
                 atPath: outputDir.appendingPathComponent("bundle.pb").path
             ) else {
@@ -1013,10 +1026,10 @@ actor BlobUploadManager {
             }
             await onAllBlobsUploaded(bundleId: bundleId, record: record)
         } else {
-            // Phase-1: blobs still pending.
+            // Blob stage: blobs still pending.
             // Pre-check all pending blob files exist. A missing file causes enqueuePhasOneBlobs
             // to throw mid-loop (after resuming earlier tasks), stranding the bundle with no
-            // terminal state and no retry path — permanent silent strand (S0b).
+            // terminal state and no retry path — a permanent silent strand.
             for entry in record.sessionEntries where entry.relativePath != "bundle.pb" {
                 guard record.blobStatuses[entry.relativePath] != .uploaded else { continue }
                 guard FileManager.default.fileExists(
@@ -1036,7 +1049,7 @@ actor BlobUploadManager {
         }
     }
 
-    // MARK: - Terminal fatal handler (P5 unit b)
+    // MARK: - Terminal fatal handler
 
     /// Permanent, unrecoverable error for a bundle. Marks the record .failed in the store,
     /// inserts the bundleId into failedBundles (re-entry guard), cancels sibling URLSession
@@ -1047,7 +1060,7 @@ actor BlobUploadManager {
     /// For DEFERRED-TRANSIENT (exhausted retries) use deferTransientBlobError.
     /// For DEFERRED-INTERRUPTED (no-context, relaunch-recoverable) log inline, return.
     ///
-    /// Decision 0045 (Fork C = R, unit b).
+    /// Decision 0045.
     func onFatalBlobError(bundleId: String, relativePath: String, reason: String) async {
         _fatalBlobErrorInvocations.append((bundleId: bundleId, relativePath: relativePath, reason: reason))
         logger.info("[BlobUploadManager] ✗ fatal: \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
@@ -1061,7 +1074,8 @@ actor BlobUploadManager {
         contexts.removeValue(forKey: bundleId)
         transientCountedThisLaunch.remove(bundleId)
 
-        // 3. Persist .failed phase + reason so the relaunch path (unit a) skips this bundle.
+        // 3. Persist .failed phase + reason so the relaunch path
+        //    (rehydrateAllUnfinishedBundles) skips this bundle.
         if let current = try? await store.load(bundleId: bundleId) {
             try? await store.save(current.markingPhase(.failed, failureReason: reason))
         }
@@ -1075,10 +1089,10 @@ actor BlobUploadManager {
             if parsed.bundleId == bundleId { task.cancel() }
         }
 
-        // TODO P5: surface terminal failure to UI / FCM.
+        // TODO: surface terminal failure to UI / FCM (unbuilt; required before launch).
     }
 
-    // MARK: - Deferred transient error handler (P5 unit b)
+    // MARK: - Deferred transient error handler
 
     /// Cross-launch retry budgeting for DEFERRED-TRANSIENT errors. Called when an error is
     /// transient (network/server/IO) but in-process retries are exhausted, so recovery must
@@ -1092,10 +1106,10 @@ actor BlobUploadManager {
     /// escalates to onFatalBlobError (permanent failure). The bundle is then marked .failed.
     ///
     /// On normal (non-escalating) deferral: saves record with incremented counter, leaves
-    /// all blob statuses unchanged (.pending). The relaunch path (unit a) re-enqueues from
-    /// the saved record on the next launch.
+    /// all blob statuses unchanged (.pending). The relaunch path
+    /// (rehydrateAllUnfinishedBundles) re-enqueues from the saved record on the next launch.
     ///
-    /// Decision 0045 (Fork C = R, unit b).
+    /// Decision 0045.
     private func deferTransientBlobError(
         bundleId: String,
         relativePath: String,
@@ -1118,7 +1132,9 @@ actor BlobUploadManager {
         try? await store.save(bumped)
         transientCountedThisLaunch.insert(bundleId)
         logger.info("[BlobUploadManager] ↩ deferred (transient, attempt \(newCount)/\(Self.maxCrossLaunchRetries)): \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
-        // Blob stays .pending in blobStatuses. Relaunch path re-enqueues via enqueuePhasOneBlobs.
+        // Blob stays .pending in blobStatuses. On relaunch, rehydrateBundle re-enqueues
+        // pending blobs via enqueuePhasOneBlobs; a pending bundle.pb is re-enqueued via
+        // onAllBlobsUploaded → enqueueBundlePb once the ordering gate holds.
     }
 }
 
@@ -1158,14 +1174,12 @@ enum BlobUploadError: LocalizedError {
     case invalidSessionUri(String)
     case emptyBlob(String)
     case missingContext(String)
-    case missingOutputDir(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidSessionUri(let s): return "Invalid session URI: \(s)"
         case .emptyBlob(let p):         return "Zero-size blob at path: \(p)"
         case .missingContext(let id):   return "No upload context for bundle: \(id)"
-        case .missingOutputDir(let id): return "No outputDir in record for bundle: \(id)"
         }
     }
 }
