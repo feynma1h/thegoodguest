@@ -62,11 +62,13 @@ class TestClaimQueued:
         assert lease > before + timedelta(seconds=299)
         assert lease < after + timedelta(seconds=301)
 
-    def test_carries_device_id(self):
+    def test_carries_device_id_and_fcm_token(self):
         repo = InMemoryReceiverRepository()
-        repo.seed(_SCENE_ID, status="queued", device_id=_DEVICE_ID)
+        repo.seed(_SCENE_ID, status="queued", device_id=_DEVICE_ID,
+                  fcm_token="fcm-tok-42")
         result = repo.claim(_SCENE_ID, lease_ttl_seconds=300)
         assert result.device_id == _DEVICE_ID
+        assert result.fcm_token == "fcm-tok-42"
 
 
 # ---------------------------------------------------------------------------
@@ -121,12 +123,13 @@ class TestClaimProcessingStale:
         repo.claim(_SCENE_ID, lease_ttl_seconds=300)
         assert repo.get_raw(_SCENE_ID)["status"] == "processing"
 
-    def test_carries_device_id(self):
+    def test_carries_device_id_and_fcm_token(self):
         repo = InMemoryReceiverRepository()
         repo.seed(_SCENE_ID, status="processing", device_id=_DEVICE_ID,
-                  lease_expires_at=_past)
+                  fcm_token="fcm-tok-42", lease_expires_at=_past)
         result = repo.claim(_SCENE_ID, lease_ttl_seconds=300)
         assert result.device_id == _DEVICE_ID
+        assert result.fcm_token == "fcm-tok-42"
 
     def test_no_lease_treated_as_stale(self):
         """A PROCESSING scene with no lease_expires_at is treated as stale."""

@@ -52,11 +52,14 @@ class ClaimStatus(str, Enum):
 class ClaimResult:
     """Result of a claim() call.
 
-    device_id is non-empty only when status is CLAIMED or RECLAIMED — the
-    caller needs it to send FCM notifications on terminal transitions.
+    device_id and fcm_token are populated only when status is CLAIMED or
+    RECLAIMED. fcm_token is the FCM registration token captured on the Scene
+    at ingest (may be empty if the client supplied none) — the caller uses it
+    to send FCM notifications on terminal transitions.
     """
     status: ClaimStatus
     device_id: str = ""
+    fcm_token: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +154,7 @@ class InMemoryReceiverRepository(ReceiverRepository):
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        # Each entry: {"status": str, "device_id": str, "bundle_uri": str,
+        # Each entry: {"status": str, "device_id": str, "fcm_token": str, "bundle_uri": str,
         #              "result_uri": str|None, "last_error": str|None,
         #              "lease_expires_at": datetime|None}
         self._scenes: dict[str, dict] = {}
@@ -162,6 +165,7 @@ class InMemoryReceiverRepository(ReceiverRepository):
         *,
         status: str,
         device_id: str = "device-1",
+        fcm_token: str = "fcm-token-1",
         bundle_uri: str = "gs://bucket/captures/test/bundle.pb",
         result_uri: Optional[str] = None,
         last_error: Optional[str] = None,
@@ -174,6 +178,7 @@ class InMemoryReceiverRepository(ReceiverRepository):
             self._scenes[scene_id] = {
                 "status": status,
                 "device_id": device_id,
+                "fcm_token": fcm_token,
                 "bundle_uri": bundle_uri,
                 "result_uri": result_uri,
                 "last_error": last_error,
@@ -208,13 +213,15 @@ class InMemoryReceiverRepository(ReceiverRepository):
                 # Stale lease — reclaim atomically under the lock.
                 entry["lease_expires_at"] = new_lease
                 entry["lease_holder_id"] = holder_id
-                return ClaimResult(ClaimStatus.RECLAIMED, device_id=entry["device_id"])
+                return ClaimResult(ClaimStatus.RECLAIMED, device_id=entry["device_id"],
+                                   fcm_token=entry.get("fcm_token", ""))
 
             if status == "queued":
                 entry["status"] = "processing"
                 entry["lease_expires_at"] = new_lease
                 entry["lease_holder_id"] = holder_id
-                return ClaimResult(ClaimStatus.CLAIMED, device_id=entry["device_id"])
+                return ClaimResult(ClaimStatus.CLAIMED, device_id=entry["device_id"],
+                                   fcm_token=entry.get("fcm_token", ""))
 
             # Unknown status — treat as bug.
             return ClaimResult(ClaimStatus.WRONG_STATE)
@@ -317,6 +324,7 @@ class FirestoreReceiverRepository(ReceiverRepository):
             data = snap.to_dict()
             status = data.get("status", "")
             device_id = data.get("device_id", "")
+            fcm_token = data.get("fcm_token") or ""
 
             if status in ("failed", "ready"):
                 return ClaimResult(ClaimStatus.WRONG_STATE)
@@ -333,7 +341,8 @@ class FirestoreReceiverRepository(ReceiverRepository):
                     "lease_holder_id": holder_id,
                     "updated_at": now,
                 })
-                return ClaimResult(ClaimStatus.RECLAIMED, device_id=device_id)
+                return ClaimResult(ClaimStatus.RECLAIMED, device_id=device_id,
+                                   fcm_token=fcm_token)
 
             if status == "queued":
                 transaction.update(ref, {
@@ -342,7 +351,8 @@ class FirestoreReceiverRepository(ReceiverRepository):
                     "lease_holder_id": holder_id,
                     "updated_at": now,
                 })
-                return ClaimResult(ClaimStatus.CLAIMED, device_id=device_id)
+                return ClaimResult(ClaimStatus.CLAIMED, device_id=device_id,
+                                   fcm_token=fcm_token)
 
             return ClaimResult(ClaimStatus.WRONG_STATE)
 

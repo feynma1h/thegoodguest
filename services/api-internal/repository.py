@@ -223,6 +223,7 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
             "last_error": scene.last_error,
             "bundle_id": scene.bundle_id,
             "user_id": scene.user_id,
+            "fcm_token": scene.fcm_token,
             "missing_paths": scene.missing_paths,
             "invalid_blobs": scene.invalid_blobs,
         }

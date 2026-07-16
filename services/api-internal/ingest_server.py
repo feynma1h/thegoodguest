@@ -442,7 +442,9 @@ def _run_ingest(
         # at mint time, tied to the verified Firebase JWT), the same source as
         # the failed_incomplete/failed_invalid creation sites — never from the
         # unverified bundle contents (decision 0036).
-        scene.user_id = _get_upload_session_repo().get_user_id(bundle_id)
+        upload_repo = _get_upload_session_repo()
+        scene.user_id = upload_repo.get_user_id(bundle_id)
+        scene.fcm_token = upload_repo.get_fcm_token(bundle_id)
         repo.create(scene)
         logger.info(
             "Scene created: scene_id=%s bundle_uri=%s", scene_id, bundle_gcs_uri
@@ -520,7 +522,9 @@ def _handle_failed_incomplete(
             bundle_uri=bundle_gcs_uri,
         )
         scene.bundle_id = bundle_id
-        scene.user_id = _get_upload_session_repo().get_user_id(bundle_id)
+        upload_repo = _get_upload_session_repo()
+        scene.user_id = upload_repo.get_user_id(bundle_id)
+        scene.fcm_token = upload_repo.get_fcm_token(bundle_id)
         repo.create(scene)
         repo.update_status(
             scene_id,
@@ -600,7 +604,9 @@ def _handle_failed_invalid(
             bundle_uri=bundle_gcs_uri,
         )
         scene.bundle_id = bundle_id
-        scene.user_id = _get_upload_session_repo().get_user_id(bundle_id)
+        upload_repo = _get_upload_session_repo()
+        scene.user_id = upload_repo.get_user_id(bundle_id)
+        scene.fcm_token = upload_repo.get_fcm_token(bundle_id)
         repo.create(scene)
         repo.update_status(
             scene_id,

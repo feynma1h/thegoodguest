@@ -525,6 +525,43 @@ class TestExistenceCheck:
         assert len(scenes) == 1
         assert scenes[0].user_id == "uid-from-session-42"
 
+    def test_queued_scene_carries_fcm_token_from_upload_session(
+        self, client: TestClient
+    ) -> None:
+        """A happy-path Scene must capture fcm_token from the upload session so
+        perception-obj can notify the device on terminal transitions
+        (ClaimResult.fcm_token → notify_ready/notify_failed)."""
+        bundle_id = str(uuid.uuid4())
+        bundle_uri = f"gs://{_BUCKET}/captures/{bundle_id}/bundle.pb"
+        bundle_bytes = _make_bundle(frame_count=1)
+
+        upload_repo = InMemoryUploadSessionRepository()
+        upload_repo._store[bundle_id] = {
+            "user_id": "uid-from-session-42",
+            "fcm_token": "fcm-reg-token-abc",
+            "manifest": [],
+            "session_entries": [],
+            "created_at": None,
+        }
+        repo = InMemorySceneRepository()
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()),
+            patch.object(server, "_fcm_notifier", NullFcmNotifier()),
+            patch.object(server, "_upload_session_repo", upload_repo),
+        ):
+            resp = _post_bundle_event(client, bundle_uri)
+
+        assert resp.json()["status"] == "queued"
+        scenes = list(repo._store.values())
+        assert len(scenes) == 1
+        assert scenes[0].status == SceneStatus.QUEUED
+        assert scenes[0].fcm_token == "fcm-reg-token-abc"
+
     def test_fcm_notifier_called_when_upload_incomplete(self, client: TestClient) -> None:
         bundle_id = str(uuid.uuid4())
         bundle_uri = f"gs://{_BUCKET}/captures/{bundle_id}/bundle.pb"
