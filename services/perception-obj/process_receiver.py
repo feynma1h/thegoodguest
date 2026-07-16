@@ -15,7 +15,7 @@ Implements the contract from docs/decisions/0004-perception-receiver-semantics.m
   attempt (X-CloudTasks-TaskRetryCount >= maxAttempts-1 = 2): update
   scene→failed, fire FCM before returning 5xx.
 
-Output structure (mirrors /objects keyed by scene_id instead of photo_sha256):
+Output structure (keyed by scene_id):
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/manifest.json
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/frames/{idx:04d}/objects.json
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/frames/{idx:04d}/masks.npz
@@ -259,7 +259,11 @@ def _process_frame(
 ) -> dict:
     """Run SAM 3 + SAM 3D on one frame. Returns a dict with per-object results.
 
-    Mirrors the per-object loop in /objects but keyed by scene_id/frame.
+    Per frame: fetch the RGB image from GCS, segment it with SAM 3, reconstruct
+    each detected object with SAM 3D, and upload each splat PLY plus a packed
+    masks.npz and a per-frame objects.json manifest under
+    scenes/{scene_id}/frames/{frame_idx}/. Frame and per-object outputs already
+    present in GCS are reused as a cache (partial-run recovery on retry).
     Raises PoisonError if the image can't be fetched/opened.
     Raises EnvironmentalError on model or GCS failures.
     """
