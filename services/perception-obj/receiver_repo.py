@@ -1,21 +1,26 @@
 """ReceiverRepository: Scene claim/release for the perception-obj /process endpoint.
 
-Manages the lease lifecycle that the ingester's SceneRepository does not need:
+Owns the lease lifecycle, which is the receiver's responsibility (the
+ingester's SceneRepository is responsible only for Scene creation and status
+writes on the ingest side):
   - claim()        — atomically transition queued→processing and write
                      lease_expires_at; or reclaim a PROCESSING scene whose
                      lease has gone stale (crash recovery per 0004).
   - release_ready() — mark the scene READY, set result_uri, clear lease.
   - release_failed() — mark the scene FAILED, set last_error, clear lease.
 
-`lease_expires_at` is an implementation detail of the receiver. It lives in the
-Firestore document alongside the standard Scene fields (written by the ingester)
-but is not part of the Scene domain model in services/api/scene.py.
+`lease_expires_at` is an implementation detail of the receiver. It lives in
+the Firestore document alongside the standard Scene fields (written by the
+ingester) but is not part of the Scene domain model in
+packages/api-core/roomstudio_api_core/scene.py.
 
 The receiver drives the queued→processing→ready|failed arc.
 The ingester owns failed→queued (manual retry). The receiver treats `failed`
 on entry as a bug (per 0004) and 200-exits without clobbering state.
 
-Status strings match the SceneStatus enum values in services/api/scene.py:
+Status strings match the SceneStatus enum values in
+packages/api-core/roomstudio_api_core/scene.py (re-exported from
+services/api-internal/scene.py):
   "queued" / "processing" / "ready" / "failed"
 
 Consumers: process_receiver.py (POST /process orchestration).
@@ -24,7 +29,7 @@ from __future__ import annotations
 
 import threading
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Optional
@@ -80,7 +85,11 @@ class ReceiverRepository(ABC):
                         Returns WRONG_STATE.
           ready       → already done; receiver should 200-exit.
                         Returns WRONG_STATE.
-          not found   → idempotency or stale task; receiver should 200-exit.
+          not found   → no scene document with this id. Currently expected
+                        only for tasks referencing manually deleted scene
+                        docs (nothing auto-deletes scenes today; a Firestore
+                        TTL on the collection — gap F6 — would make this a
+                        routine stale-task case). Receiver should 200-exit.
                         Returns NOT_FOUND.
         """
 
@@ -110,17 +119,23 @@ class ReceiverRepository(ABC):
         """
 
     @abstractmethod
-    def release_ready(self, scene_id: str, result_uri: str) -> None:
+    def release_ready(self, scene_id: str, result_uri: str, *, holder_id: str = "") -> None:
         """Transition scene_id from processing to ready and set result_uri.
 
-        Clears lease_expires_at. Raises ValueError if scene is not processing.
+        Clears the lease. Raises ValueError if scene is not processing.
+        No-op if the scene's lease is held by a different worker (a slow
+        worker that was reclaimed-from must not overwrite the reclaiming
+        worker's state). A cleared lease (empty holder) may be finalized —
+        the EnvironmentalError path releases the lease before the
+        final-attempt terminal write.
         """
 
     @abstractmethod
-    def release_failed(self, scene_id: str, last_error: str) -> None:
+    def release_failed(self, scene_id: str, last_error: str, *, holder_id: str = "") -> None:
         """Transition scene_id from processing to failed and set last_error.
 
-        Clears lease_expires_at. Raises ValueError if scene is not processing.
+        Clears the lease. Raises ValueError if scene is not processing.
+        Same holder_id guard semantics as release_ready.
         """
 
 
@@ -226,7 +241,7 @@ class InMemoryReceiverRepository(ReceiverRepository):
             entry["lease_holder_id"] = ""
             entry["shutdown_release_count"] = entry.get("shutdown_release_count", 0) + 1
 
-    def release_ready(self, scene_id: str, result_uri: str) -> None:
+    def release_ready(self, scene_id: str, result_uri: str, *, holder_id: str = "") -> None:
         with self._lock:
             entry = self._scenes.get(scene_id)
             if entry is None:
@@ -236,11 +251,15 @@ class InMemoryReceiverRepository(ReceiverRepository):
                     f"Cannot release_ready scene {scene_id!r}: "
                     f"current status is {entry['status']!r}"
                 )
+            stored_holder = entry.get("lease_holder_id") or ""
+            if stored_holder and stored_holder != holder_id:
+                return  # another worker owns the lease now; no-op
             entry["status"] = "ready"
             entry["result_uri"] = result_uri
             entry["lease_expires_at"] = None
+            entry["lease_holder_id"] = ""
 
-    def release_failed(self, scene_id: str, last_error: str) -> None:
+    def release_failed(self, scene_id: str, last_error: str, *, holder_id: str = "") -> None:
         with self._lock:
             entry = self._scenes.get(scene_id)
             if entry is None:
@@ -250,9 +269,13 @@ class InMemoryReceiverRepository(ReceiverRepository):
                     f"Cannot release_failed scene {scene_id!r}: "
                     f"current status is {entry['status']!r}"
                 )
+            stored_holder = entry.get("lease_holder_id") or ""
+            if stored_holder and stored_holder != holder_id:
+                return  # another worker owns the lease now; no-op
             entry["status"] = "failed"
             entry["last_error"] = last_error
             entry["lease_expires_at"] = None
+            entry["lease_holder_id"] = ""
 
 
 # ---------------------------------------------------------------------------
@@ -277,38 +300,31 @@ class FirestoreReceiverRepository(ReceiverRepository):
     def __init__(self, project: Optional[str] = None) -> None:
         from google.cloud import firestore as _fs  # deferred
 
+        self._fs = _fs  # module handle; methods use this instead of re-importing
         self._db = _fs.Client(project=project)
 
     def claim(self, scene_id: str, lease_ttl_seconds: int, *, holder_id: str = "") -> ClaimResult:
-        from google.cloud import firestore as _fs  # deferred
-
         ref = self._db.collection(self.COLLECTION).document(scene_id)
         now = datetime.now(tz=timezone.utc)
         new_lease = now + timedelta(seconds=lease_ttl_seconds)
 
-        result: ClaimResult = ClaimResult(ClaimStatus.NOT_FOUND)
-
-        @_fs.transactional
-        def _txn(transaction, ref):
-            nonlocal result
+        @self._fs.transactional
+        def _txn(transaction, ref) -> ClaimResult:
             snap = ref.get(transaction=transaction)
             if not snap.exists:
-                result = ClaimResult(ClaimStatus.NOT_FOUND)
-                return
+                return ClaimResult(ClaimStatus.NOT_FOUND)
 
             data = snap.to_dict()
             status = data.get("status", "")
             device_id = data.get("device_id", "")
 
             if status in ("failed", "ready"):
-                result = ClaimResult(ClaimStatus.WRONG_STATE)
-                return
+                return ClaimResult(ClaimStatus.WRONG_STATE)
 
             if status == "processing":
                 existing_lease = data.get("lease_expires_at")
                 if existing_lease is not None and existing_lease > now:
-                    result = ClaimResult(ClaimStatus.ALREADY_OWNED)
-                    return
+                    return ClaimResult(ClaimStatus.ALREADY_OWNED)
                 # Stale lease — reclaim atomically within this transaction.
                 # Re-reading the lease inside the transaction closes the TOCTOU
                 # window between two workers both observing an expired lease.
@@ -317,8 +333,7 @@ class FirestoreReceiverRepository(ReceiverRepository):
                     "lease_holder_id": holder_id,
                     "updated_at": now,
                 })
-                result = ClaimResult(ClaimStatus.RECLAIMED, device_id=device_id)
-                return
+                return ClaimResult(ClaimStatus.RECLAIMED, device_id=device_id)
 
             if status == "queued":
                 transaction.update(ref, {
@@ -327,21 +342,17 @@ class FirestoreReceiverRepository(ReceiverRepository):
                     "lease_holder_id": holder_id,
                     "updated_at": now,
                 })
-                result = ClaimResult(ClaimStatus.CLAIMED, device_id=device_id)
-                return
+                return ClaimResult(ClaimStatus.CLAIMED, device_id=device_id)
 
-            result = ClaimResult(ClaimStatus.WRONG_STATE)
+            return ClaimResult(ClaimStatus.WRONG_STATE)
 
-        _txn(self._db.transaction(), ref)
-        return result
+        return _txn(self._db.transaction(), ref)
 
     def release_lease(self, scene_id: str, *, holder_id: str = "") -> None:
-        from google.cloud import firestore as _fs  # deferred
-
         ref = self._db.collection(self.COLLECTION).document(scene_id)
         now = datetime.now(tz=timezone.utc)
 
-        @_fs.transactional
+        @self._fs.transactional
         def _txn(transaction, ref):
             snap = ref.get(transaction=transaction)
             if not snap.exists:
@@ -360,12 +371,10 @@ class FirestoreReceiverRepository(ReceiverRepository):
         _txn(self._db.transaction(), ref)
 
     def release_queued(self, scene_id: str, *, holder_id: str = "") -> None:
-        from google.cloud import firestore as _fs  # deferred
-
         ref = self._db.collection(self.COLLECTION).document(scene_id)
         now = datetime.now(tz=timezone.utc)
 
-        @_fs.transactional
+        @self._fs.transactional
         def _txn(transaction, ref):
             snap = ref.get(transaction=transaction)
             if not snap.exists:
@@ -379,18 +388,16 @@ class FirestoreReceiverRepository(ReceiverRepository):
                 "status": "queued",
                 "lease_expires_at": None,
                 "lease_holder_id": "",
-                "shutdown_release_count": _fs.Increment(1),
+                "shutdown_release_count": self._fs.Increment(1),
                 "updated_at": now,
             })
 
         _txn(self._db.transaction(), ref)
 
-    def release_ready(self, scene_id: str, result_uri: str) -> None:
-        from google.cloud import firestore as _fs  # deferred
-
+    def release_ready(self, scene_id: str, result_uri: str, *, holder_id: str = "") -> None:
         ref = self._db.collection(self.COLLECTION).document(scene_id)
 
-        @_fs.transactional
+        @self._fs.transactional
         def _txn(transaction, ref):
             snap = ref.get(transaction=transaction)
             if not snap.exists:
@@ -401,21 +408,23 @@ class FirestoreReceiverRepository(ReceiverRepository):
                     f"Cannot release_ready scene {scene_id!r}: "
                     f"current status is {data.get('status')!r}"
                 )
+            stored_holder = data.get("lease_holder_id") or ""
+            if stored_holder and stored_holder != holder_id:
+                return  # another worker owns the lease now; no-op
             transaction.update(ref, {
                 "status": "ready",
                 "result_uri": result_uri,
                 "lease_expires_at": None,
+                "lease_holder_id": "",
                 "updated_at": datetime.now(tz=timezone.utc),
             })
 
         _txn(self._db.transaction(), ref)
 
-    def release_failed(self, scene_id: str, last_error: str) -> None:
-        from google.cloud import firestore as _fs  # deferred
-
+    def release_failed(self, scene_id: str, last_error: str, *, holder_id: str = "") -> None:
         ref = self._db.collection(self.COLLECTION).document(scene_id)
 
-        @_fs.transactional
+        @self._fs.transactional
         def _txn(transaction, ref):
             snap = ref.get(transaction=transaction)
             if not snap.exists:
@@ -426,10 +435,14 @@ class FirestoreReceiverRepository(ReceiverRepository):
                     f"Cannot release_failed scene {scene_id!r}: "
                     f"current status is {data.get('status')!r}"
                 )
+            stored_holder = data.get("lease_holder_id") or ""
+            if stored_holder and stored_holder != holder_id:
+                return  # another worker owns the lease now; no-op
             transaction.update(ref, {
                 "status": "failed",
                 "last_error": last_error,
                 "lease_expires_at": None,
+                "lease_holder_id": "",
                 "updated_at": datetime.now(tz=timezone.utc),
             })
 

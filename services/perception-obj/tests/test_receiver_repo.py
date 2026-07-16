@@ -195,6 +195,29 @@ class TestReleaseReady:
         except ValueError:
             pass
 
+    def test_noop_when_another_worker_holds_lease(self):
+        """A reclaimed-from worker must not overwrite the reclaimer's state."""
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="worker-B")
+        repo.release_ready(_SCENE_ID, result_uri="gs://b/out.json", holder_id="worker-A")
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "processing"
+        assert raw["result_uri"] is None
+        assert raw["lease_holder_id"] == "worker-B"
+
+    def test_proceeds_when_holder_matches(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="worker-A")
+        repo.release_ready(_SCENE_ID, result_uri="gs://b/out.json", holder_id="worker-A")
+        assert repo.get_raw(_SCENE_ID)["status"] == "ready"
+
+    def test_proceeds_when_lease_already_cleared(self):
+        """An unheld lease (empty holder) may be finalized."""
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="")
+        repo.release_ready(_SCENE_ID, result_uri="gs://b/out.json", holder_id="worker-A")
+        assert repo.get_raw(_SCENE_ID)["status"] == "ready"
+
 
 # ---------------------------------------------------------------------------
 # release_failed()
@@ -230,6 +253,22 @@ class TestReleaseFailed:
             assert False, "should have raised"
         except ValueError:
             pass
+
+    def test_noop_when_another_worker_holds_lease(self):
+        """A reclaimed-from worker must not clobber the reclaimer's in-flight work."""
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="worker-B")
+        repo.release_failed(_SCENE_ID, last_error="err", holder_id="worker-A")
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "processing"
+        assert raw["lease_holder_id"] == "worker-B"
+
+    def test_proceeds_when_lease_already_cleared(self):
+        """Final-attempt path: release_lease ran first, holder is empty."""
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="")
+        repo.release_failed(_SCENE_ID, last_error="err", holder_id="worker-A")
+        assert repo.get_raw(_SCENE_ID)["status"] == "failed"
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 """SAM 3 wrapper: open-vocabulary segmentation by text prompt."""
 from __future__ import annotations
 
+import logging
 import sys
 from contextlib import nullcontext
 from typing import Any
@@ -8,6 +9,8 @@ from typing import Any
 import numpy as np
 import torch
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 
 class SAM3Model:
@@ -59,7 +62,18 @@ class SAM3Model:
                 boxes = out.get("boxes", [])
                 scores = out.get("scores", [])
 
-                for j, (m, b, s) in enumerate(zip(masks, boxes, scores, strict=False)):
+                # These are parallel arrays (one entry per detected instance).
+                # A length mismatch means an upstream anomaly; surface it and
+                # skip the class rather than silently truncating/misindexing.
+                if not (len(masks) == len(boxes) == len(scores)):
+                    logger.warning(
+                        "[sam3] class '%s': parallel array length mismatch "
+                        "masks=%d boxes=%d scores=%d; skipping class",
+                        cls, len(masks), len(boxes), len(scores),
+                    )
+                    continue
+
+                for j, (m, b, s) in enumerate(zip(masks, boxes, scores, strict=True)):
                     mask_np = m.cpu().numpy() if hasattr(m, "cpu") else np.asarray(m)
                     # SAM 3 returns masks with a leading singleton channel dim
                     # (e.g. (1, H, W)). SAM 3D's reconstruct path expects 2D
@@ -68,10 +82,10 @@ class SAM3Model:
                     # extra singleton dims survive. Squeeze them.
                     mask_np = np.squeeze(mask_np)
                     if mask_np.ndim != 2:
-                        print(
-                            f"[sam3] class '{cls}' instance {j}: unexpected mask "
-                            f"shape after squeeze: {mask_np.shape}; skipping",
-                            flush=True,
+                        logger.warning(
+                            "[sam3] class '%s' instance %d: unexpected mask "
+                            "shape after squeeze: %s; skipping",
+                            cls, j, mask_np.shape,
                         )
                         continue
                     bbox = b.tolist() if hasattr(b, "tolist") else list(b)
@@ -84,8 +98,8 @@ class SAM3Model:
                         "score": score,
                         "mask": mask_np.astype(bool),
                     })
-            except Exception as e:
-                print(f"[sam3] class '{cls}' raised: {e}", flush=True)
+            except Exception:
+                logger.exception("[sam3] class '%s' raised; skipping class", cls)
 
         objects.sort(key=lambda o: -o["score"])
         return objects
