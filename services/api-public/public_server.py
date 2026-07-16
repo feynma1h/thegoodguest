@@ -49,14 +49,18 @@ from fastapi import FastAPI, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-# Ensure local packages are importable in dev without a virtualenv install.
-_repo_root = Path(__file__).resolve().parents[2]
-for _pkg in ("packages/schemas", "packages/api-core"):
-    _p = str(_repo_root / _pkg)
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+from auth import TokenVerifier, NullTokenVerifier, TokenVerificationError
 
-from auth import TokenVerifier, NullTokenVerifier, TokenVerificationError  # noqa: E402
+# Ensure local packages are importable in dev without a virtualenv install.
+# Gated off in production, where the packages are pip-installed by the
+# Dockerfile and patching sys.path would be redundant.
+if os.environ.get("ENVIRONMENT") != "production":
+    _repo_root = Path(__file__).resolve().parents[2]
+    for _pkg in ("packages/schemas", "packages/api-core"):
+        _p = str(_repo_root / _pkg)
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+
 from roomstudio_api_core.upload_session_repo import (  # noqa: E402
     UploadSessionRepository,
     InMemoryUploadSessionRepository,
@@ -191,7 +195,11 @@ def health() -> JSONResponse:
     "/captures/{bundle_id}/upload_session",
     summary="Mint GCS resumable session URIs for an iOS capture upload",
 )
-async def create_upload_session(
+# Plain def (not async): the whole call chain — Firebase verify, Firestore
+# reads/writes, GCS session minting — is synchronous/blocking. FastAPI runs
+# sync handlers on its threadpool, keeping the event loop free; as async def
+# this handler blocked the loop for its full round-trip latency.
+def create_upload_session(
     bundle_id: str,
     req: UploadSessionRequest,
     authorization: str = Header(...),
@@ -272,7 +280,7 @@ async def create_upload_session(
 
     # 5. Mint (or retrieve stored) session URIs.
     try:
-        bucket = os.environ.get("GCS_CAPTURES_BUCKET", _GCS_CAPTURES_BUCKET)
+        bucket = _GCS_CAPTURES_BUCKET  # resolved once at import time
         session_entries = upload_repo.create_or_get(
             bundle_id=bundle_id,
             user_id=user_id,
@@ -295,7 +303,8 @@ async def create_upload_session(
     "/scenes/by-bundle/{bundle_id}",
     summary="Read scene state for a bundle the caller owns",
 )
-async def get_scene_by_bundle(
+# Plain def for the same event-loop reason as create_upload_session above.
+def get_scene_by_bundle(
     bundle_id: str,
     authorization: str = Header(...),
 ) -> JSONResponse:
