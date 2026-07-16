@@ -15,13 +15,11 @@ Required environment variables (when running with the Cloud Tasks backend):
   CLOUD_TASKS_QUEUE     — queue name (e.g. "perception-dispatch")
   PERCEPTION_OBJ_PROCESS_URL — full URL of the perception-obj receiver
                                endpoint (e.g. https://perception-obj-xxx.run.app/process).
-                               This endpoint does not exist yet; it is the
-                               subject of the next session.
 
-When these env vars are absent, server.py falls back to InMemoryTaskDispatcher,
-which is appropriate for local dev and tests.
+When these env vars are absent, ingest_server.py falls back to
+InMemoryTaskDispatcher, which is appropriate for local dev and tests.
 
-Consumers: server.py (POST /ingest dispatch step).
+Consumers: ingest_server.py (the ingest dispatch step).
 """
 from __future__ import annotations
 
@@ -97,9 +95,12 @@ class CloudTasksDispatcher(TaskDispatcher):
     """Google Cloud Tasks-backed dispatcher.
 
     Sends an HTTP POST task to the configured queue. The task body is the
-    JSON-serialized payload. No OIDC auth is attached — the perception-obj
-    Cloud Run service must be --allow-unauthenticated during this phase.
-    Auth is a future concern.
+    JSON-serialized payload. OIDC auth is conditional: when
+    CLOUD_TASKS_INVOKER_SA is set (as it is in production —
+    infra/api-internal.env.yaml), enqueue() attaches an OIDC token minted for
+    that service account, which perception-obj's receiver verifies. When the
+    var is absent, tasks are sent unauthenticated (local dev against an
+    --allow-unauthenticated target).
 
     Task name format: {queue_path}/tasks/{task_name}, where task_name is the
     scene_id. Cloud Tasks deduplicates on this name within a 1-hour window,

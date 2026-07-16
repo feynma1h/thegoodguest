@@ -14,7 +14,7 @@ Error codes are machine-readable strings. Details are human-readable and
 include enough context (frame index, field name, observed value) to act on
 without re-running.
 
-Consumers: server.py (the FastAPI ingester).
+Consumers: ingest_server.py (the FastAPI ingester).
 """
 from __future__ import annotations
 

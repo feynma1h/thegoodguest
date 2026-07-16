@@ -23,7 +23,7 @@ Endpoints:
       successful re-upload).
 
 Run locally (from services/api-internal/):
-  uvicorn server:app --reload --port 8081
+  uvicorn ingest_server:app --reload --port 8081
 
 Environment variables:
   ENVIRONMENT                — set to "production" to enable startup env-var
@@ -31,10 +31,14 @@ Environment variables:
                                or any other value → silent in-memory fallbacks
                                (appropriate for local dev / tests).
   FIRESTORE_PROJECT          — GCP project for Firestore; absent → in-memory repo
-  CLOUD_TASKS_PROJECT        — GCP project for Cloud Tasks  ┐
-  CLOUD_TASKS_LOCATION       — Cloud Tasks region           ├ all three required
-  CLOUD_TASKS_QUEUE          — Cloud Tasks queue name       ┘ for real dispatch
-  CLOUD_TASKS_INVOKER_SA     — service account email for OIDC token on tasks
+  CLOUD_TASKS_PROJECT        — GCP project for Cloud Tasks  ┐ all three required for
+  CLOUD_TASKS_LOCATION       — Cloud Tasks region           ├ CloudTasksDispatcher to
+  CLOUD_TASKS_QUEUE          — Cloud Tasks queue name       ┘ be selected at all
+  CLOUD_TASKS_INVOKER_SA     — service account email for the OIDC token attached
+                               to each task. Not needed to SEND tasks, but without
+                               it perception-obj rejects them (its receiver
+                               verifies the OIDC identity) — required in any real
+                               deployment for tasks to be ACCEPTED.
   PERCEPTION_OBJ_PROCESS_URL — full URL of the perception-obj /process endpoint
 
 See also: infra/cloud-tasks-queue.md for queue setup and SA configuration.
@@ -64,7 +68,7 @@ for _pkg in ("packages/schemas", "packages/api-core"):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from roomstudio_schemas import CaptureBundle, CaptureTier  # noqa: E402
+from roomstudio_schemas import CaptureBundle  # noqa: E402
 from validation import validate_bundle  # noqa: E402
 from scene import DeviceIdSource, SceneStatus, new_scene  # noqa: E402
 from repository import SceneRepository, InMemorySceneRepository  # noqa: E402
@@ -391,8 +395,9 @@ def _run_ingest(
         # the client polls into the void with no terminal state.
         #
         # Returning 200 (not 400) prevents Pub/Sub retry storms on the Eventarc path:
-        # a non-2xx from /ingest/eventarc triggers redelivery, so a stale cohort
-        # sending "1.0.0" bundles at a schema bump would spin forever otherwise.
+        # a non-2xx from /ingest/eventarc triggers redelivery, so at any future
+        # schema bump a cohort of clients still emitting the old schema_version
+        # would spin forever otherwise.
         #
         # Fallback to 400 only when we can't create a pollable Scene (no bundle_id
         # extractable from the URI, or bundle carries no device identity).

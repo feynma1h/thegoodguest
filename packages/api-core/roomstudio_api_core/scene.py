@@ -1,10 +1,8 @@
 """Scene domain model and state machine.
 
-Moved from services/api-internal/scene.py so both api-public and api-internal
-can share the type without a cross-service import.
-
-api-internal re-exports this module from services/api-internal/scene.py so
-existing imports of the form `from scene import ...` continue to work unchanged.
+Canonical location for the Scene type, shared by api-public and api-internal
+without a cross-service import. services/api-internal/scene.py re-exports this
+module for the shorter `from scene import ...` path.
 
 Consumers: packages/api-core (SceneReadRepository), services/api-internal (all
 scene persistence and dispatch logic), services/api-public (read endpoint).
@@ -47,7 +45,7 @@ class InvalidBlobReason:
     messages (e.g. "too_small" → "Photo could not be read — try again").
     """
     TOO_SMALL = "too_small"                    # blob < MIN_IMAGE_SIZE_BYTES; catches zero-byte,
-                                               # truncated, and the 21-byte synthetic fixture
+                                               # truncated, and tiny synthetic test fixtures
     BAD_MAGIC = "bad_magic"                    # first bytes don't match the extension's format
     UNRECOGNIZED_FORMAT = "unrecognized_format" # extension not in the known image format set
 
@@ -149,7 +147,7 @@ class Scene:
         Absolute GCS URI of the finished splat output. None until status==READY.
     attempt_count:
         Number of times this scene has been dispatched to perception. Incremented
-        at dispatch time (step 3), not during model construction.
+        by the ingest handler's dispatch step, not during model construction.
     last_error:
         Last error message received from perception. Server-side only —
         never included in client-facing API responses.
@@ -207,8 +205,10 @@ def new_scene(
 ) -> Scene:
     """Construct a new Scene in the initial QUEUED state.
 
-    scene_id defaults to a fresh UUIDv4. Callers that need idempotency (e.g.
-    Cloud Tasks task-name dedup in step 3) should generate and pass their own.
+    scene_id defaults to a fresh UUIDv4. A caller may pass an explicit id
+    (e.g. to reuse the id of an existing Scene record when re-running ingest);
+    note the ingest handler's idempotency comes from looking up existing
+    scenes by bundle_id, not from deterministic scene_ids.
     """
     now = datetime.now(tz=timezone.utc)
     return Scene(

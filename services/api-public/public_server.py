@@ -15,11 +15,12 @@ Endpoints:
 
   GET  /scenes/by-bundle/{bundle_id}
       Read scene state for a bundle the caller owns. Auth: Firebase ID token.
-      Returns scene status, result_uri, missing_paths, and timestamps. The
-      smoke tool polls this endpoint after upload to observe state transitions.
+      Returns scene status, result_uri, missing_paths, and timestamps.
+      Consumers: the iOS app's ScenePoller (production polling loop) and the
+      smoke tool (tools/upload_test_bundle.py) after upload.
 
 Run locally (from services/api-public/):
-  uvicorn server:app --reload --port 8080
+  uvicorn public_server:app --reload --port 8080
 
 Environment variables:
   ENVIRONMENT         — set to "production" to enable startup env-var
