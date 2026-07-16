@@ -1,14 +1,12 @@
-/// Manages an ARWorldTracking session and accumulates keyframes to a local temp directory.
+/// Manages an ARWorldTracking session and accumulates keyframes to the session
+/// output directory: tier dispatch, depth capture (LiDAR devices), per-keyframe
+/// pose/intrinsics/gravity extraction, and bundle assembly.
 ///
-/// P2 scope: tier dispatch, depth capture (LiDAR devices), and bundle assembly.
-/// P3 scope: passes Firebase anonymous UID into bundle assembly; publishes
-///           assembledWithoutUserId for UploadCoordinator's backstop re-serialize.
+/// Passes the Firebase anonymous UID into bundle assembly and publishes
+/// assembledWithoutUserId for UploadCoordinator's backstop re-serialize.
 ///
 /// On stop, all in-flight writes complete and BundleAssembler serializes bundle.pb
 /// into the session output directory. The resulting URL is published as `bundlePath`.
-///
-/// Gravity is populated as a zero vector in P2; chunk C fills the formula after
-/// Chat review (decision 0030).
 
 import ARKit
 import Combine
@@ -29,7 +27,8 @@ struct CapturedKeyframe {
     let rgbRelativePath: String
     let pose: RSPose
     let intrinsics: RSIntrinsics
-    /// Zero vector in P2; formula filled in chunk C (decision 0030).
+    /// Gravity direction in the camera frame (R^T · world-down); see
+    /// PoseExtractor.gravityInCameraFrame and decisions 0030/0034.
     let gravity: RSGravity
     /// Set iff LiDAR tier and frame.sceneDepth was non-nil. Contains relative
     /// paths ("depth/000000.f32", "confidence/000000.png") and depth intrinsics.
@@ -55,9 +54,6 @@ final class CaptureManager: NSObject, ObservableObject {
     @Published private(set) var frameCount: Int = 0
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var trackingState: ARCamera.TrackingState = .notAvailable
-    /// Most recent gravity vector in camera frame. Updated each accepted keyframe.
-    /// Nil before first keyframe. Debug HUD reads this to eyeball sign/axis on device.
-    @Published private(set) var lastGravity: SIMD3<Float>? = nil
     /// Set after stopCapture() and bundle assembly completes. Nil while capturing or
     /// before first stop.
     @Published private(set) var bundlePath: URL? = nil
@@ -266,8 +262,8 @@ final class CaptureManager: NSObject, ObservableObject {
             }
         }
 
-        // Capture depth for LiDAR frames.
-        let depth: RSDepth? = depthData.flatMap { dd in
+        // Capture depth for LiDAR frames (depthData is nil on non-LiDAR devices).
+        let depth: RSDepth? = depthData.map { dd in
             captureDepth(dd, camera: camera, index: index, outputDir: outputDir, stats: stats)
         }
 
@@ -281,12 +277,12 @@ final class CaptureManager: NSObject, ObservableObject {
             gravity:         gravityProto,
             depth:           depth
         ))
-        lastGravity = SIMD3<Float>(gravityProto.x, gravityProto.y, gravityProto.z)
         frameCount = capturedFrames.count
     }
 
     /// Build an RSDepth value and schedule the raster writes on jpegQueue.
-    /// Returns nil if pixel buffer access fails.
+    /// Raster write failures are asynchronous: they are logged and counted in
+    /// stats, not reflected in the return value.
     ///
     /// depthData comes from frame.sceneDepth (ARDepthData — LiDAR rear sensor).
     /// camera is the RGB ARCamera for the same frame; its intrinsics are scaled
@@ -297,7 +293,7 @@ final class CaptureManager: NSObject, ObservableObject {
         index:        UInt32,
         outputDir:    URL,
         stats:        WriteStats
-    ) -> RSDepth? {
+    ) -> RSDepth {
         let depthRelPath = String(format: "depth/%06d.f32",  index)
         let confRelPath  = String(format: "confidence/%06d.png", index)
 
