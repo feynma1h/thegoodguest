@@ -51,6 +51,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
+# Configure root logger so application logger.info() calls reach Cloud Logging.
+# By default uvicorn leaves the root logger with no handlers, falling back to
+# Python's lastResort handler which only outputs WARNING+. basicConfig adds a
+# StreamHandler at INFO level to the root logger; uvicorn's subsequent
+# dictConfig (disable_existing_loggers=False, no "root" key) preserves it.
+# This is a no-op if handlers are already configured (e.g. in test environments
+# that call basicConfig themselves). See perception-obj/server.py for the
+# original fix; this was missing here (decision 0023's "observable via log
+# query" claim for eventarc_ignored was not actually true in production).
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Request
