@@ -19,6 +19,7 @@ See docs/decisions/0007.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import threading
@@ -94,8 +95,10 @@ def get_sam3():
     """Return the SAM3Model singleton, loading it on first call.
 
     Raises HTTPException(500) on load failure (cached — won't retry a broken
-    model). Blocks the calling request while loading (~100s on first cold call).
-    Safe under concurrency=1; revisit if we ever raise concurrency.
+    model). Blocks the calling thread while loading (~100s on first cold call);
+    call via asyncio.to_thread from async handlers so the event loop stays
+    responsive. The pre-lock fast paths are race-free under concurrency=1;
+    the double-checked locking keeps them correct if concurrency is raised.
     """
     global _sam3, _sam3_error, _sam3_loading
     # Pre-lock fast paths — safe under concurrency=1.
@@ -128,9 +131,11 @@ def get_sam3d():
     """Return the SAM3DModel singleton, loading it on first call.
 
     Raises HTTPException(500) on load failure (cached — won't retry a broken
-    model). Blocks the calling request while loading (~95s on first cold call,
-    including DINOv2 init from baked TORCH_HOME cache).
-    Safe under concurrency=1; revisit if we ever raise concurrency.
+    model). Blocks the calling thread while loading (~95s on first cold call,
+    including DINOv2 init from baked TORCH_HOME cache); call via
+    asyncio.to_thread from async handlers so the event loop stays responsive.
+    The pre-lock fast paths are race-free under concurrency=1; the
+    double-checked locking keeps them correct if concurrency is raised.
     """
     global _sam3d, _sam3d_error, _sam3d_loading
     # Pre-lock fast paths — safe under concurrency=1.
@@ -291,14 +296,23 @@ async def process(
     lease-TTL crash recovery), runs SAM 3 + SAM 3D Objects on all frames,
     writes outputs to GCS, and updates Scene state in Firestore.
 
-    Cloud Run config: concurrency=1, request-timeout=600s.
+    Cloud Run config: concurrency=1, request-timeout=900s
+    (infra/deploy_perception.sh). NOTE: Cloud Tasks' dispatch deadline is the
+    10-minute default (dispatcher.py sets none), which is SHORTER than the
+    Cloud Run timeout — Cloud Tasks can retry an attempt that is still
+    running; the claim/lease machinery absorbs the overlap.
     Returns 5xx on environmental failures so Cloud Tasks retries. Returns 2xx
     on all success and poison paths so the task is drained from the queue.
     """
     from process_receiver import handle_process
 
-    # Accessors load models on first call (~195s combined on a cold container).
-    # Cloud Tasks' 30-min deadline absorbs this. Raises 500 on cached load failure.
+    # Accessors load models on first call (~195s combined on a cold container);
+    # run them off the event-loop thread so /health and /ready stay responsive
+    # during the load. The accessors' locking already serializes concurrent
+    # loads. Raises 500 (HTTPException) on cached load failure.
+    sam3_model = await asyncio.to_thread(get_sam3)
+    sam3d_model = await asyncio.to_thread(get_sam3d)
+
     return await handle_process(
         request,
         req,
@@ -306,8 +320,8 @@ async def process(
         receiver_repo=_get_receiver_repo(),
         fcm_notifier=_get_fcm_notifier(),
         outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
-        sam3_model=get_sam3(),
-        sam3d_model=get_sam3d(),
+        sam3_model=sam3_model,
+        sam3d_model=sam3d_model,
         object_prompt=DEFAULT_OBJECT_PROMPT,
     )
 
