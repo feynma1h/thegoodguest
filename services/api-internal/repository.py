@@ -16,13 +16,13 @@ FirestoreSceneRepository extends FirestoreSceneReadRepository from api-core so
 the Firestore read logic (_db, _doc_ref, _from_doc, get, get_by_bundle_id) is
 not duplicated. It adds create() and update_status().
 
-SceneNotFoundError is defined in api-core and re-exported from here so that
-existing `from repository import SceneNotFoundError` imports continue to work.
+SceneNotFoundError is defined in api-core and re-exported from here for
+callers that prefer importing it from repository.py.
 
 No Firestore types leak beyond FirestoreSceneRepository. The rest of the
 codebase works entirely with the Scene dataclass from scene.py.
 
-Consumers: server.py (step 3 dispatch wiring), tests.
+Consumers: ingest_server.py (Scene persistence + dispatch wiring), tests.
 """
 from __future__ import annotations
 
@@ -31,22 +31,13 @@ from abc import abstractmethod
 from datetime import datetime, timezone
 from typing import Optional
 
-from roomstudio_api_core.scene import InvalidTransitionError, Scene, SceneStatus, validate_transition
+from scene import Scene, SceneStatus, validate_transition
 from roomstudio_api_core.scene_read_repo import (
     FirestoreSceneReadRepository,
     InMemorySceneReadRepository,
     SceneNotFoundError,  # re-exported; callers may import from here or api-core
     SceneReadRepository,
 )
-
-# Re-export SceneNotFoundError so existing `from repository import SceneNotFoundError`
-# continues to work without changes in test files.
-__all__ = [
-    "SceneNotFoundError",
-    "SceneRepository",
-    "InMemorySceneRepository",
-    "FirestoreSceneRepository",
-]
 
 
 # ---------------------------------------------------------------------------
@@ -63,8 +54,8 @@ class SceneRepository(SceneReadRepository):
     """
 
     @abstractmethod
-    def create(self, scene: Scene) -> Scene:
-        """Persist a new Scene and return the stored copy.
+    def create(self, scene: Scene) -> None:
+        """Persist a new Scene.
 
         Raises ValueError if a scene with the same scene_id already exists.
         """
@@ -96,23 +87,18 @@ class SceneRepository(SceneReadRepository):
 # In-memory implementation (tests)
 # ---------------------------------------------------------------------------
 
-class InMemorySceneRepository(SceneRepository):
-    """In-memory Scene store. Intended for unit tests only; not thread-safe."""
+class InMemorySceneRepository(InMemorySceneReadRepository, SceneRepository):
+    """In-memory Scene store. Intended for unit tests only; not thread-safe.
 
-    def __init__(self) -> None:
-        self._store: dict[str, Scene] = {}
+    Inherits get() and get_by_bundle_id() (and the _store dict) from
+    InMemorySceneReadRepository, mirroring how FirestoreSceneRepository
+    extends FirestoreSceneReadRepository. Adds create() and update_status().
+    """
 
-    def get(self, scene_id: str) -> Scene:
-        if scene_id not in self._store:
-            raise SceneNotFoundError(f"Scene not found: {scene_id!r}")
-        return copy.deepcopy(self._store[scene_id])
-
-    def create(self, scene: Scene) -> Scene:
+    def create(self, scene: Scene) -> None:
         if scene.scene_id in self._store:
             raise ValueError(f"Scene already exists: {scene.scene_id!r}")
-        stored = copy.deepcopy(scene)
-        self._store[scene.scene_id] = stored
-        return copy.deepcopy(stored)
+        self._store[scene.scene_id] = copy.deepcopy(scene)
 
     def update_status(
         self,
@@ -163,7 +149,7 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
         # FirestoreSceneReadRepository.__init__ initialises self._db.
         super().__init__(project=project)
 
-    def create(self, scene: Scene) -> Scene:
+    def create(self, scene: Scene) -> None:
         from google.api_core.exceptions import AlreadyExists
 
         ref = self._doc_ref(scene.scene_id)
@@ -171,7 +157,6 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
             ref.create(self._to_dict(scene))
         except AlreadyExists:
             raise ValueError(f"Scene already exists: {scene.scene_id!r}")
-        return scene
 
     def update_status(
         self,
