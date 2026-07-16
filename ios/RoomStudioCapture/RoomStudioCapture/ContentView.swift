@@ -1,14 +1,9 @@
 /// Capture UI: start/stop button, live frame counter, tracking-state indicator,
-/// bundle-path readout, and upload-session status.
+/// tier badge, bundle-path readout, upload-session status badge, and the scene
+/// processing status panel (SceneStatusView).
 ///
-/// P2 additions: tier badge, bundle.pb path shown after stop + assembly.
-/// P3 additions: upload session state badge; coordinator triggered when bundlePath is set.
-///
-/// On-device verification checklist for P3 sign-off:
-///   □ Auth badge shows "Authenticated" after launch (requires network + GoogleService-Info.plist)
-///   □ Stop → assembly → "bundle.pb ready" → upload status progresses to "Session ready"
-///   □ Console: "POST /captures/<id>/upload_session → 200" with manifest path count
-///   □ Session record persisted: verify with lldb or log
+/// Triggers UploadCoordinator.beginUploadSession when CaptureManager publishes
+/// bundlePath (stop-capture → assembly complete).
 
 import ARKit
 import SwiftUI
@@ -27,19 +22,18 @@ struct ContentView: View {
             trackingStatusBadge
             frameCountDisplay
 
-            #if DEBUG
-            gravityDebugHUD
-            #endif
-
             Spacer()
 
             bundleReadout
             uploadSessionBadge
 
-            if poller.pollState != .idle {
-                SceneStatusView()
-                    .transition(.opacity)
-            }
+            // Always mounted: SceneStatusView renders nothing while the poller is
+            // idle, but its .task is the independent poll-start path (it scans the
+            // store for a completed bundle). Gating the view on pollState != .idle
+            // would deadlock poll start: the state can only leave .idle from inside
+            // the view (onAppear) or via the visibility-gated completion kick.
+            SceneStatusView()
+                .transition(.opacity)
 
             captureButton
                 .padding(.horizontal, 32)
@@ -126,19 +120,8 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.15), value: capture.isRunning)
     }
 
-    #if DEBUG
-    /// Live gravity readout for on-device sign/axis eyeball check (chunk C sign-off).
-    @ViewBuilder
-    private var gravityDebugHUD: some View {
-        if let g = capture.lastGravity {
-            Text(String(format: "g_cam: (%+.2f, %+.2f, %+.2f)", g.x, g.y, g.z))
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.secondary)
-        }
-    }
-    #endif
-
-    /// Upload session status badge — shown after stop-capture triggers P3 pipeline.
+    /// Upload session status badge — shown after stop-capture triggers the
+    /// upload-session pipeline.
     @ViewBuilder
     private var uploadSessionBadge: some View {
         let (label, color): (String, Color) = switch coordinator.sessionState {
