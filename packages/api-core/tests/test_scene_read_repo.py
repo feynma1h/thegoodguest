@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from roomstudio_api_core.scene import DeviceIdSource, Scene, SceneStatus
+from roomstudio_api_core.scene import Scene, SceneStatus
 from roomstudio_api_core.scene_read_repo import InMemorySceneReadRepository, SceneNotFoundError
 
 
@@ -41,7 +41,6 @@ def _scene(bundle_id: str | None = None, user_id: str | None = "u1") -> Scene:
     return Scene(
         scene_id=sid,
         device_id="dev-1",
-        device_id_source=DeviceIdSource.PROVIDED,
         status=SceneStatus.QUEUED,
         bundle_uri=f"gs://bucket/captures/{sid}/bundle.pb",
         created_at=_NOW,

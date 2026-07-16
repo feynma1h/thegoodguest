@@ -157,6 +157,7 @@ def main() -> None:
     bundle.schema_version = SCHEMA_VERSION
     bundle.bundle_id = str(uuid.uuid4())
     bundle.user_id = "synthetic:test_data_room1"
+    bundle.device.device_id = str(uuid.uuid4())  # required; backend rejects empty
     bundle.device.hardware_id = "synthetic"
     bundle.device.os_version = "n/a"
     bundle.device.app_version = "build_test_bundle.py"

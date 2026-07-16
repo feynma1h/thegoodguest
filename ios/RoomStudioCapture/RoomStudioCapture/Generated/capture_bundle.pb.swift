@@ -235,12 +235,11 @@ public nonisolated struct Roomstudio_Capture_V1_Device: Sendable {
   /// True if the device has a LiDAR sensor (Pro line, iPad Pro).
   public var hasLidar_p: Bool = false
 
-  /// Stable per-device UUID, generated on first app launch and persisted in
-  /// the iOS Keychain. Distinct from hardware_id (which identifies the model)
-  /// and from user_id (which identifies the user account). Empty until the iOS
-  /// app is built; the backend falls back to hardware_id while this field is
-  /// unpopulated. Remove the fallback once iOS bundles populate this field for
-  /// ≥99% of captures over a 7-day window.
+  /// Stable per-device UUID, generated on first use and persisted in the iOS
+  /// Keychain (see DeviceIdentity.swift). Distinct from hardware_id (which
+  /// identifies the model) and from user_id (which identifies the user
+  /// account). REQUIRED: the backend rejects bundles with an empty device_id
+  /// as failed_invalid (error code "device_id_missing").
   public var deviceID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()

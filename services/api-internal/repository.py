@@ -214,7 +214,6 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
         """
         return {
             "device_id": scene.device_id,
-            "device_id_source": scene.device_id_source.value,
             "status": scene.status.value,
             "bundle_uri": scene.bundle_uri,
             "created_at": scene.created_at,

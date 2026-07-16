@@ -8,10 +8,12 @@ validation.py, plus happy paths and dispatch integration:
   - valid LIDAR_ARKIT bundle with depth → 200 + {scene_id, status: "queued"}
   - dispatch happy path — Scene created in repo, task enqueued with correct shape
   - dispatch failure mode — dispatcher raises → 500, Scene marked failed
-  - unsupported schema_version → 400 unsupported_schema_version
-  - non-unit quaternion → 400 quaternion_norm_out_of_range
-  - depth frame on ARKIT_ONLY tier → 400 depth_requires_lidar_tier
-  - absolute gs:// path → 400 absolute_gcs_path
+  - unsupported schema_version → 200 + failed_invalid Scene
+  - missing device_id → 200 + failed_invalid Scene ("unknown" sentinel)
+  - non-unit quaternion → 200 + failed_invalid Scene
+  - depth frame on ARKIT_ONLY tier → 200 + failed_invalid Scene
+  - absolute gs:// path → 200 + failed_invalid Scene
+  - malformed proto bytes → 400 bundle_parse_failed
 
 The GCS fetch (_fetch_bundle_bytes) is patched out in every test.
 Bundles are built in-memory using roomstudio_schemas directly — no file I/O,
@@ -91,6 +93,7 @@ def _make_bundle(
     b.schema_version = schema_version
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
+    b.device.device_id = str(uuid.uuid4())
     b.device.hardware_id = "test-device"
     b.device.has_lidar = tier in (LIDAR_ARKIT,)
     b.tier = tier
@@ -302,16 +305,18 @@ def test_old_version_1_0_0_creates_failed_invalid_scene(client: TestClient) -> N
     assert "1.0.0" in (scenes[0].last_error or "")
 
 
-def test_corrupt_quaternion_returns_400(client: TestClient) -> None:
-    """Bundle with a non-unit quaternion → 400 quaternion_norm_out_of_range.
+def test_corrupt_quaternion_creates_failed_invalid_scene(client: TestClient) -> None:
+    """Bundle with a non-unit quaternion → 200 + failed_invalid Scene.
 
     Sets quat = (1, 1, 0, 0), norm = sqrt(2) ≈ 1.414, which exceeds the
-    1e-3 tolerance around 1.0.
+    1e-3 tolerance around 1.0. Like every contract-validation failure, this
+    yields a pollable failed_invalid Scene and HTTP 200 (no Pub/Sub retry).
     """
     b = CaptureBundle()
     b.schema_version = SCHEMA_VERSION
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
+    b.device.device_id = str(uuid.uuid4())
     b.tier = ARKIT_ONLY
     b.started_at_device_us = 0
     b.ended_at_device_us = 1
@@ -323,12 +328,57 @@ def test_corrupt_quaternion_returns_400(client: TestClient) -> None:
     f.camera_pose.quat_z = 0.0
     f.camera_pose.quat_w = 0.0
 
-    with patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()):
+    repo = InMemorySceneRepository()
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()),
+        patch.object(server, "_scene_repo", repo),
+        patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+    ):
         resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
-    assert resp.status_code == 400
+    assert resp.status_code == 200
     body = resp.json()
+    assert body["status"] == "failed_invalid"
     assert body["error"] == "quaternion_norm_out_of_range"
-    assert "frame 0" in body["detail"]
+    scenes = list(repo._store.values())
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED_INVALID
+
+
+def test_missing_device_id_creates_failed_invalid_scene(client: TestClient) -> None:
+    """Bundle with an empty device.device_id → 200 + failed_invalid Scene.
+
+    device_id is required (the iOS client persists a Keychain UUID); the
+    hardware_id fallback was removed. The rejection Scene carries the
+    "unknown" device_id sentinel so the client can still poll the outcome.
+    """
+    b = CaptureBundle()
+    b.schema_version = SCHEMA_VERSION
+    b.bundle_id = str(uuid.uuid4())
+    b.user_id = "test-user"
+    b.device.hardware_id = "iPhone15,3"  # deliberately no device_id
+    b.tier = ARKIT_ONLY
+    b.started_at_device_us = 0
+    b.ended_at_device_us = 1
+    f = b.frames.add()
+    f.frame_index = 0
+    f.rgb_gcs_path = "frames/000000.jpg"
+    f.camera_pose.quat_w = 1.0
+
+    repo = InMemorySceneRepository()
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()),
+        patch.object(server, "_scene_repo", repo),
+        patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+    ):
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "failed_invalid"
+    assert body["error"] == "device_id_missing"
+    scenes = list(repo._store.values())
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED_INVALID
+    assert scenes[0].device_id == "unknown"
 
 
 def test_depth_on_arkit_only_tier_creates_failed_invalid_scene(client: TestClient) -> None:
@@ -359,8 +409,9 @@ def test_depth_on_arkit_only_tier_creates_failed_invalid_scene(client: TestClien
 
 def test_malformed_proto_returns_400(client: TestClient) -> None:
     """Garbage bytes that cannot be parsed as a proto → 400 bundle_parse_failed."""
-    with patch.object(
-        server, "_fetch_bundle_bytes", return_value=b"\xff\xff\xff\xff garbage"
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=b"\xff\xff\xff\xff garbage"),
+        patch.object(server, "_scene_repo", InMemorySceneRepository()),
     ):
         resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
     assert resp.status_code == 400
@@ -368,12 +419,13 @@ def test_malformed_proto_returns_400(client: TestClient) -> None:
     assert body["error"] == "bundle_parse_failed"
 
 
-def test_absolute_rgb_path_returns_400(client: TestClient) -> None:
-    """Bundle with a full gs:// URI in rgb_gcs_path → 400 absolute_gcs_path."""
+def test_absolute_rgb_path_creates_failed_invalid_scene(client: TestClient) -> None:
+    """Bundle with a full gs:// URI in rgb_gcs_path → 200 + failed_invalid Scene."""
     b = CaptureBundle()
     b.schema_version = SCHEMA_VERSION
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
+    b.device.device_id = str(uuid.uuid4())
     b.tier = ARKIT_ONLY
     b.started_at_device_us = 0
     b.ended_at_device_us = 1
@@ -382,12 +434,20 @@ def test_absolute_rgb_path_returns_400(client: TestClient) -> None:
     f.rgb_gcs_path = "gs://my-bucket/captures/abc/frames/000000.jpg"  # wrong
     f.camera_pose.quat_w = 1.0  # unit norm — passes the quat check
 
-    with patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()):
+    repo = InMemorySceneRepository()
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()),
+        patch.object(server, "_scene_repo", repo),
+        patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+    ):
         resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
-    assert resp.status_code == 400
+    assert resp.status_code == 200
     body = resp.json()
+    assert body["status"] == "failed_invalid"
     assert body["error"] == "absolute_gcs_path"
-    assert "rgb_gcs_path" in body["detail"]
+    scenes = list(repo._store.values())
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED_INVALID
 
 
 # ---------------------------------------------------------------------------

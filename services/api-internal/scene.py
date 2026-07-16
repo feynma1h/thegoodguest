@@ -8,7 +8,6 @@ Do not add logic here. Edits to the Scene model go in
 packages/api-core/roomstudio_api_core/scene.py.
 """
 from roomstudio_api_core.scene import (  # noqa: F401
-    DeviceIdSource,
     InvalidTransitionError,
     Scene,
     SceneStatus,

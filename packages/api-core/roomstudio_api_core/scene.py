@@ -50,26 +50,6 @@ class InvalidBlobReason:
     UNRECOGNIZED_FORMAT = "unrecognized_format" # extension not in the known image format set
 
 
-class DeviceIdSource(str, Enum):
-    """How the Scene's device_id was determined at ingest time.
-
-    provided:
-        bundle.device.device_id was non-empty; used directly.
-
-    fallback_hardware_id:
-        bundle.device.device_id was empty; device_id was set from
-        bundle.device.hardware_id instead. This is a model string (e.g.
-        "iPhone15,3"), not a unique device identifier — two phones of the same
-        model produce the same value. Use this field to query for scenes still
-        on the fallback path.
-
-        Remove this enum variant (and the fallback logic in server.py) once iOS
-        bundles populate device_id for ≥99% of captures over a 7-day window.
-    """
-    PROVIDED = "provided"
-    FALLBACK_HARDWARE_ID = "fallback_hardware_id"
-
-
 # ---------------------------------------------------------------------------
 # State machine
 # ---------------------------------------------------------------------------
@@ -127,11 +107,10 @@ class Scene:
         Stable identifier (UUIDv4). Also used as the Firestore doc id and as
         the Cloud Tasks task name for deduplication.
     device_id:
-        Identifies the originating device. Non-empty; see device_id_source for
-        how it was determined.
-    device_id_source:
-        Whether device_id came from bundle.device.device_id (preferred) or
-        fell back to bundle.device.hardware_id (placeholder, not unique).
+        Identifies the originating device: the iOS app's Keychain-persisted
+        per-device UUID (bundle.device.device_id). Non-empty. The literal
+        sentinel "unknown" is used for rejection Scenes created from bundles
+        that carried no device identity (see ingest_server.py).
     status:
         Current lifecycle state.
     bundle_uri:
@@ -154,7 +133,6 @@ class Scene:
     """
     scene_id: str
     device_id: str
-    device_id_source: DeviceIdSource
     status: SceneStatus
     bundle_uri: str
     created_at: datetime
@@ -172,10 +150,6 @@ class Scene:
             raise ValueError("scene_id must not be empty")
         if not self.device_id:
             raise ValueError("device_id must not be empty")
-        if not isinstance(self.device_id_source, DeviceIdSource):
-            raise ValueError(
-                f"device_id_source must be a DeviceIdSource, got: {type(self.device_id_source)}"
-            )
         if not isinstance(self.status, SceneStatus):
             raise ValueError(
                 f"status must be a SceneStatus, got: {type(self.status)}"
@@ -200,7 +174,6 @@ def new_scene(
     *,
     scene_id: Optional[str] = None,
     device_id: str,
-    device_id_source: DeviceIdSource,
     bundle_uri: str,
 ) -> Scene:
     """Construct a new Scene in the initial QUEUED state.
@@ -214,7 +187,6 @@ def new_scene(
     return Scene(
         scene_id=scene_id or str(uuid.uuid4()),
         device_id=device_id,
-        device_id_source=device_id_source,
         status=SceneStatus.QUEUED,
         bundle_uri=bundle_uri,
         created_at=now,

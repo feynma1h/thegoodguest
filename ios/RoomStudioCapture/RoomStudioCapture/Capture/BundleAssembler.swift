@@ -71,8 +71,7 @@ struct BundleAssembler {
         device.osVersion    = UIDevice.current.systemVersion
         device.appVersion   = appVersionString()
         device.hasLidar_p   = (tier == .lidarArkit || tier == .lidarRoomplan)
-        // device.deviceID: Keychain UUID deferred to a later chunk.
-        // Backend falls back to hardware_id while this field is empty.
+        device.deviceID     = DeviceIdentity.deviceId()
         return device
     }
 

@@ -66,7 +66,7 @@ for _pkg in ("packages/schemas", "packages/api-core"):
 
 from roomstudio_schemas import CaptureBundle  # noqa: E402
 from validation import validate_bundle  # noqa: E402
-from scene import DeviceIdSource, SceneStatus, new_scene  # noqa: E402
+from scene import SceneStatus, new_scene  # noqa: E402
 from repository import SceneRepository, InMemorySceneRepository  # noqa: E402
 import blob_validator  # noqa: E402
 import gcs_client  # noqa: E402
@@ -211,30 +211,6 @@ def _get_upload_session_repo() -> UploadSessionRepository:
             _upload_session_repo = InMemoryUploadSessionRepository()
             logger.info("FIRESTORE_PROJECT unset — using in-memory UploadSessionRepository")
     return _upload_session_repo
-
-
-# ---------------------------------------------------------------------------
-# device_id resolution
-# ---------------------------------------------------------------------------
-
-def resolve_device_id(bundle, bundle_gcs_uri: str) -> tuple[str, DeviceIdSource]:
-    """Return (device_id, source) from the parsed CaptureBundle."""
-    if bundle.device.device_id:
-        return bundle.device.device_id, DeviceIdSource.PROVIDED
-
-    if bundle.device.hardware_id:
-        logger.warning(
-            "device_id absent in bundle; falling back to hardware_id %r "
-            "(not unique per device). bundle_uri=%s",
-            bundle.device.hardware_id,
-            bundle_gcs_uri,
-        )
-        return bundle.device.hardware_id, DeviceIdSource.FALLBACK_HARDWARE_ID
-
-    raise ValueError(
-        "bundle.device.device_id and bundle.device.hardware_id are both empty; "
-        "cannot determine device identity"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -390,42 +366,26 @@ def _run_ingest(
         # schema bump a cohort of clients still emitting the old schema_version
         # would spin forever otherwise.
         #
-        # Fallback to 400 only when the bundle carries no device identity at all
-        # (a Scene requires a non-empty device_id, so no pollable record can be
-        # created for it).
-        try:
-            _rej_device_id, _rej_source = resolve_device_id(bundle, bundle_gcs_uri)
-        except ValueError:
-            _rej_device_id = None
-        if _rej_device_id is not None:
-            _handle_failed_invalid(
-                bundle_gcs_uri=bundle_gcs_uri,
-                bundle_id=bundle_id,
-                device_id=_rej_device_id,
-                device_id_source=_rej_source,
-                invalid_blobs=[],
-                repo=repo,
-                existing_scene_id=existing_scene_id,
-                rejection_kind=error_code,
-                rejection_detail=detail,
-            )
-            return JSONResponse(
-                status_code=200,
-                content={"status": "failed_invalid", "error": error_code},
-            )
+        # The rejection Scene needs a non-empty device_id even when the failing
+        # check is device_id_missing itself — use the "unknown" sentinel then.
+        _handle_failed_invalid(
+            bundle_gcs_uri=bundle_gcs_uri,
+            bundle_id=bundle_id,
+            device_id=bundle.device.device_id or "unknown",
+            invalid_blobs=[],
+            repo=repo,
+            existing_scene_id=existing_scene_id,
+            rejection_kind=error_code,
+            rejection_detail=detail,
+        )
         return JSONResponse(
-            status_code=400,
-            content=IngestError(error=error_code, detail=detail).model_dump(),
+            status_code=200,
+            content={"status": "failed_invalid", "error": error_code},
         )
 
-    # 4. Resolve device_id.
-    try:
-        device_id, device_id_source = resolve_device_id(bundle, bundle_gcs_uri)
-    except ValueError as exc:
-        return JSONResponse(
-            status_code=400,
-            content=IngestError(error="device_id_missing", detail=str(exc)).model_dump(),
-        )
+    # 4. Device identity. Guaranteed non-empty by validation check 2
+    # (device_id_missing bundles were rejected above).
+    device_id = bundle.device.device_id
 
     # 5. Existence check — verify all referenced blobs are present in GCS.
     missing = _check_bundle_blobs_exist(bundle, bucket, bundle_id)
@@ -434,7 +394,6 @@ def _run_ingest(
             bundle_gcs_uri=bundle_gcs_uri,
             bundle_id=bundle_id,
             device_id=device_id,
-            device_id_source=device_id_source,
             missing=missing,
             repo=repo,
             existing_scene_id=existing_scene_id,
@@ -454,7 +413,6 @@ def _run_ingest(
             bundle_gcs_uri=bundle_gcs_uri,
             bundle_id=bundle_id,
             device_id=device_id,
-            device_id_source=device_id_source,
             invalid_blobs=invalid_blobs,
             repo=repo,
             existing_scene_id=existing_scene_id,
@@ -476,7 +434,6 @@ def _run_ingest(
         scene = new_scene(
             scene_id=scene_id,
             device_id=device_id,
-            device_id_source=device_id_source,
             bundle_uri=bundle_gcs_uri,
         )
         # Store bundle_id on the scene for later lookup by /ingest/eventarc.
@@ -488,10 +445,7 @@ def _run_ingest(
         scene.user_id = _get_upload_session_repo().get_user_id(bundle_id)
         repo.create(scene)
         logger.info(
-            "Scene created: scene_id=%s device_id_source=%s bundle_uri=%s",
-            scene_id,
-            device_id_source.value,
-            bundle_gcs_uri,
+            "Scene created: scene_id=%s bundle_uri=%s", scene_id, bundle_gcs_uri
         )
 
     # 7. Enqueue Cloud Task targeting perception-obj.
@@ -545,7 +499,6 @@ def _handle_failed_incomplete(
     bundle_gcs_uri: str,
     bundle_id: str,
     device_id: str,
-    device_id_source: DeviceIdSource,
     missing: list[str],
     repo: SceneRepository,
     existing_scene_id: str | None,
@@ -564,7 +517,6 @@ def _handle_failed_incomplete(
         scene = new_scene(
             scene_id=scene_id,
             device_id=device_id,
-            device_id_source=device_id_source,
             bundle_uri=bundle_gcs_uri,
         )
         scene.bundle_id = bundle_id
@@ -606,7 +558,6 @@ def _handle_failed_invalid(
     bundle_gcs_uri: str,
     bundle_id: str,
     device_id: str,
-    device_id_source: DeviceIdSource,
     invalid_blobs: list[dict],
     repo: SceneRepository,
     existing_scene_id: str | None,
@@ -646,7 +597,6 @@ def _handle_failed_invalid(
         scene = new_scene(
             scene_id=scene_id,
             device_id=device_id,
-            device_id_source=device_id_source,
             bundle_uri=bundle_gcs_uri,
         )
         scene.bundle_id = bundle_id
