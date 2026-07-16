@@ -130,7 +130,9 @@ final class ScenePoller: ObservableObject {
     ///
     /// Idempotent: same bundle while already polling = no-op (avoids resetting state
     /// mid-flight if the screen re-appears briefly). Re-callable after any terminal
-    /// or recoverable stop — that re-callability IS the seam for the re-upload front.
+    /// or recoverable stop, so a future re-upload coordinator (unbuilt: something
+    /// watching .recoverable and re-driving BlobUploadManager) can restart polling
+    /// after a recovery attempt.
     func start(bundleId: String) {
         if case .polling = pollState, currentBundleId == bundleId { return }
         cancelLoop()
@@ -175,7 +177,7 @@ final class ScenePoller: ObservableObject {
         sleepTask = nil
     }
 
-    /// Visibility gate for the foreground gating rule (§6):
+    /// Visibility gate for the foreground gating rule (see decisions 0046/0047):
     /// called from SceneStatusView.onAppear / onDisappear.
     func setVisible(_ visible: Bool) {
         isVisible = visible

@@ -8,8 +8,9 @@
 /// paths stored in the bundle proto (e.g. "frames/000000.jpg"). They are the
 /// idempotency key on the server side: the same path-set → same session URIs.
 ///
-/// bundle.pb is always appended last so the caller (P4) can upload it last,
-/// which signals ingest completion to api-internal.
+/// bundle.pb is always appended last so the caller (UploadCoordinator, via
+/// BlobUploadManager) can upload it last, which signals ingest completion
+/// to api-internal.
 ///
 /// Read by: UploadCoordinator, ManifestBuilderTests.
 

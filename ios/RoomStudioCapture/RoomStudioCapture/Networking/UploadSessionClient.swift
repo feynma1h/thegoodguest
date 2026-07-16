@@ -115,7 +115,8 @@ actor UploadSessionClient {
     ///   - manifest: Ordered artifact list from ManifestBuilder.build(outputDir:).
     ///   - tokenProvider: Called to obtain a fresh idToken. Re-called on 401.
     ///     Pass `{ try await AuthManager.shared.currentIDToken() }`.
-    ///   - fcmToken: FCM push token — nil for P3/P4; wired in P5.
+    ///   - fcmToken: FCM registration token for terminal-state push
+    ///     notifications. Nil until the app plumbs FCM registration.
     ///
     /// - Returns: Array of UploadSessionEntry. Map by relativePath — server
     ///   gives no ordering guarantee.

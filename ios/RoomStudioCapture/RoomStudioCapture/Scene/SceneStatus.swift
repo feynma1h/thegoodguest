@@ -4,9 +4,9 @@
 /// and NEVER throw. This is load-bearing — the backend once crashed a client by
 /// adding a new status value that a strict enum rejected (decision 0027 lesson).
 ///
-/// SceneResponse mirrors the server's 200-body shape verbatim (P2 contract,
-/// revision api-public-00006-quw). The server returns HTTP 200 even for terminal
-/// failure states; the status field in the body is authoritative.
+/// SceneResponse mirrors the server's 200-body shape verbatim. The server
+/// returns HTTP 200 even for terminal failure states; the status field in the
+/// body is authoritative.
 ///
 /// Read by: ScenePoller, SceneStatusView.
 

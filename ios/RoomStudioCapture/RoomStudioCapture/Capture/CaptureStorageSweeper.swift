@@ -1,6 +1,6 @@
 /// Startup sweep that reclaims orphaned capture session directories from Application Support.
 ///
-/// Capture blobs are written to `<App Support>/<bundleId>/captures/<session-uuid>/` (decision 0043).
+/// Capture blobs are written to `<App Support>/<app-bundle-id>/captures/<session-uuid>/` (decision 0043).
 /// That location does NOT auto-purge the way `temporaryDirectory` does. Two mechanisms bound
 /// disk growth:
 ///
@@ -21,7 +21,7 @@
 ///
 /// Directories whose record still exists (upload in progress or stalled) are NEVER deleted.
 ///
-/// Decisions: 0040 (item 7 durability), 0043 (blob durability, App Support move)
+/// Decisions: 0043 (sweep design, race guard, 300s threshold)
 
 import Foundation
 
@@ -47,7 +47,7 @@ actor CaptureStorageSweeper {
 
     /// Absolute URL of the per-app captures root directory.
     ///
-    /// Structure: `<Application Support>/<bundleId>/captures/`
+    /// Structure: `<Application Support>/<app-bundle-id>/captures/`
     /// Each session writes to a subdir named after its bundle UUID.
     /// CaptureManager.makeOutputDir appends `/<session-uuid>` to this path.
     static func capturesRootURL() -> URL {
@@ -77,8 +77,10 @@ actor CaptureStorageSweeper {
 
     /// Delete orphaned capture session directories.
     ///
-    /// Safe to call concurrently with running uploads: the actor serializes calls,
-    /// and the age threshold + record presence check ensure in-flight dirs are spared.
+    /// Safe to call concurrently with running uploads: the age threshold and the
+    /// record-presence check ensure in-flight dirs are spared. (The actor only
+    /// serializes concurrent sweep() invocations, which cannot occur anyway —
+    /// sweep() has a single call site at launch.)
     func sweep() async {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: capturesRoot,
