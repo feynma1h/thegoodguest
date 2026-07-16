@@ -1,4 +1,4 @@
-/// Orchestrates the P3 upload-session creation pipeline for one capture bundle.
+/// Orchestrates upload-session creation for one capture bundle.
 ///
 /// Pipeline (called after CaptureManager publishes bundlePath):
 ///   1. signInIfNeeded()     — ensure anonymous Firebase user exists
@@ -8,7 +8,8 @@
 ///   4. UploadSessionClient  — POST /upload_session with Bearer idToken
 ///   5. UploadSessionStore   — persist UploadSessionRecord to disk
 ///
-/// P4 picks up from `sessionState == .ready(_)` and executes the blob PUTs.
+/// BlobUploadManager picks up from `sessionState == .ready(_)` and executes
+/// the blob PUTs.
 ///
 /// Read by: ContentView (observe sessionState for UI feedback).
 
@@ -106,7 +107,7 @@ final class UploadCoordinator: ObservableObject {
             sessionState = .ready(existing)
             logger.info("[UploadCoordinator] → handing off to BlobUploadManager for bundle \(bundleId, privacy: .public)")
             if existing.allNonBundlePbBlobsUploaded {
-                // Phase-1 already complete; route to bundle.pb finalize.
+                // All non-bundle.pb blobs already uploaded; route to bundle.pb finalize.
                 // onAllBlobsUploaded carries the staleness guard (>12h → re-mint).
                 await BlobUploadManager.shared.onAllBlobsUploaded(bundleId: bundleId, record: existing)
             } else {
@@ -200,7 +201,7 @@ final class UploadCoordinator: ObservableObject {
             try await store.save(record)
         } catch {
             // Persistence failure is non-fatal — session URIs are in the record
-            // in memory; P4 can proceed. Log and continue.
+            // in memory; the blob upload can proceed. Log and continue.
             logger.info("[UploadCoordinator] WARNING — persistence failed: \(error.localizedDescription)")
         }
 

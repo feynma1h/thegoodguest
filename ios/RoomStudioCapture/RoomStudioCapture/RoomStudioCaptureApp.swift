@@ -1,11 +1,11 @@
 /// App entry point for RoomStudio Capture.
 ///
-/// P1: single-window app, ContentView owns the capture session.
-/// P3: FirebaseApp.configure() called at launch; anonymous sign-in attempted
-///     as soon as the app has network. GoogleService-Info.plist must be present
-///     in the app bundle — obtain it from the Firebase console for project
-///     "roomstudio", iOS app bundle ID com.roomstudio.RoomStudioCapture.
-/// Future phases will add navigation (scene list, status screens) here.
+/// Single-window app; ContentView owns the capture session. At launch:
+/// FirebaseApp.configure(), then three .task jobs — anonymous sign-in,
+/// orphaned-capture-directory sweep, and upload rehydration.
+/// GoogleService-Info.plist must be present in the app bundle — obtain it
+/// from the Firebase console for project "roomstudio", iOS app bundle ID
+/// com.roomstudio.RoomStudioCapture.
 
 import FirebaseCore
 import SwiftUI
@@ -44,8 +44,8 @@ struct RoomStudioCaptureApp: App {
                 .task {
                     // Resume any in-flight bundle uploads from prior sessions.
                     // Covers the swipe-up force-quit path (view appears → .task fires).
-                    // The OS-kill background-relaunch path (.task on background launch) is
-                    // the on-device gate from decision 0045 — verify before shipping.
+                    // Whether .task also fires on an OS-kill background relaunch is
+                    // unverified on hardware (decision 0045) — verify before shipping.
                     await BlobUploadManager.shared.rehydrateAllUnfinishedBundles()
                 }
         }

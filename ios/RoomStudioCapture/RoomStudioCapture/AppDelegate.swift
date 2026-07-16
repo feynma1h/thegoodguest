@@ -18,7 +18,7 @@
 ///
 /// Wired via @UIApplicationDelegateAdaptor in RoomStudioCaptureApp.
 ///
-/// Decisions: 0040 (background URLSession relaunch), 0041 (D2 AppDelegate wiring seam)
+/// Decisions: 0040 (background URLSession relaunch), 0041 (AppDelegate wiring seam)
 
 import os
 import UIKit
