@@ -3,7 +3,7 @@
 //
 // This file is the source of truth. Generated Python lives in
 // `roomstudio_schemas/capture_bundle_pb2.py` (see `tools/gen_proto.sh`);
-// generated Swift lives in the iOS app's `Generated/CaptureBundle.pb.swift`
+// generated Swift lives in the iOS app's `Generated/capture_bundle.pb.swift`
 // (via SwiftProtobuf's protoc plugin).
 //
 // Conventions baked in:
@@ -62,8 +62,8 @@ message CaptureBundle {
   string bundle_id = 2;
 
   // The user this capture belongs to, for auth/scoping at the orchestrator.
-  // Format is whatever the auth layer produces — Sign-in-with-Apple subject
-  // claim today, room to swap later.
+  // Format is whatever the auth layer produces — the Firebase anonymous-auth
+  // UID today (see docs/decisions/0036), room to swap later.
   string user_id = 3;
 
   // Capture device + app version. Useful for backend telemetry, debugging,
@@ -105,7 +105,8 @@ message CaptureBundle {
 // -----------------------------------------------------------------------------
 
 message Device {
-  // e.g. "iPhone15,3" (iPhone 14 Pro Max). Raw from `utsname`.
+  // e.g. "iPhone15,3" (iPhone 14 Pro Max). The `hw.machine` value from
+  // `sysctlbyname` (NOT `utsname` — see docs/decisions/0028).
   // This is a MODEL string, not a unique device identifier — two phones of
   // the same model produce the same value. Do not use as a device key.
   string hardware_id = 1;
