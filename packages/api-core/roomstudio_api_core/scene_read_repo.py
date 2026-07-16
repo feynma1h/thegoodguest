@@ -115,14 +115,18 @@ class FirestoreSceneReadRepository(SceneReadRepository):
 
     @staticmethod
     def _from_doc(doc) -> Scene:
-        """Deserialize a Firestore DocumentSnapshot into a Scene."""
-        from roomstudio_api_core.scene import DeviceIdSource, SceneStatus
+        """Deserialize a Firestore DocumentSnapshot into a Scene.
+
+        Ignores unknown document fields (e.g. device_id_source on documents
+        written before that field was removed from the model, and the
+        receiver-side lease fields).
+        """
+        from roomstudio_api_core.scene import SceneStatus
 
         data = doc.to_dict()
         return Scene(
             scene_id=doc.id,
             device_id=data["device_id"],
-            device_id_source=DeviceIdSource(data["device_id_source"]),
             status=SceneStatus(data["status"]),
             bundle_uri=data["bundle_uri"],
             created_at=data["created_at"],

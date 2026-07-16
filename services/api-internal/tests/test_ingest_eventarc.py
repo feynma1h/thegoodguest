@@ -76,6 +76,7 @@ def _make_bundle(*, frame_count: int = 2, add_depth: bool = False) -> bytes:
     b.schema_version = SCHEMA_VERSION
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
+    b.device.device_id = str(uuid.uuid4())
     b.device.hardware_id = "test-device"
     b.tier = tier
     now_us = int(time.monotonic_ns() // 1_000)
@@ -162,6 +163,7 @@ class TestIngestEventarc:
         b.schema_version = "1.0.0"   # the old value, rejected post-0031
         b.bundle_id = bundle_id
         b.user_id = "test-user"
+        b.device.device_id = str(uuid.uuid4())
         b.device.hardware_id = "test-device"
         b.tier = ARKIT_ONLY
         b.started_at_device_us = 0
@@ -583,6 +585,7 @@ class TestExistenceCheck:
         b.schema_version = SCHEMA_VERSION
         b.bundle_id = str(uuid.uuid4())
         b.user_id = "u"
+        b.device.device_id = str(uuid.uuid4())
         b.device.hardware_id = "d"
         b.tier = ARKIT_ONLY
         b.started_at_device_us = 0
