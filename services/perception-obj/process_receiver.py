@@ -554,7 +554,7 @@ async def handle_process(
         return JSONResponse({"status": "noop", "reason": "already_owned"})
 
     # CLAIMED or RECLAIMED — we own it; proceed.
-    device_id = claim_result.device_id
+    fcm_token = claim_result.fcm_token
     action = "claim" if claim_result.status == ClaimStatus.CLAIMED else "reclaim_stale"
     _log_lease_action(action, scene_id=scene_id)
     with _held_scenes_lock:
@@ -575,7 +575,7 @@ async def handle_process(
         with _held_scenes_lock:
             _held_scene_ids.discard(scene_id)
         _finalize_failed(
-            scene_id, str(exc), device_id, receiver_repo, fcm_notifier,
+            scene_id, str(exc), fcm_token, receiver_repo, fcm_notifier,
             holder_id=_WORKER_ID,
         )
         return JSONResponse({"status": "failed", "reason": str(exc)})
@@ -594,7 +594,7 @@ async def handle_process(
         if is_final_attempt:
             logger.error("process: final attempt exhausted for scene %s; marking failed", scene_id)
             _finalize_failed(
-                scene_id, str(exc), device_id, receiver_repo, fcm_notifier,
+                scene_id, str(exc), fcm_token, receiver_repo, fcm_notifier,
                 holder_id=_WORKER_ID,
             )
         return JSONResponse(
@@ -613,7 +613,7 @@ async def handle_process(
             _held_scene_ids.discard(scene_id)
         if is_final_attempt:
             _finalize_failed(
-                scene_id, str(exc), device_id, receiver_repo, fcm_notifier,
+                scene_id, str(exc), fcm_token, receiver_repo, fcm_notifier,
                 holder_id=_WORKER_ID,
             )
         return JSONResponse(
@@ -631,10 +631,13 @@ async def handle_process(
 
     logger.info("process: scene %s ready result_uri=%s", scene_id, result_uri)
 
-    try:
-        fcm_notifier.notify_ready(device_id=device_id, scene_id=scene_id)
-    except Exception as exc:
-        logger.warning("FCM notify_ready failed (continuing): %s", exc)
+    if fcm_token:
+        try:
+            fcm_notifier.notify_ready(fcm_token=fcm_token, scene_id=scene_id)
+        except Exception as exc:
+            logger.warning("FCM notify_ready failed (continuing): %s", exc)
+    else:
+        logger.debug("no fcm_token on scene %s; skipping notify_ready", scene_id)
 
     return JSONResponse({"status": "ready", "scene_id": scene_id, "result_uri": result_uri})
 
@@ -665,7 +668,7 @@ _FINALIZE_FAILED_RETRY_DELAYS_S: tuple[float, ...] = (0.5, 1.0)
 def _finalize_failed(
     scene_id: str,
     error: str,
-    device_id: str,
+    fcm_token: str,
     repo,
     fcm_notifier,
     *,
@@ -699,7 +702,10 @@ def _finalize_failed(
                 "no automatic retry (manual reconciliation required): %s",
                 scene_id, attempts, exc,
             )
-    try:
-        fcm_notifier.notify_failed(device_id=device_id, scene_id=scene_id, reason=error)
-    except Exception as exc:
-        logger.warning("FCM notify_failed failed (continuing): %s", exc)
+    if fcm_token:
+        try:
+            fcm_notifier.notify_failed(fcm_token=fcm_token, scene_id=scene_id, reason=error)
+        except Exception as exc:
+            logger.warning("FCM notify_failed failed (continuing): %s", exc)
+    else:
+        logger.debug("no fcm_token on scene %s; skipping notify_failed", scene_id)

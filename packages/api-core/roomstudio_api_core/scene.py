@@ -142,6 +142,7 @@ class Scene:
     last_error: Optional[str] = None      # server-side only; never serialized to clients
     bundle_id: Optional[str] = None       # iOS bundle UUIDv4; stored for lookup by bundle_id
     user_id: Optional[str] = None         # Firebase UID from the upload JWT
+    fcm_token: Optional[str] = None       # FCM registration token from /upload_session; None if the client sent none
     missing_paths: Optional[list] = None  # relative paths absent at existence-check time
     invalid_blobs: Optional[list] = None  # [{relative_path, reason}] for FAILED_INVALID scenes
 
