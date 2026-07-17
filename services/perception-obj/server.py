@@ -297,10 +297,10 @@ async def process(
     writes outputs to GCS, and updates Scene state in Firestore.
 
     Cloud Run config: concurrency=1, request-timeout=900s
-    (infra/deploy_perception.sh). NOTE: Cloud Tasks' dispatch deadline is the
-    10-minute default (dispatcher.py sets none), which is SHORTER than the
-    Cloud Run timeout — Cloud Tasks can retry an attempt that is still
-    running; the claim/lease machinery absorbs the overlap.
+    (infra/deploy_perception.sh). The dispatching side sets a Cloud Tasks
+    dispatch_deadline of 930s (api-internal dispatcher.py,
+    DISPATCH_DEADLINE_SECONDS) — deliberately ≥ this service's request
+    timeout so Cloud Tasks never retries an attempt that is still running.
     Returns 5xx on environmental failures so Cloud Tasks retries. Returns 2xx
     on all success and poison paths so the task is drained from the queue.
     """

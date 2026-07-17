@@ -27,6 +27,17 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any
 
+# Cloud Tasks stops waiting for a response after dispatch_deadline and schedules
+# a retry — even if Cloud Run is still executing the attempt (its request
+# timeout is 900s: infra/deploy_perception.sh --timeout=900). Keep this ≥ the
+# Cloud Run timeout so Cloud Tasks never retries an attempt that is still
+# alive. A premature retry would no-op via the lease (ALREADY_OWNED) but burns
+# one of maxAttempts=3, and its 200 completes the task — leaving no retry to
+# reclaim the scene if the original attempt later crashes. The 30s buffer over
+# the Cloud Run timeout covers response-delivery overhead. (Cloud Tasks allows
+# 15s–30min.)
+DISPATCH_DEADLINE_SECONDS = 930
+
 
 # ---------------------------------------------------------------------------
 # Interface
@@ -124,6 +135,7 @@ class CloudTasksDispatcher(TaskDispatcher):
         target_url: str,
     ) -> None:
         from google.cloud import tasks_v2  # deferred: not installed in tests
+        from google.protobuf import duration_pb2
 
         client = tasks_v2.CloudTasksClient()
         queue_path = client.queue_path(self._project, self._location, self._queue)
@@ -150,5 +162,10 @@ class CloudTasksDispatcher(TaskDispatcher):
             # Full resource name pins the task ID for Cloud Tasks dedup.
             "name": f"{queue_path}/tasks/{task_name}",
             "http_request": http_request,
+            # See DISPATCH_DEADLINE_SECONDS: must cover the receiver's full
+            # Cloud Run request timeout so a live attempt is never retried.
+            "dispatch_deadline": duration_pb2.Duration(
+                seconds=DISPATCH_DEADLINE_SECONDS
+            ),
         }
         client.create_task(request={"parent": queue_path, "task": task})
