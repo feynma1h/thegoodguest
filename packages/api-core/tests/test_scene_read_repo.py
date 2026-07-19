@@ -14,6 +14,8 @@ Covers:
     - get_by_bundle_id: returns None after all scenes have different bundle_ids
     - pre-population: constructor dict is copied into the store
     - isolation: mutating a returned scene does not affect stored state
+    - list_by_user: newest-first ordering, limit cap, other-user isolation,
+      empty result, deep-copy isolation
 
 Run from repo root:
   pytest packages/api-core/tests/test_scene_read_repo.py -v
@@ -113,3 +115,48 @@ class TestInMemorySceneReadRepository:
         again = repo.get_by_bundle_id(bundle_id)
         assert again is not None
         assert again.bundle_id == bundle_id
+
+
+# ---------------------------------------------------------------------------
+# list_by_user
+# ---------------------------------------------------------------------------
+
+class TestListByUser:
+    def _scene_at(self, user_id: str, minute: int) -> Scene:
+        s = _scene(user_id=user_id)
+        s.created_at = _NOW.replace(minute=minute)
+        return s
+
+    def test_empty_for_unknown_user(self) -> None:
+        repo = InMemorySceneReadRepository()
+        assert repo.list_by_user("nobody") == []
+
+    def test_newest_first_ordering(self) -> None:
+        scenes = [self._scene_at("u1", m) for m in (5, 30, 15)]
+        repo = InMemorySceneReadRepository({s.scene_id: s for s in scenes})
+        out = repo.list_by_user("u1")
+        minutes = [s.created_at.minute for s in out]
+        assert minutes == [30, 15, 5]
+
+    def test_limit_caps_results(self) -> None:
+        scenes = [self._scene_at("u1", m) for m in range(10)]
+        repo = InMemorySceneReadRepository({s.scene_id: s for s in scenes})
+        out = repo.list_by_user("u1", limit=3)
+        assert len(out) == 3
+        # The cap keeps the NEWEST three, not an arbitrary three.
+        assert [s.created_at.minute for s in out] == [9, 8, 7]
+
+    def test_other_users_scenes_excluded(self) -> None:
+        mine = self._scene_at("u1", 10)
+        theirs = self._scene_at("u2", 20)
+        repo = InMemorySceneReadRepository({
+            mine.scene_id: mine, theirs.scene_id: theirs,
+        })
+        out = repo.list_by_user("u1")
+        assert [s.scene_id for s in out] == [mine.scene_id]
+
+    def test_returns_deep_copies(self) -> None:
+        scene = self._scene_at("u1", 10)
+        repo = InMemorySceneReadRepository({scene.scene_id: scene})
+        repo.list_by_user("u1")[0].device_id = "mutated"
+        assert repo.list_by_user("u1")[0].device_id == "dev-1"
