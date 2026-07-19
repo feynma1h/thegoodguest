@@ -7,6 +7,8 @@ implementation of operations on those quaternions:
   - rotate a vector by a unit quaternion
   - conjugate (inverse for unit quaternions)
   - convert a 3x3 rotation matrix to a unit quaternion
+  - convert a unit quaternion to a 3x3 rotation matrix
+  - average a set of unit quaternions
 
 The iOS capture client uses ARKit's simd_quatf directly and never calls
 this code. But the conventions encoded here are the same ones ARKit
@@ -122,6 +124,55 @@ def rotmat_to_quat(R: np.ndarray) -> QuatXYZW:
         qz = 0.25 * s
     n = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
     return float(qx / n), float(qy / n), float(qz / n), float(qw / n)
+
+
+def quat_to_rotmat(q: QuatXYZW) -> np.ndarray:
+    """Convert a unit quaternion (x, y, z, w) to a 3x3 rotation matrix.
+
+    Inverse of rotmat_to_quat. The returned matrix R satisfies
+        R @ v == rotate_vec_by_quat(v, q)
+    for every vector v — i.e. it rotates camera-local vectors into world
+    coordinates when q comes from a Pose message. Use this when a whole
+    point cloud needs rotating: `points @ R.T` vectorizes what
+    rotate_vec_by_quat does one vector at a time.
+
+    Like rotate_vec_by_quat, this assumes unit norm (the proto contract)
+    and does not renormalize; a non-unit q scales the result by ||q||².
+    """
+    qx, qy, qz, qw = q
+    return np.array([
+        [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+        [2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
+        [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)],
+    ], dtype=np.float64)
+
+
+def quat_average(quats: "list[QuatXYZW] | tuple[QuatXYZW, ...]") -> QuatXYZW:
+    """Average a non-empty set of unit quaternions (Markley's method).
+
+    Returns the unit quaternion maximizing sum-of-squared dot products with
+    the inputs: the largest-eigenvalue eigenvector of M = sum(q qᵀ). This is
+    the standard rotation average for orientations without weights, and is
+    invariant to per-input sign flips (q and -q represent the same rotation,
+    and q qᵀ == (-q)(-q)ᵀ).
+
+    The returned sign is chosen to lie in the same hemisphere as the first
+    input (dot >= 0), so callers comparing against an input quaternion get
+    the nearby representative rather than its negation.
+    """
+    if not quats:
+        raise ValueError("quat_average: need at least one quaternion")
+    M = np.zeros((4, 4), dtype=np.float64)
+    for q in quats:
+        col = np.array(q, dtype=np.float64)
+        M += np.outer(col, col)
+    # eigh returns eigenvalues ascending; last column is the largest.
+    _, vecs = np.linalg.eigh(M)
+    avg = vecs[:, -1]
+    if float(np.dot(avg, np.array(quats[0], dtype=np.float64))) < 0.0:
+        avg = -avg
+    avg = avg / np.linalg.norm(avg)
+    return float(avg[0]), float(avg[1]), float(avg[2]), float(avg[3])
 
 
 # -----------------------------------------------------------------------------
