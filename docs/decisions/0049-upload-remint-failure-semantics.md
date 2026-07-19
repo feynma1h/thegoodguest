@@ -40,10 +40,16 @@ is guaranteed to 410 again — the identical-URI case is precisely the
 Firestore-TTL-lag window where the stale `upload_sessions` doc (7-day TTL,
 deletion lag up to ~72 h) is still being served. A bounded wait-and-retry could
 only succeed once the TTL fires: days of silent background churn, with no UI,
-for a capture whose already-uploaded blobs the age=1d GCS lifecycle rule has
-long since deleted anyway (the whole scenario requires a >7-day-old pending
-upload). A terminal `.failed` with `remint_returned_stale_uris` surfaces the
-problem instead of hiding it.
+for a bundle that has necessarily been unfinished for at least a week already —
+both the GCS resumable-URI nominal lifetime and the Firestore TTL run ~7 days,
+so reaching this branch at all implies that much elapsed time regardless of
+which blob triggered the 410. (Note: this does NOT mean every already-uploaded
+blob is guaranteed gone — that's only certain when `bundle.pb` itself is what
+410s, since the upload-ordering invariant means every sibling blob must have
+already succeeded by then; if a non-bundle.pb blob 410s first, it's possible no
+blob has ever succeeded for this bundle. The ≥7-day-stuck fact alone is what
+justifies fatal, independent of that.) A terminal `.failed` with
+`remint_returned_stale_uris` surfaces the problem instead of hiding it.
 
 **Persist-failure deferral (2, 3).** If the store cannot save, escalating to
 fatal is impotent: `onFatalBlobError`'s own `.failed` write goes through the
