@@ -36,6 +36,7 @@ Consumers: server.py (app.post("/process")).
 """
 from __future__ import annotations
 
+import asyncio
 import gc
 import io
 import json
@@ -43,7 +44,6 @@ import logging
 import os
 import signal
 import threading
-import time
 import uuid
 from typing import Any, Optional
 
@@ -574,7 +574,7 @@ async def handle_process(
         logger.error("process: poison failure for scene %s: %s", scene_id, exc)
         with _held_scenes_lock:
             _held_scene_ids.discard(scene_id)
-        _finalize_failed(
+        await _finalize_failed(
             scene_id, str(exc), fcm_token, receiver_repo, fcm_notifier,
             holder_id=_WORKER_ID,
         )
@@ -593,7 +593,7 @@ async def handle_process(
             _held_scene_ids.discard(scene_id)
         if is_final_attempt:
             logger.error("process: final attempt exhausted for scene %s; marking failed", scene_id)
-            _finalize_failed(
+            await _finalize_failed(
                 scene_id, str(exc), fcm_token, receiver_repo, fcm_notifier,
                 holder_id=_WORKER_ID,
             )
@@ -612,7 +612,7 @@ async def handle_process(
         with _held_scenes_lock:
             _held_scene_ids.discard(scene_id)
         if is_final_attempt:
-            _finalize_failed(
+            await _finalize_failed(
                 scene_id, str(exc), fcm_token, receiver_repo, fcm_notifier,
                 holder_id=_WORKER_ID,
             )
@@ -665,7 +665,7 @@ def _parse_retry_count(request: Request) -> int:
 _FINALIZE_FAILED_RETRY_DELAYS_S: tuple[float, ...] = (0.5, 1.0)
 
 
-def _finalize_failed(
+async def _finalize_failed(
     scene_id: str,
     error: str,
     fcm_token: str,
@@ -694,7 +694,7 @@ def _finalize_failed(
             break
         except Exception as exc:
             if attempt + 1 < attempts:
-                time.sleep(_FINALIZE_FAILED_RETRY_DELAYS_S[attempt])
+                await asyncio.sleep(_FINALIZE_FAILED_RETRY_DELAYS_S[attempt])
                 continue
             logger.error(
                 "scene_strand_risk=true scene_id=%s: release_failed failed on "
