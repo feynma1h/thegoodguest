@@ -280,7 +280,7 @@ def create_upload_session(
 
     # 5. Mint (or retrieve stored) session URIs.
     try:
-        bucket = _GCS_CAPTURES_BUCKET  # resolved once at import time
+        bucket = _GCS_CAPTURES_BUCKET
         session_entries = upload_repo.create_or_get(
             bundle_id=bundle_id,
             user_id=user_id,
