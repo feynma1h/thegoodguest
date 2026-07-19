@@ -6,7 +6,8 @@ interface is intentionally minimal: the write path stays in api-internal.
 
 Exports:
   SceneNotFoundError            — raised by get() when scene_id is absent
-  SceneReadRepository           — ABC: get(scene_id), get_by_bundle_id(bundle_id)
+  SceneReadRepository           — ABC: get(scene_id), get_by_bundle_id(bundle_id),
+                                  list_by_user(user_id, limit)
   InMemorySceneReadRepository   — dict-backed implementation for tests
   FirestoreSceneReadRepository  — Firestore-backed production implementation
 
@@ -55,6 +56,14 @@ class SceneReadRepository(ABC):
         time. Different from scene_id (the ingester's UUID for the job).
         """
 
+    @abstractmethod
+    def list_by_user(self, user_id: str, limit: int = 50) -> list[Scene]:
+        """Return the user's scenes, newest first (created_at descending),
+        capped at limit. Empty list when the user has none.
+
+        Consumer: api-public's GET /scenes (the web app's scene browser).
+        """
+
 
 # ---------------------------------------------------------------------------
 # In-memory implementation (tests and local development)
@@ -84,6 +93,11 @@ class InMemorySceneReadRepository(SceneReadRepository):
             if scene.bundle_id == bundle_id:
                 return copy.deepcopy(scene)
         return None
+
+    def list_by_user(self, user_id: str, limit: int = 50) -> list[Scene]:
+        matches = [s for s in self._store.values() if s.user_id == user_id]
+        matches.sort(key=lambda s: s.created_at, reverse=True)
+        return [copy.deepcopy(s) for s in matches[:limit]]
 
 
 # ---------------------------------------------------------------------------
@@ -152,3 +166,18 @@ class FirestoreSceneReadRepository(SceneReadRepository):
         for doc in docs:
             return self._from_doc(doc)
         return None
+
+    def list_by_user(self, user_id: str, limit: int = 50) -> list[Scene]:
+        # Filter-only query (automatic single-field index on user_id), sorted
+        # and capped in Python. Adding .order_by("created_at", DESCENDING)
+        # server-side would require a composite (user_id, created_at) index —
+        # the upgrade path if per-user scene counts ever make streaming the
+        # unordered set expensive. Pre-launch counts are tiny.
+        docs = (
+            self._db.collection(self.COLLECTION)
+            .where("user_id", "==", user_id)
+            .stream()
+        )
+        scenes = [self._from_doc(doc) for doc in docs]
+        scenes.sort(key=lambda s: s.created_at, reverse=True)
+        return scenes[:limit]
