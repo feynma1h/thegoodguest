@@ -44,8 +44,6 @@ struct RoomStudioCaptureApp: App {
                 .task {
                     // Resume any in-flight bundle uploads from prior sessions.
                     // Covers the swipe-up force-quit path (view appears → .task fires).
-                    // Whether .task also fires on an OS-kill background relaunch is
-                    // unverified on hardware (decision 0045) — verify before shipping.
                     await BlobUploadManager.shared.rehydrateAllUnfinishedBundles()
                 }
         }

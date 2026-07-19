@@ -78,9 +78,7 @@ actor CaptureStorageSweeper {
     /// Delete orphaned capture session directories.
     ///
     /// Safe to call concurrently with running uploads: the age threshold and the
-    /// record-presence check ensure in-flight dirs are spared. (The actor only
-    /// serializes concurrent sweep() invocations, which cannot occur anyway —
-    /// sweep() has a single call site at launch.)
+    /// record-presence check ensure in-flight dirs are spared.
     func sweep() async {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: capturesRoot,

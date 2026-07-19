@@ -116,7 +116,7 @@ actor UploadSessionClient {
     ///   - tokenProvider: Called to obtain a fresh idToken. Re-called on 401.
     ///     Pass `{ try await AuthManager.shared.currentIDToken() }`.
     ///   - fcmToken: FCM registration token for terminal-state push
-    ///     notifications. Nil until the app plumbs FCM registration.
+    ///     notifications.
     ///
     /// - Returns: Array of UploadSessionEntry. Map by relativePath — server
     ///   gives no ordering guarantee.

@@ -7,10 +7,11 @@
 /// FOREGROUND-ONLY: uses URLSession.shared, not the background blob session.
 /// Polling must be paused when the app backgrounds (SceneStatusView handles this).
 ///
-/// FCM push for ready/failed is currently broken (backend sends to device_id
-/// instead of fcm_token). Polling is therefore the sole completion channel for
-/// the user while the screen is open. The loop NEVER hard-gives-up on transient
-/// failures while foregrounded.
+/// Polling is the authoritative channel for scene-completion detection — FCM
+/// push (ready/failed) is a best-effort accelerant, not a substitute: it can
+/// go undelivered (permission denied, device offline) or arrive too late to
+/// act on (background processing is throttled by the OS). The loop therefore
+/// NEVER hard-gives-up on transient failures while the screen is foregrounded.
 ///
 /// Testability: all I/O is injected (now, sleep, performGET, tokenProvider).
 /// Tests drive pure logic without real clocks or network.
@@ -68,7 +69,6 @@ final class ScenePoller: ObservableObject {
     /// Elapsed < cadenceShortWindow  → cadenceShort between ticks.
     static let cadenceShortWindow:  TimeInterval = 30
     /// Elapsed < cadenceMediumWindow → cadenceMedium between ticks.
-    /// Named constant — retune once real perception latencies are known.
     static let cadenceMediumWindow: TimeInterval = 300   // 5 min
     static let cadenceShort:        TimeInterval = 2
     static let cadenceMedium:       TimeInterval = 10
@@ -130,9 +130,8 @@ final class ScenePoller: ObservableObject {
     ///
     /// Idempotent: same bundle while already polling = no-op (avoids resetting state
     /// mid-flight if the screen re-appears briefly). Re-callable after any terminal
-    /// or recoverable stop, so a future re-upload coordinator (unbuilt: something
-    /// watching .recoverable and re-driving BlobUploadManager) can restart polling
-    /// after a recovery attempt.
+    /// or recoverable stop, so recovery flows (e.g. a re-upload retry after
+    /// .recoverable) can restart polling.
     func start(bundleId: String) {
         if case .polling = pollState, currentBundleId == bundleId { return }
         cancelLoop()

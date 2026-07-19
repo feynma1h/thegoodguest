@@ -3,11 +3,11 @@
 /// Keyed by bundle_id. Stored to disk by UploadSessionStore (decision 0037).
 /// The upload pipeline (UploadCoordinator / BlobUploadManager) reads it to
 /// retrieve session URIs for the blob PUTs and to track per-blob upload
-/// status through the blob → bundle.pb ordering gate (decision 0040).
+/// status through the Phase-1 gate (decision 0040).
 ///
 /// Fields:
 ///   bundleId            — lowercased canonical UUIDv4; the Firestore key.
-///   tierRawValue        — RSCaptureTier.rawValue (SwiftProtobuf enum value).
+///   tierRawValue        — the underlying Int of an RSCaptureTier case (via .rawValue).
 ///   clientMintTimestamp — when this record was created on the client.
 ///                         IMPORTANT: the server response carries no expires_at.
 ///                         The real upload window is bounded by the captures
@@ -73,8 +73,7 @@ nonisolated struct UploadSessionRecord: Codable, Sendable {
     let tierRawValue: Int
     /// Client-side timestamp of when the session was created (or last re-minted).
     /// Resets to Date() on each successful /upload_session re-mint (onSessionExpired
-    /// path). Replace with the server-provided expiry once the /upload_session
-    /// response carries expires_at.
+    /// path).
     let clientMintTimestamp: Date
     /// Server response entries. Map by relativePath; order is undefined.
     let sessionEntries: [UploadSessionEntry]
@@ -194,7 +193,7 @@ nonisolated struct UploadSessionRecord: Codable, Sendable {
     /// Used by the staleness re-mint path (onSessionExpired with loopGuardEnabled: false)
     /// to force re-upload of all blobs against fresh URIs. The age=1 GCS lifecycle rule
     /// may have GC'd any blob uploaded more than 24h ago; resetting to .pending ensures
-    /// the ordering gate re-closes only after every blob is confirmed re-delivered.
+    /// the Phase-1 gate re-closes only after every blob is confirmed re-delivered.
     nonisolated func resettingNonBundlePbBlobsToPending() -> UploadSessionRecord {
         var updated = blobStatuses
         for key in updated.keys where key != "bundle.pb" {
@@ -271,11 +270,11 @@ nonisolated struct UploadSessionRecord: Codable, Sendable {
         markingPhase(uploadPhase, crossLaunchRetryCount: crossLaunchRetryCount + 1)
     }
 
-    // MARK: - Blob → bundle.pb ordering gate predicate
+    // MARK: - Phase-1 gate predicate
 
     /// True when every non-bundle.pb blob has been successfully uploaded.
     ///
-    /// This is the load-bearing ordering gate (decision 0040): the bundle.pb
+    /// This is the load-bearing Phase-1 gate (decision 0040): the bundle.pb
     /// upload task MUST NOT be enqueued until this returns true, because the
     /// arrival of bundle.pb in GCS is the backend's ingest signal.
     ///
@@ -285,9 +284,9 @@ nonisolated struct UploadSessionRecord: Codable, Sendable {
     ///   2. On app relaunch, by loading the persisted record from UploadSessionStore
     ///      and evaluating this predicate (reconstruct-on-relaunch path).
     ///
-    /// bundle.pb is excluded from the check: it is the upload the gate releases,
-    /// not one of the gate's prerequisites. Its own status is tracked in
-    /// blobStatuses but is never inspected by this predicate.
+    /// bundle.pb is excluded from the check: it is Phase-2 — the upload the
+    /// Phase-1 gate releases — not one of Phase-1's prerequisites. Its own
+    /// status is tracked in blobStatuses but is never inspected by this predicate.
     ///
     /// Edge case: a manifest with no non-bundle.pb entries (pathological; never
     /// produced by ManifestBuilder in practice) returns true immediately.
