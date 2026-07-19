@@ -19,6 +19,11 @@ Endpoints:
       Consumers: the iOS app's ScenePoller (production polling loop) and the
       smoke tool (tools/upload_test_bundle.py) after upload.
 
+  GET  /scenes?limit=N
+      List the caller's scenes, newest first. Auth: Firebase ID token.
+      Returns {"scenes": [<same shape as /scenes/by-bundle>]}.
+      Consumer: the web app's scene browser.
+
 Run locally (from services/api-public/):
   uvicorn public_server:app --reload --port 8080
 
@@ -191,6 +196,44 @@ def _get_scene_read_repo() -> SceneReadRepository:
 
 
 # ---------------------------------------------------------------------------
+# Serialization
+# ---------------------------------------------------------------------------
+
+def _scene_to_client_dict(scene) -> dict:
+    """Client-facing Scene shape, shared by /scenes/by-bundle and /scenes.
+
+    last_error and invalid_blobs are server-side only — excluded per
+    decision 0019."""
+    return {
+        "scene_id": scene.scene_id,
+        "bundle_id": scene.bundle_id,
+        "status": scene.status.value,
+        "result_uri": scene.result_uri,
+        "missing_paths": scene.missing_paths,
+        "created_at": scene.created_at.isoformat(),
+        "updated_at": scene.updated_at.isoformat(),
+    }
+
+
+def _verify_bearer(authorization: str):
+    """Common Bearer-token verification. Returns (user_id, None) on success
+    or (None, JSONResponse) with the 401 to return."""
+    if not authorization.startswith("Bearer "):
+        return None, JSONResponse(
+            status_code=401,
+            content={"error": "missing_token", "detail": "Authorization: Bearer <token> required"},
+        )
+    token = authorization[len("Bearer "):]
+    try:
+        return _get_token_verifier().verify(token), None
+    except TokenVerificationError as exc:
+        return None, JSONResponse(
+            status_code=401,
+            content={"error": "invalid_token", "detail": str(exc)},
+        )
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -235,19 +278,9 @@ def create_upload_session(
                                 this bundle_id (another user's upload)
     """
     # 1. Verify Firebase ID token.
-    if not authorization.startswith("Bearer "):
-        return JSONResponse(
-            status_code=401,
-            content={"error": "missing_token", "detail": "Authorization: Bearer <token> required"},
-        )
-    token = authorization[len("Bearer "):]
-    try:
-        user_id = _get_token_verifier().verify(token)
-    except TokenVerificationError as exc:
-        return JSONResponse(
-            status_code=401,
-            content={"error": "invalid_token", "detail": str(exc)},
-        )
+    user_id, err = _verify_bearer(authorization)
+    if err is not None:
+        return err
 
     # 2. Validate bundle_id is a UUIDv4.
     try:
@@ -337,19 +370,9 @@ def get_scene_by_bundle(
       404 not_found           — no scene exists for this bundle_id
     """
     # 1. Verify Firebase ID token.
-    if not authorization.startswith("Bearer "):
-        return JSONResponse(
-            status_code=401,
-            content={"error": "missing_token", "detail": "Authorization: Bearer <token> required"},
-        )
-    token = authorization[len("Bearer "):]
-    try:
-        user_id = _get_token_verifier().verify(token)
-    except TokenVerificationError as exc:
-        return JSONResponse(
-            status_code=401,
-            content={"error": "invalid_token", "detail": str(exc)},
-        )
+    user_id, err = _verify_bearer(authorization)
+    if err is not None:
+        return err
 
     # 2. Validate bundle_id is a UUIDv4.
     try:
@@ -388,16 +411,49 @@ def get_scene_by_bundle(
             content={"error": "forbidden", "detail": "bundle_id is owned by a different user"},
         )
 
-    # 5. Return scene state. last_error is server-side only — excluded per decision 0019.
+    # 5. Return scene state.
+    return JSONResponse(status_code=200, content=_scene_to_client_dict(scene))
+
+
+@app.get(
+    "/scenes",
+    summary="List the caller's scenes, newest first",
+)
+# Plain def for the same event-loop reason as create_upload_session above.
+def list_scenes(
+    authorization: str = Header(...),
+    limit: int = 50,
+) -> JSONResponse:
+    """List scenes owned by the authenticated user, newest first.
+
+    Auth: Firebase ID token in Authorization: Bearer <token>. Scoped to
+    the token's UID — there is no cross-user listing.
+
+    Query params:
+      limit — max scenes returned; default 50, valid range 1..100.
+
+    Response (200): {"scenes": [<same per-scene shape as /scenes/by-bundle>]}
+    An authenticated user with no scenes gets 200 {"scenes": []}, not 404.
+
+    Errors:
+      400 invalid_limit       — limit outside 1..100
+      401 missing_token       — Authorization header absent or malformed
+      401 invalid_token       — JWT failed verification
+
+    Consumer: the web app's scene browser.
+    """
+    user_id, err = _verify_bearer(authorization)
+    if err is not None:
+        return err
+
+    if not 1 <= limit <= 100:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_limit", "detail": f"limit must be 1..100, got {limit}"},
+        )
+
+    scenes = _get_scene_read_repo().list_by_user(user_id, limit=limit)
     return JSONResponse(
         status_code=200,
-        content={
-            "scene_id": scene.scene_id,
-            "bundle_id": scene.bundle_id,
-            "status": scene.status.value,
-            "result_uri": scene.result_uri,
-            "missing_paths": scene.missing_paths,
-            "created_at": scene.created_at.isoformat(),
-            "updated_at": scene.updated_at.isoformat(),
-        },
+        content={"scenes": [_scene_to_client_dict(s) for s in scenes]},
     )
