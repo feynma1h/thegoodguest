@@ -376,6 +376,120 @@ def test_fit_scale_translation_zero_extent_raises():
 
 
 # -----------------------------------------------------------------------------
+# refine_similarity_nn — the partial-view evaluation
+# -----------------------------------------------------------------------------
+
+def _ellipsoid_surface(n=1500, radii=(0.5, 0.35, 0.25), seed=29):
+    """Deterministic points on an ellipsoid surface (the 'full splat')."""
+    rng = np.random.default_rng(seed)
+    v = rng.normal(size=(n, 3))
+    v /= np.linalg.norm(v, axis=1, keepdims=True)
+    return v * np.array(radii)
+
+
+VIEW_DIR = np.array([1.0, 0.0, 0.0])  # camera at -X looking along +X
+
+
+def _single_view_fixture(noise=0.0, bleed_fraction=0.0, seed=29):
+    """A full 'splat' cloud and the true-visibility depth cloud a single
+    camera would see: for a convex surface, exactly the points whose
+    outward normal faces the camera. Optionally adds Gaussian depth noise
+    and background-bleed outliers (silhouette-rim pixels whose depth
+    lands far behind the object — the dominant real-world artifact of
+    mask-restricted LiDAR unprojection)."""
+    radii = np.array([0.5, 0.35, 0.25])
+    src = _ellipsoid_surface(radii=tuple(radii), seed=seed)
+    R = _rotmat([0, 1, 0], 35)
+    s_true, t_true = 1.6, np.array([1.0, 0.7, -2.0])
+    normals_local = src / radii ** 2
+    visible = normals_local @ (R.T @ VIEW_DIR) < 0
+    dst = (s_true * src @ R.T + t_true)[visible]
+    assert 0.4 < visible.mean() < 0.6
+    rng = np.random.default_rng(seed + 1)
+    if noise > 0.0:
+        dst = dst + rng.normal(size=dst.shape) * noise
+    if bleed_fraction > 0.0:
+        n_out = int(bleed_fraction * dst.shape[0])
+        bleed = dst[rng.integers(0, dst.shape[0], n_out)] + VIEW_DIR * rng.uniform(
+            1.0, 3.0, (n_out, 1)
+        )
+        dst = np.vstack([dst, bleed])
+    return src, dst, s_true, R, t_true
+
+
+def test_generic_fit_is_biased_on_single_view_clouds():
+    """Documents WHY fit_single_view exists: the correspondence-free PCA
+    fit, correct for full-coverage clouds, is structurally biased on a
+    single-view visibility cut (front-surface centroid + reordered
+    principal extents). If this ever starts passing with a tight bound,
+    the single-view path can be simplified away."""
+    src, dst, s_true, R_true, t_true = _single_view_fixture()
+    s0, t0 = fit_scale_translation(
+        robust_cloud_stats(src), robust_cloud_stats(dst), R_true
+    )
+    assert np.linalg.norm(t0 - t_true) > 0.1
+
+
+def test_fit_single_view_recovers_transform():
+    from roomstudio_schemas.placement_math import fit_single_view
+
+    src, dst, s_true, R_true, t_true = _single_view_fixture()
+    s, t = fit_single_view(src, dst, R_true, VIEW_DIR)
+    assert abs(s - s_true) < 0.02
+    assert np.linalg.norm(t - t_true) < 0.05
+
+
+def test_fit_single_view_robust_to_noise_and_bleed():
+    """5mm depth noise + 3% background-bleed outliers must not break the
+    fit — the percentile bands exist precisely to absorb these."""
+    from roomstudio_schemas.placement_math import fit_single_view
+
+    src, dst, s_true, R_true, t_true = _single_view_fixture(
+        noise=0.005, bleed_fraction=0.03
+    )
+    s, t = fit_single_view(src, dst, R_true, VIEW_DIR)
+    assert abs(s - s_true) < 0.03
+    assert np.linalg.norm(t - t_true) < 0.06
+
+
+def test_fit_single_view_too_few_points_raises():
+    from roomstudio_schemas.placement_math import fit_single_view
+
+    src, dst, _, R_true, _ = _single_view_fixture()
+    with pytest.raises(DegenerateGeometryError):
+        fit_single_view(src[:5], dst, R_true, VIEW_DIR)
+    with pytest.raises(DegenerateGeometryError):
+        fit_single_view(src, dst[:5], R_true, VIEW_DIR)
+
+
+def test_nn_translation_polish_improves_view_aware_fit():
+    """The refinement evaluation's surviving use: from a good view-aware
+    init, one translation-only NN pass tightens translation and must not
+    touch scale/rotation. (Full-mode refits from a poor init were found to
+    converge to shell-sliding local minima — see the placement decision
+    note — so full mode is not wired into the pipeline.)"""
+    from roomstudio_schemas.placement_math import fit_single_view, refine_similarity_nn
+
+    src, dst, s_true, R_true, t_true = _single_view_fixture()
+    s0, t0 = fit_single_view(src, dst, R_true, VIEW_DIR)
+    err_before = np.linalg.norm(t0 - t_true)
+    s, R, t, rms = refine_similarity_nn(src, dst, s0, R_true, t0, mode="translation")
+    assert s == pytest.approx(s0)
+    assert np.array_equal(R, R_true)
+    assert np.linalg.norm(t - t_true) < err_before
+    assert rms < 0.05
+
+
+def test_nn_refinement_too_few_points_raises():
+    from roomstudio_schemas.placement_math import refine_similarity_nn
+
+    with pytest.raises(DegenerateGeometryError):
+        refine_similarity_nn(
+            np.zeros((2, 3)), np.zeros((5, 3)), 1.0, np.eye(3), np.zeros(3)
+        )
+
+
+# -----------------------------------------------------------------------------
 # ray_through_pixel + triangulate_rays
 # -----------------------------------------------------------------------------
 
