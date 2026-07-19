@@ -111,6 +111,12 @@ class Scene:
         per-device UUID (bundle.device.device_id). Non-empty. The literal
         sentinel "unknown" is used for rejection Scenes created from bundles
         that carried no device identity (see ingest_server.py).
+
+        Why collected separately from user_id: Keychain data survives app
+        delete + reinstall on the same physical device, while user_id (the
+        Firebase anonymous UID) does not — a reinstall mints a fresh user_id
+        but keeps the same device_id. This lets device_id recognize "same
+        device, new-looking account" in a way user_id alone cannot.
     status:
         Current lifecycle state.
     bundle_uri:
