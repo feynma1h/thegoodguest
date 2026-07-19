@@ -431,25 +431,31 @@ def test_generic_fit_is_biased_on_single_view_clouds():
 
 
 def test_fit_single_view_recovers_transform():
+    """Tolerances are pinned near the achieved accuracy (measured
+    s_err ≈ 0.0017 on s=1.6, t_err ≈ 0.030 m with this deterministic
+    fixture) so an accuracy regression fails the suite rather than hiding
+    under a slack bound."""
     from roomstudio_schemas.placement_math import fit_single_view
 
     src, dst, s_true, R_true, t_true = _single_view_fixture()
     s, t = fit_single_view(src, dst, R_true, VIEW_DIR)
-    assert abs(s - s_true) < 0.02
-    assert np.linalg.norm(t - t_true) < 0.05
+    assert abs(s - s_true) < 0.003
+    assert np.linalg.norm(t - t_true) < 0.035
 
 
 def test_fit_single_view_robust_to_noise_and_bleed():
     """5mm depth noise + 3% background-bleed outliers must not break the
-    fit — the percentile bands exist precisely to absorb these."""
+    fit — the percentile bands exist precisely to absorb these. Bounds
+    pinned near achieved accuracy (s_err ≈ 0.0033, t_err ≈ 0.029 m,
+    deterministic seeds) for the same regression-guard reason as above."""
     from roomstudio_schemas.placement_math import fit_single_view
 
     src, dst, s_true, R_true, t_true = _single_view_fixture(
         noise=0.005, bleed_fraction=0.03
     )
     s, t = fit_single_view(src, dst, R_true, VIEW_DIR)
-    assert abs(s - s_true) < 0.03
-    assert np.linalg.norm(t - t_true) < 0.06
+    assert abs(s - s_true) < 0.006
+    assert np.linalg.norm(t - t_true) < 0.035
 
 
 def test_fit_single_view_too_few_points_raises():
