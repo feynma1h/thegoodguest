@@ -311,6 +311,7 @@ def _extract_bucket(bundle_gcs_uri: str) -> str:
 
 def _run_ingest(
     bundle_gcs_uri: str,
+    bundle_id: str,
     repo: SceneRepository,
     dispatcher: TaskDispatcher,
     *,
@@ -318,15 +319,11 @@ def _run_ingest(
 ) -> JSONResponse:
     """Fetch, parse, validate, existence-check, and enqueue a bundle.
 
+    bundle_id: extracted by the caller from bundle_gcs_uri (gs://…/captures/{bundle_id}/bundle.pb).
     existing_scene_id: if set, the Scene already exists (retry after
     failed_incomplete or failed) and will be transitioned to QUEUED rather
     than creating a new record.
-
-    bundle_gcs_uri always matches gs://…/captures/{bundle_id}/bundle.pb —
-    ingest_eventarc (the sole caller) only calls in on a path match.
     """
-    bundle_id = _extract_bundle_id(bundle_gcs_uri)
-    assert bundle_id is not None, f"caller must guarantee a bundle.pb URI, got {bundle_gcs_uri!r}"
     bucket = _extract_bucket(bundle_gcs_uri)
 
     # 1. Fetch from GCS.
@@ -759,9 +756,10 @@ async def ingest_eventarc(request: Request) -> JSONResponse:
             )
             return _run_ingest(
                 bundle_gcs_uri,
+                bundle_id,
                 repo,
                 dispatcher,
                 existing_scene_id=existing.scene_id,
             )
 
-    return _run_ingest(bundle_gcs_uri, repo, dispatcher)
+    return _run_ingest(bundle_gcs_uri, bundle_id, repo, dispatcher)
