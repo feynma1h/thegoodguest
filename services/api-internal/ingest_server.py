@@ -1,4 +1,4 @@
-"""roomstudio internal API — IAM-gated Eventarc handler and legacy ingest endpoint.
+"""roomstudio internal API — IAM-gated Eventarc ingest handler.
 
 This service runs --no-allow-unauthenticated. Cloud Run IAM validates the
 caller's OIDC token at the platform boundary before any request reaches
@@ -8,22 +8,18 @@ Endpoints:
   GET  /health
       Liveness probe; always returns {"status": "ok"} with HTTP 200.
 
-  POST /ingest
-      Validate bundle by GCS URI, run existence check, create Scene, enqueue
-      perception task. Legacy entry-point; kept for compatibility.
-
   POST /ingest/eventarc
       Eventarc CloudEvent handler for google.cloud.storage.object.v1.finalized
       on the captures bucket (bucket-wide filter — GCS Eventarc does not support
       object-path suffix filters; see decision 0023). Discriminates bundle.pb from
       pixel-blob events in-handler: non-matching paths return HTTP 200 with a
       structured ignore-log so Pub/Sub acknowledges rather than retrying. Matching
-      paths run the same ingest logic as /ingest. Handles idempotency
-      (already-queued scenes) and the retry path (failed_incomplete → queued on
-      successful re-upload).
+      paths run the full ingest pipeline (_run_ingest). Handles idempotency
+      (already-queued scenes) and the retry paths (failed_incomplete/failed →
+      queued on a new finalize event).
 
 Run locally (from services/api-internal/):
-  uvicorn server:app --reload --port 8081
+  uvicorn ingest_server:app --reload --port 8081
 
 Environment variables:
   ENVIRONMENT                — set to "production" to enable startup env-var
@@ -31,10 +27,14 @@ Environment variables:
                                or any other value → silent in-memory fallbacks
                                (appropriate for local dev / tests).
   FIRESTORE_PROJECT          — GCP project for Firestore; absent → in-memory repo
-  CLOUD_TASKS_PROJECT        — GCP project for Cloud Tasks  ┐
-  CLOUD_TASKS_LOCATION       — Cloud Tasks region           ├ all three required
-  CLOUD_TASKS_QUEUE          — Cloud Tasks queue name       ┘ for real dispatch
-  CLOUD_TASKS_INVOKER_SA     — service account email for OIDC token on tasks
+  CLOUD_TASKS_PROJECT        — GCP project for Cloud Tasks  ┐ all three required for
+  CLOUD_TASKS_LOCATION       — Cloud Tasks region           ├ CloudTasksDispatcher to
+  CLOUD_TASKS_QUEUE          — Cloud Tasks queue name       ┘ be selected at all
+  CLOUD_TASKS_INVOKER_SA     — service account email for the OIDC token attached
+                               to each task. Not needed to SEND tasks, but without
+                               it perception-obj rejects them (its receiver
+                               verifies the OIDC identity) — required in any real
+                               deployment for tasks to be ACCEPTED.
   PERCEPTION_OBJ_PROCESS_URL — full URL of the perception-obj /process endpoint
 
 See also: infra/cloud-tasks-queue.md for queue setup and SA configuration.
@@ -74,11 +74,12 @@ for _pkg in ("packages/schemas", "packages/api-core"):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from roomstudio_schemas import CaptureBundle, CaptureTier  # noqa: E402
+from roomstudio_schemas import CaptureBundle  # noqa: E402
 from validation import validate_bundle  # noqa: E402
-from scene import DeviceIdSource, SceneStatus, new_scene  # noqa: E402
+from scene import SceneStatus, new_scene  # noqa: E402
 from repository import SceneRepository, InMemorySceneRepository  # noqa: E402
 import blob_validator  # noqa: E402
+import gcs_client  # noqa: E402
 from dispatcher import TaskDispatcher, InMemoryTaskDispatcher  # noqa: E402
 from fcm import FcmNotifier, NullFcmNotifier  # noqa: E402
 from roomstudio_api_core.upload_session_repo import (  # noqa: E402
@@ -121,7 +122,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 app = FastAPI(
     title="roomstudio-api-internal",
-    description="Internal IAM-gated API. Hosts /ingest/eventarc (Eventarc trigger) and legacy /ingest.",
+    description="Internal IAM-gated API. Hosts /ingest/eventarc (Eventarc trigger).",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -130,11 +131,6 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
-
-class IngestRequest(BaseModel):
-    """Body for POST /ingest."""
-    bundle_gcs_uri: str
-
 
 class IngestAck(BaseModel):
     """Returned on successful ingest (HTTP 200)."""
@@ -228,30 +224,6 @@ def _get_upload_session_repo() -> UploadSessionRepository:
 
 
 # ---------------------------------------------------------------------------
-# device_id resolution
-# ---------------------------------------------------------------------------
-
-def resolve_device_id(bundle, bundle_gcs_uri: str) -> tuple[str, DeviceIdSource]:
-    """Return (device_id, source) from the parsed CaptureBundle."""
-    if bundle.device.device_id:
-        return bundle.device.device_id, DeviceIdSource.PROVIDED
-
-    if bundle.device.hardware_id:
-        logger.warning(
-            "device_id absent in bundle; falling back to hardware_id %r "
-            "(not unique per device). bundle_uri=%s",
-            bundle.device.hardware_id,
-            bundle_gcs_uri,
-        )
-        return bundle.device.hardware_id, DeviceIdSource.FALLBACK_HARDWARE_ID
-
-    raise ValueError(
-        "bundle.device.device_id and bundle.device.hardware_id are both empty; "
-        "cannot determine device identity"
-    )
-
-
-# ---------------------------------------------------------------------------
 # GCS fetch
 # ---------------------------------------------------------------------------
 
@@ -260,14 +232,11 @@ MAX_BUNDLE_BYTES: int = 10 * 1024 * 1024  # 10 MiB — proto metadata only
 
 def _fetch_bundle_bytes(gcs_uri: str) -> bytes:
     """Download bundle bytes from GCS. Patched out in tests."""
-    from google.cloud import storage  # deferred
-
     if not gcs_uri.startswith("gs://"):
         raise ValueError(f"Expected gs:// URI, got: {gcs_uri!r}")
     without_scheme = gcs_uri[5:]
     bucket_name, blob_path = without_scheme.split("/", 1)
-    client = storage.Client()
-    blob = client.bucket(bucket_name).blob(blob_path)
+    blob = gcs_client.get_client().bucket(bucket_name).blob(blob_path)
     blob.reload()
     if blob.size is not None and blob.size > MAX_BUNDLE_BYTES:
         raise ValueError(
@@ -284,9 +253,7 @@ def _fetch_bundle_bytes(gcs_uri: str) -> bytes:
 
 def _blob_exists(bucket_name: str, blob_path: str) -> bool:
     """Return True if the GCS blob exists. Patched in tests."""
-    from google.cloud import storage  # deferred
-
-    return storage.Client().bucket(bucket_name).blob(blob_path).exists()
+    return gcs_client.get_client().bucket(bucket_name).blob(blob_path).exists()
 
 
 def _collect_bundle_blob_paths(bundle) -> list[str]:
@@ -349,11 +316,12 @@ def _extract_bucket(bundle_gcs_uri: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Core ingest logic (shared by /ingest and /ingest/eventarc)
+# Core ingest logic (called by /ingest/eventarc; kept separate for testability)
 # ---------------------------------------------------------------------------
 
 def _run_ingest(
     bundle_gcs_uri: str,
+    bundle_id: str,
     repo: SceneRepository,
     dispatcher: TaskDispatcher,
     *,
@@ -361,11 +329,11 @@ def _run_ingest(
 ) -> JSONResponse:
     """Fetch, parse, validate, existence-check, and enqueue a bundle.
 
+    bundle_id: extracted by the caller from bundle_gcs_uri (gs://…/captures/{bundle_id}/bundle.pb).
     existing_scene_id: if set, the Scene already exists (retry after
-    failed_incomplete) and will be transitioned to QUEUED rather than
-    creating a new record.
+    failed_incomplete or failed) and will be transitioned to QUEUED rather
+    than creating a new record.
     """
-    bundle_id = _extract_bundle_id(bundle_gcs_uri)
     bucket = _extract_bucket(bundle_gcs_uri)
 
     # 1. Fetch from GCS.
@@ -396,95 +364,70 @@ def _run_ingest(
     if err:
         error_code, detail = err
         # Create a FAILED_INVALID Scene so the iOS client can observe the rejection
-        # via GET /scenes/by-bundle/{bundle_id} polling. The iOS path never calls
-        # /ingest directly — it uploads bundle.pb to GCS and polls; without a Scene
-        # the client polls into the void with no terminal state.
+        # via GET /scenes/by-bundle/{bundle_id} polling. The iOS path only uploads
+        # bundle.pb to GCS and polls; without a Scene the client polls into the
+        # void with no terminal state.
         #
         # Returning 200 (not 400) prevents Pub/Sub retry storms on the Eventarc path:
-        # a non-2xx from /ingest/eventarc triggers redelivery, so a stale cohort
-        # sending "1.0.0" bundles at a schema bump would spin forever otherwise.
+        # a non-2xx from /ingest/eventarc triggers redelivery, so at any future
+        # schema bump a cohort of clients still emitting the old schema_version
+        # would spin forever otherwise.
         #
-        # Fallback to 400 only when we can't create a pollable Scene (no bundle_id
-        # extractable from the URI, or bundle carries no device identity).
-        if bundle_id:
-            try:
-                _rej_device_id, _rej_source = resolve_device_id(bundle, bundle_gcs_uri)
-            except ValueError:
-                _rej_device_id = None
-            if _rej_device_id is not None:
-                _handle_failed_invalid(
-                    bundle_gcs_uri=bundle_gcs_uri,
-                    bundle_id=bundle_id,
-                    device_id=_rej_device_id,
-                    device_id_source=_rej_source,
-                    invalid_blobs=[],
-                    repo=repo,
-                    existing_scene_id=existing_scene_id,
-                    rejection_kind=error_code,
-                    rejection_detail=detail,
-                )
-                return JSONResponse(
-                    status_code=200,
-                    content={"status": "failed_invalid", "error": error_code},
-                )
-        # Fallback: no bundle_id in the URI or bundle has no device identity.
-        # 400 is acceptable here — the client can't poll either way (no bundle_id)
-        # or the bundle is so malformed it's not worth a Scene. Retry behaviour on
-        # the Eventarc path is bounded: _extract_bundle_id returns None only for
-        # paths that don't match captures/*/bundle.pb, which the trigger's bucket-wide
-        # filter makes rare steady-state traffic rather than a stale-cohort storm.
+        # The rejection Scene needs a non-empty device_id even when the failing
+        # check is device_id_missing itself — use the "unknown" sentinel then.
+        _handle_failed_invalid(
+            bundle_gcs_uri=bundle_gcs_uri,
+            bundle_id=bundle_id,
+            device_id=bundle.device.device_id or "unknown",
+            invalid_blobs=[],
+            repo=repo,
+            existing_scene_id=existing_scene_id,
+            rejection_kind=error_code,
+            rejection_detail=detail,
+        )
         return JSONResponse(
-            status_code=400,
-            content=IngestError(error=error_code, detail=detail).model_dump(),
+            status_code=200,
+            content={"status": "failed_invalid", "error": error_code},
         )
 
-    # 4. Resolve device_id.
-    try:
-        device_id, device_id_source = resolve_device_id(bundle, bundle_gcs_uri)
-    except ValueError as exc:
-        return JSONResponse(
-            status_code=400,
-            content=IngestError(error="device_id_missing", detail=str(exc)).model_dump(),
-        )
+    # 4. Device identity. Guaranteed non-empty by validation check 2
+    # (device_id_missing bundles were rejected above).
+    device_id = bundle.device.device_id
 
     # 5. Existence check — verify all referenced blobs are present in GCS.
-    if bundle_id:
-        missing = _check_bundle_blobs_exist(bundle, bucket, bundle_id)
-        if missing:
-            _handle_failed_incomplete(
-                bundle_gcs_uri=bundle_gcs_uri,
-                bundle_id=bundle_id,
-                device_id=device_id,
-                device_id_source=device_id_source,
-                missing=missing,
-                repo=repo,
-                existing_scene_id=existing_scene_id,
-            )
-            return JSONResponse(
-                status_code=200,
-                content={"status": "failed_incomplete", "missing_paths": missing},
-            )
+    missing = _check_bundle_blobs_exist(bundle, bucket, bundle_id)
+    if missing:
+        _handle_failed_incomplete(
+            bundle_gcs_uri=bundle_gcs_uri,
+            bundle_id=bundle_id,
+            device_id=device_id,
+            missing=missing,
+            repo=repo,
+            existing_scene_id=existing_scene_id,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "failed_incomplete", "missing_paths": missing},
+        )
 
     # 5b. Image-blob validation gate — check RGB frames before dispatching to GPU.
     # Fast-fails bundles with non-decodable image data (too small, wrong format,
     # or bad magic bytes) before they reach the perception pipeline. FAILED_INVALID
     # is terminal: corrupted blobs cannot be fixed by re-uploading the same data.
-    if bundle_id:
-        invalid_blobs = _validate_image_blobs(bundle, bucket, bundle_id)
-        if invalid_blobs:
-            _handle_failed_invalid(
-                bundle_gcs_uri=bundle_gcs_uri,
-                bundle_id=bundle_id,
-                device_id=device_id,
-                device_id_source=device_id_source,
-                invalid_blobs=invalid_blobs,
-                repo=repo,
-                existing_scene_id=existing_scene_id,
-            )
-            return JSONResponse(
-                status_code=200,
-                content={"status": "failed_invalid", "invalid_blobs": invalid_blobs},
-            )
+    invalid_blobs = _validate_image_blobs(bundle, bucket, bundle_id)
+    if invalid_blobs:
+        _handle_failed_invalid(
+            bundle_gcs_uri=bundle_gcs_uri,
+            bundle_id=bundle_id,
+            device_id=device_id,
+            invalid_blobs=invalid_blobs,
+            repo=repo,
+            existing_scene_id=existing_scene_id,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "failed_invalid", "invalid_blobs": invalid_blobs},
+        )
 
     # 6. Create or transition Scene to QUEUED.
     if existing_scene_id:
@@ -498,18 +441,20 @@ def _run_ingest(
         scene = new_scene(
             scene_id=scene_id,
             device_id=device_id,
-            device_id_source=device_id_source,
             bundle_uri=bundle_gcs_uri,
         )
         # Store bundle_id on the scene for later lookup by /ingest/eventarc.
         scene.bundle_id = bundle_id
-        scene.user_id = bundle.user_id or None
+        # user_id comes from the upload_session record (written by api-public
+        # at mint time, tied to the verified Firebase JWT), the same source as
+        # the failed_incomplete/failed_invalid creation sites — never from the
+        # unverified bundle contents (decision 0036).
+        upload_repo = _get_upload_session_repo()
+        scene.user_id = upload_repo.get_user_id(bundle_id)
+        scene.fcm_token = upload_repo.get_fcm_token(bundle_id)
         repo.create(scene)
         logger.info(
-            "Scene created: scene_id=%s device_id_source=%s bundle_uri=%s",
-            scene_id,
-            device_id_source.value,
-            bundle_gcs_uri,
+            "Scene created: scene_id=%s bundle_uri=%s", scene_id, bundle_gcs_uri
         )
 
     # 7. Enqueue Cloud Task targeting perception-obj.
@@ -563,7 +508,6 @@ def _handle_failed_incomplete(
     bundle_gcs_uri: str,
     bundle_id: str,
     device_id: str,
-    device_id_source: DeviceIdSource,
     missing: list[str],
     repo: SceneRepository,
     existing_scene_id: str | None,
@@ -582,11 +526,12 @@ def _handle_failed_incomplete(
         scene = new_scene(
             scene_id=scene_id,
             device_id=device_id,
-            device_id_source=device_id_source,
             bundle_uri=bundle_gcs_uri,
         )
         scene.bundle_id = bundle_id
-        scene.user_id = _get_upload_session_repo().get_user_id(bundle_id)
+        upload_repo = _get_upload_session_repo()
+        scene.user_id = upload_repo.get_user_id(bundle_id)
+        scene.fcm_token = upload_repo.get_fcm_token(bundle_id)
         repo.create(scene)
         repo.update_status(
             scene_id,
@@ -624,7 +569,6 @@ def _handle_failed_invalid(
     bundle_gcs_uri: str,
     bundle_id: str,
     device_id: str,
-    device_id_source: DeviceIdSource,
     invalid_blobs: list[dict],
     repo: SceneRepository,
     existing_scene_id: str | None,
@@ -664,11 +608,12 @@ def _handle_failed_invalid(
         scene = new_scene(
             scene_id=scene_id,
             device_id=device_id,
-            device_id_source=device_id_source,
             bundle_uri=bundle_gcs_uri,
         )
         scene.bundle_id = bundle_id
-        scene.user_id = _get_upload_session_repo().get_user_id(bundle_id)
+        upload_repo = _get_upload_session_repo()
+        scene.user_id = upload_repo.get_user_id(bundle_id)
+        scene.fcm_token = upload_repo.get_fcm_token(bundle_id)
         repo.create(scene)
         repo.update_status(
             scene_id,
@@ -705,27 +650,6 @@ def health() -> JSONResponse:
 
 
 @app.post(
-    "/ingest",
-    response_model=IngestAck,
-    responses={400: {"model": IngestError}, 500: {"model": IngestError}},
-    summary="Validate a CaptureBundle and enqueue perception work",
-)
-def ingest(req: IngestRequest) -> JSONResponse:
-    """Accept a serialized CaptureBundle by GCS URI.
-
-    On success (200): bundle is valid, all blobs exist, Scene is queued.
-    On validation failure (400): bundle did not pass contract checks.
-    On existence failure (200, status=failed_incomplete): some blobs absent.
-    On dispatch failure (500): valid bundle but task could not be enqueued.
-    """
-    return _run_ingest(
-        req.bundle_gcs_uri,
-        _get_scene_repo(),
-        _get_task_dispatcher(),
-    )
-
-
-@app.post(
     "/ingest/eventarc",
     summary="Eventarc CloudEvent handler for captures/*/bundle.pb finalize",
 )
@@ -746,12 +670,21 @@ async def ingest_eventarc(request: Request) -> JSONResponse:
     The Eventarc SA is granted that role in infra/eventarc_setup.sh before
     the trigger is created.
 
-    Idempotency (bundle.pb path only):
-    - If a Scene for this bundle_id is already QUEUED, PROCESSING, or READY,
-      return 200 immediately without re-processing.
-    - If FAILED_INCOMPLETE, re-run the existence check with the same scene_id
-      (transition to QUEUED if blobs are now present).
-    - Otherwise, run a fresh ingest.
+    Idempotency (bundle.pb path only), by existing Scene status:
+    - QUEUED / PROCESSING / READY: return 200 immediately without
+      re-processing (work is in flight or done).
+    - FAILED_INVALID: terminal — return 200 without re-processing
+      (corrupted content cannot be fixed by re-delivering the same event).
+    - FAILED_INCOMPLETE: re-run ingest with the same scene_id (transition
+      to QUEUED if the missing blobs are now present).
+    - FAILED: re-run ingest with the same scene_id (FAILED → QUEUED retry).
+      FAILED is reached either by a dispatch failure at ingest (we returned
+      500, so this redelivery IS the retry mechanism) or by a perception
+      failure (a fresh finalize event then means the client re-uploaded
+      bundle.pb — a deliberate retry). A rare late Pub/Sub duplicate can
+      cost one redundant processing attempt; duplicates arriving while the
+      retry is QUEUED/PROCESSING are absorbed by the first branch.
+    - No existing Scene: run a fresh ingest.
     """
     try:
         body = await request.json()
@@ -821,17 +754,22 @@ async def ingest_eventarc(request: Request) -> JSONResponse:
                     scene_id=existing.scene_id, status=existing.status.value
                 ).model_dump(),
             )
-        if existing.status == SceneStatus.FAILED_INCOMPLETE:
+        if existing.status in (SceneStatus.FAILED_INCOMPLETE, SceneStatus.FAILED):
+            # Both retry with the SAME scene_id (never a fresh Scene — a fresh
+            # ingest here would create a duplicate Scene per redelivery, and
+            # get_by_bundle_id would then return an arbitrary one to pollers).
             logger.info(
-                "Eventarc: retrying failed_incomplete scene %s for bundle_id=%s",
+                "Eventarc: retrying %s scene %s for bundle_id=%s",
+                existing.status.value,
                 existing.scene_id,
                 bundle_id,
             )
             return _run_ingest(
                 bundle_gcs_uri,
+                bundle_id,
                 repo,
                 dispatcher,
                 existing_scene_id=existing.scene_id,
             )
 
-    return _run_ingest(bundle_gcs_uri, repo, dispatcher)
+    return _run_ingest(bundle_gcs_uri, bundle_id, repo, dispatcher)

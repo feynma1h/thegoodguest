@@ -6,15 +6,16 @@ describing the first failing check.
 
 Validation checks (in priority order):
   1. schema_version is in SUPPORTED_VERSIONS
-  2. Every camera_pose quaternion is unit-norm within QUAT_NORM_TOLERANCE
-  3. Depth fields require a LIDAR_* tier
-  4. All GCS paths are relative (not full gs:// URIs)
+  2. device.device_id is populated (iOS Keychain per-device UUID)
+  3. Every camera_pose quaternion is unit-norm within QUAT_NORM_TOLERANCE
+  4. Depth fields require a LIDAR_* tier
+  5. All GCS paths are relative (not full gs:// URIs)
 
 Error codes are machine-readable strings. Details are human-readable and
 include enough context (frame index, field name, observed value) to act on
 without re-running.
 
-Consumers: server.py (the FastAPI ingester).
+Consumers: ingest_server.py (the FastAPI ingester).
 """
 from __future__ import annotations
 
@@ -33,9 +34,11 @@ def validate_bundle(bundle) -> tuple[str, str] | None:
     Order is intentional and must be preserved:
       1. schema_version first — an unknown version means we can't trust any
          field interpretation, so there's no point running later checks.
-      2. Quaternion norms — cheap, purely structural, catches iOS bugs early.
-      3. Tier-vs-depth — semantic consistency between tier and frame content.
-      4. GCS paths — catches writer bugs; last because it's the most tedious
+      2. Device identity — device_id must be populated (the iOS client's
+         Keychain UUID); cheap, structural.
+      3. Quaternion norms — cheap, purely structural, catches iOS bugs early.
+      4. Tier-vs-depth — semantic consistency between tier and frame content.
+      5. GCS paths — catches writer bugs; last because it's the most tedious
          to construct a bundle that fails only this check.
 
     Tests that assert a specific error code must construct a bundle that
@@ -44,6 +47,7 @@ def validate_bundle(bundle) -> tuple[str, str] | None:
     """
     return (
         _check_schema_version(bundle)
+        or _check_device_id(bundle)
         or _check_quaternion_norms(bundle)
         or _check_tier_depth_consistency(bundle)
         or _check_gcs_paths_relative(bundle)
@@ -61,6 +65,16 @@ def _check_schema_version(bundle) -> tuple[str, str] | None:
         return (
             "unsupported_schema_version",
             f"schema_version {v!r} is not supported; supported: {supported}",
+        )
+    return None
+
+
+def _check_device_id(bundle) -> tuple[str, str] | None:
+    if not bundle.device.device_id:
+        return (
+            "device_id_missing",
+            "bundle.device.device_id is empty; the iOS client persists a "
+            "per-device Keychain UUID and must populate this field",
         )
     return None
 

@@ -65,7 +65,8 @@ final class CaptureStorageSweeperTests: XCTestCase {
             tierRawValue:        1,
             clientMintTimestamp: Date(),
             sessionEntries:      entries,
-            manifestPaths:       paths
+            manifestPaths:       paths,
+            outputDir:           FileManager.default.temporaryDirectory
         )
         try await store.save(record)
     }

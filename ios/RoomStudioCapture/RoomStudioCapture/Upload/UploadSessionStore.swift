@@ -7,13 +7,14 @@
 /// (AES-256 at rest, readable while locked after first unlock). See decisions
 /// 0037 and 0042 for rationale: CAFUFA is required so the background URLSession
 /// completion delegate can read the record while the device is locked (decision
-/// 0040 item 7); Complete would silently stall finalize until next unlock.
+/// 0040 item 7); NSFileProtectionComplete would silently stall finalize until
+/// the next unlock.
 ///
 /// The store is an actor so all read/write operations are serialised without
 /// explicit locking.
 ///
 /// Read by: UploadCoordinator (save after session creation),
-///          P4 upload logic (load session URIs for PUT phase).
+///          BlobUploadManager (load session URIs for the PUT phases).
 
 import Foundation
 
@@ -105,7 +106,7 @@ actor UploadSessionStore {
         return updated
     }
 
-    /// Delete the session record for a bundle (called by P4 cleanup on success).
+    /// Delete the session record for a bundle (upload-success cleanup).
     func delete(bundleId: String) throws {
         let url = fileURL(for: bundleId)
         guard FileManager.default.fileExists(atPath: url.path) else { return }

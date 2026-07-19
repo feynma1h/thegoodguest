@@ -3,8 +3,9 @@
 /// Called by CaptureManager after all JPEG/depth writes have flushed. Runs on
 /// CaptureManager's jpegQueue (serial), so no concurrency concerns here.
 ///
-/// The resulting bundle.pb is the upload artifact for P3/P4. Its GCS paths are
-/// relative (e.g. "frames/000000.jpg"), matching the proto convention and the
+/// The resulting bundle.pb is the artifact the upload pipeline sends last
+/// (UploadCoordinator → BlobUploadManager). Its GCS paths are relative
+/// (e.g. "frames/000000.jpg"), matching the proto convention and the
 /// backend's path-relative expectations.
 
 import ARKit
@@ -51,7 +52,7 @@ struct BundleAssembler {
             frame.rgbGcsPath     = kf.rgbRelativePath
             frame.cameraPose     = kf.pose
             frame.intrinsics     = kf.intrinsics
-            frame.gravity        = kf.gravity   // zero vector stub — chunk C fills formula
+            frame.gravity        = kf.gravity
             if let d = kf.depth { frame.depth = d }
             bundle.frames.append(frame)
         }
@@ -71,15 +72,14 @@ struct BundleAssembler {
         device.osVersion    = UIDevice.current.systemVersion
         device.appVersion   = appVersionString()
         device.hasLidar_p   = (tier == .lidarArkit || tier == .lidarRoomplan)
-        // device.deviceID: Keychain UUID deferred to a later chunk.
-        // Backend falls back to hardware_id while this field is empty.
+        device.deviceID     = DeviceIdentity.deviceId()
         return device
     }
 
-    /// Machine model string via sysctlbyname("hw.machine").
-    /// Returns "hw.machine" (raw model identifier, e.g. "iPhone15,3").
-    /// Per decision 0028: use sysctlbyname, NOT utsname — the proto comment
-    /// is stale; utsname diverges on the simulator.
+    /// Machine model string: the value of sysctl "hw.machine" (raw model
+    /// identifier, e.g. "iPhone15,3").
+    /// Per decision 0028: use sysctlbyname, NOT utsname — utsname diverges
+    /// on the simulator.
     private func hardwareIdentifier() -> String {
         var size = 0
         sysctlbyname("hw.machine", nil, &size, nil, 0)

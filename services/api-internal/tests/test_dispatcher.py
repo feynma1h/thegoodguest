@@ -1,20 +1,28 @@
-"""Tests for the TaskDispatcher interface contract (InMemoryTaskDispatcher).
+"""Tests for the TaskDispatcher interface contract.
 
-CloudTasksDispatcher is not instantiated here — its deferred import means
-importing dispatcher.py is safe without google-cloud-tasks installed.
+google-cloud-tasks is not installed in the test environment; dispatcher.py's
+deferred import keeps it importable regardless. InMemoryTaskDispatcher is
+exercised directly; CloudTasksDispatcher is exercised against a stubbed
+tasks_v2 module injected into sys.modules.
 
 Tests verify:
   - enqueue records task_name, payload, and target_url
   - payload dict is a copy (caller mutations don't affect stored tasks)
   - multiple enqueues accumulate independently
   - task_name = scene_id pattern (the contract from 0003-async-perception-dispatch.md)
+  - CloudTasksDispatcher sets a dispatch_deadline covering the receiver's
+    Cloud Run request timeout (900s), so Cloud Tasks never retries a live attempt
 
 Run from repo root:
-  pytest services/api/tests/test_dispatcher.py -v
+  pytest services/api-internal/tests/test_dispatcher.py -v
 """
 from __future__ import annotations
 
-from dispatcher import InMemoryTaskDispatcher
+import sys
+import types
+
+import dispatcher
+from dispatcher import CloudTasksDispatcher, InMemoryTaskDispatcher
 
 
 class TestInMemoryTaskDispatcher:
@@ -77,3 +85,49 @@ class TestInMemoryTaskDispatcher:
         assert "scene_id" in payload
         assert "bundle_uri" in payload
         assert payload["bundle_uri"].startswith("gs://")
+
+
+class TestCloudTasksDispatcher:
+
+    def _enqueue_with_stub(self, monkeypatch) -> dict:
+        """Run CloudTasksDispatcher.enqueue against a stubbed tasks_v2 module
+        and return the captured create_task request."""
+        captured: dict = {}
+
+        class _StubClient:
+            def queue_path(self, project, location, queue):
+                return f"projects/{project}/locations/{location}/queues/{queue}"
+
+            def create_task(self, request):
+                captured.update(request)
+
+        stub = types.SimpleNamespace(
+            CloudTasksClient=_StubClient,
+            HttpMethod=types.SimpleNamespace(POST="POST"),
+        )
+        monkeypatch.setitem(sys.modules, "google.cloud.tasks_v2", stub)
+
+        d = CloudTasksDispatcher(project="p", location="asia-southeast1", queue="q")
+        d.enqueue(
+            task_name="scene-abc",
+            payload={"scene_id": "scene-abc", "bundle_uri": "gs://b/bundle.pb"},
+            target_url="https://perception-obj.run.app/process",
+        )
+        return captured
+
+    def test_dispatch_deadline_covers_cloud_run_timeout(self, monkeypatch):
+        """dispatch_deadline must be >= perception-obj's 900s Cloud Run request
+        timeout (infra/deploy_perception.sh --timeout=900). A shorter deadline
+        makes Cloud Tasks retry attempts that are still running: the retry
+        no-ops via the lease but burns a retry slot, and its 200 completes the
+        task — stranding the scene if the original attempt later crashes."""
+        request = self._enqueue_with_stub(monkeypatch)
+        deadline = request["task"]["dispatch_deadline"]
+        assert deadline.seconds == dispatcher.DISPATCH_DEADLINE_SECONDS
+        assert deadline.seconds >= 900
+
+    def test_task_name_pins_dedup_id(self, monkeypatch):
+        """The full task resource name embeds task_name for Cloud Tasks dedup."""
+        request = self._enqueue_with_stub(monkeypatch)
+        assert request["task"]["name"].endswith("/tasks/scene-abc")
+        assert request["parent"] == "projects/p/locations/asia-southeast1/queues/q"

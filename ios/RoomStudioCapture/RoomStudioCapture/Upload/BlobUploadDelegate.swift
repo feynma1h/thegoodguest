@@ -5,13 +5,13 @@
 /// `Task { await BlobUploadManager.shared.someMethod(...) }`.
 ///
 /// urlSession(_:task:didCompleteWithError:)
-///   Part A (M1 fix): acquires a UIBackgroundTask assertion synchronously BEFORE the
-///   Task{} spawn. Without this, iOS can suspend the process in the window between
-///   this callback and HOP 1 (the Task→BlobUploadManager actor crossing), starving
-///   the handleTaskCompletion chain. The BackgroundTaskHandle guards against double-end
+///   Acquires a UIBackgroundTask assertion synchronously BEFORE the Task{} spawn.
+///   Without this, iOS can suspend the process in the window between this callback
+///   and the Task→BlobUploadManager actor crossing, starving the
+///   handleTaskCompletion chain. The BackgroundTaskHandle guards against double-end
 ///   from both the expiration path and the defer in handleTaskCompletion.
 ///
-///   Part B (M2 fix): increments the drain-gate counter synchronously before Task spawn.
+///   Also increments the drain-gate counter synchronously before Task spawn.
 ///   The OS guarantees urlSessionDidFinishEvents fires after all didCompleteWithError
 ///   callbacks on the same serial delegate queue, so all increments are visible before
 ///   drainBackgroundSessionEvents observes the count.
@@ -46,7 +46,7 @@ final class BlobUploadDelegate: NSObject, URLSessionTaskDelegate {
         let statusCode = (task.response as? HTTPURLResponse)?.statusCode
         let desc = task.taskDescription
 
-        // Part A: acquire the UIBackgroundTask assertion synchronously on the OS delegate
+        // Acquire the UIBackgroundTask assertion synchronously on the OS delegate
         // queue, BEFORE the Task{} spawn. UIApplication.beginBackgroundTask is documented
         // thread-safe despite its @MainActor annotation; @preconcurrency suppresses the
         // Swift 6 isolation check at this call site.
@@ -65,7 +65,7 @@ final class BlobUploadDelegate: NSObject, URLSessionTaskDelegate {
             UIApplication.shared.endBackgroundTask(token)
         }
 
-        // Part B: increment before spawn so urlSessionDidFinishEvents never observes
+        // Increment before spawn so urlSessionDidFinishEvents never observes
         // count == 0 while handleTaskCompletion chains are still pending.
         BlobUploadManager.shared.incrementPendingCompletions()
 

@@ -3,9 +3,8 @@
 /// All outputs are in ARKit-native frame (right-handed, +Y up). The iOS client
 /// does NOT transform — see capture_bundle.proto file header and decision 0029.
 ///
-/// Gravity extraction formula is intentionally deferred to implementation review
-/// against pose_math.py and the Gravity docstring (decision 0029/0030). The stub
-/// below compiles but is marked with a TODO so P2 doesn't silently ship wrong gravity.
+/// Gravity is computed by gravityInCameraFrame (R^T · world-down); the
+/// derivation and on-device sign checks are recorded in decisions 0030/0034.
 
 import ARKit
 import simd

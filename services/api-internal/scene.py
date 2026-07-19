@@ -1,14 +1,13 @@
-"""Re-export shim: Scene model has moved to packages/api-core.
+"""Re-export shim for the Scene model.
 
-The canonical source is roomstudio_api_core.scene. This shim preserves
-`from scene import ...` in api-internal modules without requiring changes
-to existing imports throughout this service.
+The canonical source is roomstudio_api_core.scene (packages/api-core). This
+shim exists so api-internal modules can use the shorter
+`from scene import ...` import path.
 
 Do not add logic here. Edits to the Scene model go in
 packages/api-core/roomstudio_api_core/scene.py.
 """
 from roomstudio_api_core.scene import (  # noqa: F401
-    DeviceIdSource,
     InvalidTransitionError,
     Scene,
     SceneStatus,

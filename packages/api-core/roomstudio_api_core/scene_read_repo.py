@@ -116,13 +116,12 @@ class FirestoreSceneReadRepository(SceneReadRepository):
     @staticmethod
     def _from_doc(doc) -> Scene:
         """Deserialize a Firestore DocumentSnapshot into a Scene."""
-        from roomstudio_api_core.scene import DeviceIdSource, SceneStatus
+        from roomstudio_api_core.scene import SceneStatus
 
         data = doc.to_dict()
         return Scene(
             scene_id=doc.id,
             device_id=data["device_id"],
-            device_id_source=DeviceIdSource(data["device_id_source"]),
             status=SceneStatus(data["status"]),
             bundle_uri=data["bundle_uri"],
             created_at=data["created_at"],
@@ -132,6 +131,7 @@ class FirestoreSceneReadRepository(SceneReadRepository):
             last_error=data.get("last_error"),
             bundle_id=data.get("bundle_id"),
             user_id=data.get("user_id"),
+            fcm_token=data.get("fcm_token"),
             missing_paths=data.get("missing_paths"),
             invalid_blobs=data.get("invalid_blobs"),
         )

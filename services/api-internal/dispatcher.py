@@ -15,19 +15,28 @@ Required environment variables (when running with the Cloud Tasks backend):
   CLOUD_TASKS_QUEUE     — queue name (e.g. "perception-dispatch")
   PERCEPTION_OBJ_PROCESS_URL — full URL of the perception-obj receiver
                                endpoint (e.g. https://perception-obj-xxx.run.app/process).
-                               This endpoint does not exist yet; it is the
-                               subject of the next session.
 
-When these env vars are absent, server.py falls back to InMemoryTaskDispatcher,
-which is appropriate for local dev and tests.
+When these env vars are absent, ingest_server.py falls back to
+InMemoryTaskDispatcher, which is appropriate for local dev and tests.
 
-Consumers: server.py (POST /ingest dispatch step).
+Consumers: ingest_server.py (the ingest dispatch step).
 """
 from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
 from typing import Any
+
+# Cloud Tasks stops waiting for a response after dispatch_deadline and schedules
+# a retry — even if Cloud Run is still executing the attempt (its request
+# timeout is 900s: infra/deploy_perception.sh --timeout=900). Keep this ≥ the
+# Cloud Run timeout so Cloud Tasks never retries an attempt that is still
+# alive. A premature retry would no-op via the lease (ALREADY_OWNED) but burns
+# one of maxAttempts=3, and its 200 completes the task — leaving no retry to
+# reclaim the scene if the original attempt later crashes. The 30s buffer over
+# the Cloud Run timeout covers response-delivery overhead. (Cloud Tasks allows
+# 15s–30min.)
+DISPATCH_DEADLINE_SECONDS = 930
 
 
 # ---------------------------------------------------------------------------
@@ -97,9 +106,12 @@ class CloudTasksDispatcher(TaskDispatcher):
     """Google Cloud Tasks-backed dispatcher.
 
     Sends an HTTP POST task to the configured queue. The task body is the
-    JSON-serialized payload. No OIDC auth is attached — the perception-obj
-    Cloud Run service must be --allow-unauthenticated during this phase.
-    Auth is a future concern.
+    JSON-serialized payload. OIDC auth is conditional: when
+    CLOUD_TASKS_INVOKER_SA is set (as it is in production —
+    infra/api-internal.env.yaml), enqueue() attaches an OIDC token minted for
+    that service account, which perception-obj's receiver verifies. When the
+    var is absent, tasks are sent unauthenticated (local dev against an
+    --allow-unauthenticated target).
 
     Task name format: {queue_path}/tasks/{task_name}, where task_name is the
     scene_id. Cloud Tasks deduplicates on this name within a 1-hour window,
@@ -123,6 +135,7 @@ class CloudTasksDispatcher(TaskDispatcher):
         target_url: str,
     ) -> None:
         from google.cloud import tasks_v2  # deferred: not installed in tests
+        from google.protobuf import duration_pb2
 
         client = tasks_v2.CloudTasksClient()
         queue_path = client.queue_path(self._project, self._location, self._queue)
@@ -149,5 +162,10 @@ class CloudTasksDispatcher(TaskDispatcher):
             # Full resource name pins the task ID for Cloud Tasks dedup.
             "name": f"{queue_path}/tasks/{task_name}",
             "http_request": http_request,
+            # See DISPATCH_DEADLINE_SECONDS: must cover the receiver's full
+            # Cloud Run request timeout so a live attempt is never retried.
+            "dispatch_deadline": duration_pb2.Duration(
+                seconds=DISPATCH_DEADLINE_SECONDS
+            ),
         }
         client.create_task(request={"parent": queue_path, "task": task})

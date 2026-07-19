@@ -1,15 +1,19 @@
-"""Integration tests for POST /ingest.
+"""Integration tests for the core ingest pipeline (_run_ingest).
 
-Tests are structured around the four validation checks in validation.py,
-plus happy paths and dispatch integration:
+Requests enter through POST /ingest/eventarc (the only ingest entry point;
+the legacy direct /ingest route was removed) via the _post_bundle_event
+helper. Tests are structured around the four validation checks in
+validation.py, plus happy paths and dispatch integration:
   - valid ARKIT_ONLY bundle → 200 + {scene_id, status: "queued"}
   - valid LIDAR_ARKIT bundle with depth → 200 + {scene_id, status: "queued"}
   - dispatch happy path — Scene created in repo, task enqueued with correct shape
   - dispatch failure mode — dispatcher raises → 500, Scene marked failed
-  - unsupported schema_version → 400 unsupported_schema_version
-  - non-unit quaternion → 400 quaternion_norm_out_of_range
-  - depth frame on ARKIT_ONLY tier → 400 depth_requires_lidar_tier
-  - absolute gs:// path → 400 absolute_gcs_path
+  - unsupported schema_version → 200 + failed_invalid Scene
+  - missing device_id → 200 + failed_invalid Scene ("unknown" sentinel)
+  - non-unit quaternion → 200 + failed_invalid Scene
+  - depth frame on ARKIT_ONLY tier → 200 + failed_invalid Scene
+  - absolute gs:// path → 200 + failed_invalid Scene
+  - malformed proto bytes → 400 bundle_parse_failed
 
 The GCS fetch (_fetch_bundle_bytes) is patched out in every test.
 Bundles are built in-memory using roomstudio_schemas directly — no file I/O,
@@ -52,6 +56,16 @@ def client() -> TestClient:
     return TestClient(server.app)
 
 
+def _post_bundle_event(client: TestClient, bundle_uri: str):
+    """POST the Eventarc finalize event for a gs://bucket/path bundle URI.
+
+    /ingest/eventarc is the only ingest entry point (the legacy direct
+    /ingest route was removed); tests reach _run_ingest through it.
+    """
+    bucket, name = bundle_uri[5:].split("/", 1)
+    return client.post("/ingest/eventarc", json={"bucket": bucket, "name": name})
+
+
 # ---------------------------------------------------------------------------
 # Bundle builders
 # ---------------------------------------------------------------------------
@@ -79,6 +93,7 @@ def _make_bundle(
     b.schema_version = schema_version
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
+    b.device.device_id = str(uuid.uuid4())
     b.device.hardware_id = "test-device"
     b.device.has_lidar = tier in (LIDAR_ARKIT,)
     b.tier = tier
@@ -135,10 +150,7 @@ def test_valid_arkit_bundle_returns_200(client: TestClient) -> None:
          patch.object(server, "_validate_image_blobs", return_value=[]), \
          patch.object(server, "_scene_repo", InMemorySceneRepository()), \
          patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()):
-        resp = client.post(
-            "/ingest",
-            json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
-        )
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body["scene_id"], str) and body["scene_id"]
@@ -153,10 +165,7 @@ def test_valid_lidar_bundle_returns_200(client: TestClient) -> None:
          patch.object(server, "_validate_image_blobs", return_value=[]), \
          patch.object(server, "_scene_repo", InMemorySceneRepository()), \
          patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()):
-        resp = client.post(
-            "/ingest",
-            json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
-        )
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body["scene_id"], str) and body["scene_id"]
@@ -182,7 +191,7 @@ def test_dispatch_happy_path_scene_and_task_created(client: TestClient) -> None:
          patch.object(server, "_validate_image_blobs", return_value=[]), \
          patch.object(server, "_scene_repo", repo), \
          patch.object(server, "_task_dispatcher", dispatcher):
-        resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+        resp = _post_bundle_event(client, _BUNDLE_URI)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -224,7 +233,7 @@ def test_dispatch_failure_returns_500_and_marks_scene_failed(client: TestClient)
          patch.object(server, "_validate_image_blobs", return_value=[]), \
          patch.object(server, "_scene_repo", repo), \
          patch.object(server, "_task_dispatcher", failing_dispatcher):
-        resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+        resp = _post_bundle_event(client, _BUNDLE_URI)
 
     assert resp.status_code == 500
     body = resp.json()
@@ -257,10 +266,7 @@ def test_unsupported_schema_version_creates_failed_invalid_scene(client: TestCli
         patch.object(server, "_scene_repo", repo),
         patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
     ):
-        resp = client.post(
-            "/ingest",
-            json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
-        )
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "failed_invalid"
@@ -288,10 +294,7 @@ def test_old_version_1_0_0_creates_failed_invalid_scene(client: TestClient) -> N
         patch.object(server, "_scene_repo", repo),
         patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
     ):
-        resp = client.post(
-            "/ingest",
-            json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
-        )
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "failed_invalid"
@@ -302,16 +305,18 @@ def test_old_version_1_0_0_creates_failed_invalid_scene(client: TestClient) -> N
     assert "1.0.0" in (scenes[0].last_error or "")
 
 
-def test_corrupt_quaternion_returns_400(client: TestClient) -> None:
-    """Bundle with a non-unit quaternion → 400 quaternion_norm_out_of_range.
+def test_corrupt_quaternion_creates_failed_invalid_scene(client: TestClient) -> None:
+    """Bundle with a non-unit quaternion → 200 + failed_invalid Scene.
 
     Sets quat = (1, 1, 0, 0), norm = sqrt(2) ≈ 1.414, which exceeds the
-    1e-3 tolerance around 1.0.
+    1e-3 tolerance around 1.0. Like every contract-validation failure, this
+    yields a pollable failed_invalid Scene and HTTP 200 (no Pub/Sub retry).
     """
     b = CaptureBundle()
     b.schema_version = SCHEMA_VERSION
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
+    b.device.device_id = str(uuid.uuid4())
     b.tier = ARKIT_ONLY
     b.started_at_device_us = 0
     b.ended_at_device_us = 1
@@ -323,15 +328,57 @@ def test_corrupt_quaternion_returns_400(client: TestClient) -> None:
     f.camera_pose.quat_z = 0.0
     f.camera_pose.quat_w = 0.0
 
-    with patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()):
-        resp = client.post(
-            "/ingest",
-            json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
-        )
-    assert resp.status_code == 400
+    repo = InMemorySceneRepository()
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()),
+        patch.object(server, "_scene_repo", repo),
+        patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+    ):
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
+    assert resp.status_code == 200
     body = resp.json()
+    assert body["status"] == "failed_invalid"
     assert body["error"] == "quaternion_norm_out_of_range"
-    assert "frame 0" in body["detail"]
+    scenes = list(repo._store.values())
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED_INVALID
+
+
+def test_missing_device_id_creates_failed_invalid_scene(client: TestClient) -> None:
+    """Bundle with an empty device.device_id → 200 + failed_invalid Scene.
+
+    device_id is required (the iOS client persists a Keychain UUID); the
+    hardware_id fallback was removed. The rejection Scene carries the
+    "unknown" device_id sentinel so the client can still poll the outcome.
+    """
+    b = CaptureBundle()
+    b.schema_version = SCHEMA_VERSION
+    b.bundle_id = str(uuid.uuid4())
+    b.user_id = "test-user"
+    b.device.hardware_id = "iPhone15,3"  # deliberately no device_id
+    b.tier = ARKIT_ONLY
+    b.started_at_device_us = 0
+    b.ended_at_device_us = 1
+    f = b.frames.add()
+    f.frame_index = 0
+    f.rgb_gcs_path = "frames/000000.jpg"
+    f.camera_pose.quat_w = 1.0
+
+    repo = InMemorySceneRepository()
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()),
+        patch.object(server, "_scene_repo", repo),
+        patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+    ):
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "failed_invalid"
+    assert body["error"] == "device_id_missing"
+    scenes = list(repo._store.values())
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED_INVALID
+    assert scenes[0].device_id == "unknown"
 
 
 def test_depth_on_arkit_only_tier_creates_failed_invalid_scene(client: TestClient) -> None:
@@ -349,10 +396,7 @@ def test_depth_on_arkit_only_tier_creates_failed_invalid_scene(client: TestClien
         patch.object(server, "_scene_repo", repo),
         patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
     ):
-        resp = client.post(
-            "/ingest",
-            json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
-        )
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "failed_invalid"
@@ -365,24 +409,23 @@ def test_depth_on_arkit_only_tier_creates_failed_invalid_scene(client: TestClien
 
 def test_malformed_proto_returns_400(client: TestClient) -> None:
     """Garbage bytes that cannot be parsed as a proto → 400 bundle_parse_failed."""
-    with patch.object(
-        server, "_fetch_bundle_bytes", return_value=b"\xff\xff\xff\xff garbage"
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=b"\xff\xff\xff\xff garbage"),
+        patch.object(server, "_scene_repo", InMemorySceneRepository()),
     ):
-        resp = client.post(
-            "/ingest",
-            json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
-        )
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
     assert resp.status_code == 400
     body = resp.json()
     assert body["error"] == "bundle_parse_failed"
 
 
-def test_absolute_rgb_path_returns_400(client: TestClient) -> None:
-    """Bundle with a full gs:// URI in rgb_gcs_path → 400 absolute_gcs_path."""
+def test_absolute_rgb_path_creates_failed_invalid_scene(client: TestClient) -> None:
+    """Bundle with a full gs:// URI in rgb_gcs_path → 200 + failed_invalid Scene."""
     b = CaptureBundle()
     b.schema_version = SCHEMA_VERSION
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
+    b.device.device_id = str(uuid.uuid4())
     b.tier = ARKIT_ONLY
     b.started_at_device_us = 0
     b.ended_at_device_us = 1
@@ -391,15 +434,20 @@ def test_absolute_rgb_path_returns_400(client: TestClient) -> None:
     f.rgb_gcs_path = "gs://my-bucket/captures/abc/frames/000000.jpg"  # wrong
     f.camera_pose.quat_w = 1.0  # unit norm — passes the quat check
 
-    with patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()):
-        resp = client.post(
-            "/ingest",
-            json={"bundle_gcs_uri": "gs://test-bucket/captures/test/bundle.pb"},
-        )
-    assert resp.status_code == 400
+    repo = InMemorySceneRepository()
+    with (
+        patch.object(server, "_fetch_bundle_bytes", return_value=b.SerializeToString()),
+        patch.object(server, "_scene_repo", repo),
+        patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+    ):
+        resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
+    assert resp.status_code == 200
     body = resp.json()
+    assert body["status"] == "failed_invalid"
     assert body["error"] == "absolute_gcs_path"
-    assert "rgb_gcs_path" in body["detail"]
+    scenes = list(repo._store.values())
+    assert len(scenes) == 1
+    assert scenes[0].status == SceneStatus.FAILED_INVALID
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +482,7 @@ class TestBlobValidationGate:
              patch.object(server, "_scene_repo", repo), \
              patch.object(server, "_task_dispatcher", dispatcher), \
              patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": self._BUNDLE_URI})
+            resp = _post_bundle_event(client, self._BUNDLE_URI)
 
         assert resp.status_code == 200
         body = resp.json()
@@ -463,7 +511,7 @@ class TestBlobValidationGate:
              patch.object(server, "_scene_repo", repo), \
              patch.object(server, "_task_dispatcher", dispatcher), \
              patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": self._BUNDLE_URI})
+            resp = _post_bundle_event(client, self._BUNDLE_URI)
 
         assert resp.status_code == 200
         body = resp.json()
@@ -482,7 +530,7 @@ class TestBlobValidationGate:
              patch.object(server, "_validate_image_blobs", return_value=[]), \
              patch.object(server, "_scene_repo", repo), \
              patch.object(server, "_task_dispatcher", dispatcher):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": self._BUNDLE_URI})
+            resp = _post_bundle_event(client, self._BUNDLE_URI)
 
         assert resp.status_code == 200
         body = resp.json()
@@ -502,7 +550,7 @@ class TestBlobValidationGate:
              patch.object(server, "_scene_repo", repo), \
              patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()), \
              patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()):
-            client.post("/ingest", json={"bundle_gcs_uri": self._BUNDLE_URI})
+            _post_bundle_event(client, self._BUNDLE_URI)
 
         scenes = list(repo._store.values())
         assert len(scenes) == 1

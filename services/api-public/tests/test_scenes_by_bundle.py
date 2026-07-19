@@ -28,7 +28,7 @@ from fastapi.testclient import TestClient
 
 import public_server as server
 from auth import NullTokenVerifier  # noqa: E402
-from roomstudio_api_core.scene import DeviceIdSource, Scene, SceneStatus  # noqa: E402
+from roomstudio_api_core.scene import Scene, SceneStatus  # noqa: E402
 from roomstudio_api_core.scene_read_repo import InMemorySceneReadRepository  # noqa: E402
 
 
@@ -53,7 +53,6 @@ def _make_scene(
     return Scene(
         scene_id=str(uuid.uuid4()),
         device_id="device-1",
-        device_id_source=DeviceIdSource.PROVIDED,
         status=status,
         bundle_uri=f"gs://roomstudio-captures/captures/{bundle_id}/bundle.pb",
         created_at=_NOW,

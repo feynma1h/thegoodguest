@@ -10,8 +10,6 @@ Tests are organized into four groups:
                           transition raises InvalidTransitionError
   3. Repository contract — get/create/update_status semantics via the
                           in-memory fake (copy isolation, error cases, etc.)
-  4. device_id resolution — resolve_device_id helper: provided path, fallback
-                            path with warning log, both-empty rejection
 
 Run from repo root:
   pytest services/api/tests/test_scene.py -v
@@ -26,7 +24,6 @@ from unittest.mock import patch
 import pytest
 
 from scene import (
-    DeviceIdSource,
     InvalidTransitionError,
     Scene,
     SceneStatus,
@@ -35,7 +32,6 @@ from scene import (
     validate_transition,
 )
 from repository import InMemorySceneRepository, FirestoreSceneRepository, SceneNotFoundError
-import ingest_server as server  # for resolve_device_id
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +45,6 @@ def _scene(**kwargs) -> Scene:
     defaults = dict(
         scene_id="scene-001",
         device_id="device-uuid-abc",
-        device_id_source=DeviceIdSource.PROVIDED,
         status=SceneStatus.QUEUED,
         bundle_uri="gs://test-bucket/captures/abc/bundle.pb",
         created_at=_NOW,
@@ -57,20 +52,6 @@ def _scene(**kwargs) -> Scene:
     )
     defaults.update(kwargs)
     return Scene(**defaults)
-
-
-def _bundle_stub(*, device_id: str = "", hardware_id: str = "iPhone15,3"):
-    """Minimal bundle-like object for testing resolve_device_id."""
-    class DeviceStub:
-        pass
-    class BundleStub:
-        pass
-    d = DeviceStub()
-    d.device_id = device_id
-    d.hardware_id = hardware_id
-    b = BundleStub()
-    b.device = d
-    return b
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +63,6 @@ class TestSceneModel:
     def test_new_scene_is_queued(self):
         s = new_scene(
             device_id="d",
-            device_id_source=DeviceIdSource.PROVIDED,
             bundle_uri="gs://b/path/bundle.pb",
         )
         assert s.status == SceneStatus.QUEUED
@@ -90,7 +70,6 @@ class TestSceneModel:
     def test_new_scene_generates_uuid(self):
         s = new_scene(
             device_id="d",
-            device_id_source=DeviceIdSource.PROVIDED,
             bundle_uri="gs://b/path/bundle.pb",
         )
         assert len(s.scene_id) == 36  # UUIDv4
@@ -99,7 +78,6 @@ class TestSceneModel:
         s = new_scene(
             scene_id="my-id",
             device_id="d",
-            device_id_source=DeviceIdSource.PROVIDED,
             bundle_uri="gs://b/path/bundle.pb",
         )
         assert s.scene_id == "my-id"
@@ -107,7 +85,6 @@ class TestSceneModel:
     def test_new_scene_timestamps_are_tz_aware(self):
         s = new_scene(
             device_id="d",
-            device_id_source=DeviceIdSource.PROVIDED,
             bundle_uri="gs://b/path/bundle.pb",
         )
         assert s.created_at.tzinfo is not None
@@ -116,7 +93,6 @@ class TestSceneModel:
     def test_defaults(self):
         s = new_scene(
             device_id="d",
-            device_id_source=DeviceIdSource.PROVIDED,
             bundle_uri="gs://b/path/bundle.pb",
         )
         assert s.attempt_count == 0
@@ -155,13 +131,6 @@ class TestSceneModel:
         with pytest.raises(ValueError, match="status"):
             _scene(status="queued")  # must be SceneStatus, not a raw string
 
-    def test_string_device_id_source_raises(self):
-        with pytest.raises(ValueError, match="device_id_source"):
-            _scene(device_id_source="provided")  # must be DeviceIdSource enum
-
-    def test_fallback_source_accepted(self):
-        s = _scene(device_id_source=DeviceIdSource.FALLBACK_HARDWARE_ID)
-        assert s.device_id_source == DeviceIdSource.FALLBACK_HARDWARE_ID
 
 
 # ---------------------------------------------------------------------------
@@ -281,11 +250,11 @@ class TestInMemoryRepository:
         with pytest.raises(ValueError, match="already exists"):
             repo.create(s)
 
-    def test_create_returns_isolated_copy(self, repo):
-        """Mutating the returned scene must not affect the stored scene."""
+    def test_create_stores_isolated_copy(self, repo):
+        """Mutating the input scene after create must not affect the stored scene."""
         s = _scene()
-        returned = repo.create(s)
-        returned.status = SceneStatus.PROCESSING
+        repo.create(s)
+        s.status = SceneStatus.PROCESSING
         assert repo.get(s.scene_id).status == SceneStatus.QUEUED
 
     def test_get_returns_isolated_copy(self, repo):
@@ -348,10 +317,10 @@ class TestInMemoryRepository:
         retried = repo.update_status("scene-001", SceneStatus.QUEUED)
         assert retried.status == SceneStatus.QUEUED
 
-    def test_device_id_source_preserved(self, repo):
-        s = _scene(device_id_source=DeviceIdSource.FALLBACK_HARDWARE_ID)
+    def test_device_id_preserved(self, repo):
+        s = _scene(device_id="keychain-uuid-42")
         repo.create(s)
-        assert repo.get(s.scene_id).device_id_source == DeviceIdSource.FALLBACK_HARDWARE_ID
+        assert repo.get(s.scene_id).device_id == "keychain-uuid-42"
 
 
 # ---------------------------------------------------------------------------
@@ -420,57 +389,3 @@ class TestFirestoreSerializationRoundTrip:
         doc_stub = _DocStub(scene.scene_id, doc_data)
         restored = FirestoreSceneRepository._from_doc(doc_stub)
         assert restored.invalid_blobs is None
-
-
-# ---------------------------------------------------------------------------
-# 4. device_id resolution
-# ---------------------------------------------------------------------------
-
-class TestResolveDeviceId:
-
-    def test_provided_path_uses_device_id(self):
-        bundle = _bundle_stub(device_id="stable-uuid-123", hardware_id="iPhone15,3")
-        device_id, source = server.resolve_device_id(bundle, "gs://b/bundle.pb")
-        assert device_id == "stable-uuid-123"
-        assert source == DeviceIdSource.PROVIDED
-
-    def test_provided_path_no_warning(self, caplog):
-        bundle = _bundle_stub(device_id="stable-uuid-123", hardware_id="iPhone15,3")
-        with caplog.at_level(logging.WARNING, logger="server"):
-            server.resolve_device_id(bundle, "gs://b/bundle.pb")
-        assert caplog.records == []
-
-    def test_fallback_uses_hardware_id(self):
-        bundle = _bundle_stub(device_id="", hardware_id="iPhone15,3")
-        device_id, source = server.resolve_device_id(bundle, "gs://b/bundle.pb")
-        assert device_id == "iPhone15,3"
-        assert source == DeviceIdSource.FALLBACK_HARDWARE_ID
-
-    def test_fallback_emits_warning(self, caplog):
-        bundle = _bundle_stub(device_id="", hardware_id="iPhone15,3")
-        with caplog.at_level(logging.WARNING, logger="server"):
-            server.resolve_device_id(bundle, "gs://b/bundle.pb")
-        assert len(caplog.records) == 1
-        assert caplog.records[0].levelname == "WARNING"
-        assert "iPhone15,3" in caplog.records[0].message
-        assert "gs://b/bundle.pb" in caplog.records[0].message
-
-    def test_fallback_warning_is_greppable(self, caplog):
-        """Warning must contain hardware_id value and bundle URI for Cloud Logging."""
-        bundle = _bundle_stub(device_id="", hardware_id="iPhone14,2")
-        with caplog.at_level(logging.WARNING, logger="server"):
-            server.resolve_device_id(bundle, "gs://prod-bucket/captures/xyz/bundle.pb")
-        msg = caplog.records[0].message
-        assert "iPhone14,2" in msg
-        assert "gs://prod-bucket/captures/xyz/bundle.pb" in msg
-
-    def test_both_empty_raises(self):
-        bundle = _bundle_stub(device_id="", hardware_id="")
-        with pytest.raises(ValueError, match="device_id.*hardware_id.*empty"):
-            server.resolve_device_id(bundle, "gs://b/bundle.pb")
-
-    def test_both_empty_raises_value_error_not_500(self):
-        """Ensures the exception type is ValueError (maps to 400 in server.py)."""
-        bundle = _bundle_stub(device_id="", hardware_id="")
-        with pytest.raises(ValueError):
-            server.resolve_device_id(bundle, "gs://b/bundle.pb")
