@@ -243,6 +243,43 @@ def _gcs_blob_exists(bucket_name: str, blob_path: str) -> bool:
         return False
 
 
+def _fetch_frame_depth(frame, bundle_prefix: str):
+    """Download and decode a frame's LiDAR depth payload, if present.
+
+    Returns (depth, confidence, intrinsics): the float32 (H, W) z-depth
+    raster in meters, the optional uint8 confidence raster, and the depth
+    raster's own Intrinsics message — or (None, None, None) when the frame
+    carries no depth (ARKIT_ONLY tier).
+
+    Raises PoisonError on malformed rasters (wrong byte count — retrying
+    cannot fix the uploaded blob) and propagates _download_gcs_uri's
+    Poison/Environmental classification for fetch failures.
+    """
+    import numpy as np  # deferred: heavy dep, only needed during processing
+
+    if frame is None or not frame.HasField("depth"):
+        return None, None, None
+    d = frame.depth
+    raw = _download_gcs_uri(bundle_prefix + d.depth_gcs_path)
+    expected = d.width * d.height * 4
+    if len(raw) != expected:
+        raise PoisonError(
+            f"Depth raster {d.depth_gcs_path} is {len(raw)} bytes; expected "
+            f"{expected} ({d.width}x{d.height} float32)"
+        )
+    depth = np.frombuffer(raw, dtype="<f4").reshape(d.height, d.width)
+    confidence = None
+    if d.HasField("confidence_gcs_path") and d.confidence_gcs_path:
+        raw_c = _download_gcs_uri(bundle_prefix + d.confidence_gcs_path)
+        if len(raw_c) != d.width * d.height:
+            raise PoisonError(
+                f"Confidence raster {d.confidence_gcs_path} is {len(raw_c)} "
+                f"bytes; expected {d.width * d.height} ({d.width}x{d.height} uint8)"
+            )
+        confidence = np.frombuffer(raw_c, dtype=np.uint8).reshape(d.height, d.width)
+    return depth, confidence, d.intrinsics
+
+
 # ---------------------------------------------------------------------------
 # Per-frame perception
 # ---------------------------------------------------------------------------
@@ -260,6 +297,8 @@ def _process_frame(
     sam3_model: Any,
     sam3d_model: Any,
     object_prompt: str,
+    frame=None,
+    bundle_prefix: Optional[str] = None,
 ) -> dict:
     """Run SAM 3 + SAM 3D on one frame. Returns a dict with per-object results.
 
@@ -268,9 +307,18 @@ def _process_frame(
     masks.npz and a per-frame objects.json manifest under
     scenes/{scene_id}/frames/{frame_idx}/. Frame and per-object outputs already
     present in GCS are reused as a cache (partial-run recovery on retry).
-    Raises PoisonError if the image can't be fetched/opened.
-    Raises EnvironmentalError on model or GCS failures.
+
+    frame is the CaptureBundle Frame proto (pose/intrinsics/gravity/depth);
+    when provided (with bundle_prefix for depth blob resolution), each
+    object entry gains a world "placement" (LiDAR depth fit, or an
+    unplaced record pending scene-level ray triangulation on ARKIT_ONLY
+    frames) and a "view_ray" observation. When None (legacy callers/tests),
+    entries carry no placement fields.
+
+    Raises PoisonError if the image or a depth raster can't be fetched or
+    decoded. Raises EnvironmentalError on model or GCS failures.
     """
+    import placement as placement_mod  # deferred with the other heavy imports
     from PIL import Image
 
     frame_prefix = f"scenes/{scene_id}/frames/{frame_idx:04d}"
@@ -301,6 +349,15 @@ def _process_frame(
     except Exception as exc:
         raise EnvironmentalError(f"SAM 3 failed on frame {frame_idx}: {exc}") from exc
 
+    # LiDAR depth payload for this frame; (None, None, None) on ARKIT_ONLY
+    # frames or when the caller provided no Frame proto.
+    if frame is not None and bundle_prefix is not None:
+        depth_raster, depth_confidence, depth_intrinsics = _fetch_frame_depth(
+            frame, bundle_prefix
+        )
+    else:
+        depth_raster = depth_confidence = depth_intrinsics = None
+
     # SAM 3D per object.
     objects_out: list[dict] = []
     for i, obj in enumerate(detections):
@@ -317,50 +374,83 @@ def _process_frame(
             "mask_index": i,
         }
 
-        # Per-object cache: reuse if already uploaded.
-        if _gcs_blob_exists(outputs_bucket, splat_blob):
-            objects_out.append({
-                **meta,
-                "ok": True,
-                "cached": True,
-                "splat_gcs_uri": f"gs://{outputs_bucket}/{splat_blob}",
-            })
-            continue
-
         try:
-            try:
-                result = sam3d_model.reconstruct(pil, obj["mask"], seed=42 + i)
-            except Exception as oom:
-                gc.collect()
+            layout = None
+            # Per-object cache: reuse the uploaded splat if present. The
+            # bytes are downloaded (not just existence-checked) because
+            # placement needs the vertex positions either way.
+            cached_ply = _gcs_blob_exists_and_get(outputs_bucket, splat_blob)
+            if cached_ply is not None:
+                # Cache hits have no reconstruct() result, so no layout
+                # prior — placement degrades to rotation_source "none".
+                ply_bytes = cached_ply
+                entry = {
+                    **meta,
+                    "ok": True,
+                    "cached": True,
+                    "splat_gcs_uri": f"gs://{outputs_bucket}/{splat_blob}",
+                }
+            else:
                 try:
-                    import torch as _torch
-                    if _torch.cuda.is_available():
-                        _torch.cuda.empty_cache()
-                except ImportError:
-                    pass
-                result = sam3d_model.reconstruct(pil, obj["mask"], seed=42 + i)
+                    result = sam3d_model.reconstruct(pil, obj["mask"], seed=42 + i)
+                except Exception as oom:
+                    gc.collect()
+                    try:
+                        import torch as _torch
+                        if _torch.cuda.is_available():
+                            _torch.cuda.empty_cache()
+                    except ImportError:
+                        pass
+                    result = sam3d_model.reconstruct(pil, obj["mask"], seed=42 + i)
 
-            # Convert to PLY bytes.
-            gs = result.get("gs")
-            if gs is None:
-                raise RuntimeError("No 'gs' output in SAM 3D result")
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".ply", delete=True) as tmp:
-                gs.save_ply(tmp.name)
-                with open(tmp.name, "rb") as f:
-                    ply_bytes = f.read()
+                # Runtime confirmation seam for the layout-key/convention
+                # assumptions in placement.py (no GPU exists in dev).
+                logger.info(
+                    "sam3d result keys frame=%d obj=%d: %s",
+                    frame_idx, i, sorted(result.keys()),
+                )
+                layout = placement_mod.extract_layout(result)
 
-            splat_uri = _gcs_upload_for_scene(
-                f"gs://{outputs_bucket}/", splat_blob, ply_bytes,
-                "application/octet-stream"
-            )
-            objects_out.append({
-                **meta,
-                "ok": True,
-                "cached": False,
-                "splat_gcs_uri": splat_uri,
-                "splat_size_bytes": len(ply_bytes),
-            })
+                # Convert to PLY bytes.
+                gs = result.get("gs")
+                if gs is None:
+                    raise RuntimeError("No 'gs' output in SAM 3D result")
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".ply", delete=True) as tmp:
+                    gs.save_ply(tmp.name)
+                    with open(tmp.name, "rb") as f:
+                        ply_bytes = f.read()
+
+                splat_uri = _gcs_upload_for_scene(
+                    f"gs://{outputs_bucket}/", splat_blob, ply_bytes,
+                    "application/octet-stream"
+                )
+                entry = {
+                    **meta,
+                    "ok": True,
+                    "cached": False,
+                    "splat_gcs_uri": splat_uri,
+                    "splat_size_bytes": len(ply_bytes),
+                }
+
+            if frame is not None:
+                view_ray = placement_mod.object_view_ray(
+                    obj["mask"], frame.intrinsics, frame.camera_pose
+                )
+                if view_ray is not None:
+                    entry["view_ray"] = view_ray
+                # compute_frame_placement never raises: placement bugs
+                # degrade the object to unplaced, never abort the scene.
+                entry["placement"] = placement_mod.compute_frame_placement(
+                    ply_bytes=ply_bytes,
+                    layout=layout,
+                    mask_rgb=obj["mask"],
+                    depth_raster=depth_raster,
+                    depth_confidence=depth_confidence,
+                    depth_intrinsics=depth_intrinsics,
+                    camera_pose=frame.camera_pose,
+                )
+            objects_out.append(entry)
         except (PoisonError, EnvironmentalError):
             # GCS upload failures stay environmental: the whole attempt is
             # retryable, and a scene must not go `ready` with objects missing
@@ -467,6 +557,8 @@ def run_perception(
             sam3_model=sam3_model,
             sam3d_model=sam3d_model,
             object_prompt=object_prompt,
+            frame=frame,
+            bundle_prefix=prefix,
         )
         frame_results.append(frame_result)
         logger.info(
