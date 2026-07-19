@@ -249,6 +249,27 @@ def test_parallel_rays_unplaced_degenerate():
     assert all(o["reason"] == "insufficient_observations" for o in out)
 
 
+def test_rays_converging_at_camera_origin_do_not_merge():
+    """Regression guard for the camera-origin triangulation trap, isolated
+    from the per-frame uniqueness rule: two DIFFERENT objects, observed in
+    DIFFERENT frames by cameras at nearly the same position, have rays
+    whose closest approach is at the (shared) camera origin — a tiny RMS
+    that would pass the consistency gate. The behind-camera check in
+    _try_triangulate must reject it; without it, fusion would merge the
+    two objects into one phantom placed at the camera."""
+    obs_a = _ray_obs(frame_index=0, origin=(0.0, 0.0, 0.0), direction=(0.0, 0.0, -1.0))
+    obs_b = _ray_obs(frame_index=1, origin=(0.01, 0.0, 0.0), direction=(0.7, 0.0, -0.7))
+
+    # The specific line under guard: the pair 'triangulates' near the
+    # origins with tiny RMS, but the point is behind/at both cameras.
+    assert fusion._try_triangulate([obs_a, obs_b]) is None
+
+    out = fusion.fuse_scene_objects(_frames([obs_a], [obs_b]))
+    assert len(out) == 2, "distinct objects must not merge at the camera origin"
+    assert all(o["placed"] is False for o in out)
+    assert all(o["reason"] == "insufficient_observations" for o in out)
+
+
 def test_ray_cluster_without_splat_extent_unplaced():
     obs = _rays_toward(
         (1.0, 0.5, -2.0), [(0, 0, 0), (1.5, 0, 0)], splat_max_extent=None
