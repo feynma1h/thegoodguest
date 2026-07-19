@@ -462,8 +462,22 @@ def test_run_perception_writes_placement_fields():
 
     assert result_uri == "gs://outputs/scenes/scene-1/manifest.json"
     manifest = json.loads(uploads["scenes/scene-1/manifest.json"])
+    assert manifest["manifest_version"] == 2
     frames = manifest["frames"]
     assert len(frames) == 2
+
+    # Scene-level fused objects array (manifest v2): both frames saw the
+    # same 'chair'; the depth frame's placed fit wins a fused entry, and
+    # the lone no-depth observation can't triangulate alone.
+    objs = manifest["objects"]
+    assert len(objs) >= 1
+    placed_objs = [o for o in objs if o["placed"]]
+    assert len(placed_objs) == 1
+    fused = placed_objs[0]
+    assert fused["label"] == "chair"
+    assert fused["method"] == "depth_fit"
+    assert fused["world_transform"]["scale"] > 0
+    assert fused["splat_gcs_uri"].startswith("gs://outputs/scenes/scene-1/")
 
     obj_depth = frames[0]["objects"][0]
     assert obj_depth["ok"] is True

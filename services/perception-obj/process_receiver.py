@@ -23,6 +23,17 @@ Output structure (keyed by scene_id):
 
 The scene manifest URI is stored in Scene.result_uri on success.
 
+Manifest contract (manifest_version 2):
+  {scene_id, bundle_uri, schema_version, manifest_version: 2, frame_count,
+   objects: [...], frames: [...]}
+  "objects" is the scene-level fused array (one entry per physical object,
+  with a world transform in the ARKit world frame — see fusion.py); it is
+  what the web viewer renders. "frames" carries the per-frame observations
+  for provenance: each object entry there includes "placement" (see
+  placement.py) and "view_ray". world_transform is
+  {position: [x,y,z] meters, rotation_xyzw: unit quat, scale: float} —
+  splat local frame -> ARKit world.
+
 Environment variables:
   RECEIVER_URL            — full HTTPS URL of this Cloud Run service
                             (e.g. https://perception-obj-xxx.run.app).
@@ -567,11 +578,19 @@ def run_perception(
             sum(1 for o in frame_result.get("objects", []) if o.get("ok")),
         )
 
+    # Scene-level fusion: one entry per physical object, with a fused world
+    # transform — the array the web viewer renders. Frames stay for
+    # provenance/debug. See fusion.py.
+    import fusion as fusion_mod
+    scene_objects = fusion_mod.fuse_scene_objects(frame_results)
+
     manifest = {
         "scene_id": scene_id,
         "bundle_uri": bundle_uri,
         "schema_version": bundle.schema_version,
+        "manifest_version": 2,
         "frame_count": len(bundle.frames),
+        "objects": scene_objects,
         "frames": frame_results,
     }
     manifest_blob = f"scenes/{scene_id}/manifest.json"
