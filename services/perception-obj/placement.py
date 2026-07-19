@@ -295,11 +295,30 @@ def compute_frame_placement(
 ) -> dict:
     """Per-frame placement entry point for the perception loop. Never
     raises: any failure becomes an unplaced record with a reason, so a
-    placement bug can degrade a scene but never abort it."""
+    placement bug can degrade a scene but never abort it.
+
+    Records for frames without depth still carry whatever partial
+    information this frame CAN contribute — the layout rotation lifted to
+    world ("world_rotation_xyzw") and the splat's local max extent
+    ("splat_max_extent") — because the scene-level fusion pass needs both
+    to finish the job from triangulated view rays."""
     if depth_raster is None:
         # ARKIT_ONLY tier: no metric depth in this frame. The scene-level
         # fusion pass triangulates a center from view rays across frames.
-        return unplaced("no_depth_pending_triangulation", layout)
+        record = unplaced("no_depth_pending_triangulation", layout)
+        if layout is not None:
+            R_world = rotation_world_from_layout(layout, camera_pose)
+            record["world_rotation_xyzw"] = [
+                float(c) for c in rotmat_to_quat(R_world)
+            ]
+            record["rotation_source"] = "sam3d_layout"
+        try:
+            from roomstudio_schemas.placement_math import robust_cloud_stats
+            stats = robust_cloud_stats(parse_ply_vertices(ply_bytes))
+            record["splat_max_extent"] = float(stats.extents[0])
+        except Exception:
+            pass  # extent is a bonus; fusion marks the object unplaced without it
+        return record
     try:
         splat_xyz = parse_ply_vertices(ply_bytes)
     except Exception as exc:
