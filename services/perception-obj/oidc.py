@@ -2,8 +2,8 @@
 
 Cloud Tasks attaches an OIDC token on the Authorization header when the
 task is created with `oidc_token.service_account_email` set (see
-services/api/dispatcher.py — this field is the known gap patched in
-commit 5). The receiver verifies the token before doing any work.
+services/api-internal/dispatcher.py). The receiver verifies the token
+before doing any work.
 
 Two claims are checked:
   - audience (aud): must equal the receiver's own URL. Prevents tokens

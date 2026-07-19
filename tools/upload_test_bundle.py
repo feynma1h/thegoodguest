@@ -974,7 +974,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="NDJSON event stream to stdout")
     p.add_argument("--use-hardware-id-fallback", action="store_true",
-                   help="Leave device_id empty; set hardware_id instead")
+                   help="Leave device_id empty; set hardware_id instead. NOTE: the "
+                        "backend no longer falls back to hardware_id — such bundles "
+                        "are rejected as failed_invalid (device_id_missing), so this "
+                        "flag now exercises that rejection path")
     return p
 
 

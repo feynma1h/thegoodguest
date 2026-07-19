@@ -3,7 +3,7 @@
 Implements the contract from docs/decisions/0004-perception-receiver-semantics.md:
 
   1. Verify OIDC token (Cloud Tasks attaches it when oidc_token is set on the
-     task — see the ingester OIDC patch in services/api/dispatcher.py).
+     task — see the OIDC verification in services/api-internal/dispatcher.py).
   2. Claim the scene atomically via ReceiverRepository (lease-TTL crash
      recovery). Exit 200 without processing on ALREADY_OWNED, WRONG_STATE,
      NOT_FOUND.
@@ -15,7 +15,7 @@ Implements the contract from docs/decisions/0004-perception-receiver-semantics.m
   attempt (X-CloudTasks-TaskRetryCount >= maxAttempts-1 = 2): update
   scene→failed, fire FCM before returning 5xx.
 
-Output structure (mirrors /objects keyed by scene_id instead of photo_sha256):
+Output structure (keyed by scene_id):
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/manifest.json
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/frames/{idx:04d}/objects.json
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/frames/{idx:04d}/masks.npz
@@ -36,6 +36,7 @@ Consumers: server.py (app.post("/process")).
 """
 from __future__ import annotations
 
+import asyncio
 import gc
 import io
 import json
@@ -177,7 +178,10 @@ class ProcessRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _bundle_prefix(bundle_uri: str) -> str:
-    """Return the gs:// prefix for paths relative to bundle_uri.
+    """Return the absolute gs:// directory prefix containing bundle_uri.
+
+    The bundle's frame paths are relative to this prefix; callers prepend it
+    to resolve them into absolute gs:// URIs.
 
     bundle_uri = "gs://bucket/captures/id/bundle.pb"
     prefix     = "gs://bucket/captures/id/"
@@ -259,22 +263,24 @@ def _process_frame(
 ) -> dict:
     """Run SAM 3 + SAM 3D on one frame. Returns a dict with per-object results.
 
-    Mirrors the per-object loop in /objects but keyed by scene_id/frame.
+    Per frame: fetch the RGB image from GCS, segment it with SAM 3, reconstruct
+    each detected object with SAM 3D, and upload each splat PLY plus a packed
+    masks.npz and a per-frame objects.json manifest under
+    scenes/{scene_id}/frames/{frame_idx}/. Frame and per-object outputs already
+    present in GCS are reused as a cache (partial-run recovery on retry).
     Raises PoisonError if the image can't be fetched/opened.
     Raises EnvironmentalError on model or GCS failures.
     """
-    import torch
     from PIL import Image
 
     frame_prefix = f"scenes/{scene_id}/frames/{frame_idx:04d}"
     objects_blob = f"{frame_prefix}/objects.json"
 
     # Whole-frame cache hit: a previous run already processed this frame.
-    if _gcs_blob_exists(outputs_bucket, objects_blob):
-        cached_bytes = _gcs_blob_exists_and_get(outputs_bucket, objects_blob)
-        if cached_bytes:
-            logger.info("Frame %d cache hit for scene %s", frame_idx, scene_id)
-            return json.loads(cached_bytes)
+    cached_bytes = _gcs_blob_exists_and_get(outputs_bucket, objects_blob)
+    if cached_bytes:
+        logger.info("Frame %d cache hit for scene %s", frame_idx, scene_id)
+        return json.loads(cached_bytes)
 
     # Fetch + open the RGB image.
     try:
@@ -341,7 +347,6 @@ def _process_frame(
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".ply", delete=True) as tmp:
                 gs.save_ply(tmp.name)
-                tmp.flush()
                 with open(tmp.name, "rb") as f:
                     ply_bytes = f.read()
 
@@ -357,11 +362,18 @@ def _process_frame(
                 "splat_size_bytes": len(ply_bytes),
             })
         except (PoisonError, EnvironmentalError):
+            # GCS upload failures stay environmental: the whole attempt is
+            # retryable, and a scene must not go `ready` with objects missing
+            # only because the output bucket was briefly unavailable.
             raise
         except Exception as exc:
-            raise EnvironmentalError(
-                f"SAM 3D failed on frame {frame_idx} object {i}: {exc}"
-            ) from exc
+            # Model/conversion failure on ONE object soft-fails that object
+            # and continues the frame, rather than aborting the whole scene.
+            logger.error(
+                "SAM 3D failed on frame %d object %d (%s); continuing: %s",
+                frame_idx, i, obj["label"], exc,
+            )
+            objects_out.append({**meta, "ok": False, "error": str(exc)})
         finally:
             del result
             del ply_bytes
@@ -542,7 +554,7 @@ async def handle_process(
         return JSONResponse({"status": "noop", "reason": "already_owned"})
 
     # CLAIMED or RECLAIMED — we own it; proceed.
-    device_id = claim_result.device_id
+    fcm_token = claim_result.fcm_token
     action = "claim" if claim_result.status == ClaimStatus.CLAIMED else "reclaim_stale"
     _log_lease_action(action, scene_id=scene_id)
     with _held_scenes_lock:
@@ -562,7 +574,10 @@ async def handle_process(
         logger.error("process: poison failure for scene %s: %s", scene_id, exc)
         with _held_scenes_lock:
             _held_scene_ids.discard(scene_id)
-        _finalize_failed(scene_id, str(exc), device_id, receiver_repo, fcm_notifier)
+        await _finalize_failed(
+            scene_id, str(exc), fcm_token, receiver_repo, fcm_notifier,
+            holder_id=_WORKER_ID,
+        )
         return JSONResponse({"status": "failed", "reason": str(exc)})
     except EnvironmentalError as exc:
         logger.error("process: environmental failure for scene %s: %s", scene_id, exc)
@@ -578,7 +593,10 @@ async def handle_process(
             _held_scene_ids.discard(scene_id)
         if is_final_attempt:
             logger.error("process: final attempt exhausted for scene %s; marking failed", scene_id)
-            _finalize_failed(scene_id, str(exc), device_id, receiver_repo, fcm_notifier)
+            await _finalize_failed(
+                scene_id, str(exc), fcm_token, receiver_repo, fcm_notifier,
+                holder_id=_WORKER_ID,
+            )
         return JSONResponse(
             status_code=500,
             content={"status": "error", "reason": str(exc)},
@@ -594,7 +612,10 @@ async def handle_process(
         with _held_scenes_lock:
             _held_scene_ids.discard(scene_id)
         if is_final_attempt:
-            _finalize_failed(scene_id, str(exc), device_id, receiver_repo, fcm_notifier)
+            await _finalize_failed(
+                scene_id, str(exc), fcm_token, receiver_repo, fcm_notifier,
+                holder_id=_WORKER_ID,
+            )
         return JSONResponse(
             status_code=500,
             content={"status": "error", "reason": str(exc)},
@@ -604,16 +625,19 @@ async def handle_process(
     with _held_scenes_lock:
         _held_scene_ids.discard(scene_id)
     try:
-        receiver_repo.release_ready(scene_id, result_uri)
+        receiver_repo.release_ready(scene_id, result_uri, holder_id=_WORKER_ID)
     except Exception as exc:
         raise EnvironmentalError(f"Failed to mark scene ready: {exc}") from exc
 
     logger.info("process: scene %s ready result_uri=%s", scene_id, result_uri)
 
-    try:
-        fcm_notifier.notify_ready(device_id=device_id, scene_id=scene_id)
-    except Exception as exc:
-        logger.warning("FCM notify_ready failed (continuing): %s", exc)
+    if fcm_token:
+        try:
+            fcm_notifier.notify_ready(fcm_token=fcm_token, scene_id=scene_id)
+        except Exception as exc:
+            logger.warning("FCM notify_ready failed (continuing): %s", exc)
+    else:
+        logger.debug("no fcm_token on scene %s; skipping notify_ready", scene_id)
 
     return JSONResponse({"status": "ready", "scene_id": scene_id, "result_uri": result_uri})
 
@@ -631,22 +655,57 @@ def _parse_retry_count(request: Request) -> int:
         return 0
 
 
-def _finalize_failed(
+# release_failed retry schedule for _finalize_failed. This call is the last
+# opportunity to mark the scene failed on both terminal paths (PoisonError
+# drain, EnvironmentalError final attempt); if it never lands, the scene is
+# permanently stranded in `processing` with no further automatic retry. A
+# short bounded retry absorbs transient Firestore errors; the residual risk
+# is logged with a stable discriminator for alerting/manual reconciliation.
+# See docs/decisions/0048.
+_FINALIZE_FAILED_RETRY_DELAYS_S: tuple[float, ...] = (0.5, 1.0)
+
+
+async def _finalize_failed(
     scene_id: str,
     error: str,
-    device_id: str,
+    fcm_token: str,
     repo,
     fcm_notifier,
+    *,
+    holder_id: str = "",
 ) -> None:
-    """Mark scene as failed and fire FCM. Both are best-effort: log on failure."""
-    try:
-        repo.release_failed(scene_id, error)
-    except Exception as exc:
-        logger.error(
-            "Failed to mark scene %s as failed (state may be inconsistent): %s",
-            scene_id, exc,
-        )
-    try:
-        fcm_notifier.notify_failed(device_id=device_id, scene_id=scene_id, reason=error)
-    except Exception as exc:
-        logger.warning("FCM notify_failed failed (continuing): %s", exc)
+    """Mark scene as failed and fire FCM. Both are best-effort: log on failure.
+
+    release_failed is retried on a short bounded schedule because there is no
+    later automatic path that can rescue the scene if this write is lost.
+    """
+    attempts = 1 + len(_FINALIZE_FAILED_RETRY_DELAYS_S)
+    for attempt in range(attempts):
+        try:
+            repo.release_failed(scene_id, error, holder_id=holder_id)
+            break
+        except ValueError:
+            # Wrong state / not found — retrying cannot change this; the scene
+            # is not in `processing`, so there is nothing to strand.
+            logger.error(
+                "release_failed rejected for scene %s (wrong state or missing)",
+                scene_id,
+            )
+            break
+        except Exception as exc:
+            if attempt + 1 < attempts:
+                await asyncio.sleep(_FINALIZE_FAILED_RETRY_DELAYS_S[attempt])
+                continue
+            logger.error(
+                "scene_strand_risk=true scene_id=%s: release_failed failed on "
+                "all %d attempts; scene may be stranded in 'processing' with "
+                "no automatic retry (manual reconciliation required): %s",
+                scene_id, attempts, exc,
+            )
+    if fcm_token:
+        try:
+            fcm_notifier.notify_failed(fcm_token=fcm_token, scene_id=scene_id, reason=error)
+        except Exception as exc:
+            logger.warning("FCM notify_failed failed (continuing): %s", exc)
+    else:
+        logger.debug("no fcm_token on scene %s; skipping notify_failed", scene_id)

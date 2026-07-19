@@ -29,7 +29,8 @@ final class UploadBlobStateTests: XCTestCase {
             tierRawValue: 1,
             clientMintTimestamp: Date(),
             sessionEntries: makeEntries(paths),
-            manifestPaths: paths
+            manifestPaths: paths,
+            outputDir: FileManager.default.temporaryDirectory
         )
     }
 
@@ -198,54 +199,6 @@ final class UploadBlobStateTests: XCTestCase {
         XCTAssertNil(decoded.failureReason, "failureReason must remain nil after round-trip")
     }
 
-    func test_uploadPhase_legacyDecode_blobsPending_isUploadingBlobs() throws {
-        // Legacy record (no uploadPhase key) with all blobs .pending → conservative default.
-        let legacyJSON = """
-        {
-            "bundleId": "legacy-bundle",
-            "tierRawValue": 1,
-            "clientMintTimestamp": "2026-05-31T00:00:00Z",
-            "sessionEntries": [
-                {"relative_path": "frames/000000.jpg", "session_uri": "https://example.com/f0"},
-                {"relative_path": "bundle.pb",         "session_uri": "https://example.com/bp"}
-            ],
-            "manifestPaths": ["frames/000000.jpg", "bundle.pb"]
-        }
-        """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let record = try decoder.decode(UploadSessionRecord.self, from: Data(legacyJSON.utf8))
-
-        XCTAssertEqual(record.uploadPhase, .uploadingBlobs,
-                       "Legacy record with pending blobs must decode as .uploadingBlobs")
-    }
-
-    func test_uploadPhase_legacyDecode_allBlobsUploaded_isUploadingBundlePb() throws {
-        // Legacy record with all non-bundle.pb blobs explicitly .uploaded → .uploadingBundlePb.
-        let legacyJSON = """
-        {
-            "bundleId": "legacy-bundle",
-            "tierRawValue": 1,
-            "clientMintTimestamp": "2026-05-31T00:00:00Z",
-            "sessionEntries": [
-                {"relative_path": "frames/000000.jpg", "session_uri": "https://example.com/f0"},
-                {"relative_path": "bundle.pb",         "session_uri": "https://example.com/bp"}
-            ],
-            "manifestPaths": ["frames/000000.jpg", "bundle.pb"],
-            "blobStatuses": {
-                "frames/000000.jpg": "uploaded",
-                "bundle.pb": "pending"
-            }
-        }
-        """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let record = try decoder.decode(UploadSessionRecord.self, from: Data(legacyJSON.utf8))
-
-        XCTAssertEqual(record.uploadPhase, .uploadingBundlePb,
-                       "Legacy record with all frame blobs uploaded must decode as .uploadingBundlePb")
-    }
-
     func test_markingPhase_preservesCrossLaunchRetryCount() {
         // Functional mutations via markingPhase must preserve crossLaunchRetryCount.
         let base = makeRecord(paths: ["frames/000000.jpg", "bundle.pb"])
@@ -297,85 +250,32 @@ final class UploadBlobStateTests: XCTestCase {
                        "crossLaunchRetryCount must survive encode/decode round-trip")
     }
 
-    func test_crossLaunchRetryCount_legacyDecode_defaultsToZero() throws {
-        // Records written before unit (b) have no crossLaunchRetryCount key.
-        // Must decode to 0 (no retries charged).
-        let legacyJSON = """
+    // MARK: - Strict decode (no migration shims)
+
+    func test_decode_missingRequiredKey_throws() throws {
+        // The decode path is strict (synthesized Codable, no migration shims):
+        // a record missing a required key must throw, never silently default.
+        // No legacy on-disk records exist — the shims were removed pre-launch.
+        let jsonMissingBlobStatuses = """
         {
-            "bundleId": "legacy-bundle",
+            "bundleId": "some-bundle",
             "tierRawValue": 1,
             "clientMintTimestamp": "2026-05-31T00:00:00Z",
             "sessionEntries": [
-                {"relative_path": "frames/000000.jpg", "session_uri": "https://example.com/f0"},
-                {"relative_path": "bundle.pb",         "session_uri": "https://example.com/bp"}
+                {"relative_path": "frames/000000.jpg", "session_uri": "https://example.com/f0"}
             ],
-            "manifestPaths": ["frames/000000.jpg", "bundle.pb"]
+            "manifestPaths": ["frames/000000.jpg"]
         }
         """
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let record = try decoder.decode(UploadSessionRecord.self, from: Data(legacyJSON.utf8))
-
-        XCTAssertEqual(record.crossLaunchRetryCount, 0,
-                       "Legacy record missing crossLaunchRetryCount key must decode as 0")
+        XCTAssertThrowsError(
+            try decoder.decode(UploadSessionRecord.self, from: Data(jsonMissingBlobStatuses.utf8)),
+            "Strict decode must throw on a record missing required keys"
+        )
     }
 
-    func test_uploadPhase_legacyDecode_neverComplete() throws {
-        // Even if blobStatuses shows all blobs uploaded (including bundle.pb), the conservative
-        // default must NEVER produce .complete for a record lacking the uploadPhase key.
-        let legacyJSON = """
-        {
-            "bundleId": "legacy-bundle",
-            "tierRawValue": 1,
-            "clientMintTimestamp": "2026-05-31T00:00:00Z",
-            "sessionEntries": [
-                {"relative_path": "bundle.pb", "session_uri": "https://example.com/bp"}
-            ],
-            "manifestPaths": ["bundle.pb"],
-            "blobStatuses": { "bundle.pb": "uploaded" }
-        }
-        """
-        // bundle.pb-only manifest: nonBundle is empty → phaseBlobsAllUploaded is false
-        // → default is .uploadingBlobs, never .complete.
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let record = try decoder.decode(UploadSessionRecord.self, from: Data(legacyJSON.utf8))
-
-        XCTAssertNotEqual(record.uploadPhase, .complete,
-                          "Conservative default must never yield .complete for a legacy record")
-    }
-
-    // MARK: - Backward-compatible decode (pre-P4 records)
-
-    func test_decode_missingBlobStatuses_treatsAllAsPending() throws {
-        // Simulate a pre-P4 record persisted without the blobStatuses key.
-        let legacyJSON = """
-        {
-            "bundleId": "legacy-bundle",
-            "tierRawValue": 1,
-            "clientMintTimestamp": "2026-05-31T00:00:00Z",
-            "sessionEntries": [
-                {"relative_path": "frames/000000.jpg", "session_uri": "https://example.com/f0"},
-                {"relative_path": "bundle.pb",         "session_uri": "https://example.com/bp"}
-            ],
-            "manifestPaths": ["frames/000000.jpg", "bundle.pb"]
-        }
-        """
-        let data = Data(legacyJSON.utf8)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-
-        let record = try decoder.decode(UploadSessionRecord.self, from: data)
-
-        XCTAssertEqual(record.blobStatuses["frames/000000.jpg"], .pending,
-                       "Pre-P4 record must decode frames/000000.jpg as .pending")
-        XCTAssertEqual(record.blobStatuses["bundle.pb"], .pending,
-                       "Pre-P4 record must decode bundle.pb as .pending")
-        XCTAssertFalse(record.allNonBundlePbBlobsUploaded,
-                       "Pre-P4 record must start with gate = false (all pending)")
-    }
-
-    // MARK: - UploadSessionStore.allBundleIds (P5 unit a, decision 0045)
+    // MARK: - UploadSessionStore.allBundleIds (decision 0045)
 
     func test_allBundleIds_returnsAllSavedBundleIds() async throws {
         let storeDir = FileManager.default.temporaryDirectory
@@ -387,10 +287,12 @@ final class UploadBlobStateTests: XCTestCase {
         let id2 = "00000000-0000-0000-0000-000000000002"
         try await store.save(UploadSessionRecord(bundleId: id1, tierRawValue: 1,
                                                  clientMintTimestamp: Date(),
-                                                 sessionEntries: [], manifestPaths: []))
+                                                 sessionEntries: [], manifestPaths: [],
+                                                 outputDir: FileManager.default.temporaryDirectory))
         try await store.save(UploadSessionRecord(bundleId: id2, tierRawValue: 1,
                                                  clientMintTimestamp: Date(),
-                                                 sessionEntries: [], manifestPaths: []))
+                                                 sessionEntries: [], manifestPaths: [],
+                                                 outputDir: FileManager.default.temporaryDirectory))
 
         let ids = try await store.allBundleIds()
         XCTAssertEqual(Set(ids), Set([id1, id2]), "allBundleIds must return all saved bundle IDs")
@@ -415,7 +317,8 @@ final class UploadBlobStateTests: XCTestCase {
         let validId = "00000000-0000-0000-0000-000000000001"
         try await store.save(UploadSessionRecord(bundleId: validId, tierRawValue: 1,
                                                  clientMintTimestamp: Date(),
-                                                 sessionEntries: [], manifestPaths: []))
+                                                 sessionEntries: [], manifestPaths: [],
+                                                 outputDir: FileManager.default.temporaryDirectory))
         // Write a non-UUID JSON file directly.
         try Data("{}".utf8).write(to: storeDir.appendingPathComponent("not-a-uuid.json"))
 
@@ -432,7 +335,8 @@ final class UploadBlobStateTests: XCTestCase {
         let validId = "00000000-0000-0000-0000-000000000001"
         try await store.save(UploadSessionRecord(bundleId: validId, tierRawValue: 1,
                                                  clientMintTimestamp: Date(),
-                                                 sessionEntries: [], manifestPaths: []))
+                                                 sessionEntries: [], manifestPaths: [],
+                                                 outputDir: FileManager.default.temporaryDirectory))
         // Write a UUID-named non-.json file directly.
         try Data([0x00]).write(
             to: storeDir.appendingPathComponent("00000000-0000-0000-0000-000000000002.pb")

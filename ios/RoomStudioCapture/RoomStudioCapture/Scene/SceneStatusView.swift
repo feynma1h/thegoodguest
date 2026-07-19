@@ -13,7 +13,10 @@
 /// Re-upload action for .recoverable is intentionally absent here — that front
 /// is separate. This view surfaces the count and the path list is on the model.
 
+import os
 import SwiftUI
+
+private let logger = Logger(subsystem: "com.roomstudio.RoomStudioCapture", category: "SceneStatusView")
 
 struct SceneStatusView: View {
 
@@ -32,8 +35,7 @@ struct SceneStatusView: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
-                ScenePoller.shared.setVisible(true)
-                ScenePoller.shared.resume()
+                ScenePoller.shared.resume()  // resume() sets isVisible = true
             case .background, .inactive:
                 ScenePoller.shared.pause()
             @unknown default:
@@ -48,7 +50,9 @@ struct SceneStatusView: View {
     private var stateContent: some View {
         switch poller.pollState {
         case .idle:
-            ProgressView("Connecting…")
+            // Nothing to show: the view stays mounted (its .task is the
+            // independent poll-start path) but renders empty until polling starts.
+            EmptyView()
 
         case .polling(let latest, let since, let longRunning, let connectionTrouble):
             pollingView(latest: latest, since: since, longRunning: longRunning, connectionTrouble: connectionTrouble)
@@ -103,11 +107,15 @@ struct SceneStatusView: View {
             }
 
             if longRunning {
+                // Quiet text link, not a bordered control — this is a reassurance
+                // affordance, not a primary action.
                 Button("Check now") {
                     ScenePoller.shared.checkNow()
                 }
-                .buttonStyle(.bordered)
-                .tint(.secondary)
+                .buttonStyle(.plain)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
             }
         }
     }
@@ -129,6 +137,13 @@ struct SceneStatusView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
+            }
+        }
+        .onAppear {
+            // result_uri must be present on a ready scene; its absence is a
+            // backend contract violation worth surfacing in logs, not hiding.
+            if response.resultUri == nil {
+                logger.error("[SceneStatusView] ready scene \(response.sceneId, privacy: .public) has no result_uri — backend contract violation")
             }
         }
     }

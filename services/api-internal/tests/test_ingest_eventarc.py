@@ -12,8 +12,9 @@ Covers:
     - Idempotency: scene already QUEUED → 200, no re-enqueue
     - Idempotency: scene already PROCESSING → 200, no re-enqueue
     - Idempotency: scene FAILED_INCOMPLETE → re-runs ingest with existing scene_id
+    - Idempotency: scene FAILED → re-runs ingest with existing scene_id (no duplicate)
 
-  Existence-check pass (tested through /ingest and /ingest/eventarc):
+  Existence-check pass (tested through /ingest/eventarc):
     - All blobs present → scene reaches QUEUED (proceeds normally)
     - One blob missing → status=failed_incomplete, missing_paths in response
     - Multiple blobs missing → all listed in missing_paths
@@ -55,6 +56,16 @@ def client() -> TestClient:
     return TestClient(server.app)
 
 
+def _post_bundle_event(client: TestClient, bundle_uri: str):
+    """POST the Eventarc finalize event for a gs://bucket/path bundle URI.
+
+    /ingest/eventarc is the only ingest entry point (the legacy direct
+    /ingest route was removed); tests reach _run_ingest through it.
+    """
+    bucket, name = bundle_uri[5:].split("/", 1)
+    return client.post("/ingest/eventarc", json={"bucket": bucket, "name": name})
+
+
 # ---------------------------------------------------------------------------
 # Bundle builder
 # ---------------------------------------------------------------------------
@@ -65,6 +76,7 @@ def _make_bundle(*, frame_count: int = 2, add_depth: bool = False) -> bytes:
     b.schema_version = SCHEMA_VERSION
     b.bundle_id = str(uuid.uuid4())
     b.user_id = "test-user"
+    b.device.device_id = str(uuid.uuid4())
     b.device.hardware_id = "test-device"
     b.tier = tier
     now_us = int(time.monotonic_ns() // 1_000)
@@ -151,6 +163,7 @@ class TestIngestEventarc:
         b.schema_version = "1.0.0"   # the old value, rejected post-0031
         b.bundle_id = bundle_id
         b.user_id = "test-user"
+        b.device.device_id = str(uuid.uuid4())
         b.device.hardware_id = "test-device"
         b.tier = ARKIT_ONLY
         b.started_at_device_us = 0
@@ -351,6 +364,49 @@ class TestIngestEventarc:
             # Scene transitioned correctly.
             assert repo.get(scene_id).status == SceneStatus.QUEUED
 
+    def test_failed_retries_with_existing_scene_no_duplicate(self, client: TestClient) -> None:
+        """Redelivery for a FAILED scene retries with the SAME scene_id.
+
+        FAILED at ingest means dispatch failed and we returned 500, so Pub/Sub
+        redelivers — the redelivery must reuse the existing Scene (FAILED →
+        QUEUED) rather than falling through to a fresh ingest and creating a
+        duplicate Scene per retry."""
+        bundle_id = str(uuid.uuid4())
+        bundle_bytes = _make_bundle()
+        repo = InMemorySceneRepository()
+        event = {"bucket": _BUCKET, "name": f"captures/{bundle_id}/bundle.pb"}
+
+        failing_dispatcher = MagicMock(spec=InMemoryTaskDispatcher)
+        failing_dispatcher.enqueue.side_effect = RuntimeError("cloud tasks unavailable")
+        working_dispatcher = InMemoryTaskDispatcher()
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_fcm_notifier", NullFcmNotifier()),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+        ):
+            # First fire: dispatch fails → 500, scene FAILED.
+            with patch.object(server, "_task_dispatcher", failing_dispatcher):
+                resp1 = client.post("/ingest/eventarc", json=event)
+            assert resp1.status_code == 500
+            scenes = list(repo._store.values())
+            assert len(scenes) == 1
+            scene_id = scenes[0].scene_id
+            assert scenes[0].status == SceneStatus.FAILED
+
+            # Redelivery: dispatch now works → same scene retried, no duplicate.
+            with patch.object(server, "_task_dispatcher", working_dispatcher):
+                resp2 = client.post("/ingest/eventarc", json=event)
+            assert resp2.status_code == 200
+            assert resp2.json()["status"] == "queued"
+            assert resp2.json()["scene_id"] == scene_id
+            assert len(list(repo._store.values())) == 1  # no duplicate Scene
+            assert len(working_dispatcher.tasks) == 1
+            assert repo.get(scene_id).status == SceneStatus.QUEUED
+
 
 # ---------------------------------------------------------------------------
 # Existence-check pass
@@ -369,7 +425,7 @@ class TestExistenceCheck:
             patch.object(server, "_scene_repo", repo),
             patch.object(server, "_task_dispatcher", dispatcher),
         ):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+            resp = _post_bundle_event(client, _BUNDLE_URI)
 
         assert resp.status_code == 200
         assert resp.json()["status"] == "queued"
@@ -389,7 +445,7 @@ class TestExistenceCheck:
             patch.object(server, "_fcm_notifier", NullFcmNotifier()),
             patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
         ):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+            resp = _post_bundle_event(client, _BUNDLE_URI)
 
         assert resp.status_code == 200
         body = resp.json()
@@ -408,7 +464,7 @@ class TestExistenceCheck:
             patch.object(server, "_fcm_notifier", NullFcmNotifier()),
             patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
         ):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+            resp = _post_bundle_event(client, _BUNDLE_URI)
 
         body = resp.json()
         assert body["status"] == "failed_incomplete"
@@ -427,7 +483,7 @@ class TestExistenceCheck:
             patch.object(server, "_fcm_notifier", NullFcmNotifier()),
             patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
         ):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+            resp = _post_bundle_event(client, _BUNDLE_URI)
 
         assert resp.json()["status"] == "failed_incomplete"
         scenes = list(repo._store.values())
@@ -462,12 +518,49 @@ class TestExistenceCheck:
             patch.object(server, "_fcm_notifier", NullFcmNotifier()),
             patch.object(server, "_upload_session_repo", upload_repo),
         ):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": bundle_uri})
+            resp = _post_bundle_event(client, bundle_uri)
 
         assert resp.json()["status"] == "failed_incomplete"
         scenes = list(repo._store.values())
         assert len(scenes) == 1
         assert scenes[0].user_id == "uid-from-session-42"
+
+    def test_queued_scene_carries_fcm_token_from_upload_session(
+        self, client: TestClient
+    ) -> None:
+        """A happy-path Scene must capture fcm_token from the upload session so
+        perception-obj can notify the device on terminal transitions
+        (ClaimResult.fcm_token → notify_ready/notify_failed)."""
+        bundle_id = str(uuid.uuid4())
+        bundle_uri = f"gs://{_BUCKET}/captures/{bundle_id}/bundle.pb"
+        bundle_bytes = _make_bundle(frame_count=1)
+
+        upload_repo = InMemoryUploadSessionRepository()
+        upload_repo._store[bundle_id] = {
+            "user_id": "uid-from-session-42",
+            "fcm_token": "fcm-reg-token-abc",
+            "manifest": [],
+            "session_entries": [],
+            "created_at": None,
+        }
+        repo = InMemorySceneRepository()
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()),
+            patch.object(server, "_fcm_notifier", NullFcmNotifier()),
+            patch.object(server, "_upload_session_repo", upload_repo),
+        ):
+            resp = _post_bundle_event(client, bundle_uri)
+
+        assert resp.json()["status"] == "queued"
+        scenes = list(repo._store.values())
+        assert len(scenes) == 1
+        assert scenes[0].status == SceneStatus.QUEUED
+        assert scenes[0].fcm_token == "fcm-reg-token-abc"
 
     def test_fcm_notifier_called_when_upload_incomplete(self, client: TestClient) -> None:
         bundle_id = str(uuid.uuid4())
@@ -497,7 +590,7 @@ class TestExistenceCheck:
             patch.object(server, "_fcm_notifier", mock_notifier),
             patch.object(server, "_upload_session_repo", upload_repo),
         ):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": bundle_uri})
+            resp = _post_bundle_event(client, bundle_uri)
 
         assert resp.json()["status"] == "failed_incomplete"
         mock_notifier.notify_upload_incomplete.assert_called_once()
@@ -518,7 +611,7 @@ class TestExistenceCheck:
             patch.object(server, "_fcm_notifier", mock_notifier),
             patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
         ):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+            resp = _post_bundle_event(client, _BUNDLE_URI)
 
         assert resp.json()["status"] == "queued"
         mock_notifier.notify_upload_incomplete.assert_not_called()
@@ -529,6 +622,7 @@ class TestExistenceCheck:
         b.schema_version = SCHEMA_VERSION
         b.bundle_id = str(uuid.uuid4())
         b.user_id = "u"
+        b.device.device_id = str(uuid.uuid4())
         b.device.hardware_id = "d"
         b.tier = ARKIT_ONLY
         b.started_at_device_us = 0
@@ -545,7 +639,7 @@ class TestExistenceCheck:
             patch.object(server, "_scene_repo", repo),
             patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()),
         ):
-            resp = client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+            resp = _post_bundle_event(client, _BUNDLE_URI)
 
         assert resp.status_code == 200
         assert resp.json()["status"] == "queued"
@@ -567,7 +661,7 @@ class TestExistenceCheck:
             patch.object(server, "_scene_repo", InMemorySceneRepository()),
             patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()),
         ):
-            client.post("/ingest", json={"bundle_gcs_uri": _BUNDLE_URI})
+            _post_bundle_event(client, _BUNDLE_URI)
 
         assert any("depth" in p for p in checked_paths), (
             f"Expected depth paths to be checked, got: {checked_paths}"

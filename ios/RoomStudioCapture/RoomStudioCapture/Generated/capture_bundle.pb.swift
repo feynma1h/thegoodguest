@@ -13,7 +13,7 @@
 //
 // This file is the source of truth. Generated Python lives in
 // `roomstudio_schemas/capture_bundle_pb2.py` (see `tools/gen_proto.sh`);
-// generated Swift lives in the iOS app's `Generated/CaptureBundle.pb.swift`
+// generated Swift lives in the iOS app's `Generated/capture_bundle.pb.swift`
 // (via SwiftProtobuf's protoc plugin).
 //
 // Conventions baked in:
@@ -135,8 +135,8 @@ public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendab
   }
 
   /// The user this capture belongs to, for auth/scoping at the orchestrator.
-  /// Format is whatever the auth layer produces — Sign-in-with-Apple subject
-  /// claim today, room to swap later.
+  /// Format is whatever the auth layer produces — the Firebase anonymous-auth
+  /// UID today (see docs/decisions/0036), room to swap later.
   public var userID: String {
     get {_storage._userID}
     set {_uniqueStorage()._userID = newValue}
@@ -220,7 +220,8 @@ public nonisolated struct Roomstudio_Capture_V1_Device: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// e.g. "iPhone15,3" (iPhone 14 Pro Max). Raw from `utsname`.
+  /// e.g. "iPhone15,3" (iPhone 14 Pro Max). The `hw.machine` value from
+  /// `sysctlbyname` (NOT `utsname` — see docs/decisions/0028).
   /// This is a MODEL string, not a unique device identifier — two phones of
   /// the same model produce the same value. Do not use as a device key.
   public var hardwareID: String = String()
@@ -234,12 +235,11 @@ public nonisolated struct Roomstudio_Capture_V1_Device: Sendable {
   /// True if the device has a LiDAR sensor (Pro line, iPad Pro).
   public var hasLidar_p: Bool = false
 
-  /// Stable per-device UUID, generated on first app launch and persisted in
-  /// the iOS Keychain. Distinct from hardware_id (which identifies the model)
-  /// and from user_id (which identifies the user account). Empty until the iOS
-  /// app is built; the backend falls back to hardware_id while this field is
-  /// unpopulated. Remove the fallback once iOS bundles populate this field for
-  /// ≥99% of captures over a 7-day window.
+  /// Stable per-device UUID, generated on first use and persisted in the iOS
+  /// Keychain (see DeviceIdentity.swift). Distinct from hardware_id (which
+  /// identifies the model) and from user_id (which identifies the user
+  /// account). REQUIRED: the backend rejects bundles with an empty device_id
+  /// as failed_invalid (error code "device_id_missing").
   public var deviceID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()

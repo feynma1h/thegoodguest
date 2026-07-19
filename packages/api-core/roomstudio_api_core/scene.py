@@ -1,10 +1,8 @@
 """Scene domain model and state machine.
 
-Moved from services/api-internal/scene.py so both api-public and api-internal
-can share the type without a cross-service import.
-
-api-internal re-exports this module from services/api-internal/scene.py so
-existing imports of the form `from scene import ...` continue to work unchanged.
+Canonical location for the Scene type, shared by api-public and api-internal
+without a cross-service import. services/api-internal/scene.py re-exports this
+module for the shorter `from scene import ...` path.
 
 Consumers: packages/api-core (SceneReadRepository), services/api-internal (all
 scene persistence and dispatch logic), services/api-public (read endpoint).
@@ -47,29 +45,9 @@ class InvalidBlobReason:
     messages (e.g. "too_small" → "Photo could not be read — try again").
     """
     TOO_SMALL = "too_small"                    # blob < MIN_IMAGE_SIZE_BYTES; catches zero-byte,
-                                               # truncated, and the 21-byte synthetic fixture
+                                               # truncated, and tiny synthetic test fixtures
     BAD_MAGIC = "bad_magic"                    # first bytes don't match the extension's format
     UNRECOGNIZED_FORMAT = "unrecognized_format" # extension not in the known image format set
-
-
-class DeviceIdSource(str, Enum):
-    """How the Scene's device_id was determined at ingest time.
-
-    provided:
-        bundle.device.device_id was non-empty; used directly.
-
-    fallback_hardware_id:
-        bundle.device.device_id was empty; device_id was set from
-        bundle.device.hardware_id instead. This is a model string (e.g.
-        "iPhone15,3"), not a unique device identifier — two phones of the same
-        model produce the same value. Use this field to query for scenes still
-        on the fallback path.
-
-        Remove this enum variant (and the fallback logic in server.py) once iOS
-        bundles populate device_id for ≥99% of captures over a 7-day window.
-    """
-    PROVIDED = "provided"
-    FALLBACK_HARDWARE_ID = "fallback_hardware_id"
 
 
 # ---------------------------------------------------------------------------
@@ -129,11 +107,16 @@ class Scene:
         Stable identifier (UUIDv4). Also used as the Firestore doc id and as
         the Cloud Tasks task name for deduplication.
     device_id:
-        Identifies the originating device. Non-empty; see device_id_source for
-        how it was determined.
-    device_id_source:
-        Whether device_id came from bundle.device.device_id (preferred) or
-        fell back to bundle.device.hardware_id (placeholder, not unique).
+        Identifies the originating device: the iOS app's Keychain-persisted
+        per-device UUID (bundle.device.device_id). Non-empty. The literal
+        sentinel "unknown" is used for rejection Scenes created from bundles
+        that carried no device identity (see ingest_server.py).
+
+        Why collected separately from user_id: Keychain data survives app
+        delete + reinstall on the same physical device, while user_id (the
+        Firebase anonymous UID) does not — a reinstall mints a fresh user_id
+        but keeps the same device_id. This lets device_id recognize "same
+        device, new-looking account" in a way user_id alone cannot.
     status:
         Current lifecycle state.
     bundle_uri:
@@ -149,14 +132,13 @@ class Scene:
         Absolute GCS URI of the finished splat output. None until status==READY.
     attempt_count:
         Number of times this scene has been dispatched to perception. Incremented
-        at dispatch time (step 3), not during model construction.
+        by the ingest handler's dispatch step, not during model construction.
     last_error:
         Last error message received from perception. Server-side only —
         never included in client-facing API responses.
     """
     scene_id: str
     device_id: str
-    device_id_source: DeviceIdSource
     status: SceneStatus
     bundle_uri: str
     created_at: datetime
@@ -166,6 +148,7 @@ class Scene:
     last_error: Optional[str] = None      # server-side only; never serialized to clients
     bundle_id: Optional[str] = None       # iOS bundle UUIDv4; stored for lookup by bundle_id
     user_id: Optional[str] = None         # Firebase UID from the upload JWT
+    fcm_token: Optional[str] = None       # FCM registration token from /upload_session; None if the client sent none
     missing_paths: Optional[list] = None  # relative paths absent at existence-check time
     invalid_blobs: Optional[list] = None  # [{relative_path, reason}] for FAILED_INVALID scenes
 
@@ -174,10 +157,6 @@ class Scene:
             raise ValueError("scene_id must not be empty")
         if not self.device_id:
             raise ValueError("device_id must not be empty")
-        if not isinstance(self.device_id_source, DeviceIdSource):
-            raise ValueError(
-                f"device_id_source must be a DeviceIdSource, got: {type(self.device_id_source)}"
-            )
         if not isinstance(self.status, SceneStatus):
             raise ValueError(
                 f"status must be a SceneStatus, got: {type(self.status)}"
@@ -202,19 +181,19 @@ def new_scene(
     *,
     scene_id: Optional[str] = None,
     device_id: str,
-    device_id_source: DeviceIdSource,
     bundle_uri: str,
 ) -> Scene:
     """Construct a new Scene in the initial QUEUED state.
 
-    scene_id defaults to a fresh UUIDv4. Callers that need idempotency (e.g.
-    Cloud Tasks task-name dedup in step 3) should generate and pass their own.
+    scene_id defaults to a fresh UUIDv4. A caller may pass an explicit id
+    (e.g. to reuse the id of an existing Scene record when re-running ingest);
+    note the ingest handler's idempotency comes from looking up existing
+    scenes by bundle_id, not from deterministic scene_ids.
     """
     now = datetime.now(tz=timezone.utc)
     return Scene(
         scene_id=scene_id or str(uuid.uuid4()),
         device_id=device_id,
-        device_id_source=device_id_source,
         status=SceneStatus.QUEUED,
         bundle_uri=bundle_uri,
         created_at=now,
