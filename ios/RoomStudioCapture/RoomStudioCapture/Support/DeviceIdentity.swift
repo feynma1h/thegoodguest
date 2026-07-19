@@ -8,9 +8,14 @@
 /// Keychain accessibility is AfterFirstUnlockThisDeviceOnly:
 ///   - readable during background relaunches (anything after first unlock),
 ///     matching the CAFUFA posture of the capture files (decision 0042);
-///   - ThisDeviceOnly: never synced via iCloud Keychain and never restored
-///     onto different hardware — a restored backup minting a fresh id is
-///     correct, because it IS a different device.
+///   - ThisDeviceOnly excludes this item from device backup/restore onto
+///     different hardware (a separate mechanism from iCloud Keychain sync,
+///     which this item was never opted into anyway — kSecAttrSynchronizable
+///     is left unset). Concretely: restoring an iCloud/Finder backup from
+///     one iPhone onto a new one does NOT carry this UUID over; the new
+///     phone mints its own on first launch. Correct, because it IS a
+///     different device — restoring the SAME phone from its own backup
+///     (e.g. after an erase) is unaffected, since that's not a hardware change.
 ///
 /// If the Keychain write fails (should not happen in practice), the minted
 /// UUID is still returned and cached for this process, so device_id is
@@ -21,8 +26,11 @@
 
 import Foundation
 import Security
+import os
 
 enum DeviceIdentity {
+
+    private static let logger = Logger(subsystem: "com.roomstudio.RoomStudioCapture", category: "DeviceIdentity")
 
     private static let service =
         (Bundle.main.bundleIdentifier ?? "com.roomstudio.RoomStudioCapture") + ".device-identity"
@@ -74,11 +82,19 @@ enum DeviceIdentity {
             kSecValueData as String:      Data(fresh.utf8),
         ]
         let status = SecItemAdd(attrs as CFDictionary, nil)
-        if status == errSecDuplicateItem, let existing = read() {
+        switch status {
+        case errSecSuccess:
+            break
+        case errSecDuplicateItem:
             // Lost a write race — prefer the value that actually persisted.
-            return existing
+            if let existing = read() { return existing }
+        default:
+            // Genuine write failure — the minted UUID is used for this launch only
+            // and won't survive relaunch. Logged so a persistent failure (e.g. a
+            // Keychain access-group misconfiguration) is observable in production
+            // rather than silently churning device_id across launches forever.
+            logger.error("[DeviceIdentity] Keychain write failed (status=\(status, privacy: .public)); using unpersisted id for this launch")
         }
-        // Success, or a non-duplicate failure (fresh value used unpersisted).
         return fresh
     }
 }
