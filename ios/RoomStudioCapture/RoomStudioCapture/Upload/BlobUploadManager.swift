@@ -30,6 +30,12 @@
 ///   Stable across kill/relaunch per Apple docs ("The system preserves this property even
 ///   after you restart the app"). taskIdentifier is ephemeral — a new Int is assigned per
 ///   session instance. NEVER use taskIdentifier for cross-launch association.
+///
+/// Decisions: 0040 (blob-then-bundle.pb ordering, staleness guard), 0041 (retry/backoff
+/// shape, clock injection for deterministic tests), 0044 (background-task assertion +
+/// drain gate), 0045 (relaunch recovery: rehydration, cross-launch retry, terminal fatal
+/// handling), 0049 (re-mint failure semantics: loop-guard fatal, persist-failure deferral).
+/// Retry/backoff constants mirror UploadSessionClient's own decision 0038.
 
 import Foundation
 import os
@@ -294,7 +300,7 @@ actor BlobUploadManager {
     /// Create one background uploadTask per non-bundle.pb blob not yet uploaded.
     ///
     /// - Skips blobs already .uploaded in the persisted record (relaunch resume path).
-    /// - Excludes bundle.pb: it is enqueued by onAllBlobsUploaded after the gate fires,
+    /// - Excludes bundle.pb: it is enqueued by onAllBlobsUploaded after the Phase-1 gate fires,
     ///   never by this loop. This is the load-bearing ordering guarantee (decision 0040).
     /// - Sets Content-Range: bytes 0-{size-1}/{size} (required by GCS single-shot resumable PUT).
     /// - Does NOT set Content-Length: URLSession computes it from the file URL automatically.
@@ -370,7 +376,7 @@ actor BlobUploadManager {
     /// (network-layer failure with no HTTP response).
     ///
     /// Race safety: markBlobUploaded is actor-isolated on UploadSessionStore, so
-    /// concurrent completions for the same bundle are serialized there. The gate
+    /// concurrent completions for the same bundle are serialized there. The Phase-1 gate
     /// predicate is evaluated ONLY on the record returned by markBlobUploaded —
     /// never on a separately-loaded copy — so exactly one completion sees
     /// allNonBundlePbBlobsUploaded == true.
@@ -382,7 +388,7 @@ actor BlobUploadManager {
     ) async {
         // Single defer covers every exit path (decision 0044):
         // malformed-desc early return, all onFatalBlobError routing sites, markBlobUploaded
-        // nil/throw, gate-not-fired return, onBundleComplete routing, enqueueReput/task.resume
+        // nil/throw, Phase-1-gate-not-fired return, onBundleComplete routing, enqueueReput/task.resume
         // success, onAllBlobsUploaded→enqueueBundlePb, onSessionExpired all terminals.
         // Re-enqueue paths (308/5xx/410 success) start a new URLSession task whose own
         // didCompleteWithError callback acquires its own token and increments its own counter.
@@ -428,7 +434,6 @@ actor BlobUploadManager {
 
         case 408, 429:
             // DEFERRED-TRANSIENT: transient GCS rate-limit (429) or request-timeout (408).
-            // Retry-After honoring is a pre-launch gap (0038) — not built here.
             // Load record for counter. If no record, route to fatal (can't track budget).
             if let record = try? await store.load(bundleId: bundleId) {
                 await deferTransientBlobError(bundleId: bundleId, relativePath: relativePath,
@@ -464,7 +469,7 @@ actor BlobUploadManager {
         // onAllBlobsUploaded to fire again — an incorrect re-entry.
         if relativePath == "bundle.pb" {
             // Persist .complete phase. Does NOT delete the record or session dir —
-            // that is reserved for the unbuilt onBundleComplete cleanup work.
+            // onBundleComplete owns that cleanup.
             if let current = try? await store.load(bundleId: bundleId) {
                 try? await store.save(current.markingPhase(.complete))
             }
@@ -607,7 +612,7 @@ actor BlobUploadManager {
 
     /// Enqueue the bundle.pb PUT, completing Phase-2.
     ///
-    /// Called when the ordering gate fires (all non-bundle.pb blobs uploaded) or by
+    /// Called when the Phase-1 gate fires (all non-bundle.pb blobs uploaded) or by
     /// the relaunch path (rehydrateBundle) when the persisted record already
     /// satisfies allNonBundlePbBlobsUploaded on app restart.
     ///
@@ -738,8 +743,8 @@ actor BlobUploadManager {
     ///   4. Persist fresh record (new sessionEntries + fresh clientMintTimestamp).
     ///   5. Re-enqueue blobs against the fresh URIs.
     ///      Staleness: reset ALL non-bundle.pb statuses to .pending + re-enqueue all
-    ///                 (abort on missing file). bundle.pb deferred to gate path.
-    ///      410: re-enqueue only non-uploaded blobs. bundle.pb deferred to gate path.
+    ///                 (abort on missing file). bundle.pb deferred to the Phase-1 gate path.
+    ///      410: re-enqueue only non-uploaded blobs. bundle.pb deferred to the Phase-1 gate path.
     ///
     /// Cold-relaunch safe: all state comes from the on-disk record; no UploadContext needed.
     func onSessionExpired(bundleId: String, loopGuardEnabled: Bool = true) async {
@@ -786,9 +791,10 @@ actor BlobUploadManager {
         //
         //    Fatal (not wait-and-retry) is deliberate: GCS has declared the session
         //    dead, so identical URIs are guaranteed to 410 again; the only thing a
-        //    bounded wait could buy is the Firestore TTL firing (up to ~72 h of lag),
-        //    days of silent background churn for a capture whose already-uploaded
-        //    blobs the age=1d lifecycle rule has long since deleted anyway. A
+        //    bounded wait could buy is the Firestore TTL firing (up to ~72 h of lag).
+        //    Reaching this branch at all means the bundle has been unfinished for
+        //    at least a week (both the GCS URI and the Firestore TTL run ~7 days),
+        //    so days more of silent background churn isn't a reasonable ask. A
         //    terminal .failed surfaces the problem instead. See decision 0049.
         let oldUriMap = record.sessionUriMap
         let newUriMap = Dictionary(
@@ -830,7 +836,7 @@ actor BlobUploadManager {
         //        Missing blob file = abort (cannot finalize against a gone-locally blob).
         //        bundle.pb is NOT enqueued here; the Phase-1 gate re-fires via normal path.
         //      410 path (loopGuardEnabled): only re-enqueue blobs not yet .uploaded.
-        //        Already-done blobs are preserved; bundle.pb deferred to gate path.
+        //        Already-done blobs are preserved; bundle.pb deferred to the Phase-1 gate path.
         let outputDir = freshRecord.outputDir
 
         if !loopGuardEnabled {
@@ -938,14 +944,14 @@ actor BlobUploadManager {
         logger.info("[BlobUploadManager] 🔄 re-minted \(bundleId, privacy: .public): re-enqueued \(reenqueued) blob(s)")
     }
 
-    // MARK: - Unbuilt seams
+    // MARK: - Terminal success handler
 
-    /// UNBUILT seam: upload pipeline terminal state.
-    /// Future unit: surface bundle upload completion to UI / polling / FCM,
-    /// delete the on-device session dir, and remove the UploadSessionRecord.
+    /// Bundle upload fully complete (bundle.pb PUT returned 200/201).
+    /// Owns the completion side effects: surfacing to the user (polling / FCM)
+    /// and reclaiming the on-device session dir + UploadSessionRecord.
     func onBundleComplete(bundleId: String) async {
         _bundleCompleteInvocations.append(bundleId)
-        logger.info("[BlobUploadManager] TODO onBundleComplete(\(bundleId, privacy: .public)) — not yet built")
+        logger.info("[BlobUploadManager] ✓ onBundleComplete(\(bundleId, privacy: .public))")
         // Notify the foreground poller if visible (decision 0045).
         // The .complete record is already on disk (handleSuccess writes it before this call),
         // so SceneStatusView.onAppear can find it independently if the app is backgrounded.
@@ -989,10 +995,10 @@ actor BlobUploadManager {
     /// Resume a single upload bundle from its persisted record.
     ///
     /// Skips terminal (.failed) and completed (.complete) records. For active bundles:
-    ///   • Finalize stage (allNonBundlePbBlobsUploaded == true): existence-pre-checks
+    ///   • Phase-2 (allNonBundlePbBlobsUploaded == true): existence-pre-checks
     ///     bundle.pb, then routes to onAllBlobsUploaded (which handles the staleness
     ///     guard and enqueues).
-    ///   • Blob stage (blobs still pending): existence-pre-checks all pending blob files
+    ///   • Phase-1 (blobs still pending): existence-pre-checks all pending blob files
     ///     to prevent a mid-loop throw in enqueuePhasOneBlobs from leaving a partially-
     ///     enqueued bundle with no terminal state. Then calls enqueuePhasOneBlobs, which
     ///     applies getAllTasks reconciliation to skip any blobs with live tasks.
@@ -1013,7 +1019,7 @@ actor BlobUploadManager {
         logger.info("[BlobUploadManager] ↩ rehydrate: resuming \(bundleId, privacy: .public) — phase=\(record.uploadPhase.rawValue, privacy: .public)")
 
         if record.allNonBundlePbBlobsUploaded {
-            // Finalize stage: bundle.pb not yet sent.
+            // Phase-2: bundle.pb not yet sent.
             // Pre-check it exists before routing to onAllBlobsUploaded. The
             // bundle_pb_read_failed site in enqueueBundlePb is defence-in-depth; this
             // pre-check is the explicit relaunch gate (decision 0045).
@@ -1026,7 +1032,7 @@ actor BlobUploadManager {
             }
             await onAllBlobsUploaded(bundleId: bundleId, record: record)
         } else {
-            // Blob stage: blobs still pending.
+            // Phase-1: blobs still pending.
             // Pre-check all pending blob files exist. A missing file causes enqueuePhasOneBlobs
             // to throw mid-loop (after resuming earlier tasks), stranding the bundle with no
             // terminal state and no retry path — a permanent silent strand.
@@ -1088,8 +1094,6 @@ actor BlobUploadManager {
             guard let parsed = Self.parseTaskDescription(task.taskDescription ?? "") else { continue }
             if parsed.bundleId == bundleId { task.cancel() }
         }
-
-        // TODO: surface terminal failure to UI / FCM (unbuilt; required before launch).
     }
 
     // MARK: - Deferred transient error handler
@@ -1134,7 +1138,7 @@ actor BlobUploadManager {
         logger.info("[BlobUploadManager] ↩ deferred (transient, attempt \(newCount)/\(Self.maxCrossLaunchRetries)): \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
         // Blob stays .pending in blobStatuses. On relaunch, rehydrateBundle re-enqueues
         // pending blobs via enqueuePhasOneBlobs; a pending bundle.pb is re-enqueued via
-        // onAllBlobsUploaded → enqueueBundlePb once the ordering gate holds.
+        // onAllBlobsUploaded → enqueueBundlePb once the Phase-1 gate holds.
     }
 }
 

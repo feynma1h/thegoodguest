@@ -35,7 +35,7 @@ struct SceneStatusView: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
-                ScenePoller.shared.resume()  // resume() also sets isVisible = true
+                ScenePoller.shared.resume()  // resume() sets isVisible = true
             case .background, .inactive:
                 ScenePoller.shared.pause()
             @unknown default:
