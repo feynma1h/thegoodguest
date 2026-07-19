@@ -135,6 +135,27 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS for browser clients (the web app). Off unless CORS_ALLOWED_ORIGINS is
+# set — a comma-separated origin list (see infra/api-public.env.yaml). Native
+# clients (iOS) don't send Origin and are unaffected. No credentials mode:
+# auth is the Bearer header, not cookies.
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+    if o.strip()
+]
+if _cors_origins:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+        allow_credentials=False,
+    )
+    logger.info("CORS enabled for origins: %s", _cors_origins)
+
 
 # ---------------------------------------------------------------------------
 # Request / response models
