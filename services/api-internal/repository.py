@@ -125,12 +125,6 @@ class InMemorySceneRepository(InMemorySceneReadRepository, SceneRepository):
         self._store[scene_id] = copy.deepcopy(scene)
         return copy.deepcopy(scene)
 
-    def get_by_bundle_id(self, bundle_id: str) -> Optional[Scene]:
-        for scene in self._store.values():
-            if scene.bundle_id == bundle_id:
-                return copy.deepcopy(scene)
-        return None
-
 
 # ---------------------------------------------------------------------------
 # Firestore implementation (production)
