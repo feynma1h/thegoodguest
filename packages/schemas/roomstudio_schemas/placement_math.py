@@ -278,6 +278,187 @@ def fit_scale_translation(
     return s, t
 
 
+def fit_single_view(
+    src_points: np.ndarray,
+    dst_points: np.ndarray,
+    R_fixed: np.ndarray,
+    view_dir: np.ndarray,
+    lo_percentile: float = 5.0,
+    hi_percentile: float = 95.0,
+) -> Tuple[float, np.ndarray]:
+    """Scale + translation fit specialized for single-view depth clouds.
+
+    dst_points is what one depth camera sees of an object: the visible
+    front surface only. Generic cloud statistics are structurally biased
+    on such data — the centroid sits on the front surface rather than the
+    volume center, and truncating the along-view extent reorders the
+    principal axes so PCA-extent ratios pair the wrong axes. This fit
+    exploits the two things a single view measures correctly instead:
+
+      * The silhouette is complete: extents TRANSVERSE to the viewing
+        direction are unbiased (for each transverse position the depth map
+        records the front point of the front/back pair, so the transverse
+        footprint matches the full object's).
+      * The near surface is exactly what depth measures: the low-percentile
+        band of along-view projections corresponds on both clouds.
+
+    src_points: the full object cloud in its local frame (splat vertices).
+    R_fixed: world-from-object rotation (from the SAM 3D layout prior).
+    view_dir: unit-ish direction the camera looks along, in the dst frame
+        (camera forward, pointing at the object).
+
+    Scale is the median transverse-extent ratio; transverse translation
+    aligns robust band midpoints; along-view translation aligns the
+    near-surface percentile. Percentile bands (rather than min/max) keep
+    depth-bleed outliers at the silhouette rim from stretching either
+    measurement.
+
+    Returns (s, t). Raises DegenerateGeometryError on empty/degenerate
+    inputs (delegated to the percentile math via zero extents).
+    """
+    src = np.asarray(src_points, dtype=np.float64)
+    dst = np.asarray(dst_points, dtype=np.float64)
+    if src.ndim != 2 or src.shape[1] != 3 or dst.ndim != 2 or dst.shape[1] != 3:
+        raise ValueError("fit_single_view: expected (N, 3) arrays")
+    if src.shape[0] < MIN_CLOUD_POINTS or dst.shape[0] < MIN_CLOUD_POINTS:
+        raise DegenerateGeometryError(
+            f"fit_single_view: {src.shape[0]}/{dst.shape[0]} points < "
+            f"MIN_CLOUD_POINTS={MIN_CLOUD_POINTS}"
+        )
+    v = np.asarray(view_dir, dtype=np.float64)
+    norm = np.linalg.norm(v)
+    if norm < 1e-9:
+        raise ValueError("fit_single_view: zero view direction")
+    v = v / norm
+    # Orthonormal transverse frame (t1, t2, v).
+    seed = np.array([1.0, 0.0, 0.0]) if abs(v[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    t1 = np.cross(v, seed)
+    t1 /= np.linalg.norm(t1)
+    t2 = np.cross(v, t1)
+    B = np.stack([t1, t2, v], axis=1)
+
+    P_src = (src @ np.asarray(R_fixed, dtype=np.float64).T) @ B
+    P_dst = dst @ B
+
+    def _band(P: np.ndarray, i: int) -> Tuple[float, float]:
+        lo = float(np.percentile(P[:, i], lo_percentile))
+        hi = float(np.percentile(P[:, i], hi_percentile))
+        return lo, hi
+
+    ratios = []
+    for i in (0, 1):
+        s_lo, s_hi = _band(P_src, i)
+        d_lo, d_hi = _band(P_dst, i)
+        if s_hi - s_lo > 1e-9:
+            ratios.append((d_hi - d_lo) / (s_hi - s_lo))
+    if not ratios:
+        raise DegenerateGeometryError(
+            "fit_single_view: source has no transverse extent"
+        )
+    s = float(np.median(ratios))
+    if s <= 0.0:
+        raise DegenerateGeometryError(f"fit_single_view: non-positive scale {s}")
+
+    offsets = []
+    for i in (0, 1):
+        s_lo, s_hi = _band(P_src, i)
+        d_lo, d_hi = _band(P_dst, i)
+        offsets.append((d_lo + d_hi) / 2.0 - s * (s_lo + s_hi) / 2.0)
+    near_offset = float(
+        np.percentile(P_dst[:, 2], lo_percentile)
+        - s * np.percentile(P_src[:, 2], lo_percentile)
+    )
+    t = offsets[0] * t1 + offsets[1] * t2 + near_offset * v
+    return s, t
+
+
+def refine_similarity_nn(
+    src_points: np.ndarray,
+    dst_points: np.ndarray,
+    s0: float,
+    R0: np.ndarray,
+    t0: np.ndarray,
+    *,
+    mode: str = "full",
+    trim_fraction: float = 0.8,
+    max_points: int = 2000,
+) -> Tuple[float, np.ndarray, np.ndarray, float]:
+    """One nearest-neighbor correspondence refinement pass on an initial
+    similarity estimate.
+
+    Motivation: a single-view depth cloud sees only the object's visible
+    surface, so aligning robust centers (fit_scale_translation) carries a
+    systematic translation bias along the viewing direction — the partial
+    cloud's centroid sits on the front surface while the full splat's
+    centroid sits at the volume center. Matching each dst (depth) point to
+    its nearest transformed src (splat) point and re-fitting corrects
+    exactly that class of error.
+
+    Correspondences run dst -> src deliberately: every depth point lies on
+    the object surface and has a true splat counterpart, while many splat
+    points (the hidden back side) have no depth counterpart and must not
+    be forced into matches.
+
+    mode="full" re-fits (s, R, t) with one Umeyama pass on the trimmed
+    pairs; mode="translation" keeps (s0, R0) and re-fits only t — for
+    callers whose rotation came from a source they trust less than the
+    initial guess (or not at all), where a full re-fit could rotate the
+    object to chase the partial shell.
+
+    Both clouds are deterministically subsampled to max_points (evenly
+    spaced) to bound the brute-force distance matrix; the worst
+    (1 - trim_fraction) of matches are trimmed before fitting.
+
+    Returns (s, R, t, rms) where rms is the root-mean-square distance of
+    the trimmed correspondences under the refined transform.
+
+    Raises DegenerateGeometryError if fewer than 3 trimmed pairs survive.
+    """
+    if mode not in ("full", "translation"):
+        raise ValueError(f"refine_similarity_nn: unknown mode {mode!r}")
+    src = np.asarray(src_points, dtype=np.float64)
+    dst = np.asarray(dst_points, dtype=np.float64)
+    R0 = np.asarray(R0, dtype=np.float64)
+    t0 = np.asarray(t0, dtype=np.float64)
+
+    def _subsample(a: np.ndarray) -> np.ndarray:
+        if a.shape[0] <= max_points:
+            return a
+        idx = np.linspace(0, a.shape[0] - 1, max_points).astype(int)
+        return a[np.unique(idx)]
+
+    src = _subsample(src)
+    dst = _subsample(dst)
+    if src.shape[0] < 3 or dst.shape[0] < 3:
+        raise DegenerateGeometryError("refine_similarity_nn: too few points")
+
+    src_t = s0 * src @ R0.T + t0
+    # Brute-force NN dst -> transformed src, chunked to bound memory.
+    nn_idx = np.empty(dst.shape[0], dtype=int)
+    nn_d2 = np.empty(dst.shape[0], dtype=np.float64)
+    chunk = 512
+    for start in range(0, dst.shape[0], chunk):
+        block = dst[start:start + chunk]
+        d2 = ((block[:, None, :] - src_t[None, :, :]) ** 2).sum(axis=2)
+        nn_idx[start:start + chunk] = d2.argmin(axis=1)
+        nn_d2[start:start + chunk] = d2.min(axis=1)
+
+    keep_n = max(3, int(dst.shape[0] * trim_fraction))
+    keep = np.argsort(nn_d2)[:keep_n]
+    src_matched = src[nn_idx[keep]]
+    dst_kept = dst[keep]
+
+    if mode == "full":
+        s, R, t = fit_similarity(src_matched, dst_kept)
+    else:
+        s, R = float(s0), R0
+        t = (dst_kept - s * src_matched @ R.T).mean(axis=0)
+
+    resid = dst_kept - (s * src_matched @ R.T + t)
+    rms = float(np.sqrt((resid ** 2).sum(axis=1).mean()))
+    return float(s), R, t, rms
+
+
 # -----------------------------------------------------------------------------
 # Posed camera rays (the no-depth path)
 # -----------------------------------------------------------------------------
