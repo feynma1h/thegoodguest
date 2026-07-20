@@ -45,3 +45,30 @@ export function PillLink({
     </MotionLink>
   );
 }
+
+/** Same pill, as a button — for actions that open in place (sheets, menus)
+ * rather than navigate. */
+export function PillButton({
+  onClick,
+  variant = "primary",
+  className,
+  children,
+}: {
+  onClick: () => void;
+  variant?: keyof typeof PILL_VARIANTS;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+      transition={SPRING}
+      className={`inline-block cursor-pointer transition-colors ${PILL_VARIANTS[variant]} ${className ?? ""}`}
+    >
+      {children}
+    </motion.button>
+  );
+}

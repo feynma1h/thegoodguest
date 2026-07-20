@@ -6,10 +6,12 @@
  * ApiClient (mock fixtures or live api-public depending on mode).
  */
 
+import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
 import RoomCard from "@/components/RoomCard";
-import { PillLink } from "@/components/ui/spring";
+import { openNewRoomSheet } from "@/components/NewRoomSheet";
+import { PillButton } from "@/components/ui/spring";
 import { getApiClient } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import type { SceneSummary } from "@/lib/api/types";
@@ -74,16 +76,23 @@ export default function RoomsPage() {
             Your first scan takes about a minute — a slow walk around the room
             with your iPhone.
           </p>
-          <PillLink href="/new" className="mt-8">
+          <PillButton onClick={openNewRoomSheet} className="mt-8">
             Scan your first room
-          </PillLink>
+          </PillButton>
         </div>
       )}
 
       {state.phase === "ready" && state.scenes.length > 0 && (
         <div className="mt-10 grid gap-5 sm:grid-cols-2">
-          {state.scenes.map((scene) => (
-            <RoomCard key={scene.scene_id} scene={scene} />
+          {state.scenes.map((scene, i) => (
+            <motion.div
+              key={scene.scene_id}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: i * 0.06 }}
+            >
+              <RoomCard scene={scene} />
+            </motion.div>
           ))}
         </div>
       )}
