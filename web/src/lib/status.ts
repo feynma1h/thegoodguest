@@ -21,39 +21,41 @@ const META: Record<SceneStatus, StatusMeta> = {
     label: "In line",
     tone: "progress",
     terminal: false,
-    description: "Your scan arrived. Analysis begins in a moment.",
+    description: "Your scan made the trip. The rebuild starts in a moment.",
   },
   processing: {
-    label: "Analyzing",
+    label: "Being rebuilt",
     tone: "progress",
     terminal: false,
     description:
-      "Reading the room — finding every object, rebuilding it in 3D, and placing it exactly where it stands.",
+      "The room is being rebuilt — each piece found, remade in 3D, and placed where it stands.",
   },
   ready: {
     label: "Ready",
     tone: "success",
     terminal: true,
-    description: "Analyzed and rebuilt. Step inside.",
+    description: "Rebuilt and waiting. Step inside.",
   },
   failed: {
-    label: "Failed",
+    label: "Didn't survive",
     tone: "error",
     terminal: true,
-    description: "The analysis didn't finish. A fresh scan usually fixes this.",
+    description:
+      "The scan didn't survive the trip. One more slow pass usually fixes it.",
   },
   failed_incomplete: {
-    label: "Upload incomplete",
+    label: "Partly arrived",
     tone: "warning",
     terminal: false,
     description:
-      "Some of the scan never arrived. Reopen the iOS app to finish uploading.",
+      "Part of the scan never arrived. Reopen the iOS app and it picks up where it left off.",
   },
   failed_invalid: {
     label: "Unreadable scan",
     tone: "error",
     terminal: true,
-    description: "This scan couldn't be read. Try scanning the room again.",
+    description:
+      "This scan arrived in a form that can't be read. One more slow pass and we'll get it.",
   },
 };
 

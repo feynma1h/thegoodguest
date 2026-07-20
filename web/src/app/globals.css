@@ -47,6 +47,28 @@
   background: repeating-linear-gradient(45deg, #efe5d0 0 12px, #e7dcc4 12px 24px);
 }
 
+/* Ambient breathe for forming states — atmosphere, not progress. CSS so
+   reduced-motion is honored without JS. */
+@utility breathe {
+  animation: rs-breathe 6s ease-in-out infinite;
+}
+
+@keyframes rs-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .breathe {
+    animation: none;
+  }
+}
+
 body {
   background: var(--paper);
   color: var(--ink);

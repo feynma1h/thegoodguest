@@ -25,6 +25,8 @@ const PILL_VARIANTS = {
     "rounded-full border-[1.5px] border-ink/20 px-6 py-2.5 text-sm font-medium text-ink/60 hover:border-ink/40 hover:text-ink",
   cream:
     "rounded-full bg-paper px-6 py-2.5 text-sm font-semibold text-ink hover:bg-white",
+  creamGhost:
+    "rounded-full border-[1.5px] border-paper/35 px-6 py-2.5 text-sm font-medium text-paper/85 hover:border-paper/60 hover:text-paper",
 } as const;
 
 /** A pill CTA with the standard spring press/hover behavior. */
