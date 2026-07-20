@@ -1,21 +1,33 @@
 "use client";
 
 /**
- * The landing page. One argument, made three ways: the headline states the
- * thesis, the live demo room proves it (DemoRoom — the product itself is
- * the signature element here), and the three steps ground it. Motion is
- * orchestrated, not scattered: one staggered entrance on load, one rise
- * per section on first scroll into view, all on the shared spring/ease.
+ * Landing — one claim, one image, one action (design §1). The thesis in
+ * serif, the live demo room as the only image, "Scan your first room" as
+ * the action.
+ *
+ * A returning visitor — anyone whose scene list isn't empty — never sees
+ * the pitch: the guest greets them and points at their newest room. A
+ * localStorage hint ("did the list have rooms last time?") chooses what
+ * to render while this visit's list is still loading, so returning
+ * visitors don't get a flash of marketing before the greeting.
+ *
+ * Dev escape: ?pitch=1 forces the pitch in non-live modes (mock always
+ * has rooms, which would otherwise make the pitch unreachable).
  */
 
 import { motion } from "motion/react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
-import AmbientHero from "@/components/AmbientHero";
-import DemoRoom from "@/components/DemoRoom";
-import { openNewRoomSheet } from "@/components/NewRoomSheet";
+import DemoPanel, { useDemoSplats } from "@/components/DemoRoom";
 import { PillButton, PillLink } from "@/components/ui/spring";
+import { GuestLine } from "@/components/ui/voice";
+import { apiMode, getApiClient } from "@/lib/api";
+import type { SceneSummary } from "@/lib/api/types";
+import { statusMeta } from "@/lib/status";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
+const HAS_ROOMS_KEY = "roomstudio:has-rooms";
+const emptySubscribe = () => () => {};
 
 /** Shared load-entrance: rise + fade, staggered by `order`. */
 function enter(order: number) {
@@ -26,96 +38,170 @@ function enter(order: number) {
   };
 }
 
-const rise = {
-  initial: { opacity: 0, y: 24 },
-  whileInView: { opacity: 1, y: 0 },
-  viewport: { once: true, margin: "-80px" },
-  transition: { duration: 0.6, ease: EASE },
-} as const;
+type HomeState =
+  | { phase: "deciding" }
+  | { phase: "pitch" }
+  | { phase: "returning"; latest: SceneSummary };
+
+/** The greeting is grounded in the newest room's real state — nothing
+ * observed, nothing promised. */
+function greetingFor(latest: SceneSummary): {
+  line: string;
+  cta: string;
+  href: string;
+} {
+  const day = new Date(latest.created_at).toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+  });
+  const roomHref = `/room?bundle=${latest.bundle_id}`;
+  if (latest.status === "ready") {
+    return {
+      line: `The room from ${day} is as you left it.`,
+      cta: "Step back inside",
+      href: roomHref,
+    };
+  }
+  if (!statusMeta(latest.status).terminal) {
+    return {
+      line: `Your newest room is still being rebuilt — it won't be long.`,
+      cta: "See how it's coming along",
+      href: roomHref,
+    };
+  }
+  return {
+    line: "Your rooms are where you left them.",
+    cta: "Go to your house",
+    href: "/rooms",
+  };
+}
 
 export default function Home() {
-  return (
-    <>
-      <AmbientHero>
-        <div className="mx-auto flex min-h-[82vh] max-w-4xl flex-col items-center justify-center px-6 text-center">
-          <motion.h1
-            {...enter(0)}
-            className="max-w-3xl text-balance text-5xl font-semibold leading-[1.05] tracking-[-0.03em] sm:text-6xl"
-          >
-            Your room has a version of itself
-            <span className="text-zinc-500"> you&rsquo;ve never seen.</span>
-          </motion.h1>
-          <motion.p
-            {...enter(1)}
-            className="mt-8 max-w-xl text-pretty text-lg leading-relaxed text-zinc-400"
-          >
-            Scan it once with your iPhone. It comes back as a living 3D space —
-            understood object by object, light by light — so deciding what to
-            change stops being guesswork.
-          </motion.p>
-          <motion.div {...enter(2)} className="mt-12 flex items-center gap-4">
-            <PillLink href="/rooms" className="!px-7 !py-3">
-              Show me
+  const [state, setState] = useState<HomeState>({ phase: "deciding" });
+  const demoSplats = useDemoSplats();
+  const demoRef = useRef<HTMLDivElement | null>(null);
+
+  // What did last visit's list say? Decides what "deciding" looks like.
+  const hasRoomsHint = useSyncExternalStore(
+    emptySubscribe,
+    () => localStorage.getItem(HAS_ROOMS_KEY) === "1",
+    () => false,
+  );
+  // Dev escape, derived not stored: the query never changes in-page.
+  const forcedPitch = useSyncExternalStore(
+    emptySubscribe,
+    () =>
+      apiMode() !== "live" &&
+      new URLSearchParams(window.location.search).has("pitch"),
+    () => false,
+  );
+
+  useEffect(() => {
+    if (forcedPitch) return;
+    let cancelled = false;
+    getApiClient()
+      .listScenes()
+      .then((scenes) => {
+        if (cancelled) return;
+        localStorage.setItem(HAS_ROOMS_KEY, scenes.length > 0 ? "1" : "0");
+        setState(
+          scenes.length > 0
+            ? { phase: "returning", latest: scenes[0] }
+            : { phase: "pitch" },
+        );
+      })
+      .catch(() => {
+        // The landing must never break on a backend hiccup — pitch it is.
+        if (!cancelled) setState({ phase: "pitch" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [forcedPitch]);
+
+  const effective: HomeState = forcedPitch ? { phase: "pitch" } : state;
+
+  // While deciding, a returning visitor sees calm paper (the greeting is
+  // about to land); a first-time visitor sees the pitch immediately.
+  if (effective.phase === "deciding" && hasRoomsHint) {
+    return <div className="min-h-[80vh]" aria-hidden />;
+  }
+
+  if (effective.phase === "returning") {
+    const greeting = greetingFor(effective.latest);
+    return (
+      <section className="mx-auto flex min-h-[80vh] max-w-3xl flex-col items-start justify-center px-6">
+        <motion.div {...enter(0)}>
+          <GuestLine className="text-[clamp(1.6rem,2.6vw,2.1rem)] leading-[1.4]">
+            Welcome back. {greeting.line}
+          </GuestLine>
+        </motion.div>
+        <motion.div {...enter(1)} className="mt-10 flex items-center gap-4">
+          <PillLink href={greeting.href} className="!px-7 !py-3">
+            {greeting.cta}
+          </PillLink>
+          {greeting.href !== "/rooms" && (
+            <PillLink href="/rooms" variant="quiet">
+              Your house
             </PillLink>
-            <PillButton
-              onClick={openNewRoomSheet}
-              variant="ghost"
-              className="!px-7 !py-3"
-            >
-              Scan a room
-            </PillButton>
-          </motion.div>
-        </div>
-      </AmbientHero>
-
-      <DemoRoom />
-
-      <section className="mx-auto max-w-3xl px-6 py-28 text-center">
-        <motion.div
-          {...rise}
-          className="space-y-6 text-2xl font-light leading-snug tracking-tight text-zinc-400 sm:text-[1.6rem]"
-        >
-          <p>Most rooms are shaped by what was available, not by what was wanted.</p>
-          <p>Most design tools show you other people&rsquo;s rooms.</p>
-          <p className="font-normal text-foreground">This one shows you yours.</p>
+          )}
         </motion.div>
       </section>
+    );
+  }
 
-      <section className="border-t border-white/[0.06]">
-        <div className="mx-auto grid max-w-5xl gap-12 px-6 py-20 sm:grid-cols-3">
-          {[
-            {
-              n: "01",
-              title: "Scan",
-              body: "A slow walk through the room with your iPhone. Camera, motion, LiDAR — everything is measured, nothing is guessed.",
-            },
-            {
-              n: "02",
-              title: "Understand",
-              body: "Every object is found, rebuilt in 3D, and placed exactly where it stands — the room as a structure, not a photo.",
-            },
-            {
-              n: "03",
-              title: "Decide",
-              body: "Explore your space, see how it actually works, and try the versions of it you've been imagining.",
-            },
-          ].map((step, i) => (
-            <motion.div
-              key={step.n}
-              initial={{ opacity: 0, y: 24 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-80px" }}
-              transition={{ duration: 0.6, ease: EASE, delay: i * 0.1 }}
+  return (
+    <section className="mx-auto grid max-w-6xl gap-10 px-6 pb-16 pt-14 lg:min-h-[calc(100vh-3.5rem)] lg:grid-cols-[minmax(0,46fr)_minmax(0,54fr)] lg:gap-8 lg:pb-8">
+      <div className="flex flex-col justify-center lg:pr-6">
+        <motion.h1
+          {...enter(0)}
+          className="max-w-2xl text-balance font-serif text-[clamp(2.1rem,3.4vw,2.85rem)] font-normal leading-[1.24] tracking-[-0.01em]"
+        >
+          Every home contains a version of itself its owner has never seen.
+        </motion.h1>
+        <motion.p
+          {...enter(1)}
+          className="mt-6 max-w-[430px] text-pretty text-base leading-relaxed text-ink/70"
+        >
+          Scan a room with your phone. Meet it again on your desk — real, in
+          3D, exactly as you live in it — with a guest who understands it and
+          talks it through with you.
+        </motion.p>
+        <motion.div {...enter(2)} className="mt-9 flex flex-wrap items-center gap-3">
+          <PillLink href="/new" className="!px-7 !py-3">
+            Scan your first room
+          </PillLink>
+          {demoSplats && (
+            <PillButton
+              variant="ghost"
+              className="!px-6 !py-3"
+              onClick={() =>
+                demoRef.current?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                })
+              }
             >
-              <p className="text-xs font-medium text-zinc-600">{step.n}</p>
-              <h2 className="mt-3 text-lg font-semibold tracking-tight text-foreground">
-                {step.title}
-              </h2>
-              <p className="mt-3 text-sm leading-relaxed text-zinc-500">{step.body}</p>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-    </>
+              See one first
+            </PillButton>
+          )}
+        </motion.div>
+        <motion.p {...enter(3)} className="mt-7 text-xs text-ink/45">
+          No photos generated. No feed. Your rooms are yours.
+        </motion.p>
+      </div>
+
+      {demoSplats && (
+        <motion.div
+          ref={demoRef}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.9, ease: EASE, delay: 0.25 }}
+          className="relative min-h-[440px] overflow-hidden rounded-xl lg:my-6"
+        >
+          <DemoPanel splats={demoSplats} />
+        </motion.div>
+      )}
+    </section>
   );
 }
