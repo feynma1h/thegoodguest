@@ -1,15 +1,18 @@
 """Bundle validation logic for the roomstudio API ingester.
 
 Pure functions: no I/O, no FastAPI. Takes a parsed CaptureBundle protobuf
-and returns either None (passes all checks) or a (error_code, detail) pair
-describing the first failing check.
+(plus the bundle_id the caller derived from the upload URI) and returns
+either None (passes all checks) or a (error_code, detail) pair describing
+the first failing check.
 
 Validation checks (in priority order):
   1. schema_version is in SUPPORTED_VERSIONS
-  2. device.device_id is populated (iOS Keychain per-device UUID)
-  3. Every camera_pose quaternion is unit-norm within QUAT_NORM_TOLERANCE
-  4. Depth fields require a LIDAR_* tier
-  5. All GCS paths are relative (not full gs:// URIs)
+  2. bundle.bundle_id matches the URI-derived bundle_id (exact,
+     case-sensitive; skipped when the caller passes no expected id)
+  3. device.device_id is populated (iOS Keychain per-device UUID)
+  4. Every camera_pose quaternion is unit-norm within QUAT_NORM_TOLERANCE
+  5. Depth fields require a LIDAR_* tier
+  6. All GCS paths are relative (not full gs:// URIs)
 
 Error codes are machine-readable strings. Details are human-readable and
 include enough context (frame index, field name, observed value) to act on
@@ -25,8 +28,16 @@ SUPPORTED_VERSIONS: frozenset[str] = frozenset({"1"})
 QUAT_NORM_TOLERANCE: float = 1e-3
 
 
-def validate_bundle(bundle) -> tuple[str, str] | None:
+def validate_bundle(
+    bundle, expected_bundle_id: str | None = None
+) -> tuple[str, str] | None:
     """Validate a parsed CaptureBundle.
+
+    expected_bundle_id is the bundle_id the caller derived from the GCS
+    upload URI (gs://…/captures/{bundle_id}/bundle.pb). None skips the
+    cross-check (check 2) — that is only for callers with no upload URI in
+    hand, e.g. fixture self-tests that validate bundle content in isolation.
+    The ingest path always passes it.
 
     Returns None if all checks pass, or (error_code, detail) for the first
     failing check. Checks run in the order listed in the module docstring.
@@ -34,11 +45,15 @@ def validate_bundle(bundle) -> tuple[str, str] | None:
     Order is intentional and must be preserved:
       1. schema_version first — an unknown version means we can't trust any
          field interpretation, so there's no point running later checks.
-      2. Device identity — device_id must be populated (the iOS client's
+      2. bundle_id cross-check — if the bundle's self-declared identity
+         doesn't match where it was uploaded, every downstream join keyed on
+         bundle_id is broken and content checks on a mis-identified bundle
+         are noise. Cheapest check after schema_version (one string compare).
+      3. Device identity — device_id must be populated (the iOS client's
          Keychain UUID); cheap, structural.
-      3. Quaternion norms — cheap, purely structural, catches iOS bugs early.
-      4. Tier-vs-depth — semantic consistency between tier and frame content.
-      5. GCS paths — catches writer bugs; last because it's the most tedious
+      4. Quaternion norms — cheap, purely structural, catches iOS bugs early.
+      5. Tier-vs-depth — semantic consistency between tier and frame content.
+      6. GCS paths — catches writer bugs; last because it's the most tedious
          to construct a bundle that fails only this check.
 
     Tests that assert a specific error code must construct a bundle that
@@ -47,6 +62,7 @@ def validate_bundle(bundle) -> tuple[str, str] | None:
     """
     return (
         _check_schema_version(bundle)
+        or _check_bundle_id(bundle, expected_bundle_id)
         or _check_device_id(bundle)
         or _check_quaternion_norms(bundle)
         or _check_tier_depth_consistency(bundle)
@@ -65,6 +81,32 @@ def _check_schema_version(bundle) -> tuple[str, str] | None:
         return (
             "unsupported_schema_version",
             f"schema_version {v!r} is not supported; supported: {supported}",
+        )
+    return None
+
+
+def _check_bundle_id(bundle, expected_bundle_id: str | None) -> tuple[str, str] | None:
+    """Cross-check the proto's self-declared bundle_id against the upload URI's.
+
+    Comparison is exact and case-sensitive. Every downstream join on
+    bundle_id — Firestore scenes.bundle_id queries, upload_sessions doc IDs,
+    captures/{bundle_id}/ blob paths in GCS — is a byte-wise comparison, so a
+    case-differing pair would break those joins exactly like a wholly
+    different id and is rejected the same way, not normalized to a match.
+    Conforming clients never hit this: the iOS client lowercases bundle_id at
+    bundle assembly and builds the upload path from that same value.
+
+    An empty proto bundle_id is caught here too — the ingest URI regex
+    guarantees a non-empty expected value, so empty can never match.
+    """
+    if expected_bundle_id is None:
+        return None
+    if bundle.bundle_id != expected_bundle_id:
+        return (
+            "bundle_id_mismatch",
+            f"bundle.bundle_id {bundle.bundle_id!r} does not match the "
+            f"bundle_id {expected_bundle_id!r} derived from the upload URI; "
+            "the proto must carry the exact bundle_id it was uploaded under",
         )
     return None
 
