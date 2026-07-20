@@ -70,6 +70,47 @@ export interface SceneAssets {
 }
 
 /**
+ * Conversation stage 1 (decision 0058). One completed turn as the wire
+ * carries it — the server's client projection; internal fields (usage,
+ * model, versions) never appear here.
+ */
+export interface ConversationTurn {
+  turn_index: number;
+  client_msg_id: string;
+  user_text: string;
+  assistant_text: string;
+  created_at: string; // ISO 8601
+}
+
+export interface ConversationMeta {
+  scene_id: string;
+  turn_count: number;
+  rested_until: string | null; // ISO 8601; set while the daily quota rests
+}
+
+/** GET /scenes/{scene_id}/conversation response. */
+export interface ConversationSnapshot {
+  conversation: ConversationMeta;
+  turns: ConversationTurn[]; // ascending, last <=50
+  cursor: { before: number } | null; // pagination handle; v1 may ignore
+}
+
+/**
+ * The normalized guest-event stream — the seam both transports speak
+ * (the PositionedSplat trick applied to conversation): LiveApiClient
+ * parses SSE into these; MockApiClient yields them directly; components
+ * cannot tell the transports apart.
+ *
+ * "connection_lost" is client-vocabulary for a stream that died without
+ * a terminal event — the turn's fate is unknown and the composer
+ * confirms by refetching with its client_msg_id.
+ */
+export type GuestEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; turn: ConversationTurn }
+  | { type: "error"; code: string };
+
+/**
  * Renderer-agnostic viewer input: a splat file plus its world transform.
  * SplatViewer consumes ONLY this shape — nothing about the API or Spark
  * leaks across that boundary in either direction.

@@ -14,8 +14,9 @@
  */
 
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import Conversation from "@/components/conversation/Conversation";
 import SplatViewer from "@/components/SplatViewer";
 import { PillButton, SPRING } from "@/components/ui/spring";
 import { DisabledComposer, Eyebrow, GuestLine } from "@/components/ui/voice";
@@ -28,7 +29,12 @@ import {
 } from "@/lib/api/types";
 import { hasSeenReveal, markRevealSeen } from "@/lib/seen";
 import { statusMeta } from "@/lib/status";
-import { arrivalLine, countsLine, settledLine } from "@/lib/voice";
+import {
+  arrivalLine,
+  countsLine,
+  settledLine,
+  settledQuietLine,
+} from "@/lib/voice";
 
 type AssetsResult =
   | { forScene: string; phase: "not_ready"; message: string }
@@ -51,6 +57,10 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
   );
   const [freshReveal, setFreshReveal] = useState(false);
   const [arrival, setArrival] = useState<string | null>(null);
+  // Conversation is an enhancement layer: if its GET fails, the settled
+  // layout degrades to the non-conversational shape (decision 0058).
+  const [convDown, setConvDown] = useState(false);
+  const onConvUnavailable = useCallback(() => setConvDown(true), []);
 
   const assets =
     result && result.forScene === sceneId ? result : { phase: "loading" as const };
@@ -149,22 +159,34 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
         </AnimatePresence>
       </div>
 
-      {/* Stage 1, settled: one guest line, the composer's place, the ledger. */}
+      {/* Stage 1, settled: the conversation (card + live composer), or the
+          non-conversational layout when the conversation layer is down. */}
       {phase === "settled" && (
         <>
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-6 pb-7">
             <div className="pointer-events-auto w-full max-w-2xl">
-              <div className="rounded-[14px] border border-ink/15 bg-paper/[0.96] px-5 py-4 shadow-deep">
-                <GuestLine className="text-[15px]">
-                  {freshReveal ? arrivalLine(placed) : settledLine(placed)}
-                </GuestLine>
-                {assets.phase === "ready" && (
-                  <p className="mt-2 text-[11.5px] text-ink/55">
-                    {countsLine(placed, seen)}
-                  </p>
-                )}
-              </div>
-              <DisabledComposer className="mx-auto mt-3 max-w-xl" />
+              {assets.phase === "ready" && !convDown ? (
+                <Conversation
+                  sceneId={sceneId}
+                  greeting={freshReveal ? arrivalLine(placed) : settledLine(placed)}
+                  countsNote={countsLine(placed, seen)}
+                  onUnavailable={onConvUnavailable}
+                />
+              ) : (
+                <>
+                  <div className="rounded-[14px] border border-ink/15 bg-paper/[0.96] px-5 py-4 shadow-deep">
+                    <GuestLine className="text-[15px]">
+                      {freshReveal ? arrivalLine(placed) : settledQuietLine(placed)}
+                    </GuestLine>
+                    {assets.phase === "ready" && (
+                      <p className="mt-2 text-[11.5px] text-ink/55">
+                        {countsLine(placed, seen)}
+                      </p>
+                    )}
+                  </div>
+                  <DisabledComposer className="mx-auto mt-3 max-w-xl" />
+                </>
+              )}
             </div>
           </div>
 
