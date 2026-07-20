@@ -26,24 +26,25 @@ export function openNewRoomSheet() {
   window.dispatchEvent(new Event(OPEN_EVENT));
 }
 
-/** The scan instructions themselves — shared by the sheet and /new. */
+/** The scan instructions — the sheet's compact form of the bridge. The
+ * full handoff (QR placeholder, the listening desk) lives at /new. */
 export function ScanInstructions() {
   return (
     <div className="flex flex-col items-center text-center">
-      <h2 className="max-w-xl text-balance text-3xl font-semibold leading-tight tracking-[-0.02em] sm:text-4xl">
+      <h2 className="max-w-xl text-balance font-serif text-[26px] font-normal leading-snug sm:text-[30px]">
         It starts with a slow walk around the room.
       </h2>
       <p className="mt-5 max-w-md text-pretty text-sm leading-relaxed text-ink/65">
-        Open the iOS app and scan the space — about a minute. Your iPhone
-        measures what a photo can only guess at: true distances, depth, and
-        where every object actually stands.
+        Your phone does the walking; this desk is where the room arrives.
+        Your iPhone measures what a photo can only guess at: true distances,
+        depth, and where every object actually stands.
       </p>
 
       <div className="mt-12 grid w-full gap-8 text-left sm:grid-cols-3">
         {[
           { n: "01", text: "Open the iOS app on your iPhone" },
-          { n: "02", text: "Walk the room slowly, corners included" },
-          { n: "03", text: "That's it — analysis starts on its own" },
+          { n: "02", text: "Walk the room slowly — corners included" },
+          { n: "03", text: "That's it. The room travels here on its own." },
         ].map((step) => (
           <div key={step.n}>
             <p className="text-xs font-medium text-ink/40">{step.n}</p>
@@ -53,8 +54,7 @@ export function ScanInstructions() {
       </div>
 
       <p className="mt-12 text-xs text-ink/45">
-        The room appears here on its own when the scan lands. LiDAR-equipped
-        iPhones give the most faithful rooms.
+        LiDAR-equipped iPhones give the most faithful rooms.
       </p>
     </div>
   );
