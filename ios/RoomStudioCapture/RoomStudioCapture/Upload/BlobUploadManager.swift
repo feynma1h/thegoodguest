@@ -36,6 +36,15 @@
 /// drain gate), 0045 (relaunch recovery: rehydration, cross-launch retry, terminal fatal
 /// handling), 0049 (re-mint failure semantics: loop-guard fatal, persist-failure deferral).
 /// Retry/backoff constants mirror UploadSessionClient's own decision 0038.
+///
+/// Retry-After (GCS side): 408/429 blob PUT responses are retried in-process on the
+/// shared schedule (same as 5xx), and a Retry-After header — GCS can send one on
+/// 408/429/503 regardless of our own API's rate-limiting posture — overrides the local
+/// backoff delay. A stated wait beyond maxRetryAfterHoldSec defers cross-launch instead:
+/// the client never retries EARLIER than the server asked, and never pins the completion
+/// chain for minutes. This is distinct from decision 0038's Retry-After item, which
+/// concerns UploadSessionClient's /upload_session retries and stays gated on the
+/// api-public rate limit (pre-launch gap (b)).
 
 import Foundation
 import os
@@ -77,6 +86,12 @@ actor BlobUploadManager {
 
     private static let baseDelaySec: TimeInterval = 1.0   // mirrors 0038
     private static let maxDelaySec:  TimeInterval = 30.0
+    /// Longest server-directed Retry-After honored in-process. A 408/429/5xx whose
+    /// Retry-After is ≤ this sleeps exactly the stated interval before the re-PUT;
+    /// beyond it the blob defers cross-launch (DEFERRED-TRANSIENT) — retrying sooner
+    /// than the server asked is not an option, and a multi-minute in-process hold
+    /// outlives the background-execution window anyway.
+    static let maxRetryAfterHoldSec: TimeInterval = 60.0
 
     // MARK: - Stored properties
 
@@ -124,6 +139,13 @@ actor BlobUploadManager {
 
     /// Returns "now". Inject a fixed Date in tests for deterministic staleness-guard behavior.
     var clock: () -> Date = { Date() }
+
+    /// Suspends for the given interval between retry attempts. Default: Task.sleep.
+    /// Tests inject a recorder to assert the retry schedule (including Retry-After
+    /// honoring) without real waiting.
+    var sleeper: @Sendable (TimeInterval) async -> Void = { seconds in
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    }
 
     /// Called by onSessionExpired to re-POST /upload_session.
     /// Receives (bundleId, manifestEntries) and returns fresh [UploadSessionEntry].
@@ -373,7 +395,9 @@ actor BlobUploadManager {
     ///
     /// Call surface for BlobUploadDelegate (via Task { await ... }) and directly
     /// for unit tests. The `statusCode` parameter is nil when `error` is non-nil
-    /// (network-layer failure with no HTTP response).
+    /// (network-layer failure with no HTTP response). `retryAfterHeader` is the raw
+    /// Retry-After response header when the server sent one; parsed here (delta-seconds
+    /// or HTTP-date) and honored on the 408/429/5xx retry paths.
     ///
     /// Race safety: markBlobUploaded is actor-isolated on UploadSessionStore, so
     /// concurrent completions for the same bundle are serialized there. The Phase-1 gate
@@ -384,6 +408,7 @@ actor BlobUploadManager {
         taskDescription: String?,
         statusCode: Int?,
         error: Error?,
+        retryAfterHeader: String? = nil,
         backgroundTaskToken: BackgroundTaskHandle? = nil
     ) async {
         // Single defer covers every exit path (decision 0044):
@@ -433,15 +458,15 @@ actor BlobUploadManager {
             await onSessionExpired(bundleId: bundleId)
 
         case 408, 429:
-            // DEFERRED-TRANSIENT: transient GCS rate-limit (429) or request-timeout (408).
-            // Load record for counter. If no record, route to fatal (can't track budget).
-            if let record = try? await store.load(bundleId: bundleId) {
-                await deferTransientBlobError(bundleId: bundleId, relativePath: relativePath,
-                                              reason: "http_\(statusCode!)", record: record)
-            } else {
-                await onFatalBlobError(bundleId: bundleId, relativePath: relativePath,
-                                       reason: "http_\(statusCode!)_no_record")
-            }
+            // Transient GCS rate-limit (429) or request-timeout (408): retried in-process
+            // on the shared schedule, same as 5xx, honoring Retry-After when GCS sends one.
+            // Exhaustion routes to DEFERRED-TRANSIENT inside handleServerError, so the
+            // cross-launch budget still bounds the total work.
+            await handleServerError(
+                bundleId: bundleId, relativePath: relativePath,
+                statusCode: statusCode!,
+                retryAfter: Self.parseRetryAfter(retryAfterHeader, now: clock())
+            )
 
         case let code where (400..<500).contains(code ?? -1):
             // TERMINAL: deterministic 4xx (400/401/403/404/409/422/…).
@@ -452,10 +477,12 @@ actor BlobUploadManager {
             )
 
         default:
-            // 5xx or missing status code — retryable server error.
+            // 5xx or missing status code — retryable server error. A 5xx carrying
+            // Retry-After (503 commonly does) gets the same honoring as 408/429.
             await handleServerError(
                 bundleId: bundleId, relativePath: relativePath,
-                statusCode: statusCode ?? 0
+                statusCode: statusCode ?? 0,
+                retryAfter: Self.parseRetryAfter(retryAfterHeader, now: clock())
             )
         }
     }
@@ -540,7 +567,8 @@ actor BlobUploadManager {
         bundleId: String,
         relativePath: String,
         statusCode: Int,
-        networkError: Error? = nil
+        networkError: Error? = nil,
+        retryAfter: TimeInterval? = nil
     ) async {
         guard var ctx = contexts[bundleId] else {
             // DEFERRED-INTERRUPTED: context absent because this process was killed/relaunched.
@@ -565,19 +593,69 @@ actor BlobUploadManager {
             }
             return
         }
+
+        // Server-directed wait beyond the in-process hold cap: retrying sooner than the
+        // server asked is not an option, and holding the completion chain for minutes
+        // outlives the background-execution window. DEFERRED-TRANSIENT instead — the
+        // relaunch path re-enqueues from the persisted record, necessarily later.
+        if let retryAfter, retryAfter > Self.maxRetryAfterHoldSec {
+            contexts[bundleId] = ctx
+            logger.info("[BlobUploadManager] Retry-After \(Int(retryAfter))s exceeds \(Int(Self.maxRetryAfterHoldSec))s hold cap for \(relativePath, privacy: .public) — deferring")
+            if let record = try? await store.load(bundleId: bundleId) {
+                await deferTransientBlobError(bundleId: bundleId, relativePath: relativePath,
+                                              reason: "http_\(statusCode)_retry_after_exceeds_hold",
+                                              record: record)
+            } else {
+                await onFatalBlobError(bundleId: bundleId, relativePath: relativePath,
+                                       reason: "http_\(statusCode)_retry_after_no_record")
+            }
+            return
+        }
+
         ctx.retryCount[relativePath] = attempts + 1
         contexts[bundleId] = ctx
 
         let jitter = Double.random(in: 0..<1.0)
-        let delay  = min(Self.baseDelaySec * pow(2.0, Double(attempts)) + jitter, Self.maxDelaySec)
+        let delay: TimeInterval
+        if let retryAfter {
+            // The server's stated wait overrides the local schedule — including
+            // maxDelaySec: a Retry-After between maxDelaySec and the hold cap is
+            // slept in full. Jitter on top keeps concurrent blobs from re-PUTting
+            // in lockstep (Retry-After is a minimum, not an exact time).
+            delay = retryAfter + jitter
+        } else {
+            delay = min(Self.baseDelaySec * pow(2.0, Double(attempts)) + jitter, Self.maxDelaySec)
+        }
         logger.info("[BlobUploadManager] retry \(attempts + 1)/\(Self.maxRetries) for \(relativePath, privacy: .public) in \(String(format: "%.2f", delay))s")
-        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        await sleeper(delay)
         do {
             try await enqueueReput(bundleId: bundleId, relativePath: relativePath)
         } catch {
             await onFatalBlobError(bundleId: bundleId, relativePath: relativePath,
                                    reason: "reput_failed: \(error)")
         }
+    }
+
+    // MARK: - Retry-After parsing
+
+    /// Parse an HTTP Retry-After header value (RFC 9110 §10.2.3) into a wait interval.
+    ///
+    /// Two wire forms: delta-seconds ("120") and HTTP-date ("Wed, 21 Oct 2015 07:28:00 GMT").
+    /// Returns nil for an absent or malformed value — callers fall back to the local
+    /// backoff schedule. An HTTP-date already in the past yields 0 (the wait has elapsed).
+    static func parseRetryAfter(_ headerValue: String?, now: Date) -> TimeInterval? {
+        guard let raw = headerValue?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
+            return nil
+        }
+        if let seconds = TimeInterval(raw) {
+            return (seconds.isFinite && seconds >= 0) ? seconds : nil
+        }
+        let formatter = DateFormatter()
+        formatter.locale     = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone   = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        guard let date = formatter.date(from: raw) else { return nil }
+        return max(0, date.timeIntervalSince(now))
     }
 
     // MARK: - Private: shared re-enqueue (used by 308 and 5xx retry paths)

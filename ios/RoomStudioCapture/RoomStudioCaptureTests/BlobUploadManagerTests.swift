@@ -1748,33 +1748,224 @@ final class BlobUploadManagerTests: XCTestCase {
 
     // MARK: DEFERRED-TRANSIENT: counter bump (408, 429, exhausted, remint variants)
 
-    func test_408_deferredTransient_bumpsCounter_notFatal() async throws {
-        // 408 → DEFERRED-TRANSIENT (transient GCS timeout).
-        // crossLaunchRetryCount bumped to 1; uploadPhase NOT .failed.
+    // 408/429 route through the shared in-process retry schedule (same as 5xx), so
+    // the DEFERRED-TRANSIENT counter bump now happens at exhaustion, not on first
+    // sight, and a no-context completion is DEFERRED-INTERRUPTED like any other
+    // transient. Retry-After honoring has its own section below.
+
+    func test_408_noContext_deferredInterrupted_noBump_notFatal() async throws {
+        // 408 with no in-memory context (killed/relaunched process) → DEFERRED-INTERRUPTED:
+        // blob stays .pending, no counter bump, no fatal. Same classification as 5xx/network.
         let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        // No enqueuePhasOneBlobs → contexts[bundleId] is nil.
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
             statusCode: 408, error: nil
         )
         let record = try await store.load(bundleId: "test-bundle")!
-        XCTAssertEqual(record.uploadPhase, .uploadingBlobs, "408 must NOT mark bundle .failed")
-        XCTAssertEqual(record.crossLaunchRetryCount, 1, "408 must bump crossLaunchRetryCount")
+        XCTAssertEqual(record.uploadPhase, .uploadingBlobs, "408_no_context must NOT mark bundle .failed")
+        XCTAssertEqual(record.crossLaunchRetryCount, 0,
+                       "408_no_context must NOT bump crossLaunchRetryCount (relaunch artifact, not a failure)")
         let fatal = await manager._fatalBlobErrorInvocations
-        XCTAssertTrue(fatal.isEmpty, "408 must route to deferred, not fatal")
+        XCTAssertTrue(fatal.isEmpty, "408_no_context must not route to onFatalBlobError")
     }
 
-    func test_429_deferredTransient_bumpsCounter_notFatal() async throws {
-        // 429 → DEFERRED-TRANSIENT (transient GCS rate limit).
+    func test_429_noContext_deferredInterrupted_noBump_notFatal() async throws {
+        // 429 with no context → DEFERRED-INTERRUPTED, same as the 408 case above.
         let (manager, store, _) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
         await manager.handleTaskCompletion(
             taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
             statusCode: 429, error: nil
         )
         let record = try await store.load(bundleId: "test-bundle")!
-        XCTAssertEqual(record.uploadPhase, .uploadingBlobs, "429 must NOT mark bundle .failed")
-        XCTAssertEqual(record.crossLaunchRetryCount, 1, "429 must bump crossLaunchRetryCount")
+        XCTAssertEqual(record.uploadPhase, .uploadingBlobs, "429_no_context must NOT mark bundle .failed")
+        XCTAssertEqual(record.crossLaunchRetryCount, 0,
+                       "429_no_context must NOT bump crossLaunchRetryCount")
         let fatal = await manager._fatalBlobErrorInvocations
-        XCTAssertTrue(fatal.isEmpty, "429 must route to deferred, not fatal")
+        XCTAssertTrue(fatal.isEmpty, "429_no_context must not route to onFatalBlobError")
+    }
+
+    func test_429_withContext_retriesInProcess_thenDefersTransient_neverFatal() async throws {
+        // The P5(b) invariant, preserved at its new position: a persistent 429 is never
+        // fatal — it exhausts the in-process schedule (maxRetries sleeps), then defers
+        // cross-launch with exactly one counter bump.
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, _) = try await makeManager(paths: paths)
+        await manager.setGetAllTasksProvider { [] }
+        let sleeps = OSAllocatedUnfairLock<[TimeInterval]>(initialState: [])
+        await manager.setSleeper { delay in sleeps.withLock { $0.append(delay) } }
+        let record = try await store.load(bundleId: "test-bundle")!
+        try await manager.enqueuePhasOneBlobs(record: record)
+
+        for _ in 0...BlobUploadManager.maxRetries {
+            await manager.handleTaskCompletion(
+                taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+                statusCode: 429, error: nil
+            )
+        }
+
+        XCTAssertEqual(sleeps.withLock { $0 }.count, BlobUploadManager.maxRetries,
+                       "429 must sleep once per in-process retry attempt")
+        let stored = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(stored.uploadPhase, .uploadingBlobs, "Exhausted 429 must NOT mark bundle .failed")
+        XCTAssertEqual(stored.crossLaunchRetryCount, 1,
+                       "Exhausted 429 must bump crossLaunchRetryCount exactly once")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "429 must route to deferred at exhaustion, never fatal")
+    }
+
+    // MARK: Retry-After honoring (GCS-side; distinct from decision 0038's /upload_session item)
+
+    /// Context + fast sleeper + record loaded — shared setup for the schedule tests.
+    private func makeRetryScheduleFixture(
+        clock: @escaping () -> Date = { Date() }
+    ) async throws -> (BlobUploadManager, UploadSessionStore, OSAllocatedUnfairLock<[TimeInterval]>) {
+        let (manager, store, _) = try await makeManager(
+            paths: ["frames/000000.jpg", "bundle.pb"], clock: clock
+        )
+        await manager.setGetAllTasksProvider { [] }
+        let sleeps = OSAllocatedUnfairLock<[TimeInterval]>(initialState: [])
+        await manager.setSleeper { delay in sleeps.withLock { $0.append(delay) } }
+        let record = try await store.load(bundleId: "test-bundle")!
+        try await manager.enqueuePhasOneBlobs(record: record)
+        return (manager, store, sleeps)
+    }
+
+    func test_429_retryAfterSeconds_delayHonored() async throws {
+        // Retry-After: 7 → the retry sleeps [7, 8) (stated wait + jitter < 1),
+        // overriding the exponential schedule (which would be [1, 2) on attempt 0).
+        let (manager, store, sleeps) = try await makeRetryScheduleFixture()
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 429, error: nil, retryAfterHeader: "7"
+        )
+        let recorded = sleeps.withLock { $0 }
+        XCTAssertEqual(recorded.count, 1, "One retry sleep expected")
+        XCTAssertGreaterThanOrEqual(recorded[0], 7, "Delay must be at least the server-stated wait")
+        XCTAssertLessThan(recorded[0], 8, "Delay must be stated wait + jitter (< 1s)")
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(record.blobStatuses["frames/000000.jpg"], .pending,
+                       "Blob stays .pending across an in-process retry")
+        XCTAssertEqual(record.crossLaunchRetryCount, 0,
+                       "In-process retry must not spend the cross-launch budget")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "Honored Retry-After must not fatal")
+    }
+
+    func test_408_retryAfterAboveLocalMax_stillHonoredInFull() async throws {
+        // Retry-After: 45 exceeds the local maxDelaySec (30) but is within the hold cap
+        // (60) — the server's statement overrides the local schedule and is slept in full.
+        let (manager, _, sleeps) = try await makeRetryScheduleFixture()
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 408, error: nil, retryAfterHeader: "45"
+        )
+        let recorded = sleeps.withLock { $0 }
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertGreaterThanOrEqual(recorded[0], 45,
+                                    "Server-stated wait above maxDelaySec must not be clamped down")
+        XCTAssertLessThan(recorded[0], 46)
+    }
+
+    func test_429_noRetryAfterHeader_usesExponentialBackoff() async throws {
+        // Without the header, the shared schedule applies: attempt 0 sleeps [1, 2).
+        let (manager, _, sleeps) = try await makeRetryScheduleFixture()
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 429, error: nil
+        )
+        let recorded = sleeps.withLock { $0 }
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertGreaterThanOrEqual(recorded[0], 1, "Attempt 0 backoff is baseDelaySec + jitter")
+        XCTAssertLessThan(recorded[0], 2)
+    }
+
+    func test_429_retryAfterHTTPDate_delayComputedFromInjectedClock() async throws {
+        // HTTP-date form, resolved against the injected clock: a date 20s ahead of
+        // "now" sleeps [20, 21).
+        let fixedNow = Date(timeIntervalSince1970: 1_445_412_460)  // 2015-10-21 07:27:40 GMT
+        let (manager, _, sleeps) = try await makeRetryScheduleFixture(clock: { fixedNow })
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 429, error: nil,
+            retryAfterHeader: "Wed, 21 Oct 2015 07:28:00 GMT"
+        )
+        let recorded = sleeps.withLock { $0 }
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertGreaterThanOrEqual(recorded[0], 20)
+        XCTAssertLessThan(recorded[0], 21)
+    }
+
+    func test_429_retryAfterExceedsHoldCap_defersTransient_withoutSleeping() async throws {
+        // Retry-After: 3600 — never retry earlier than the server asked, and never hold
+        // the completion chain for an hour: DEFERRED-TRANSIENT immediately, zero sleeps.
+        let (manager, store, sleeps) = try await makeRetryScheduleFixture()
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 429, error: nil, retryAfterHeader: "3600"
+        )
+        XCTAssertTrue(sleeps.withLock { $0 }.isEmpty,
+                      "Beyond the hold cap there must be no in-process sleep")
+        let record = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(record.uploadPhase, .uploadingBlobs, "Hold-cap deferral must NOT mark .failed")
+        XCTAssertEqual(record.blobStatuses["frames/000000.jpg"], .pending)
+        XCTAssertEqual(record.crossLaunchRetryCount, 1,
+                       "Hold-cap deferral is DEFERRED-TRANSIENT: one counter bump")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "Hold-cap deferral must not fatal")
+    }
+
+    func test_503_retryAfterSeconds_delayHonored() async throws {
+        // The honoring mechanism is shared with the 5xx path (503 commonly carries
+        // Retry-After): stated wait 40 > maxDelaySec sleeps in full.
+        let (manager, _, sleeps) = try await makeRetryScheduleFixture()
+        await manager.handleTaskCompletion(
+            taskDescription: taskDesc(relativePath: "frames/000000.jpg"),
+            statusCode: 503, error: nil, retryAfterHeader: "40"
+        )
+        let recorded = sleeps.withLock { $0 }
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertGreaterThanOrEqual(recorded[0], 40)
+        XCTAssertLessThan(recorded[0], 41)
+    }
+
+    // MARK: parseRetryAfter (pure function)
+
+    func test_parseRetryAfter_deltaSeconds() {
+        let now = Date()
+        XCTAssertEqual(BlobUploadManager.parseRetryAfter("120", now: now), 120)
+        XCTAssertEqual(BlobUploadManager.parseRetryAfter("0", now: now), 0,
+                       "Zero is a valid stated wait (retry immediately)")
+        XCTAssertEqual(BlobUploadManager.parseRetryAfter(" 15 ", now: now), 15,
+                       "Surrounding whitespace must be tolerated")
+    }
+
+    func test_parseRetryAfter_httpDate() {
+        // RFC 7231's own example date, pinned against a fixed epoch:
+        // "Wed, 21 Oct 2015 07:28:00 GMT" == 1445412480.
+        let now = Date(timeIntervalSince1970: 1_445_412_420)  // 60s before the date
+        XCTAssertEqual(
+            BlobUploadManager.parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", now: now), 60
+        )
+    }
+
+    func test_parseRetryAfter_pastHTTPDate_clampsToZero() {
+        let now = Date(timeIntervalSince1970: 1_445_412_580)  // 100s after the date
+        XCTAssertEqual(
+            BlobUploadManager.parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", now: now), 0,
+            "A date already in the past means the wait has elapsed"
+        )
+    }
+
+    func test_parseRetryAfter_malformed_returnsNil() {
+        let now = Date()
+        XCTAssertNil(BlobUploadManager.parseRetryAfter(nil, now: now))
+        XCTAssertNil(BlobUploadManager.parseRetryAfter("", now: now))
+        XCTAssertNil(BlobUploadManager.parseRetryAfter("soon", now: now))
+        XCTAssertNil(BlobUploadManager.parseRetryAfter("-5", now: now),
+                     "Negative delta-seconds is malformed, not a zero wait")
+        XCTAssertNil(BlobUploadManager.parseRetryAfter("inf", now: now),
+                     "Non-finite values must not produce an unbounded sleep")
     }
 
     func test_networkExhausted_deferredTransient_bumpsCounter_notFatal() async throws {
@@ -2294,5 +2485,11 @@ extension BlobUploadManager {
     /// Convenience for tests: inject a getAllTasks stub for reconciliation tests.
     func setGetAllTasksProvider(_ provider: @escaping @Sendable () async -> [URLSessionTask]) {
         getAllTasksProvider = provider
+    }
+
+    /// Convenience for tests: inject a sleep recorder so retry-schedule tests assert
+    /// the computed delay (including Retry-After honoring) without real waiting.
+    func setSleeper(_ sleeper: @escaping @Sendable (TimeInterval) async -> Void) {
+        self.sleeper = sleeper
     }
 }
