@@ -18,40 +18,42 @@ export interface StatusMeta {
 
 const META: Record<SceneStatus, StatusMeta> = {
   queued: {
-    label: "Queued",
+    label: "In line",
     tone: "progress",
     terminal: false,
-    description: "Waiting for a reconstruction worker.",
+    description: "Your scan arrived. Analysis begins in a moment.",
   },
   processing: {
-    label: "Processing",
+    label: "Analyzing",
     tone: "progress",
     terminal: false,
-    description: "Reconstructing your room — this can take a few minutes.",
+    description:
+      "Reading the room — finding every object, rebuilding it in 3D, and placing it exactly where it stands.",
   },
   ready: {
     label: "Ready",
     tone: "success",
     terminal: true,
-    description: "Your room is ready to explore.",
+    description: "Analyzed and rebuilt. Step inside.",
   },
   failed: {
     label: "Failed",
     tone: "error",
     terminal: true,
-    description: "Reconstruction failed. Try capturing the room again.",
+    description: "The analysis didn't finish. A fresh scan usually fixes this.",
   },
   failed_incomplete: {
     label: "Upload incomplete",
     tone: "warning",
     terminal: false,
-    description: "Some capture files never arrived. Reopen the iOS app to finish uploading.",
+    description:
+      "Some of the scan never arrived. Reopen the iOS app to finish uploading.",
   },
   failed_invalid: {
-    label: "Invalid capture",
+    label: "Unreadable scan",
     tone: "error",
     terminal: true,
-    description: "The capture couldn't be read. Try capturing the room again.",
+    description: "This scan couldn't be read. Try scanning the room again.",
   },
 };
 
