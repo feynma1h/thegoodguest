@@ -1,16 +1,22 @@
-# roomstudio
+# roomstudio (working name — no product name has been chosen)
 
-A spatial intelligence platform: capture a room with an iPhone, get a per-object 3D-Gaussian-splat scene you can edit in a browser.
+A spatial intelligence product that helps people discover the best version of their home: AI-powered room analysis, conversational redesign, and an immersive 3D representation of *their own* space.
 
 This file is the always-current state of the project. Both Claude Code (reads it automatically) and Claude Chat (you upload it) consume it at the start of every session. If something in here is wrong, fix it before doing anything else.
 
 ## What we're building
 
-A premium consumer product with three surfaces:
+**The thesis: every home contains a version of itself that its owner has never seen. This product makes that version visible, understandable, and achievable — one conversation at a time.** Every feature decision filters through this. The full founding vision lives at `docs/product/initial-idea-draft.md` (verbatim, with what's superseded vs durable mapped in decision 0055) — read it before making product-surface decisions.
+
+This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction is the *medium*; the product is helping people make AI-based decisions about improving their room. Three product layers frame everything: the **AI layer** (understands space structurally — object relationships, traffic flow, light, proportion — with algorithmic spatial analysis before any LLM is invoked, and reasoning traces on every design decision), the **emotional layer** (feels personal, not algorithmic — the experience bar is Linear/Vercel/Figma-tier premium consumer software; conversation is the primary post-reveal interface; the cinematic reveal is the defining moment; serif = feeling, mono = thinking), and the **social layer** (rooms are identity — sharing, comparison, evolution over time). Direction, not yet commitments: room health scoring, taste graph, lighting simulation, budget-aware shopping, DAG version history. Deliberately out (per the founding draft, still sound): AR overlay, social feed, photorealistic image generation, floor plans, voice input; desktop-first.
+
+**Naming:** "RoomMind" (the draft's name) was discarded; nothing has been chosen. "roomstudio" is a stand-in used for the repo, GCP project, and wordmark — the web wordmark is isolated in `web/src/components/Wordmark.tsx` for a one-file swap when the name lands.
+
+Three technical surfaces today:
 
 - **iOS capture app** (Swift + ARKit + RoomPlan) — capture-only, no viewer. The app's only job is producing a high-quality capture bundle and uploading it. Users come to the web for everything else.
-- **Backend perception pipeline** (FastAPI on Cloud Run, `asia-southeast1`) — ingests bundles, runs SAM 3 segmentation + SAM 3D Objects reconstruction, places objects in the room's gravity-aligned metric frame using ARKit data, generates inpainted scene-3DGS for walls/floor.
-- **Web app** (Next.js, static export + web splat rendering — WebGL2 via Spark, decision 0053 — hosted on Firebase Hosting) — the actual product. Browse, edit, replace, share scenes. Capture path is one screen: "Open the iOS app." Auth: same Firebase identity as iOS — requires upgrading iOS's anonymous auth to a real sign-in linked to the existing anonymous credential (see "Next on the board"); anonymous UIDs don't carry across devices.
+- **Backend perception pipeline** (FastAPI on Cloud Run, `asia-southeast1`) — ingests bundles, runs SAM 3 segmentation + SAM 3D Objects reconstruction, places objects in the room's gravity-aligned metric frame using ARKit data (decision 0052), generates inpainted scene-3DGS for walls/floor (unbuilt). This is the modern substrate for the draft's perception + spatial-reasoning layers; the spatial relationship graph and design-generation layers above it are unbuilt.
+- **Web app** (Next.js, static export + web splat rendering — WebGL2 via Spark, decision 0053 — hosted on Firebase Hosting) — the product surface: today rooms + viewer; next analysis, conversation, and redesign. Capture path is one screen: "Open the iOS app." Auth: same Firebase identity as iOS — requires upgrading iOS's anonymous auth to a real sign-in linked to the existing anonymous credential (see "Next on the board"); anonymous UIDs don't carry across devices.
 
 Photo-upload (Android, no-iPhone users) is a deferred concern. Until the iOS path is solid we don't build the web-fallback capture.
 
