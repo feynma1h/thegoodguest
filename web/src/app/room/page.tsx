@@ -54,15 +54,18 @@ function RoomChrome({
       <div className="flex items-baseline gap-4">
         <Link
           href="/rooms"
-          className={`pointer-events-auto text-xs font-medium transition-colors ${dim}`}
+          className={`pointer-events-auto whitespace-nowrap text-xs font-medium transition-colors ${dim}`}
         >
           ← your house
         </Link>
-        <Link href="/" className="pointer-events-auto transition-opacity hover:opacity-70">
-          <Wordmark tone={tone} />
+        <Link
+          href="/"
+          className="pointer-events-auto hidden transition-opacity hover:opacity-70 sm:block"
+        >
+          <Wordmark tone={tone} className="whitespace-nowrap" />
         </Link>
         <span
-          className={`font-serif text-[15px] italic ${
+          className={`hidden font-serif text-[15px] italic sm:inline ${
             tone === "cream" ? "text-paper/85" : "text-ink/85"
           }`}
         >
@@ -83,8 +86,8 @@ function CapturedChip({ createdAt }: { createdAt: string }) {
     minute: "2-digit",
   });
   return (
-    <span className="flex items-center gap-2 rounded-full border border-ink/15 bg-paper/90 px-3.5 py-1.5 text-xs text-ink/75">
-      <span aria-hidden className="h-2 w-2 rounded-full bg-sun" />
+    <span className="flex items-center gap-2 whitespace-nowrap rounded-full border border-ink/15 bg-paper/90 px-3.5 py-1.5 text-xs text-ink/75">
+      <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-sun" />
       as captured · {time}
     </span>
   );
