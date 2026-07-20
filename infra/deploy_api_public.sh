@@ -32,6 +32,13 @@ RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 BUNDLE_BUCKET="roomstudio-captures"
 
+# Secret Manager secret holding the Anthropic API key for the conversation
+# guest model (decision 0058). The secret VALUE is operator-managed; this
+# script only checks existence and binds access. Create it once with:
+#   printf '%s' "$THE_KEY" | gcloud secrets create anthropic-api-key \
+#       --project=roomstudio --replication-policy=automatic --data-file=-
+ANTHROPIC_SECRET_NAME="anthropic-api-key"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
@@ -50,6 +57,7 @@ gcloud services enable \
     artifactregistry.googleapis.com \
     firestore.googleapis.com \
     storage.googleapis.com \
+    secretmanager.googleapis.com \
     iam.googleapis.com \
     --project="${PROJECT_ID}"
 echo "APIs enabled."
@@ -89,6 +97,27 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUNDLE_BUCKET}" \
     echo "  Note: bucket ${BUNDLE_BUCKET} may not exist yet — re-run after bucket creation."
 }
 
+# api-public-runtime: read the Anthropic API key at runtime (conversation
+# stage 1, decision 0058). The grant is SECRET-scoped, not project-scoped.
+# Fail fast if the secret doesn't exist — a --set-secrets deploy against a
+# missing secret fails later with a much less legible error.
+if gcloud secrets describe "${ANTHROPIC_SECRET_NAME}" \
+        --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud secrets add-iam-policy-binding "${ANTHROPIC_SECRET_NAME}" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/secretmanager.secretAccessor" \
+        --project="${PROJECT_ID}" \
+        --quiet >/dev/null
+    echo "  secretAccessor on ${ANTHROPIC_SECRET_NAME} granted to api-public-runtime."
+else
+    echo "ERROR: Secret Manager secret '${ANTHROPIC_SECRET_NAME}' does not exist."
+    echo "The conversation endpoint requires it. Create it (operator step —"
+    echo "the key value is yours), then re-run this script:"
+    echo "  printf '%s' \"\$THE_KEY\" | gcloud secrets create ${ANTHROPIC_SECRET_NAME} \\"
+    echo "      --project=${PROJECT_ID} --replication-policy=automatic --data-file=-"
+    exit 1
+fi
+
 # Cloud Build SA needs to be able to deploy as the runtime SA.
 PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" \
     --format='value(projectNumber)')"
@@ -123,6 +152,9 @@ gcloud builds submit . \
     --substitutions="_IMAGE_URI=${IMAGE_URI}"
 
 # ── Step 6: Deploy to Cloud Run ───────────────────────────────────────────────
+# --timeout=120: the conversation streaming route's request envelope
+# (decision 0058) = 60 s model-call cap + shield drain + persist margin.
+# The server-side turn reservation TTL (150 s) deliberately exceeds this.
 echo ""
 echo "=== 6/7: Deploying to Cloud Run ==="
 
@@ -152,11 +184,12 @@ gcloud run deploy "${SERVICE_NAME}" \
     --concurrency=80 \
     --min-instances=0 \
     --max-instances=10 \
-    --timeout=30 \
+    --timeout=120 \
     --port=8080 \
     --allow-unauthenticated \
     --service-account="${RUNTIME_SA}" \
     --env-vars-file="infra/api-public.env.yaml" \
+    --set-secrets="ANTHROPIC_API_KEY=${ANTHROPIC_SECRET_NAME}:latest" \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
     "${TRAFFIC_FLAGS[@]}" --tag=candidate
 
