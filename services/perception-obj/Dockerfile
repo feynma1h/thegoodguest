@@ -181,6 +181,14 @@ COPY services/perception-obj/process_receiver.py /app/process_receiver.py
 COPY services/perception-obj/oidc.py /app/oidc.py
 COPY services/perception-obj/receiver_repo.py /app/receiver_repo.py
 COPY services/perception-obj/fcm.py /app/fcm.py
+COPY services/perception-obj/placement.py /app/placement.py
+COPY services/perception-obj/fusion.py /app/fusion.py
+
+# Deferred-import smoke: placement/fusion are imported lazily inside /process,
+# so a missing COPY above passes /health and every pre-traffic probe, then
+# breaks the first real reconstruction. Fail the BUILD instead. (Light imports
+# only — numpy + roomstudio_schemas; no torch, no model weights.)
+RUN python -c "import placement, fusion"
 
 ENV PORT=8080
 EXPOSE 8080
