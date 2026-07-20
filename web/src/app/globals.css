@@ -1,30 +1,57 @@
 @import "tailwindcss";
 
-/* Neutral, content-first theme (decision 0056: Apple-grade restraint).
-   Chrome is permanently achromatic — near-black surfaces, hairline
-   borders, white primary actions. Color belongs to CONTENT (the user's
-   room, its light), never to UI chrome.
+/* The Good Guest design language (design file: "Good Guest — Product
+   System"; decision 0057 supersedes parts of 0056). Warm, literary,
+   hospitable: parchment surfaces, warm-brown ink, rust for actions,
+   muted gold STRICTLY as light/sun indicators — never ornament. Dark
+   ink panels are the emphasis register (thresholds, terminal failure).
 
-   Type rules: sans (Geist) does everything — hierarchy comes from weight,
-   size, and tracking. Mono (DM Mono) appears ONLY for machine data:
-   identifiers, coordinates, reasoning traces. No decorative type. */
+   Type roles: serif (Source Serif 4) is the guest's voice (italic) and
+   display statements; sans (Instrument Sans) is all UI; mono (IBM Plex
+   Mono) is eyebrow labels and machine data (ids, coordinates). */
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --paper: #f7efdf; /* screen background, cream text on dark panels */
+  --parchment: #e9e2d2; /* recessed/inset tone */
+  --ink: #3a2d22; /* text; also the dark-panel surface */
+  --accent: #8e3b2f; /* rust — primary actions, emphasis, links */
+  --accent-deep: #6e2d24; /* rust hover */
+  --sun: #c9a25e; /* light indicators only (capture time, listening) */
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-dm-mono);
+  /* Aliases kept so background/foreground utilities stay coherent. */
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --color-paper: var(--paper);
+  --color-parchment: var(--parchment);
+  --color-ink: var(--ink);
+  --color-accent: var(--accent);
+  --color-accent-deep: var(--accent-deep);
+  --color-sun: var(--sun);
+  --font-sans: var(--font-instrument-sans);
+  --font-serif: var(--font-source-serif);
+  --font-mono: var(--font-plex-mono);
+}
+
+@theme {
+  /* Warm ink shadows — lift (cards), float (overlays), deep (modals). */
+  --shadow-lift: 0 2px 8px rgba(58, 45, 34, 0.08);
+  --shadow-float: 0 8px 24px rgba(58, 45, 34, 0.12);
+  --shadow-deep: 0 12px 32px rgba(58, 45, 34, 0.16);
+}
+
+/* Placeholder stage texture — where a room will be but isn't rendered
+   (card thumbs, forming states). Straight from the design file's splat
+   placeholder hatch. */
+@utility hatch {
+  background: repeating-linear-gradient(45deg, #efe5d0 0 12px, #e7dcc4 12px 24px);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--paper);
+  color: var(--ink);
 }
 
 ::selection {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(142, 59, 47, 0.18);
 }
