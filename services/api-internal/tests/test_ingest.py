@@ -2,18 +2,25 @@
 
 Requests enter through POST /ingest/eventarc (the only ingest entry point;
 the legacy direct /ingest route was removed) via the _post_bundle_event
-helper. Tests are structured around the four validation checks in
-validation.py, plus happy paths and dispatch integration:
+helper. Tests are structured around the validation checks in validation.py,
+plus happy paths and dispatch integration:
   - valid ARKIT_ONLY bundle → 200 + {scene_id, status: "queued"}
   - valid LIDAR_ARKIT bundle with depth → 200 + {scene_id, status: "queued"}
   - dispatch happy path — Scene created in repo, task enqueued with correct shape
   - dispatch failure mode — dispatcher raises → 500, Scene marked failed
   - unsupported schema_version → 200 + failed_invalid Scene
+  - proto bundle_id ≠ URI-derived bundle_id → 200 + failed_invalid Scene
+    (including case-differing and empty proto bundle_id)
   - missing device_id → 200 + failed_invalid Scene ("unknown" sentinel)
   - non-unit quaternion → 200 + failed_invalid Scene
   - depth frame on ARKIT_ONLY tier → 200 + failed_invalid Scene
   - absolute gs:// path → 200 + failed_invalid Scene
   - malformed proto bytes → 400 bundle_parse_failed
+
+Bundle builders take a bundle_id that must match the bundle_id in the URI
+the test posts (the validate_bundle cross-check rejects any divergence —
+the pre-crosscheck fixtures here used to carry a random UUID against a
+"test" URI, exactly the silent mismatch the check now catches).
 
 The GCS fetch (_fetch_bundle_bytes) is patched out in every test.
 Bundles are built in-memory using roomstudio_schemas directly — no file I/O,
@@ -43,6 +50,7 @@ import ingest_server as server  # the service module  # noqa: E402
 from repository import InMemorySceneRepository  # noqa: E402
 from dispatcher import InMemoryTaskDispatcher  # noqa: E402
 from scene import SceneStatus  # noqa: E402
+from validation import validate_bundle  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +81,7 @@ def _post_bundle_event(client: TestClient, bundle_uri: str):
 def _make_bundle(
     *,
     schema_version: str = SCHEMA_VERSION,
+    bundle_id: str = "test",
     tier=None,
     frame_count: int = 3,
     add_depth: bool = False,
@@ -85,13 +94,17 @@ def _make_bundle(
     The tier defaults to LIDAR_ARKIT when add_depth=True, ARKIT_ONLY otherwise,
     so the default bundle always passes tier-vs-depth consistency. Callers can
     override tier to deliberately create an invalid bundle.
+
+    bundle_id defaults to "test" — matching the captures/test/bundle.pb URIs
+    this module posts — so the default bundle passes the bundle_id
+    cross-check. Tests posting a different URI must pass the matching id.
     """
     if tier is None:
         tier = LIDAR_ARKIT if add_depth else ARKIT_ONLY
 
     b = CaptureBundle()
     b.schema_version = schema_version
-    b.bundle_id = str(uuid.uuid4())
+    b.bundle_id = bundle_id
     b.user_id = "test-user"
     b.device.device_id = str(uuid.uuid4())
     b.device.hardware_id = "test-device"
@@ -314,7 +327,7 @@ def test_corrupt_quaternion_creates_failed_invalid_scene(client: TestClient) -> 
     """
     b = CaptureBundle()
     b.schema_version = SCHEMA_VERSION
-    b.bundle_id = str(uuid.uuid4())
+    b.bundle_id = "test"  # matches the posted URI — passes the cross-check
     b.user_id = "test-user"
     b.device.device_id = str(uuid.uuid4())
     b.tier = ARKIT_ONLY
@@ -353,7 +366,7 @@ def test_missing_device_id_creates_failed_invalid_scene(client: TestClient) -> N
     """
     b = CaptureBundle()
     b.schema_version = SCHEMA_VERSION
-    b.bundle_id = str(uuid.uuid4())
+    b.bundle_id = "test"  # matches the posted URI — passes the cross-check
     b.user_id = "test-user"
     b.device.hardware_id = "iPhone15,3"  # deliberately no device_id
     b.tier = ARKIT_ONLY
@@ -423,7 +436,7 @@ def test_absolute_rgb_path_creates_failed_invalid_scene(client: TestClient) -> N
     """Bundle with a full gs:// URI in rgb_gcs_path → 200 + failed_invalid Scene."""
     b = CaptureBundle()
     b.schema_version = SCHEMA_VERSION
-    b.bundle_id = str(uuid.uuid4())
+    b.bundle_id = "test"  # matches the posted URI — passes the cross-check
     b.user_id = "test-user"
     b.device.device_id = str(uuid.uuid4())
     b.tier = ARKIT_ONLY
@@ -451,6 +464,171 @@ def test_absolute_rgb_path_creates_failed_invalid_scene(client: TestClient) -> N
 
 
 # ---------------------------------------------------------------------------
+# bundle_id cross-check (proto vs URI-derived)
+# ---------------------------------------------------------------------------
+
+class TestBundleIdCrosscheck:
+    """Tests for validation check 2: bundle.bundle_id must equal the
+    bundle_id derived from the upload URI.
+
+    A mismatched bundle previously passed validation silently — the Scene
+    keys on the URI-derived id while the proto claimed another, breaking
+    every downstream join on bundle_id. Like every contract-validation
+    failure, a mismatch yields a pollable failed_invalid Scene + HTTP 200
+    (decision 0031's pattern), never a bare 400.
+    """
+
+    def test_mismatched_bundle_id_creates_failed_invalid_scene(
+        self, client: TestClient
+    ) -> None:
+        """Proto bundle_id ≠ URI bundle_id → 200 + failed_invalid, no dispatch."""
+        uri_id = str(uuid.uuid4())
+        proto_id = str(uuid.uuid4())
+        bundle_bytes = _make_bundle(frame_count=1, bundle_id=proto_id)
+        repo = InMemorySceneRepository()
+        dispatcher = InMemoryTaskDispatcher()
+        mock_image_check = MagicMock(return_value=[])
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", mock_image_check),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_task_dispatcher", dispatcher),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+        ):
+            resp = _post_bundle_event(
+                client, f"gs://test-bucket/captures/{uri_id}/bundle.pb"
+            )
+
+        # 200 (not 400) so Pub/Sub acknowledges and does not retry.
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "failed_invalid"
+        assert body["error"] == "bundle_id_mismatch"
+
+        scenes = list(repo._store.values())
+        assert len(scenes) == 1
+        scene = scenes[0]
+        assert scene.status == SceneStatus.FAILED_INVALID
+        # The Scene keys on the URI-derived id — the id pollers actually use.
+        assert scene.bundle_id == uri_id
+        # last_error carries both ids so an operator can see which side is wrong.
+        assert "bundle_id_mismatch" in (scene.last_error or "")
+        assert proto_id in (scene.last_error or "")
+        assert uri_id in (scene.last_error or "")
+        # Terminal pre-GPU: nothing enqueued, image gate never reached.
+        assert len(dispatcher.tasks) == 0
+        mock_image_check.assert_not_called()
+
+    def test_case_differing_bundle_id_is_rejected(self, client: TestClient) -> None:
+        """A case-differing pair is a mismatch, not a match.
+
+        Every downstream join on bundle_id (Firestore scenes.bundle_id
+        queries, upload_sessions doc IDs, captures/{bundle_id}/ GCS paths)
+        is byte-wise, so 'ABC…' vs 'abc…' breaks those joins exactly like a
+        wholly different id. The comparison is deliberately case-sensitive;
+        the iOS client lowercases bundle_id and builds the upload path from
+        the same value, so only a non-conforming client can produce this.
+        """
+        uri_id = str(uuid.uuid4())  # canonical lowercase
+        proto_id = uri_id.upper()   # same UUID text, wrong case
+        bundle_bytes = _make_bundle(frame_count=1, bundle_id=proto_id)
+        repo = InMemorySceneRepository()
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+        ):
+            resp = _post_bundle_event(
+                client, f"gs://test-bucket/captures/{uri_id}/bundle.pb"
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "failed_invalid"
+        assert body["error"] == "bundle_id_mismatch"
+        scenes = list(repo._store.values())
+        assert len(scenes) == 1
+        assert scenes[0].status == SceneStatus.FAILED_INVALID
+
+    def test_empty_proto_bundle_id_is_rejected(self, client: TestClient) -> None:
+        """An unset/empty proto bundle_id can never match the URI-derived id
+        (the ingest URI regex guarantees non-empty) — previously an empty
+        bundle_id passed validation silently."""
+        bundle_bytes = _make_bundle(frame_count=1, bundle_id="")
+        repo = InMemorySceneRepository()
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+        ):
+            resp = _post_bundle_event(client, "gs://test-bucket/captures/test/bundle.pb")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "failed_invalid"
+        assert body["error"] == "bundle_id_mismatch"
+
+    def test_matching_bundle_id_reaches_queued(self, client: TestClient) -> None:
+        """Exact match — the conforming-client case — proceeds to QUEUED."""
+        bid = str(uuid.uuid4())
+        bundle_bytes = _make_bundle(frame_count=1, bundle_id=bid)
+        repo = InMemorySceneRepository()
+        dispatcher = InMemoryTaskDispatcher()
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_task_dispatcher", dispatcher),
+        ):
+            resp = _post_bundle_event(
+                client, f"gs://test-bucket/captures/{bid}/bundle.pb"
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "queued"
+        assert len(dispatcher.tasks) == 1
+
+    def test_no_expected_id_skips_crosscheck(self) -> None:
+        """validate_bundle without expected_bundle_id skips check 2 only.
+
+        Callers with no upload URI in hand (the api-core fixture self-tests)
+        validate bundle content in isolation; any bundle_id passes there.
+        With an expected id supplied, the same bundle matches or mismatches.
+        """
+        b = CaptureBundle()
+        b.ParseFromString(_make_bundle(frame_count=1, bundle_id=str(uuid.uuid4())))
+        assert validate_bundle(b) is None
+        assert validate_bundle(b, expected_bundle_id=b.bundle_id) is None
+        err = validate_bundle(b, expected_bundle_id="something-else")
+        assert err is not None
+        assert err[0] == "bundle_id_mismatch"
+
+    def test_crosscheck_order_between_schema_and_device_id(self) -> None:
+        """Check ordering: schema_version fires before the cross-check; the
+        cross-check fires before device_id (a mis-identified bundle's content
+        errors are noise — identity is reported first)."""
+        b = CaptureBundle()
+        b.schema_version = "99.0.0"  # bad schema AND mismatched id
+        b.bundle_id = "proto-id"
+        err = validate_bundle(b, expected_bundle_id="uri-id")
+        assert err is not None
+        assert err[0] == "unsupported_schema_version"
+
+        b2 = CaptureBundle()
+        b2.schema_version = SCHEMA_VERSION  # mismatched id AND missing device_id
+        b2.bundle_id = "proto-id"
+        err2 = validate_bundle(b2, expected_bundle_id="uri-id")
+        assert err2 is not None
+        assert err2[0] == "bundle_id_mismatch"
+
+
+# ---------------------------------------------------------------------------
 # Blob validation gate
 # ---------------------------------------------------------------------------
 
@@ -467,7 +645,7 @@ class TestBlobValidationGate:
 
     def test_undersized_blobs_return_failed_invalid(self, client: TestClient) -> None:
         """_validate_image_blobs returning TOO_SMALL entries → 200 status=failed_invalid."""
-        bundle_bytes = _make_bundle(frame_count=2)
+        bundle_bytes = _make_bundle(frame_count=2, bundle_id="bundle-abc")
         repo = InMemorySceneRepository()
         dispatcher = InMemoryTaskDispatcher()
 
@@ -499,7 +677,7 @@ class TestBlobValidationGate:
 
     def test_bad_magic_blobs_return_failed_invalid(self, client: TestClient) -> None:
         """_validate_image_blobs returning BAD_MAGIC → 200 status=failed_invalid."""
-        bundle_bytes = _make_bundle(frame_count=1)
+        bundle_bytes = _make_bundle(frame_count=1, bundle_id="bundle-abc")
         repo = InMemorySceneRepository()
         dispatcher = InMemoryTaskDispatcher()
 
@@ -521,7 +699,7 @@ class TestBlobValidationGate:
 
     def test_valid_blobs_proceed_to_queued(self, client: TestClient) -> None:
         """_validate_image_blobs returning [] → scene reaches QUEUED and task enqueued."""
-        bundle_bytes = _make_bundle(frame_count=2)
+        bundle_bytes = _make_bundle(frame_count=2, bundle_id="bundle-abc")
         repo = InMemorySceneRepository()
         dispatcher = InMemoryTaskDispatcher()
 
@@ -539,7 +717,7 @@ class TestBlobValidationGate:
 
     def test_failed_invalid_scene_has_invalid_blobs_field(self, client: TestClient) -> None:
         """Scene.invalid_blobs carries the structured list from _validate_image_blobs."""
-        bundle_bytes = _make_bundle(frame_count=1)
+        bundle_bytes = _make_bundle(frame_count=1, bundle_id="bundle-abc")
         repo = InMemorySceneRepository()
 
         invalid = [{"relative_path": "frames/000000.jpg", "reason": "unrecognized_format"}]
