@@ -10,6 +10,12 @@
 ///   onDisappear + background → pause()
 ///   foreground return → resume() (immediate tick, no cadence wait)
 ///
+/// Manual refresh is pull-to-refresh, not a button: the content lives in a
+/// ScrollView (.refreshable does not attach to a bare VStack) whose gesture is
+/// enabled only while a poll loop is actually running — in every other state
+/// checkNow() has nothing to kick, and a spinner that does nothing would be a
+/// false affordance.
+///
 /// Re-upload action for .recoverable is intentionally absent here — that front
 /// is separate. This view surfaces the count and the path list is on the model.
 
@@ -24,12 +30,27 @@ struct SceneStatusView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            stateContent
-            Spacer()
+        // GeometryReader + minHeight keeps the content vertically centered in the
+        // available space, exactly as the previous Spacer pair did, while giving
+        // .refreshable the scrollable container it requires.
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 24) {
+                    stateContent
+                }
+                .padding(.horizontal, 32)
+                .frame(maxWidth: .infinity, minHeight: geo.size.height)
+            }
+            .refreshable {
+                // checkNow() cancels the current cadence sleep → immediate tick.
+                // The tick is fire-and-forget by design, so the brief hold below is
+                // presentation-only: returning instantly would collapse the refresh
+                // indicator before the pull reads as acknowledged.
+                ScenePoller.shared.checkNow()
+                try? await Task.sleep(nanoseconds: 600_000_000)
+            }
+            .scrollDisabled(!isPolling)
         }
-        .padding(.horizontal, 32)
         .task { await onAppearAsync() }
         .onDisappear { ScenePoller.shared.pause() }
         .onChange(of: scenePhase) { _, phase in
@@ -45,6 +66,13 @@ struct SceneStatusView: View {
     }
 
     // MARK: - State rendering
+
+    /// Pull-to-refresh is live only while a poll loop is running: checkNow() kicks
+    /// the cadence sleep, and there is no sleep to kick in any other state.
+    private var isPolling: Bool {
+        if case .polling = poller.pollState { return true }
+        return false
+    }
 
     @ViewBuilder
     private var stateContent: some View {
@@ -107,15 +135,12 @@ struct SceneStatusView: View {
             }
 
             if longRunning {
-                // Quiet text link, not a bordered control — this is a reassurance
-                // affordance, not a primary action.
-                Button("Check now") {
-                    ScenePoller.shared.checkNow()
-                }
-                .buttonStyle(.plain)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
+                // Quiet affordance note, not a control — the pull gesture on the
+                // surrounding ScrollView is the actual trigger (see body).
+                Text("Pull down to check again")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
             }
         }
     }
