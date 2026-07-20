@@ -482,6 +482,17 @@ final class BlobUploadManagerTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: outputDir) }
 
+        // Blob files must exist on disk: the re-mint manifest reads real sizes and
+        // fatals on a missing file.
+        for path in ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"] {
+            let fileURL = outputDir.appendingPathComponent(path)
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data([0x00, 0x01]).write(to: fileURL)
+        }
+
         // Create a record where frames/000000.jpg is already uploaded.
         let entries  = makeSessionEntries(["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"])
         var record   = UploadSessionRecord(
@@ -723,10 +734,11 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     func test_stalenessRemint_blobFileMissing_routesToFatalError() async throws {
-        // Staleness re-enqueue: blob file missing from disk (App Support dir cleared).
-        // NEW ORDERING: the pre-pass checks all files before mutating any state, so a
-        // missing-file abort must leave the store untouched and start zero uploads.
-        // Expect: onFatalBlobError("blob_file_missing_at_staleness_remint") fired once;
+        // Staleness re-mint: blob file missing from disk (App Support dir cleared).
+        // A file already missing when onSessionExpired starts is caught at manifest
+        // build (real-size read, pre-mint) — before the staleness pre-pass — so the
+        // abort must leave the store untouched and start zero uploads.
+        // Expect: onFatalBlobError("blob_unreadable_at_remint_manifest") fired once;
         //         no blob status reset to .pending; bundle.pb NOT finalized.
         let fixedNow = Date()
         let mintTime = fixedNow.addingTimeInterval(-(12 * 3600 + 60))
@@ -752,21 +764,125 @@ final class BlobUploadManagerTests: XCTestCase {
         let fatal = await manager._fatalBlobErrorInvocations
         XCTAssertFalse(fatal.isEmpty, "Missing blob file must route to onFatalBlobError")
         XCTAssertTrue(
-            fatal.allSatisfy { $0.reason == "blob_file_missing_at_staleness_remint" },
-            "Reason must be blob_file_missing_at_staleness_remint; got: \(fatal.map(\.reason))"
+            fatal.allSatisfy { $0.reason == "blob_unreadable_at_remint_manifest" },
+            "Reason must be blob_unreadable_at_remint_manifest; got: \(fatal.map(\.reason))"
         )
         let completed = await manager._bundleCompleteInvocations
         XCTAssertTrue(completed.isEmpty, "bundle.pb must NOT be finalized when a blob file is missing")
 
-        // KEY ZERO-SIDE-EFFECTS ASSERTIONS (new pre-pass ordering guarantee):
-        // The pre-pass aborts before resettingNonBundlePbBlobsToPending is called,
-        // so the store must reflect exactly the pre-call state — no status mutation,
-        // no reset record persisted, zero URLSession tasks enqueued.
+        // KEY ZERO-SIDE-EFFECTS ASSERTIONS (manifest-build ordering guarantee):
+        // The manifest build aborts before the mint call, the fresh-record save, and
+        // resettingNonBundlePbBlobsToPending, so apart from the .failed phase the store
+        // must reflect the pre-call state — no status mutation, no fresh URIs persisted,
+        // zero URLSession tasks enqueued.
         let afterAbort = try await store.load(bundleId: "test-bundle")!
         XCTAssertEqual(afterAbort.blobStatuses["frames/000000.jpg"], .uploaded,
-                       "Pre-pass abort must NOT reset blob status to .pending (zero state mutation)")
+                       "Manifest-build abort must NOT reset blob status to .pending (zero state mutation)")
         XCTAssertEqual(afterAbort.blobStatuses["bundle.pb"], .pending,
                        "bundle.pb status must remain .pending after abort (unchanged from pre-call)")
+        XCTAssertEqual(afterAbort.sessionUri(for: "frames/000000.jpg"),
+                       "https://gcs.example.com/frames/000000.jpg",
+                       "Abort happens pre-mint: fresh URIs must never be persisted")
+    }
+
+    // MARK: - onSessionExpired: real manifest sizes (pre-launch gap (c) client half)
+
+    func test_onSessionExpired_remintManifestCarriesRealSizes() async throws {
+        // The re-mint manifest must carry each blob's real on-disk size — including
+        // already-uploaded blobs, since the full path-set is the idempotency key —
+        // never the historical placeholder 0.
+        let paths = ["frames/000000.jpg", "frames/000001.jpg", "bundle.pb"]
+        let (manager, store, outputDir) = try await makeManager(paths: paths)
+
+        // Overwrite the 2-byte placeholder files with distinct known sizes.
+        try Data(count: 5).write(to: outputDir.appendingPathComponent("frames/000000.jpg"))
+        try Data(count: 7).write(to: outputDir.appendingPathComponent("frames/000001.jpg"))
+        try Data(count: 3).write(to: outputDir.appendingPathComponent("bundle.pb"))
+        // One blob already uploaded: it must still appear in the manifest with its real size.
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000000.jpg")
+
+        let captured = OSAllocatedUnfairLock<[UploadManifestEntry]>(initialState: [])
+        await manager.setRemintProvider { _, manifest in
+            captured.withLock { $0 = manifest }
+            return [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.example.com/f0"),
+                UploadSessionEntry(relativePath: "frames/000001.jpg", sessionUri: "https://fresh.example.com/f1"),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://fresh.example.com/bp"),
+            ]
+        }
+
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        let sizesByPath = Dictionary(
+            uniqueKeysWithValues: captured.withLock { $0 }.map { ($0.relativePath, $0.expectedSizeBytes) }
+        )
+        XCTAssertEqual(sizesByPath, [
+            "frames/000000.jpg": 5,
+            "frames/000001.jpg": 7,
+            "bundle.pb":         3,
+        ], "Re-mint manifest must carry real on-disk sizes for every manifest path")
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertTrue(fatal.isEmpty, "Re-mint with readable files must not fatal; got: \(fatal.map(\.reason))")
+    }
+
+    func test_onSessionExpired_blobFileMissingAtManifestBuild_fatalsWithoutMintCall() async throws {
+        // A blob file missing at size-read time routes to the existing fatal path —
+        // never a silent expectedSizeBytes = 0 — and no /upload_session call is spent
+        // on a session that could not be used.
+        let (manager, store, outputDir) = try await makeManager(paths: ["frames/000000.jpg", "bundle.pb"])
+        try FileManager.default.removeItem(at: outputDir.appendingPathComponent("frames/000000.jpg"))
+
+        let mintCalls = OSAllocatedUnfairLock(initialState: 0)
+        await manager.setRemintProvider { _, _ in
+            mintCalls.withLock { $0 += 1 }
+            return [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.example.com/f0"),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://fresh.example.com/bp"),
+            ]
+        }
+
+        await manager.onSessionExpired(bundleId: "test-bundle")
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertEqual(fatal.count, 1, "Missing blob file at manifest build must fatal exactly once")
+        XCTAssertEqual(fatal.first?.reason, "blob_unreadable_at_remint_manifest")
+        XCTAssertEqual(fatal.first?.relativePath, "frames/000000.jpg")
+        XCTAssertEqual(mintCalls.withLock { $0 }, 0,
+                       "remintProvider must NOT be called when a blob file is unreadable")
+        let stored = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(stored.uploadPhase, .failed, "Manifest-build fatal must persist .failed")
+        XCTAssertEqual(stored.failureReason, "blob_unreadable_at_remint_manifest")
+    }
+
+    func test_stalenessRemint_fileVanishingAfterManifestBuild_prePassStillCatches() async throws {
+        // Defence-in-depth: the staleness pre-pass (post-mint, pre-reset) still catches
+        // a file that vanishes AFTER the manifest size-read but BEFORE re-enqueue. The
+        // remintProvider stub deletes the file to land in exactly that window.
+        let fixedNow = Date()
+        let mintTime = fixedNow.addingTimeInterval(-(12 * 3600 + 60))
+        let paths = ["frames/000000.jpg", "bundle.pb"]
+        let (manager, store, outputDir) = try await makeManager(
+            paths: paths, mintTimestamp: mintTime, clock: { fixedNow }
+        )
+        _ = try await store.markBlobUploaded(bundleId: "test-bundle", relativePath: "frames/000000.jpg")
+        let record = try await store.load(bundleId: "test-bundle")!
+
+        await manager.setRemintProvider { _, _ in
+            try? FileManager.default.removeItem(at: outputDir.appendingPathComponent("frames/000000.jpg"))
+            return [
+                UploadSessionEntry(relativePath: "frames/000000.jpg", sessionUri: "https://fresh.example.com/f0"),
+                UploadSessionEntry(relativePath: "bundle.pb",         sessionUri: "https://fresh.example.com/bp"),
+            ]
+        }
+
+        await manager.onAllBlobsUploaded(bundleId: "test-bundle", record: record)
+
+        let fatal = await manager._fatalBlobErrorInvocations
+        XCTAssertEqual(fatal.map(\.reason), ["blob_file_missing_at_staleness_remint"],
+                       "Pre-pass must still catch a file that vanishes after the manifest size-read")
+        let afterAbort = try await store.load(bundleId: "test-bundle")!
+        XCTAssertEqual(afterAbort.blobStatuses["frames/000000.jpg"], .uploaded,
+                       "Pre-pass abort must NOT reset blob status to .pending")
     }
 
     func test_coldRelaunch_stalenessRemint_finalizesBundlePb() async throws {
