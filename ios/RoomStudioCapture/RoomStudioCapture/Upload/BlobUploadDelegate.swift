@@ -43,7 +43,11 @@ final class BlobUploadDelegate: NSObject, URLSessionTaskDelegate {
         task: URLSessionTask,
         didCompleteWithError error: Error?
     ) {
-        let statusCode = (task.response as? HTTPURLResponse)?.statusCode
+        let httpResponse = task.response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode
+        // Raw header string; parsed by the manager (which owns the clock for the
+        // HTTP-date form). Honored on the 408/429/5xx retry paths.
+        let retryAfterHeader = httpResponse?.value(forHTTPHeaderField: "Retry-After")
         let desc = task.taskDescription
 
         // Acquire the UIBackgroundTask assertion synchronously on the OS delegate
@@ -74,6 +78,7 @@ final class BlobUploadDelegate: NSObject, URLSessionTaskDelegate {
                 taskDescription:     desc,
                 statusCode:          statusCode,
                 error:               error,
+                retryAfterHeader:    retryAfterHeader,
                 backgroundTaskToken: handle
             )
         }
