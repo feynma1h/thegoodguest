@@ -3,26 +3,29 @@
 /**
  * The landing page's live room — the product demonstrating itself. Loads
  * the dev fixture manifest (tools/make_synthetic_splat.py output) and
- * renders it as an interactive, idly-orbiting scene; the section renders
- * nothing at all when no manifest is present, so a deploy without a demo
- * room simply has no demo section rather than a broken one.
+ * renders it as the hero's only image: an interactive, idly-orbiting
+ * scene with the guest's caption floating over it. When no manifest is
+ * present the hook returns null and the hero simply has no demo panel,
+ * rather than a broken one.
  *
  * LAUNCH NOTE: /dev-fixtures/ is gitignored — the deployed landing page
- * hides this section until a curated real-room capture replaces the
+ * hides the demo until a curated real-room capture replaces the
  * synthetic fixture as the shipped demo.
  */
 
-import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
 import SplatViewer from "@/components/SplatViewer";
+import { GuestLine } from "@/components/ui/voice";
 import {
   assembleScene,
   type PositionedSplat,
   type SceneAssets,
 } from "@/lib/api/types";
 
-export default function DemoRoom() {
+/** Fixture loader shared by whoever presents the demo. Null until loaded;
+ * stays null when no fixture is deployed. */
+export function useDemoSplats(): PositionedSplat[] | null {
   const [splats, setSplats] = useState<PositionedSplat[] | null>(null);
 
   useEffect(() => {
@@ -35,7 +38,7 @@ export default function DemoRoom() {
         const { splats } = assembleScene(assets);
         if (!cancelled && splats.length > 0) setSplats(splats);
       } catch {
-        // No demo room available — section stays hidden.
+        // No demo room available — the demo simply doesn't exist.
       }
     })();
     return () => {
@@ -43,35 +46,24 @@ export default function DemoRoom() {
     };
   }, []);
 
-  if (!splats) return null;
+  return splats;
+}
 
+/** The hero's demo stage: the orbiting room with the guest's caption.
+ * Fills its parent; the caption claims only what is true of the fixture. */
+export default function DemoPanel({ splats }: { splats: PositionedSplat[] }) {
   return (
-    <section className="border-t border-white/[0.06]">
-      <div className="mx-auto max-w-6xl px-6 py-24">
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        >
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            A scan, not a photograph.
-          </h2>
-          <p className="mt-3 max-w-lg text-sm leading-relaxed text-zinc-400">
-            Every object below was rebuilt in 3D from a scan and placed where
-            it actually stood. Grab it and look around.
-          </p>
-        </motion.div>
-        <motion.div
-          initial={{ opacity: 0, y: 32 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-60px" }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
-          className="mt-8"
-        >
-          <SplatViewer splats={splats} idleOrbit className="h-[64vh]" />
-        </motion.div>
+    <div className="relative h-full w-full">
+      <SplatViewer splats={splats} idleOrbit className="h-full min-h-[420px]" />
+      <div className="absolute bottom-5 left-5 max-w-[360px] rounded-xl bg-paper/95 p-4 shadow-float">
+        <GuestLine className="text-[14.5px]">
+          Every piece in this room was scanned, not modeled — the dents came
+          along too. Have a look around.
+        </GuestLine>
+        <p className="mt-1.5 text-[11.5px] text-ink/55">
+          the live demo room — drag to orbit
+        </p>
       </div>
-    </section>
+    </div>
   );
 }
