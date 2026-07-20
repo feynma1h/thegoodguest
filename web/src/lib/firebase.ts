@@ -68,3 +68,23 @@ export async function getFirebaseIdToken(): Promise<string | null> {
     return null;
   }
 }
+
+/** Current user for the account menu; resolves null when signed out. */
+export async function getCurrentUser(): Promise<User | null> {
+  try {
+    return await ensureSignedIn();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sign out. NOTE: with today's anonymous auth this orphans the anon UID —
+ * acceptable for the dev-only identity; once decision 0051's linked
+ * sign-in lands, sign-out becomes a real account operation and this stays
+ * the single call site.
+ */
+export async function signOutUser(): Promise<void> {
+  const { signOut } = await import("firebase/auth");
+  await signOut(getFirebaseAuth());
+}
