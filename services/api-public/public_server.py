@@ -34,6 +34,19 @@ Endpoints:
       on itself (V4 signing runs through IAM signBlob — Cloud Run has no
       private key on disk).
 
+  GET  /scenes/{scene_id}/conversation
+      Conversation meta + the last ~50 turns for the caller's conversation
+      on a ready scene (decision 0058). 200-empty when no conversation
+      exists; 409 scene_not_ready until ready. Consumer: the web app.
+
+  POST /scenes/{scene_id}/conversation/messages
+      One conversation turn. Body {text, client_msg_id}; the response IS
+      the stream: text/event-stream with events delta/done/error and
+      ": ping" comments during model silence. Everything checkable
+      pre-generation returns the JSON {error, detail} contract; once
+      streaming starts, failures travel as a terminal `error` event.
+      Consumer: the web app's composer.
+
 Run locally (from services/api-public/):
   uvicorn public_server:app --reload --port 8080
 
@@ -41,15 +54,24 @@ Environment variables:
   ENVIRONMENT         — set to "production" to enable startup env-var
                         validation. Unset or any other value → silent
                         in-memory fallbacks (local dev / tests).
-  FIRESTORE_PROJECT   — GCP project for Firestore upload_sessions and scenes
-                        collections; absent → in-memory repositories
+  FIRESTORE_PROJECT   — GCP project for Firestore upload_sessions, scenes,
+                        and conversations collections; absent → in-memory
+                        repositories
   GCS_CAPTURES_BUCKET — bucket name for capture blobs; used when minting
                         GCS resumable session URIs
+  ANTHROPIC_API_KEY   — Anthropic API key for the conversation guest model
+                        (production: Secret Manager via Cloud Run
+                        --set-secrets). Absent in dev → the conversation
+                        route degrades to an in-stream model_unavailable
+                        error; everything else works.
+  GUEST_MODEL         — guest model id (default claude-sonnet-5)
+  GUEST_DAILY_TURNS   — per-conversation daily turn quota (default 100)
 
-Consumed by: the iOS capture app and integration tests.
+Consumed by: the iOS capture app, the web app, and integration tests.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -58,7 +80,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 # Configure root logger so application logger.info() calls reach Cloud Logging.
 # By default uvicorn leaves the root logger with no handlers, falling back to
@@ -72,10 +94,17 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message
 logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Header
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from auth import TokenVerifier, NullTokenVerifier, TokenVerificationError
+from conversation_repo import (
+    ConversationRepository,
+    InMemoryConversationRepository,
+    TurnRecord,
+)
+from guest_prompt import PROMPT_VERSION, build_system_prompt, telemetry_flags
+from scene_facts import cached_scene_facts, render_facts_block
 
 # Ensure local packages are importable in dev without a virtualenv install.
 # Gated off in production, where the packages are pip-installed by the
@@ -107,6 +136,7 @@ from roomstudio_api_core.scene_read_repo import (  # noqa: E402
 _PRODUCTION_REQUIRED_VARS: tuple[str, ...] = (
     "FIRESTORE_PROJECT",
     "GCS_CAPTURES_BUCKET",
+    "ANTHROPIC_API_KEY",  # conversation guest model (Secret Manager-mounted)
 )
 
 
@@ -351,6 +381,166 @@ def _get_url_signer():
 
 
 # ---------------------------------------------------------------------------
+# Conversation stage 1 (decision 0058): config + guest model seam
+# ---------------------------------------------------------------------------
+
+# Env-configured knobs. Module-level so tests can patch them.
+GUEST_MODEL = os.environ.get("GUEST_MODEL", "claude-sonnet-5")
+GUEST_DAILY_TURNS = int(os.environ.get("GUEST_DAILY_TURNS", "100"))
+
+# Cost bounds (decision 0058 "Cost" — worst-case per-scene-daily spend is
+# closed-form from these):
+GUEST_MESSAGE_MAX_CHARS = 2000     # request body text ceiling
+GUEST_HISTORY_TURNS = 20           # model context window: last N turns verbatim
+GUEST_MAX_TOKENS = 250             # generous backstop — truncating the guest
+                                   # mid-sentence is worse than a long beat
+GUEST_MODEL_TIMEOUT_S = 60.0       # model call wall-clock cap
+# The reservation TTL MUST exceed the full 120 s request envelope (60 s model
+# cap + shield drain + persist margin): a lease expiring under a legitimate
+# in-flight turn re-admits parallel generation through the mechanism that
+# closed it (decision 0058; lease-expiry-vs-live-holder history: 0011/0012).
+CONVERSATION_RESERVATION_TTL_S = 150
+SSE_PING_INTERVAL_S = 15.0         # ": ping" comment cadence during silence
+CONVERSATION_GET_TURN_LIMIT = 50
+
+# The 429 budget_exhausted guest line: server-authored, fixed, in voice, and
+# time-vague on purpose — "later", never "tomorrow", so voice never promises
+# a boundary the mechanism doesn't keep (resets_at carries the mechanism).
+GUEST_REST_LINE = (
+    "We've talked a lot today, and I want to keep doing right by this room — "
+    "let's pick it up again a little later."
+)
+
+
+class GuestModelError(Exception):
+    """A guest model call failed. `code` is OUR error vocabulary — the SSE
+    error event carries it; upstream provider details stay in logs."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
+        super().__init__(detail or code)
+        self.code = code
+
+
+class AnthropicGuestStreamer:
+    """Production guest streamer: Claude via the Anthropic SDK.
+
+    Yields {"type": "delta", "text": ...} chunks, then one
+    {"type": "final", "stop_reason": ..., "usage": {...}}.
+
+    ZERO tools on the call — read-only is architectural, not charter
+    (decision 0058). Thinking is explicitly disabled: claude-sonnet-5 runs
+    adaptive thinking by default when the field is omitted, and max_tokens
+    caps thinking + speech together — an invisible thought would spend the
+    guest's 250-token beat budget and truncate the reply. No sampling params
+    (rejected by the model family).
+    """
+
+    def __init__(self) -> None:
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            import anthropic  # deferred: not needed by tests
+
+            self._client = anthropic.AsyncAnthropic()
+        return self._client
+
+    async def stream_turn(
+        self,
+        *,
+        model: str,
+        max_tokens: int,
+        system: list[dict],
+        messages: list[dict],
+    ) -> AsyncIterator[dict]:
+        import anthropic  # deferred
+
+        try:
+            async with self._get_client().messages.stream(
+                model=model,
+                max_tokens=max_tokens,
+                thinking={"type": "disabled"},
+                system=system,
+                messages=messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield {"type": "delta", "text": text}
+                final = await stream.get_final_message()
+            usage = final.usage
+            yield {
+                "type": "final",
+                "stop_reason": final.stop_reason or "end_turn",
+                "usage": {
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "cache_read_input_tokens": getattr(
+                        usage, "cache_read_input_tokens", 0
+                    ) or 0,
+                    "cache_creation_input_tokens": getattr(
+                        usage, "cache_creation_input_tokens", 0
+                    ) or 0,
+                },
+            }
+        except anthropic.APIStatusError as exc:
+            code = (
+                "model_unavailable"
+                if exc.status_code == 429 or exc.status_code >= 500
+                else "model_error"
+            )
+            raise GuestModelError(code, str(exc)) from exc
+        except anthropic.APIConnectionError as exc:
+            raise GuestModelError("model_unavailable", str(exc)) from exc
+
+
+class NullGuestStreamer:
+    """Dev fallback when no ANTHROPIC_API_KEY is configured: fails honestly
+    as an in-stream model_unavailable — never a fake guest voice."""
+
+    async def stream_turn(self, **kwargs) -> AsyncIterator[dict]:
+        raise GuestModelError(
+            "model_unavailable", "no ANTHROPIC_API_KEY configured"
+        )
+        yield  # pragma: no cover — makes this an async generator
+
+_conversation_repo: Optional[ConversationRepository] = None
+_guest_streamer = None
+
+# asyncio keeps only weak references to tasks; the turn task must survive the
+# SSE generator being torn down on client disconnect (the shield), so hold a
+# strong reference until each task completes.
+_conversation_turn_tasks: set[asyncio.Task] = set()
+
+
+def _get_conversation_repo() -> ConversationRepository:
+    global _conversation_repo
+    if _conversation_repo is None:
+        project = os.environ.get("FIRESTORE_PROJECT")
+        if project:
+            from conversation_repo import FirestoreConversationRepository
+
+            _conversation_repo = FirestoreConversationRepository(project=project)
+            logger.info("Using Firestore ConversationRepository")
+        else:
+            _conversation_repo = InMemoryConversationRepository()
+            logger.info(
+                "FIRESTORE_PROJECT unset — using in-memory ConversationRepository"
+            )
+    return _conversation_repo
+
+
+def _get_guest_streamer():
+    global _guest_streamer
+    if _guest_streamer is None:
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            _guest_streamer = AnthropicGuestStreamer()
+            logger.info("Using AnthropicGuestStreamer (model=%s)", GUEST_MODEL)
+        else:
+            _guest_streamer = NullGuestStreamer()
+            logger.info("ANTHROPIC_API_KEY unset — using NullGuestStreamer")
+    return _guest_streamer
+
+
+# ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
 
@@ -370,6 +560,20 @@ def _scene_to_client_dict(scene) -> dict:
     }
 
 
+def _turn_to_client_dict(turn: TurnRecord) -> dict:
+    """Client-facing turn projection, shared by the conversation GET and the
+    stream's `done` event (mirrors _scene_to_client_dict). Internal fields —
+    usage, model, prompt_version, facts_version, finish_reason, flags — never
+    enter the wire contract."""
+    return {
+        "turn_index": turn.turn_index,
+        "client_msg_id": turn.client_msg_id,
+        "user_text": turn.user_text,
+        "assistant_text": turn.assistant_text,
+        "created_at": turn.created_at.isoformat(),
+    }
+
+
 def _verify_bearer(authorization: str):
     """Common Bearer-token verification. Returns (user_id, None) on success
     or (None, JSONResponse) with the 401 to return."""
@@ -386,6 +590,53 @@ def _verify_bearer(authorization: str):
             status_code=401,
             content={"error": "invalid_token", "detail": str(exc)},
         )
+
+
+def _validate_uuid4(value: str, error_code: str):
+    """400 JSONResponse if value is not canonical UUIDv4, else None."""
+    try:
+        val = uuid.UUID(value, version=4)
+        if str(val) != value:
+            raise ValueError("not canonical form")
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content={"error": error_code, "detail": f"{value!r} is not a UUIDv4"},
+        )
+    return None
+
+
+def _load_owned_ready_scene(scene_id: str, user_id: str):
+    """Shared gate for the ready-scene routes (assets + conversation, both
+    verbs): fetch → 404, ownership → 403, readiness → 409 scene_not_ready.
+    Returns (scene, None) or (None, JSONResponse)."""
+    try:
+        scene = _get_scene_read_repo().get(scene_id)
+    except SceneNotFoundError:
+        return None, JSONResponse(
+            status_code=404,
+            content={"error": "not_found", "detail": f"No scene {scene_id!r}"},
+        )
+
+    if scene.user_id is None:
+        logger.warning("Scene %s has no user_id — possible ingest bug", scene_id)
+        return None, JSONResponse(
+            status_code=403,
+            content={"error": "forbidden", "detail": "scene has no owner"},
+        )
+    if scene.user_id != user_id:
+        return None, JSONResponse(
+            status_code=403,
+            content={"error": "forbidden", "detail": "scene is owned by a different user"},
+        )
+
+    from roomstudio_api_core.scene import SceneStatus
+    if scene.status != SceneStatus.READY or not scene.result_uri:
+        return None, JSONResponse(
+            status_code=409,
+            content={"error": "scene_not_ready", "status": scene.status.value},
+        )
+    return scene, None
 
 
 # ---------------------------------------------------------------------------
@@ -653,42 +904,13 @@ def get_scene_assets(
     if err is not None:
         return err
 
-    try:
-        val = uuid.UUID(scene_id, version=4)
-        if str(val) != scene_id:
-            raise ValueError("not canonical form")
-    except ValueError:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "invalid_scene_id", "detail": f"{scene_id!r} is not a UUIDv4"},
-        )
+    err = _validate_uuid4(scene_id, "invalid_scene_id")
+    if err is not None:
+        return err
 
-    try:
-        scene = _get_scene_read_repo().get(scene_id)
-    except SceneNotFoundError:
-        return JSONResponse(
-            status_code=404,
-            content={"error": "not_found", "detail": f"No scene {scene_id!r}"},
-        )
-
-    if scene.user_id is None:
-        logger.warning("Scene %s has no user_id — possible ingest bug", scene_id)
-        return JSONResponse(
-            status_code=403,
-            content={"error": "forbidden", "detail": "scene has no owner"},
-        )
-    if scene.user_id != user_id:
-        return JSONResponse(
-            status_code=403,
-            content={"error": "forbidden", "detail": "scene is owned by a different user"},
-        )
-
-    from roomstudio_api_core.scene import SceneStatus
-    if scene.status != SceneStatus.READY or not scene.result_uri:
-        return JSONResponse(
-            status_code=409,
-            content={"error": "scene_not_ready", "status": scene.status.value},
-        )
+    scene, err = _load_owned_ready_scene(scene_id, user_id)
+    if err is not None:
+        return err
 
     try:
         manifest = json.loads(_get_manifest_fetcher().fetch(scene.result_uri))
@@ -728,4 +950,460 @@ def get_scene_assets(
             "asset_urls": asset_urls,
             "expires_at": expires_at.isoformat(),
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Conversation routes (decision 0058)
+# ---------------------------------------------------------------------------
+
+class ConversationMessageRequest(BaseModel):
+    """Body for POST /scenes/{scene_id}/conversation/messages."""
+    text: str
+    client_msg_id: str
+
+
+def _scene_facts_for(scene):
+    """SceneFacts for a ready scene, via the (scene_id, FACTS_VERSION) cache.
+    The manifest fetch runs only on a cache miss. Blocking — call off-loop."""
+    def _load() -> dict:
+        return json.loads(_get_manifest_fetcher().fetch(scene.result_uri))
+
+    return cached_scene_facts(scene.scene_id, _load)
+
+
+@app.get(
+    "/scenes/{scene_id}/conversation",
+    summary="Conversation meta + recent turns for a ready scene",
+)
+# Plain def for the same event-loop reason as create_upload_session above —
+# only the streaming POST below needs the async posture.
+def get_conversation(
+    scene_id: str,
+    authorization: str = Header(...),
+) -> JSONResponse:
+    """Return the caller's conversation on this scene: meta + last ~50 turns.
+
+    Response (200):
+      {conversation: {scene_id, turn_count, rested_until|null},
+       turns: [{turn_index, client_msg_id, user_text, assistant_text,
+                created_at}...]  (ascending, last <=50),
+       cursor: {before: <lowest returned turn_index>} | null}
+
+    A scene+user pair with no conversation yet returns 200 with
+    turn_count 0 and no turns — not 404. The cursor is defined now for
+    pagination; the v1 client may ignore it.
+
+    Errors mirror /scenes/{scene_id}/assets:
+      400 invalid_scene_id / 401 / 403 forbidden / 404 not_found /
+      409 scene_not_ready (until the scene reaches `ready`)
+    """
+    user_id, err = _verify_bearer(authorization)
+    if err is not None:
+        return err
+    err = _validate_uuid4(scene_id, "invalid_scene_id")
+    if err is not None:
+        return err
+    scene, err = _load_owned_ready_scene(scene_id, user_id)
+    if err is not None:
+        return err
+
+    snapshot = _get_conversation_repo().get_conversation(
+        scene_id,
+        user_id,
+        turn_limit=CONVERSATION_GET_TURN_LIMIT,
+        daily_quota=GUEST_DAILY_TURNS,
+        now=datetime.now(tz=timezone.utc),
+    )
+    turns = [_turn_to_client_dict(t) for t in snapshot.turns]
+    cursor = (
+        {"before": snapshot.turns[0].turn_index}
+        if snapshot.turns and snapshot.turns[0].turn_index > 0
+        else None
+    )
+    return JSONResponse(
+        status_code=200,
+        content={
+            "conversation": {
+                "scene_id": scene_id,
+                "turn_count": snapshot.turn_count,
+                "rested_until": (
+                    snapshot.rested_until.isoformat()
+                    if snapshot.rested_until
+                    else None
+                ),
+            },
+            "turns": turns,
+            "cursor": cursor,
+        },
+    )
+
+
+def _sse(event: str, payload: dict) -> bytes:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n".encode()
+
+
+_SSE_HEADERS = {
+    # SSE must never be buffered or cached between us and the browser.
+    "Cache-Control": "no-store",
+    "X-Accel-Buffering": "no",
+}
+
+
+async def _replay_stream(turn: TurnRecord) -> AsyncIterator[bytes]:
+    """Dedupe replay: the stored turn, never regeneration (decision 0058).
+    One full-text delta then done keeps the client's stream path uniform."""
+    yield _sse("delta", {"text": turn.assistant_text})
+    yield _sse("done", {"turn": _turn_to_client_dict(turn)})
+
+
+async def _run_guest_turn(
+    *,
+    queue: asyncio.Queue,
+    scene,
+    user_id: str,
+    client_msg_id: str,
+    user_text: str,
+    facts,
+    history: list[TurnRecord],
+) -> None:
+    """Drain the model stream, persist the completed turn, feed the SSE
+    queue. Runs as an independent task so a client disconnect cannot stop
+    generation or persistence (the 0058 shield) — turns exist only
+    completed, and a disconnected client refetches by client_msg_id."""
+    repo = _get_conversation_repo()
+    created_at = datetime.now(tz=timezone.utc)
+    parts: list[str] = []
+    usage: dict = {}
+    stop_reason = "end_turn"
+
+    async def _fail(code: str) -> None:
+        # Error path: the turn never happened — release our lease so the
+        # composer isn't locked out for the remaining TTL.
+        try:
+            await asyncio.to_thread(
+                repo.release_reservation, scene.scene_id, user_id, client_msg_id
+            )
+        except Exception:
+            logger.exception(
+                "conversation: reservation release failed for scene %s",
+                scene.scene_id,
+            )
+        await queue.put(("error", code))
+
+    try:
+        messages = []
+        for t in history:
+            messages.append({"role": "user", "content": t.user_text})
+            messages.append({"role": "assistant", "content": t.assistant_text})
+        # Third (rolling) cache breakpoint on the newest user message: the
+        # cached prefix then covers charter + facts + prior history, so each
+        # turn re-reads the whole conversation at cache-read rates
+        # (decision 0058 lists this one as a tunable; measured worth it).
+        messages.append({
+            "role": "user",
+            "content": [{
+                "type": "text",
+                "text": user_text,
+                "cache_control": {"type": "ephemeral"},
+            }],
+        })
+
+        async with asyncio.timeout(GUEST_MODEL_TIMEOUT_S):
+            async for event in _get_guest_streamer().stream_turn(
+                model=GUEST_MODEL,
+                max_tokens=GUEST_MAX_TOKENS,
+                system=build_system_prompt(facts),
+                messages=messages,
+            ):
+                if event["type"] == "delta":
+                    parts.append(event["text"])
+                    await queue.put(("delta", event["text"]))
+                elif event["type"] == "final":
+                    usage = event["usage"]
+                    stop_reason = event["stop_reason"]
+    except TimeoutError:
+        logger.warning(
+            "conversation: model call exceeded %.0fs for scene %s",
+            GUEST_MODEL_TIMEOUT_S,
+            scene.scene_id,
+        )
+        await _fail("model_timeout")
+        return
+    except GuestModelError as exc:
+        logger.warning(
+            "conversation: guest model failed for scene %s: %s",
+            scene.scene_id,
+            exc,
+        )
+        await _fail(exc.code)
+        return
+    except Exception:
+        logger.exception(
+            "conversation: unexpected turn failure for scene %s", scene.scene_id
+        )
+        await _fail("turn_failed")
+        return
+
+    assistant_text = "".join(parts)
+    if not assistant_text.strip():
+        # A stream that produced no speech is a failed turn, not an empty one.
+        await _fail("turn_failed")
+        return
+
+    # Observe-only telemetry (decision 0058): flags + structured log, never
+    # blocking, never failing the turn.
+    try:
+        flags = telemetry_flags(
+            assistant_text,
+            render_facts_block(facts),
+            [t.user_text for t in history] + [user_text],
+        )
+    except Exception:
+        logger.exception("conversation: telemetry failed (observe-only)")
+        flags = []
+
+    try:
+        turn = await asyncio.to_thread(
+            repo.persist_turn,
+            scene.scene_id,
+            user_id,
+            client_msg_id=client_msg_id,
+            user_text=user_text,
+            assistant_text=assistant_text,
+            created_at=created_at,
+            completed_at=datetime.now(tz=timezone.utc),
+            facts_version=facts.facts_version,
+            prompt_version=PROMPT_VERSION,
+            model=GUEST_MODEL,
+            usage=usage,
+            finish_reason=stop_reason,
+            flags=flags,
+        )
+    except Exception:
+        logger.exception(
+            "conversation: persist failed for scene %s", scene.scene_id
+        )
+        await _fail("persist_failed")
+        return
+
+    logger.info(
+        "conversation_turn scene_id=%s turn_index=%d model=%s prompt_version=%d "
+        "facts_version=%d finish_reason=%s output_tokens=%s "
+        "cache_read_input_tokens=%s flags=%s",
+        scene.scene_id,
+        turn.turn_index,
+        GUEST_MODEL,
+        PROMPT_VERSION,
+        facts.facts_version,
+        stop_reason,
+        usage.get("output_tokens"),
+        usage.get("cache_read_input_tokens"),
+        ",".join(flags) or "-",
+    )
+    await queue.put(("done", _turn_to_client_dict(turn)))
+
+
+async def _turn_stream(
+    *,
+    scene,
+    user_id: str,
+    client_msg_id: str,
+    user_text: str,
+    facts,
+    history: list[TurnRecord],
+) -> AsyncIterator[bytes]:
+    """SSE body: forwards the turn task's events; emits ": ping" during
+    model silence. The vocabulary here is OURS (delta/done/error) — a
+    transform of the model stream, never a passthrough."""
+    queue: asyncio.Queue = asyncio.Queue()
+    task = asyncio.create_task(_run_guest_turn(
+        queue=queue,
+        scene=scene,
+        user_id=user_id,
+        client_msg_id=client_msg_id,
+        user_text=user_text,
+        facts=facts,
+        history=history,
+    ))
+    _conversation_turn_tasks.add(task)
+    task.add_done_callback(_conversation_turn_tasks.discard)
+    try:
+        while True:
+            try:
+                kind, payload = await asyncio.wait_for(
+                    queue.get(), timeout=SSE_PING_INTERVAL_S
+                )
+            except TimeoutError:
+                yield b": ping\n\n"
+                continue
+            if kind == "delta":
+                yield _sse("delta", {"text": payload})
+            elif kind == "done":
+                yield _sse("done", {"turn": payload})
+                return
+            else:
+                yield _sse("error", {"code": payload})
+                return
+    finally:
+        # The shield (decision 0058): on client disconnect the framework
+        # tears this generator down (cancellation or GeneratorExit); the turn
+        # task above keeps generating and persists on its own. Hold the
+        # request open until it finishes — the open request is the only place
+        # Cloud Run guarantees CPU. Cancellation may be re-delivered at every
+        # await while the enclosing scope unwinds, so swallow it in a bounded
+        # loop; the task itself is bounded by the model cap + persist.
+        if not task.done():
+            deadline = asyncio.get_running_loop().time() + GUEST_MODEL_TIMEOUT_S + 30.0
+            while not task.done():
+                if asyncio.get_running_loop().time() > deadline:
+                    logger.error(
+                        "conversation: shield deadline exceeded for scene %s",
+                        scene.scene_id,
+                    )
+                    break
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=0.25)
+                except (TimeoutError, asyncio.CancelledError):
+                    continue
+                except Exception:
+                    break  # task error already handled inside _run_guest_turn
+
+
+@app.post(
+    "/scenes/{scene_id}/conversation/messages",
+    summary="One conversation turn: streamed guest reply (SSE)",
+)
+# async def — the service's FIRST async route, diverging from the sync-def
+# posture recorded on create_upload_session above. A sync handler would hold
+# a threadpool slot for the whole streamed turn (up to ~120 s); async holds
+# none. The discipline that makes this safe: every blocking call — auth,
+# scene fetch, manifest fetch, accept/persist transactions — runs via
+# asyncio.to_thread or before the generator starts, so the event loop this
+# service was just un-async'd to protect stays unblocked.
+async def post_conversation_message(
+    scene_id: str,
+    req: ConversationMessageRequest,
+    authorization: str = Header(...),
+):
+    """One turn of the read-only room conversation (decision 0058).
+
+    Body: {text: <=2000 chars, client_msg_id: UUID}
+
+    Everything checkable pre-generation returns the JSON {error, detail}
+    contract; once streaming starts, failures travel as a terminal `error`
+    event. Success: 200 text/event-stream with events
+      delta {text} / done {turn} / error {code}
+    and ": ping" comments during model silence. `done` carries the same
+    client projection as GET (internal fields never on the wire).
+
+    Pre-stream errors:
+      400 invalid_scene_id / invalid_client_msg_id / message_empty /
+          message_too_long
+      401 missing_token / invalid_token
+      403 forbidden
+      404 not_found
+      409 scene_not_ready — scene isn't ready
+      409 turn_in_flight  — a live turn holds the reservation (second tab)
+      429 budget_exhausted — body {error, guest_line, resets_at}
+      502 upstream_error  — manifest unavailable (facts underivable)
+
+    A repeated client_msg_id replays the stored turn verbatim — never
+    regeneration; the id is also the client's refetch-confirmation key.
+    """
+    user_id, err = await asyncio.to_thread(_verify_bearer, authorization)
+    if err is not None:
+        return err
+    err = _validate_uuid4(scene_id, "invalid_scene_id")
+    if err is not None:
+        return err
+
+    try:
+        uuid.UUID(req.client_msg_id)
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "invalid_client_msg_id",
+                "detail": f"{req.client_msg_id!r} is not a UUID",
+            },
+        )
+    if not req.text.strip():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "message_empty", "detail": "text must not be empty"},
+        )
+    if len(req.text) > GUEST_MESSAGE_MAX_CHARS:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "message_too_long",
+                "detail": f"text exceeds {GUEST_MESSAGE_MAX_CHARS} characters",
+            },
+        )
+
+    scene, err = await asyncio.to_thread(_load_owned_ready_scene, scene_id, user_id)
+    if err is not None:
+        return err
+
+    try:
+        facts = await asyncio.to_thread(_scene_facts_for, scene)
+    except (ManifestFetchError, ValueError) as exc:
+        logger.error(
+            "conversation: manifest unavailable for scene %s: %s", scene_id, exc
+        )
+        return JSONResponse(
+            status_code=502,
+            content={"error": "upstream_error", "detail": "manifest unavailable"},
+        )
+
+    repo = _get_conversation_repo()
+    outcome = await asyncio.to_thread(
+        repo.accept_turn,
+        scene_id,
+        user_id,
+        req.client_msg_id,
+        daily_quota=GUEST_DAILY_TURNS,
+        reservation_ttl_s=CONVERSATION_RESERVATION_TTL_S,
+        now=datetime.now(tz=timezone.utc),
+    )
+
+    if outcome.kind == "rested":
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "budget_exhausted",
+                "guest_line": GUEST_REST_LINE,
+                "resets_at": outcome.resets_at.isoformat(),
+            },
+        )
+    if outcome.kind == "busy":
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "turn_in_flight",
+                "detail": "a turn is already being answered for this conversation",
+            },
+        )
+    if outcome.kind == "replay":
+        return StreamingResponse(
+            _replay_stream(outcome.replay_turn),
+            media_type="text/event-stream",
+            headers=_SSE_HEADERS,
+        )
+
+    history = await asyncio.to_thread(
+        repo.recent_turns, scene_id, user_id, GUEST_HISTORY_TURNS
+    )
+    return StreamingResponse(
+        _turn_stream(
+            scene=scene,
+            user_id=user_id,
+            client_msg_id=req.client_msg_id,
+            user_text=req.text,
+            facts=facts,
+            history=history,
+        ),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
     )

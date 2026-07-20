@@ -27,11 +27,14 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # ── Layer 1: install service deps (pulls proto-plus 1.x → protobuf 6.x) ─────
+# anthropic (conversation stage 1, decision 0058) is protobuf-free — safe in
+# Layer 1, before the protobuf force-pin.
 COPY services/api-public/pyproject.toml services/api-public/pyproject.toml
 RUN pip install --no-cache-dir \
         fastapi \
         "uvicorn[standard]" \
-        firebase-admin
+        firebase-admin \
+        anthropic
 
 # ── Layer 2: install roomstudio-api-core ─────────────────────────────────────
 # BEFORE the protobuf force-pin — api-core depends on google-cloud-firestore

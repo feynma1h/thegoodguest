@@ -7,6 +7,8 @@ dependencies = [
     "fastapi>=0.110,<1.0",
     "uvicorn[standard]>=0.27,<1.0",
     "firebase-admin>=6.3,<7.0",
+    # Conversation stage 1 (decision 0058): the guest model.
+    "anthropic>=0.100,<1.0",
     # roomstudio-schemas and roomstudio-api-core are local packages.
     # Install them first: pip install -e packages/schemas packages/api-core
     "roomstudio-schemas",

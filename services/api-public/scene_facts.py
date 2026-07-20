@@ -35,6 +35,7 @@ from __future__ import annotations
 import math
 import threading
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 
 # Bump when the derivation or rendering logic changes meaning — recorded per
@@ -336,16 +337,17 @@ _cache: OrderedDict[tuple[str, int], SceneFacts] = OrderedDict()
 _cache_lock = threading.Lock()
 
 
-def cached_scene_facts(scene_id: str, manifest: dict) -> SceneFacts:
-    """Get-or-derive keyed (scene_id, FACTS_VERSION). Safe because a ready
-    scene's manifest is immutable; bounded so a long-lived process can't
-    grow without limit."""
+def cached_scene_facts(scene_id: str, load_manifest: Callable[[], dict]) -> SceneFacts:
+    """Get-or-derive keyed (scene_id, FACTS_VERSION). `load_manifest` is only
+    invoked on a miss, so a cache hit costs no GCS round-trip. Safe because a
+    ready scene's manifest is immutable; bounded so a long-lived process
+    can't grow without limit."""
     key = (scene_id, FACTS_VERSION)
     with _cache_lock:
         if key in _cache:
             _cache.move_to_end(key)
             return _cache[key]
-    facts = derive_scene_facts(manifest)
+    facts = derive_scene_facts(load_manifest())
     with _cache_lock:
         _cache[key] = facts
         _cache.move_to_end(key)
