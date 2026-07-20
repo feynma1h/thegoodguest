@@ -72,8 +72,18 @@ export function arrivalLine(placed: number): string {
   return "Your furniture came through ahead of the walls — they’re still on their way. Honestly, my favorite way to meet a room: just the things you chose, nothing behind them.";
 }
 
-/** The settled greeting on a return visit. */
+/** The settled greeting on a return visit — a live invitation, now that
+ * the guest can answer (conversation stage 1, decision 0058). */
 export function settledLine(placed: number): string {
+  if (placed === 0) {
+    return "Still nothing I could honestly place — ask me why, or give me one slower pass and I’ll meet the room properly.";
+  }
+  return "As you left it. I’ve been looking — ask me anything about how it sits.";
+}
+
+/** The settled greeting when the conversation layer is unavailable (the
+ * degraded branch): no invitation a dead composer can't honor. */
+export function settledQuietLine(placed: number): string {
   if (placed === 0) {
     return "Still nothing I could honestly place — when you have a minute, one slower pass and I’ll meet the room properly.";
   }

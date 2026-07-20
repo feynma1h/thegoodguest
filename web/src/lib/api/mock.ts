@@ -8,8 +8,21 @@
  * endpoint returns — the viewer cannot tell the difference.
  */
 
-import { ApiError, SceneNotReadyError, type ApiClient } from "./client";
-import type { SceneAssets, SceneStatus, SceneSummary } from "./types";
+import {
+  ApiError,
+  BudgetExhaustedError,
+  SceneNotReadyError,
+  TurnInFlightError,
+  type ApiClient,
+} from "./client";
+import type {
+  ConversationSnapshot,
+  ConversationTurn,
+  GuestEvent,
+  SceneAssets,
+  SceneStatus,
+  SceneSummary,
+} from "./types";
 
 /** Fixed UUIDs so deep links are stable across reloads. */
 export const MOCK_READY_SCENE_ID = "11111111-1111-4111-8111-111111111111";
@@ -113,6 +126,53 @@ function delay<T>(value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), LATENCY_MS));
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Canned guest replies, grounded in the fixture manifest above (sofa /
+ * table / lamp placed; the plant seen but never placed). Beat + invitation
+ * shape; the one distance quoted (about 1.2 m sofa↔table centers) is the
+ * fixture's real center-to-center distance, honestly rounded.
+ */
+function mockGuestReply(text: string): string {
+  const q = text.toLowerCase();
+  if (q.includes("plant")) {
+    return (
+      "The plant I only glimpsed — it never held still in the scan long " +
+      "enough to place, so I honestly can't say where it stands. The sofa, " +
+      "table, and lamp I can speak to properly. Want to start with one of those?"
+    );
+  }
+  if (/(colou?r|material|fabric|light|bright|window)/.test(q)) {
+    return (
+      "I can't see color or light yet — this room reached me as shapes and " +
+      "positions, not surfaces. I'd rather admit that than guess. I can tell " +
+      "you how the pieces sit around each other, if that helps?"
+    );
+  }
+  if (/(move|rearrange|swap|push|put the|redecorate)/.test(q)) {
+    return (
+      "I can't move things yet — today I have eyes, not hands. What I can " +
+      "do is talk through how the room sits right now, so when moving day " +
+      "comes we both know what we're working with. Shall we?"
+    );
+  }
+  if (/(far|distance|close|apart|between)/.test(q)) {
+    return (
+      "About 1.2 m between the sofa's center and the table's center — of " +
+      "everything placed, they're each other's nearest neighbors, so that " +
+      "corner already works as one sitting place. Want the lamp's corner too?"
+    );
+  }
+  return (
+    "Three pieces stand placed — the sofa anchoring one end, the table in " +
+    "close company, the lamp keeping its own corner. The plant I saw but " +
+    "couldn't place. Where would you like to start?"
+  );
+}
+
 export class MockApiClient implements ApiClient {
   readonly scenes = STATUS_FIXTURES.map((f, i) => sceneFixture(i, f.status, f.minutesAgo));
 
@@ -140,5 +200,101 @@ export class MockApiClient implements ApiClient {
       throw new SceneNotReadyError(scene.status);
     }
     return delay(READY_ASSETS);
+  }
+
+  // ── Conversation (decision 0058): accumulating in-memory transcript ──────
+  // Starts empty so first-sight is reachable; resets on reload (instance
+  // state). Trigger phrases walk every composer state offline:
+  //   !error    — in-stream terminal error event after a few deltas
+  //   !budget   — pre-stream 429 (rested; lifts after ~30 s here)
+  //   !slow     — long inter-delta gaps (watch pings/batching behavior)
+  //   !inflight — pre-stream 409; a pretend other-tab turn lands ~4 s later
+  private conversation: ConversationTurn[] = [];
+
+  private requireReady(sceneId: string): void {
+    const scene = this.scenes.find((s) => s.scene_id === sceneId);
+    if (!scene) throw new ApiError(404, "not_found", `No scene ${sceneId}`);
+    if (scene.status !== "ready") throw new SceneNotReadyError(scene.status);
+  }
+
+  async getConversation(sceneId: string): Promise<ConversationSnapshot> {
+    this.requireReady(sceneId);
+    return delay({
+      conversation: {
+        scene_id: sceneId,
+        turn_count: this.conversation.length,
+        rested_until: null,
+      },
+      turns: [...this.conversation.slice(-50)],
+      cursor: null,
+    });
+  }
+
+  private appendTurn(text: string, reply: string, clientMsgId: string): ConversationTurn {
+    const turn: ConversationTurn = {
+      turn_index: this.conversation.length,
+      client_msg_id: clientMsgId,
+      user_text: text,
+      assistant_text: reply,
+      created_at: new Date().toISOString(),
+    };
+    this.conversation.push(turn);
+    return turn;
+  }
+
+  async sendMessage(
+    sceneId: string,
+    text: string,
+    clientMsgId: string,
+  ): Promise<AsyncIterable<GuestEvent>> {
+    this.requireReady(sceneId);
+    await sleep(LATENCY_MS);
+
+    if (text.includes("!budget")) {
+      throw new BudgetExhaustedError(
+        "We've talked a lot today, and I want to keep doing right by this " +
+          "room — let's pick it up again a little later.",
+        new Date(Date.now() + 30_000).toISOString(),
+      );
+    }
+    if (text.includes("!inflight")) {
+      // Simulate the second-tab race: throw 409 now, land the "other
+      // tab's" turn shortly after so the blocked state resolves.
+      setTimeout(() => {
+        this.appendTurn(
+          "(from your other window)",
+          "That corner reads well from here — the lamp keeps it from going quiet.",
+          crypto.randomUUID(),
+        );
+      }, 4_000);
+      throw new TurnInFlightError();
+    }
+
+    // Dedupe replay parity with the server: a known client_msg_id streams
+    // the stored turn back, never regenerates.
+    const existing = this.conversation.find((t) => t.client_msg_id === clientMsgId);
+    const slow = text.includes("!slow");
+    const errorMid = text.includes("!error");
+    const reply = existing?.assistant_text ?? mockGuestReply(text);
+    const appendTurn = () => this.appendTurn(text, reply, clientMsgId);
+
+    async function* stream(): AsyncGenerator<GuestEvent> {
+      if (existing) {
+        yield { type: "delta", text: existing.assistant_text };
+        yield { type: "done", turn: existing };
+        return;
+      }
+      const words = reply.split(" ");
+      for (let i = 0; i < words.length; i++) {
+        await sleep(slow ? 500 : 45);
+        if (errorMid && i === Math.min(5, words.length - 1)) {
+          yield { type: "error", code: "model_error" };
+          return;
+        }
+        yield { type: "delta", text: (i > 0 ? " " : "") + words[i] };
+      }
+      yield { type: "done", turn: appendTurn() };
+    }
+    return stream();
   }
 }
