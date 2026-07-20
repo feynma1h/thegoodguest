@@ -736,8 +736,10 @@ actor BlobUploadManager {
     ///
     /// Re-mint flow:
     ///   1. Load persisted record (cold-relaunch safe: no in-memory context needed).
-    ///   2. Call remintProvider with the stored manifest paths (expectedSizeBytes = 0,
-    ///      the server accepts size 0). Reuses the full 0038 retry/backoff + 401
+    ///   2. Rebuild the manifest from the stored path-set with real per-blob sizes
+    ///      read from disk via record.outputDir; a missing/unreadable/empty blob file
+    ///      routes to onFatalBlobError before any network call. Call remintProvider
+    ///      with that manifest — reuses the full 0038 retry/backoff + 401
     ///      token-refresh policy implemented in UploadSessionClient.
     ///   3. Loop guard (410 path only): if returned URIs == persisted URIs → fatal.
     ///   4. Persist fresh record (new sessionEntries + fresh clientMintTimestamp).
@@ -766,10 +768,25 @@ actor BlobUploadManager {
                                    reason: "expired_no_remint_provider")
             return
         }
-        // Send expectedSizeBytes = 0; the server accepts size 0 and the path-set alone
-        // is the idempotency key. We cannot reconstruct exact sizes from the record.
-        let manifestEntries = record.manifestPaths.map {
-            UploadManifestEntry(relativePath: $0, expectedSizeBytes: 0)
+        // Real per-blob sizes, read from disk via the persisted outputDir. The full
+        // manifestPaths set is re-sent regardless of per-blob upload status — the
+        // path-set is the server-side idempotency key. A missing, unreadable, or
+        // zero-size blob file is deterministic (the post-mint re-enqueue would fatal
+        // on the same file), so fatal before the network call rather than send a
+        // fabricated size 0.
+        var manifestEntries: [UploadManifestEntry] = []
+        for path in record.manifestPaths {
+            let fileURL = record.outputDir.appendingPathComponent(path)
+            guard
+                let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+                let size = resources.fileSize, size > 0
+            else {
+                logger.info("[BlobUploadManager] ✗ blob file unreadable at re-mint manifest build: \(path, privacy: .public)")
+                await onFatalBlobError(bundleId: bundleId, relativePath: path,
+                                       reason: "blob_unreadable_at_remint_manifest")
+                return
+            }
+            manifestEntries.append(UploadManifestEntry(relativePath: path, expectedSizeBytes: size))
         }
         let freshEntries: [UploadSessionEntry]
         do {
