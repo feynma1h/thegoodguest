@@ -14,11 +14,17 @@ export const SPRING: Transition = { type: "spring", stiffness: 180, damping: 24 
 
 export const MotionLink = motion.create(Link);
 
+/* Pill actions per the Good Guest system: rust fill for the primary act,
+ * quiet ink outline for the alternative, cream fill on dark panels. */
 const PILL_VARIANTS = {
   primary:
-    "rounded-full bg-white px-6 py-2.5 text-sm font-medium text-black hover:bg-zinc-200",
+    "rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-paper hover:bg-accent-deep",
   ghost:
-    "rounded-full border border-white/15 px-6 py-2.5 text-sm text-zinc-300 hover:border-white/30 hover:text-white",
+    "rounded-full border-[1.5px] border-ink/35 px-6 py-2.5 text-sm font-medium text-ink hover:border-ink/60",
+  quiet:
+    "rounded-full border-[1.5px] border-ink/20 px-6 py-2.5 text-sm font-medium text-ink/60 hover:border-ink/40 hover:text-ink",
+  cream:
+    "rounded-full bg-paper px-6 py-2.5 text-sm font-semibold text-ink hover:bg-white",
 } as const;
 
 /** A pill CTA with the standard spring press/hover behavior. */

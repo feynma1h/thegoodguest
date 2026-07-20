@@ -15,7 +15,7 @@
  */
 
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 import { SPRING } from "@/components/ui/spring";
@@ -33,7 +33,7 @@ export function ScanInstructions() {
       <h2 className="max-w-xl text-balance text-3xl font-semibold leading-tight tracking-[-0.02em] sm:text-4xl">
         It starts with a slow walk around the room.
       </h2>
-      <p className="mt-5 max-w-md text-pretty text-sm leading-relaxed text-zinc-400">
+      <p className="mt-5 max-w-md text-pretty text-sm leading-relaxed text-ink/65">
         Open the iOS app and scan the space — about a minute. Your iPhone
         measures what a photo can only guess at: true distances, depth, and
         where every object actually stands.
@@ -46,13 +46,13 @@ export function ScanInstructions() {
           { n: "03", text: "That's it — analysis starts on its own" },
         ].map((step) => (
           <div key={step.n}>
-            <p className="text-xs font-medium text-zinc-600">{step.n}</p>
-            <p className="mt-2 text-sm leading-relaxed text-zinc-300">{step.text}</p>
+            <p className="text-xs font-medium text-ink/40">{step.n}</p>
+            <p className="mt-2 text-sm leading-relaxed text-ink/80">{step.text}</p>
           </div>
         ))}
       </div>
 
-      <p className="mt-12 text-xs text-zinc-600">
+      <p className="mt-12 text-xs text-ink/45">
         The room appears here on its own when the scan lands. LiDAR-equipped
         iPhones give the most faithful rooms.
       </p>
@@ -60,13 +60,20 @@ export function ScanInstructions() {
   );
 }
 
+const emptySubscribe = () => () => {};
+
 export default function NewRoomSheet() {
   const [open, setOpen] = useState(false);
   // Portal target exists only after mount (SSG renders no document).
-  const [mounted, setMounted] = useState(false);
+  // useSyncExternalStore is the lint-clean "am I on the client" signal —
+  // no synchronous setState inside an effect.
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
 
   useEffect(() => {
-    setMounted(true);
     const onOpen = () => setOpen(true);
     window.addEventListener(OPEN_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_EVENT, onOpen);
@@ -94,7 +101,7 @@ export default function NewRoomSheet() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-6 backdrop-blur-sm"
           onClick={() => setOpen(false)}
           role="dialog"
           aria-modal="true"
@@ -105,14 +112,14 @@ export default function NewRoomSheet() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
             transition={SPRING}
-            className="relative w-full max-w-2xl rounded-3xl border border-white/[0.08] bg-[#101010] p-10 shadow-2xl shadow-black/60 sm:p-14"
+            className="relative w-full max-w-2xl rounded-3xl border border-ink/15 bg-paper p-10 shadow-deep sm:p-14"
             onClick={(e) => e.stopPropagation()}
           >
             <button
               type="button"
               onClick={() => setOpen(false)}
               aria-label="Close"
-              className="absolute right-5 top-5 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+              className="absolute right-5 top-5 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-ink/50 transition-colors hover:bg-ink/[0.06] hover:text-ink"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
                 <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

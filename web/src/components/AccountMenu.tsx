@@ -79,7 +79,7 @@ export default function AccountMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-label="Account"
         aria-expanded={open}
-        className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-white/[0.12] text-zinc-400 transition-colors hover:border-white/25 hover:text-zinc-200"
+        className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-ink/25 text-ink/60 transition-colors hover:border-ink/50 hover:text-ink"
       >
         <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden>
           <circle cx="7.5" cy="5.2" r="2.4" stroke="currentColor" strokeWidth="1.2" />
@@ -99,20 +99,20 @@ export default function AccountMenu() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.98 }}
             transition={SPRING}
-            className="absolute right-0 top-11 z-40 w-64 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#111] shadow-xl shadow-black/50"
+            className="absolute right-0 top-11 z-40 w-64 overflow-hidden rounded-2xl border border-ink/15 bg-white shadow-float"
           >
-            <div className="border-b border-white/[0.06] px-4 py-3.5">
-              <p className="text-sm font-medium text-zinc-200">{identity.title}</p>
+            <div className="border-b border-ink/10 px-4 py-3.5">
+              <p className="text-sm font-medium text-ink">{identity.title}</p>
               {identity.detail && (
-                <p className="mt-1 truncate font-mono text-[10px] text-zinc-500">
+                <p className="mt-1 truncate font-mono text-[10px] text-ink/45">
                   {identity.detail}
                 </p>
               )}
             </div>
 
             {mode !== "live" && (
-              <div className="border-b border-white/[0.06] px-4 py-3">
-                <p className="text-xs leading-relaxed text-zinc-500">
+              <div className="border-b border-ink/10 px-4 py-3">
+                <p className="text-xs leading-relaxed text-ink/55">
                   Sign-in arrives with accounts — rooms currently come from{" "}
                   {mode === "mock" ? "built-in demo data" : "your local backend"}.
                 </p>
@@ -123,10 +123,10 @@ export default function AccountMenu() {
               <Link
                 href="/viewer"
                 onClick={() => setOpen(false)}
-                className="block px-4 py-3 text-sm text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-200"
+                className="block px-4 py-3 text-sm text-ink/70 transition-colors hover:bg-ink/[0.04] hover:text-ink"
               >
                 Dev viewer
-                <span className="ml-2 font-mono text-[10px] text-zinc-600">workbench</span>
+                <span className="ml-2 font-mono text-[10px] text-ink/40">workbench</span>
               </Link>
             )}
 
@@ -134,7 +134,7 @@ export default function AccountMenu() {
               <button
                 type="button"
                 onClick={onSignOut}
-                className="block w-full cursor-pointer px-4 py-3 text-left text-sm text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-200"
+                className="block w-full cursor-pointer px-4 py-3 text-left text-sm text-ink/70 transition-colors hover:bg-ink/[0.04] hover:text-ink"
               >
                 Sign out
               </button>
