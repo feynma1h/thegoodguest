@@ -1,6 +1,6 @@
 /// Capture UI: start/stop button, live frame counter, tracking-state indicator,
-/// tier badge, bundle-path readout, upload-session status badge, and the scene
-/// processing status panel (SceneStatusView).
+/// tier badge, bundle-path readout, upload-session status badge, the upload-failure
+/// banner (UploadFailureView), and the scene processing status panel (SceneStatusView).
 ///
 /// Triggers UploadCoordinator.beginUploadSession when CaptureManager publishes
 /// bundlePath (stop-capture → assembly complete).
@@ -26,6 +26,12 @@ struct ContentView: View {
 
             bundleReadout
             uploadSessionBadge
+
+            // Always mounted, same rationale as SceneStatusView below: renders nothing
+            // until a .failed record is surfaced, but its .task is the independent scan
+            // path for upload-level terminal failures persisted by prior launches.
+            UploadFailureView()
+                .transition(.opacity)
 
             // Always mounted: SceneStatusView renders nothing while the poller is
             // idle, but its .task is the independent poll-start path (it scans the

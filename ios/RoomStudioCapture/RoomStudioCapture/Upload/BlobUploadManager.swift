@@ -1154,7 +1154,8 @@ actor BlobUploadManager {
 
     /// Permanent, unrecoverable error for a bundle. Marks the record .failed in the store,
     /// inserts the bundleId into failedBundles (re-entry guard), cancels sibling URLSession
-    /// tasks for this bundle, and cleans up in-memory state.
+    /// tasks for this bundle, cleans up in-memory state, and kicks UploadFailureMonitor
+    /// so a foregrounded UI surfaces the failure immediately.
     ///
     /// Classification: called ONLY for TERMINAL errors (deterministic failures that retry
     /// cannot recover: http_400/401/403/404, 308_persistent, empty_bundle_pb, …).
@@ -1189,6 +1190,12 @@ actor BlobUploadManager {
             guard let parsed = Self.parseTaskDescription(task.taskDescription ?? "") else { continue }
             if parsed.bundleId == bundleId { task.cancel() }
         }
+
+        // 5. Surface to the foreground failure monitor (the .complete-kick pattern from
+        //    onBundleComplete, applied to the failure side). In-memory kick only — the
+        //    .failed record persisted in step 3 is the shared seam UploadFailureView's
+        //    .task scan reads independently on later launches.
+        Task { await MainActor.run { UploadFailureMonitor.shared.notifyUploadFailed(bundleId: bundleId, reason: reason) } }
     }
 
     // MARK: - Deferred transient error handler
