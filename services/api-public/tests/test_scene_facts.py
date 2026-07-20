@@ -288,15 +288,22 @@ class TestRenderAndCache:
             framing = (match.group(1) or "") + match.group(2)
             assert ("about" in framing) or ("than" in framing), match.group(0)
 
-    def test_cache_returns_same_object(self):
+    def test_cache_returns_same_object_and_skips_loader_on_hit(self):
         scene_facts._cache.clear()
-        manifest = _room()
-        first = cached_scene_facts("scene-1", manifest)
-        second = cached_scene_facts("scene-1", manifest)
+        loads = 0
+
+        def loader() -> dict:
+            nonlocal loads
+            loads += 1
+            return _room()
+
+        first = cached_scene_facts("scene-1", loader)
+        second = cached_scene_facts("scene-1", loader)
         assert first is second
+        assert loads == 1  # a hit costs no manifest fetch
 
     def test_cache_bounded(self):
         scene_facts._cache.clear()
         for i in range(scene_facts._CACHE_MAX_ENTRIES + 10):
-            cached_scene_facts(f"scene-{i}", _manifest([]))
+            cached_scene_facts(f"scene-{i}", lambda: _manifest([]))
         assert len(scene_facts._cache) == scene_facts._CACHE_MAX_ENTRIES
