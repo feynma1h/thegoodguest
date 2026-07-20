@@ -136,10 +136,8 @@ function ViewerContent() {
   return (
     <div>
       <div className="flex items-baseline justify-between">
-        <h1 className="font-serif text-3xl font-light tracking-tight">Viewer</h1>
-        <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-600">
-          dev workbench
-        </span>
+        <h1 className="text-3xl font-semibold tracking-tight">Viewer</h1>
+        <span className="font-mono text-[10px] text-zinc-600">dev workbench</span>
       </div>
       {sceneId ? (
         <div className="mt-8">

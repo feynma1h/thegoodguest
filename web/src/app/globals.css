@@ -1,22 +1,22 @@
 @import "tailwindcss";
 
-/* Warm dark theme. The draft's type rule is load-bearing everywhere:
-   serif = feeling (Fraunces), mono = thinking (DM Mono), sans = chrome.
-   Never serif and mono in the same sentence. */
+/* Neutral, content-first theme (decision 0056: Apple-grade restraint).
+   Chrome is permanently achromatic — near-black surfaces, hairline
+   borders, white primary actions. Color belongs to CONTENT (the user's
+   room, its light), never to UI chrome.
+
+   Type rules: sans (Geist) does everything — hierarchy comes from weight,
+   size, and tracking. Mono (DM Mono) appears ONLY for machine data:
+   identifiers, coordinates, reasoning traces. No decorative type. */
 :root {
-  --background: #0b0a09;
-  --foreground: #eae5dc;
-  --accent: #e0a35c;
-  --accent-soft: #b98544;
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-accent: var(--accent);
-  --color-accent-soft: var(--accent-soft);
   --font-sans: var(--font-geist-sans);
-  --font-serif: var(--font-fraunces);
   --font-mono: var(--font-dm-mono);
 }
 
@@ -26,10 +26,5 @@ body {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-/* Soft weighted transitions (the draft's spring feel, approximated in CSS). */
-.ease-soft {
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  background: rgba(255, 255, 255, 0.18);
 }

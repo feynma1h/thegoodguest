@@ -6,8 +6,8 @@
 
 export default function Wordmark({ className }: { className?: string }) {
   return (
-    <span className={`font-serif text-[17px] font-medium tracking-tight ${className ?? ""}`}>
-      roomstudio<span className="text-accent">.</span>
+    <span className={`text-[15px] font-semibold tracking-tight ${className ?? ""}`}>
+      roomstudio
     </span>
   );
 }

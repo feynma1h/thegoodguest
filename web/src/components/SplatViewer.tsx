@@ -70,7 +70,7 @@ export default function SplatViewer({ splats, className }: SplatViewerProps) {
         container.appendChild(renderer.domElement);
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0d0c0a);
+        scene.background = new THREE.Color(0x0d0d0d);
 
         const camera = new THREE.PerspectiveCamera(
           55,
@@ -84,7 +84,7 @@ export default function SplatViewer({ splats, className }: SplatViewerProps) {
         scene.add(spark);
 
         // Subtle stage: a floor grid so scale and gravity read instantly.
-        const grid = new THREE.GridHelper(10, 20, 0x35302a, 0x211d18);
+        const grid = new THREE.GridHelper(10, 20, 0x2e2e2e, 0x1c1c1c);
         scene.add(grid);
 
         const controls = new OrbitControls(camera, renderer.domElement);
@@ -161,7 +161,7 @@ export default function SplatViewer({ splats, className }: SplatViewerProps) {
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border border-white/[0.06] bg-[#0d0c0a] ${className ?? ""}`}
+      className={`relative overflow-hidden rounded-2xl border border-white/[0.06] bg-[#0d0d0d] ${className ?? ""}`}
     >
       <div ref={containerRef} className="absolute inset-0" />
       {phase === "loading" && (

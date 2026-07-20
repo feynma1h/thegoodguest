@@ -5,12 +5,13 @@
  * draft's Act 1 ("the cursor is a soft light source; the room is
  * desaturated by default, color only exists where the user looks").
  *
- * Pure CSS layers driven by two custom properties (--mx/--my): a dark
- * room-toned base with a faint horizon and floor grid, and a warm color
- * layer revealed through a radial mask centered on the cursor. Cursor
- * position is eased toward its target on rAF so the light feels weighted
- * rather than glued to the pointer. Honors prefers-reduced-motion by
- * holding a fixed, centered glow.
+ * Pure CSS layers driven by two custom properties (--mx/--my): a neutral
+ * near-black base with a faint horizon and floor grid, and warm-white
+ * room light revealed around the cursor. Per decision 0056 the warmth
+ * here is CONTENT (light falling in a room — the product itself), not
+ * chrome decoration; the UI around it stays achromatic. Cursor position
+ * is eased on rAF so the light feels weighted rather than glued to the
+ * pointer. Honors prefers-reduced-motion by holding a fixed glow.
  */
 
 import { useEffect, useRef } from "react";
@@ -56,23 +57,23 @@ export default function AmbientHero({ children }: { children: React.ReactNode })
       className="relative overflow-hidden"
       style={{ "--mx": "50%", "--my": "42%" } as React.CSSProperties}
     >
-      {/* Base: near-black room tone with a faint horizon. */}
+      {/* Base: neutral room tone with a faint horizon. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "linear-gradient(to bottom, #0b0a09 0%, #0d0c0a 55%, #12100c 68%, #0b0a09 100%)",
+            "linear-gradient(to bottom, #0a0a0a 0%, #0c0c0c 55%, #101010 68%, #0a0a0a 100%)",
         }}
       />
       {/* Floor grid, fading toward the horizon. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] opacity-[0.13]"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] opacity-[0.1]"
         style={{
           background:
-            "repeating-linear-gradient(to right, transparent 0 calc(6.25% - 1px), #a08c6c calc(6.25% - 1px) 6.25%)," +
-            "repeating-linear-gradient(to top, transparent 0 34px, #a08c6c 34px 35px)",
+            "repeating-linear-gradient(to right, transparent 0 calc(6.25% - 1px), #8a8a8a calc(6.25% - 1px) 6.25%)," +
+            "repeating-linear-gradient(to top, transparent 0 34px, #8a8a8a 34px 35px)",
           maskImage:
             "linear-gradient(to top, rgba(0,0,0,0.9), transparent 90%)",
           WebkitMaskImage:
@@ -81,13 +82,13 @@ export default function AmbientHero({ children }: { children: React.ReactNode })
           transformOrigin: "bottom",
         }}
       />
-      {/* Color exists only where the light is. */}
+      {/* Warm-white room light — content, not chrome. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(52rem 36rem at var(--mx) var(--my), rgba(224,163,92,0.16), rgba(190,120,70,0.07) 45%, transparent 70%)",
+            "radial-gradient(52rem 36rem at var(--mx) var(--my), rgba(255,244,228,0.09), rgba(255,236,214,0.04) 45%, transparent 70%)",
         }}
       />
       <div
@@ -95,7 +96,7 @@ export default function AmbientHero({ children }: { children: React.ReactNode })
         className="pointer-events-none absolute inset-0 mix-blend-screen"
         style={{
           background:
-            "radial-gradient(20rem 14rem at var(--mx) var(--my), rgba(255,214,160,0.10), transparent 70%)",
+            "radial-gradient(18rem 13rem at var(--mx) var(--my), rgba(255,248,238,0.07), transparent 70%)",
         }}
       />
       <div className="relative">{children}</div>

@@ -6,10 +6,10 @@
  * ApiClient (mock fixtures or live api-public depending on mode).
  */
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import RoomCard from "@/components/RoomCard";
+import { PillLink } from "@/components/ui/spring";
 import { getApiClient } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import type { SceneSummary } from "@/lib/api/types";
@@ -41,9 +41,9 @@ export default function RoomsPage() {
   return (
     <div className="mx-auto max-w-6xl px-6 py-14">
       <div className="flex items-baseline justify-between">
-        <h1 className="font-serif text-4xl font-light tracking-tight">Your rooms</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Your rooms</h1>
         {state.phase === "ready" && state.scenes.length > 0 && (
-          <span className="font-mono text-xs tracking-wider text-zinc-500">
+          <span className="text-sm text-zinc-500">
             {state.scenes.length} {state.scenes.length === 1 ? "room" : "rooms"}
           </span>
         )}
@@ -68,18 +68,15 @@ export default function RoomsPage() {
       )}
 
       {state.phase === "ready" && state.scenes.length === 0 && (
-        <div className="mt-10 flex flex-col items-center rounded-2xl border border-white/[0.06] bg-white/[0.02] px-6 py-20 text-center">
-          <p className="font-serif text-2xl font-light text-zinc-200">No rooms yet.</p>
+        <div className="mt-24 flex flex-col items-center text-center">
+          <p className="text-xl font-medium text-zinc-200">No rooms yet.</p>
           <p className="mt-3 max-w-sm text-sm leading-relaxed text-zinc-500">
             Your first scan takes about a minute — a slow walk around the room
             with your iPhone.
           </p>
-          <Link
-            href="/new"
-            className="ease-soft mt-8 rounded-full bg-accent px-6 py-2.5 text-sm font-medium text-[#171207] transition-all duration-200 hover:scale-[1.03] active:scale-[0.98]"
-          >
+          <PillLink href="/new" className="mt-8">
             Scan your first room
-          </Link>
+          </PillLink>
         </div>
       )}
 

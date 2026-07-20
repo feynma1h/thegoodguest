@@ -45,6 +45,9 @@ live mode).
 - `firebase.json` — Hosting config incl. the CSP (connect-src must allow
   api-public and storage.googleapis.com or the viewer loads nothing).
 
-Type system (founding draft, decision 0055): serif (Fraunces) = feeling,
-mono (DM Mono) = thinking, sans (Geist) = chrome. Never serif and mono in
-the same sentence.
+Design language (decision 0056, "Apple-grade restraint"): permanently
+neutral chrome — near-black surfaces, hairlines, white pill CTAs; color
+belongs to content (the room, its light), never to UI. One sans (Geist)
+does all typography via weight/size/tracking; mono (DM Mono) appears only
+for machine data (ids, coordinates, reasoning traces). All motion uses
+the single spring in `src/components/ui/spring.tsx`.
