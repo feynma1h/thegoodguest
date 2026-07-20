@@ -54,5 +54,11 @@ __MACOSX/
 docs/
 tools/
 
+# The web app deploys to Firebase Hosting, not Cloud Run; no service Dockerfile
+# COPYs from web/. Its node_modules/ and .next/ are ignored only by the NESTED
+# web/.gitignore, which gcloud does not process (only the top-level .gitignore
+# is inherited) — without this line they add ~1.3 GiB to every build context.
+web/
+
 # ── Generated artifacts ───────────────────────────────────────────────────────
 outputs/
