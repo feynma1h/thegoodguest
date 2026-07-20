@@ -26,14 +26,25 @@ python tools/make_synthetic_splat.py   # from the repo root
 ```
 
 then open /viewer (it auto-loads `/dev-fixtures/manifest.json`), or use
-the mock ready scene at /scenes.
+the mock ready room at /rooms.
 
 ## Structure
+
+Routes are room-centric: `/` (thesis landing), `/rooms` (browser),
+`/room?bundle=` (a single room — the viewer embeds HERE when ready),
+`/new` (scan instructions), `/viewer` (dev workbench, hidden from nav in
+live mode).
 
 - `src/lib/api/` — typed client for api-public (mock + live), manifest-v2
   types, and `assembleScene` (assets → positioned splats).
 - `src/components/SplatViewer.tsx` — the ONLY module that touches the
   rendering library (three.js + @sparkjsdev/spark). Its input contract is
   a list of `PositionedSplat`s; a renderer swap is a one-file rewrite.
+- `src/components/Wordmark.tsx` — the placeholder wordmark; NO PRODUCT
+  NAME HAS BEEN CHOSEN, and this file is the single point of change.
 - `firebase.json` — Hosting config incl. the CSP (connect-src must allow
   api-public and storage.googleapis.com or the viewer loads nothing).
+
+Type system (founding draft, decision 0055): serif (Fraunces) = feeling,
+mono (DM Mono) = thinking, sans (Geist) = chrome. Never serif and mono in
+the same sentence.
