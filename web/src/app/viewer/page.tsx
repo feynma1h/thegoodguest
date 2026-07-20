@@ -98,13 +98,13 @@ function DevViewerContent({ directUrl }: { directUrl: string | null }) {
   return (
     <div onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
       {state.phase === "loading" && (
-        <div className="mt-8 h-[62vh] animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.02]" />
+        <div className="mt-8 h-[62vh] animate-pulse rounded-xl border border-ink/10 bg-parchment/60" />
       )}
 
       {state.phase === "idle" && (
-        <div className="mt-8 flex h-[62vh] flex-col items-center justify-center rounded-2xl border border-dashed border-white/15 bg-white/[0.02] text-center">
-          <p className="text-zinc-300">Drop a splat file to view it</p>
-          <p className="mt-2 max-w-sm text-sm leading-relaxed text-zinc-500">
+        <div className="mt-8 flex h-[62vh] flex-col items-center justify-center rounded-xl border border-dashed border-ink/30 bg-parchment/40 text-center">
+          <p className="text-ink/85">Drop a splat file to view it</p>
+          <p className="mt-2 max-w-sm text-sm leading-relaxed text-ink/55">
             .ply, .spz, .splat or .ksplat — or generate the synthetic room
             fixture with <code className="font-mono text-xs">tools/make_synthetic_splat.py</code>.
           </p>
@@ -115,7 +115,7 @@ function DevViewerContent({ directUrl }: { directUrl: string | null }) {
         <>
           <SplatViewer splats={state.splats} className="mt-8 h-[62vh]" />
           {state.unrenderable.length > 0 && (
-            <p className="mt-3 text-sm text-zinc-500">
+            <p className="mt-3 text-sm text-ink/55">
               Not shown:{" "}
               {state.unrenderable
                 .map((o) => `${o.label} (${o.reason ?? "no transform"})`)
@@ -137,7 +137,7 @@ function ViewerContent() {
     <div>
       <div className="flex items-baseline justify-between">
         <h1 className="text-3xl font-semibold tracking-tight">Viewer</h1>
-        <span className="font-mono text-[10px] text-zinc-600">dev workbench</span>
+        <span className="font-mono text-[10px] text-ink/40">dev workbench</span>
       </div>
       {sceneId ? (
         <div className="mt-8">
@@ -155,7 +155,7 @@ export default function ViewerPage() {
     <div className="mx-auto max-w-6xl px-6 py-14">
       <Suspense
         fallback={
-          <div className="h-[62vh] animate-pulse rounded-2xl bg-white/[0.02]" />
+          <div className="h-[62vh] animate-pulse rounded-xl bg-parchment/60" />
         }
       >
         <ViewerContent />

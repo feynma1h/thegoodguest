@@ -6,21 +6,25 @@
  * "a splat file URL plus a world transform". Swapping Spark for another
  * renderer is a rewrite of this file and nothing else — keep it that way.
  *
- * Renderer: three.js + @sparkjsdev/spark (WebGL2 3DGS renderer; decided
- * over WebGPU-first options — see the session's decision note). Both are
- * imported dynamically inside useEffect so the static export never
- * evaluates GPU/browser globals at build time.
+ * Renderer: three.js + @sparkjsdev/spark (WebGL2 3DGS renderer; decision
+ * 0053). Both are imported dynamically inside useEffect so the static
+ * export never evaluates GPU/browser globals at build time.
  *
  * Coordinate frames: PositionedSplat transforms are ARKit-world (right-
  * handed, +Y up, meters) — the same handedness and up-axis as three.js,
  * so transforms apply directly with no basis change.
  *
- * Staging: the room is presented, not just rendered — camera auto-frames
- * the content, the ground is a radially-fading grid disc (no infinite
- * horizon), orbit is bounded above the floor, and the scene arrives with
- * a short dolly-in + fade (a small echo of the product's reveal moment).
- * Spark's splat shaders ignore three.js fog, so all depth falloff here is
- * texture/CSS-based rather than fog-based.
+ * Staging: the room is presented, not just rendered — a warm dark stage
+ * (the Good Guest palette's ambient register), a radially-fading 1m grid
+ * disc, bounded orbit, and a short dolly-in on arrival. Spark's splat
+ * shaders ignore three.js fog, so all depth falloff here is texture/CSS.
+ *
+ * Reveal (design §4, the objects-first assembly — literally our path,
+ * since the room-shell pipeline is unbuilt): with `reveal`, objects
+ * arrive one at a time onto the bare ground plane, largest first, each
+ * dropping softly into place; `onRevealStep` fires as each arrives (the
+ * DOM layer names it) and `onRevealDone` when the room is assembled.
+ * Reduced motion collapses the assembly to an immediate full room.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -32,6 +36,12 @@ interface SplatViewerProps {
   className?: string;
   /** Slow auto-orbit until the user grabs the scene (landing demo). */
   idleOrbit?: boolean;
+  /** Full-bleed stage: no rounded frame, no hairline (immersive room). */
+  frameless?: boolean;
+  /** Play the objects-first assembly on load. */
+  reveal?: boolean;
+  onRevealStep?: (index: number, label: string) => void;
+  onRevealDone?: () => void;
 }
 
 /** Async-only load outcome, stamped with the splat-set key it belongs to.
@@ -40,8 +50,7 @@ interface SplatViewerProps {
 type LoadOutcome = { key: string; phase: "ready" } | { key: string; phase: "error"; error: string };
 
 /** Ground: a fine 1m grid that fades out radially, drawn to a canvas
- * texture — reads as a measured stage under the room instead of a CAD
- * horizon. */
+ * texture — a measured stage under the room, in warm lamplight tones. */
 function makeGroundTexture(): HTMLCanvasElement {
   const size = 1024;
   const canvas = document.createElement("canvas");
@@ -52,16 +61,16 @@ function makeGroundTexture(): HTMLCanvasElement {
 
   // Faint radial fill — the "contact pool" of light under the content.
   const pool = ctx.createRadialGradient(center, center, 0, center, center, center);
-  pool.addColorStop(0, "rgba(255,255,255,0.05)");
-  pool.addColorStop(0.45, "rgba(255,255,255,0.02)");
-  pool.addColorStop(1, "rgba(255,255,255,0)");
+  pool.addColorStop(0, "rgba(247, 239, 223, 0.06)");
+  pool.addColorStop(0.45, "rgba(247, 239, 223, 0.025)");
+  pool.addColorStop(1, "rgba(247, 239, 223, 0)");
   ctx.fillStyle = pool;
   ctx.fillRect(0, 0, size, size);
 
   // Grid lines, alpha-masked by the same radial falloff. The plane is
   // GROUND_SIZE meters wide, so lines every size/GROUND_SIZE px = 1m.
   const step = size / GROUND_SIZE;
-  ctx.strokeStyle = "rgba(255,255,255,0.16)";
+  ctx.strokeStyle = "rgba(247, 239, 223, 0.17)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let i = 0; i <= GROUND_SIZE; i++) {
@@ -87,13 +96,37 @@ function makeGroundTexture(): HTMLCanvasElement {
 
 const GROUND_SIZE = 16; // meters; also the grid line count (1m spacing)
 
-export default function SplatViewer({ splats, className, idleOrbit = false }: SplatViewerProps) {
+// Assembly timing: object i starts at REVEAL_LEAD + i*REVEAL_STEP and
+// settles over REVEAL_DROP_MS from REVEAL_DROP_M above its place.
+const REVEAL_LEAD_MS = 500;
+const REVEAL_STEP_MS = 650;
+const REVEAL_DROP_MS = 700;
+const REVEAL_DROP_M = 0.4;
+
+export default function SplatViewer({
+  splats,
+  className,
+  idleOrbit = false,
+  frameless = false,
+  reveal = false,
+  onRevealStep,
+  onRevealDone,
+}: SplatViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const key = useMemo(
     () => splats.map((s) => `${s.url}@${s.position.join(",")}`).join("|"),
     [splats],
   );
   const [outcome, setOutcome] = useState<LoadOutcome | null>(null);
+
+  // Callback identity must not restart the renderer; refs are written
+  // after commit (never during render) and read at call time.
+  const revealStepRef = useRef(onRevealStep);
+  const revealDoneRef = useRef(onRevealDone);
+  useEffect(() => {
+    revealStepRef.current = onRevealStep;
+    revealDoneRef.current = onRevealDone;
+  });
 
   const phase: "empty" | "loading" | "ready" | "error" =
     splats.length === 0
@@ -227,6 +260,31 @@ export default function SplatViewer({ splats, className, idleOrbit = false }: Sp
         setOutcome({ key, phase: "ready" });
         renderer.domElement.style.opacity = "1";
 
+        // --- Assembly (design §4): largest pieces first, each dropped
+        // softly onto the ground plane. Reduced motion skips straight to
+        // the assembled room.
+        const reducedMotion = window.matchMedia(
+          "(prefers-reduced-motion: reduce)",
+        ).matches;
+        const assembling = reveal && !reducedMotion && meshes.length > 0;
+        const revealOrder = splats
+          .map((s, i) => ({ i, size: s.scale }))
+          .sort((a, b) => b.size - a.size)
+          .map((entry, seq) => ({ ...entry, seq }));
+        const revealStartAt = new Map<number, number>(); // mesh idx -> start ms
+        const revealFired = new Set<number>();
+        let revealDoneFired = !assembling;
+        const revealT0 = performance.now();
+        if (assembling) {
+          for (const { i, seq } of revealOrder) {
+            revealStartAt.set(i, revealT0 + REVEAL_LEAD_MS + seq * REVEAL_STEP_MS);
+            meshes[i].visible = false;
+          }
+        } else if (reveal && !disposed) {
+          // Reveal requested but not animated: the room is simply there.
+          revealDoneRef.current?.();
+        }
+
         // --- Entrance: a short dolly-in from farther out, interruptible by
         // the first grab. Runs on an eased clock inside the render loop.
         const ENTRANCE_MS = 1400;
@@ -243,13 +301,41 @@ export default function SplatViewer({ splats, className, idleOrbit = false }: Sp
         let raf = 0;
         const renderLoop = () => {
           raf = requestAnimationFrame(renderLoop);
+          const now = performance.now();
           if (entranceStart !== null) {
-            const t = Math.min(1, (performance.now() - entranceStart) / ENTRANCE_MS);
+            const t = Math.min(1, (now - entranceStart) / ENTRANCE_MS);
             const eased = 1 - Math.pow(1 - t, 3);
             camera.position
               .copy(target)
               .add(fromOffset.clone().lerp(finalOffset, eased));
             if (t >= 1) entranceStart = null;
+          }
+          if (assembling && !revealDoneFired) {
+            let allSettled = true;
+            for (const [i, startMs] of revealStartAt) {
+              const p = (now - startMs) / REVEAL_DROP_MS;
+              if (p < 0) {
+                allSettled = false;
+                continue;
+              }
+              const mesh = meshes[i];
+              if (!revealFired.has(i)) {
+                revealFired.add(i);
+                mesh.visible = true;
+                revealStepRef.current?.(i, splats[i].label);
+              }
+              if (p < 1) {
+                allSettled = false;
+                const eased = 1 - Math.pow(1 - Math.min(1, p), 3);
+                mesh.position.y = splats[i].position[1] + REVEAL_DROP_M * (1 - eased);
+              } else {
+                mesh.position.y = splats[i].position[1];
+              }
+            }
+            if (allSettled) {
+              revealDoneFired = true;
+              revealDoneRef.current?.();
+            }
           }
           controls.update();
           renderer.render(scene, camera);
@@ -299,16 +385,19 @@ export default function SplatViewer({ splats, className, idleOrbit = false }: Sp
       disposed = true;
       cleanup?.();
     };
-  }, [key, splats, idleOrbit]);
+  }, [key, splats, idleOrbit, reveal]);
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border border-white/[0.06] ${className ?? ""}`}
+      className={`relative overflow-hidden ${
+        frameless ? "" : "rounded-xl border border-ink/15"
+      } ${className ?? ""}`}
       style={{
-        // The stage's atmosphere: a deep neutral with a faint lift where
-        // the room sits. CSS, not clear-color, so it can be a gradient.
+        // The stage's atmosphere: warm lamplight dark (the palette's
+        // ambient register — §11's family, dimmed). CSS, not clear-color,
+        // so it can be a gradient.
         background:
-          "radial-gradient(120% 90% at 50% 42%, #131313 0%, #0c0c0c 55%, #080808 100%)",
+          "radial-gradient(120% 90% at 50% 42%, #3f3226 0%, #2a2017 55%, #1c1610 100%)",
       }}
     >
       <div ref={containerRef} className="absolute inset-0" />
@@ -316,23 +405,23 @@ export default function SplatViewer({ splats, className, idleOrbit = false }: Sp
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
-        style={{ boxShadow: "inset 0 0 110px 32px rgba(0,0,0,0.5)" }}
+        style={{ boxShadow: "inset 0 0 110px 32px rgba(18, 12, 6, 0.5)" }}
       />
       {phase === "loading" && (
         <Overlay>
-          <p className="animate-pulse text-sm text-zinc-400">Assembling the room…</p>
+          <p className="animate-pulse text-sm text-paper/60">Assembling the room…</p>
         </Overlay>
       )}
       {phase === "empty" && (
         <Overlay>
-          <p className="text-sm text-zinc-500">Nothing to render yet.</p>
+          <p className="text-sm text-paper/45">Nothing to render yet.</p>
         </Overlay>
       )}
       {phase === "error" && (
         <Overlay>
           <div className="max-w-sm text-center">
-            <p className="text-sm font-medium text-red-400">Viewer error</p>
-            <p className="mt-1 break-words text-xs text-zinc-500">{error}</p>
+            <p className="text-sm font-medium text-[#e8a68e]">Viewer error</p>
+            <p className="mt-1 break-words text-xs text-paper/50">{error}</p>
           </div>
         </Overlay>
       )}

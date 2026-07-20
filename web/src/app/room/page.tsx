@@ -1,32 +1,182 @@
 "use client";
 
 /**
- * A single room: /room?bundle=<bundle_id>. Query-param routing because the
- * static export cannot prerender unknown dynamic path segments
- * (useSearchParams requires the Suspense boundary below during prerender).
+ * A single room: /room?bundle=<bundle_id>. Query-param routing because
+ * the static export cannot prerender unknown dynamic path segments
+ * (useSearchParams requires the Suspense boundary below during
+ * prerender).
  *
- * When the room is ready the 3D space is embedded HERE — the room page is
- * the destination, not a status card pointing elsewhere. It renders as
- * viewer + side rail; the rail carries analysis today and is the
- * conversational interface's future home (decision 0056). While
- * processing, the copy narrates the analysis (with real 10s polling)
- * rather than exposing pipeline states.
+ * The room page is immersive — the global nav stands down (SiteNav
+ * returns null here) and the page carries its own floating chrome. One
+ * governing rule (design §0): this page is a conversation happening in
+ * a room; everything else is furniture. Until the conversation backend
+ * exists, the guest's lines are template narration grounded in real
+ * state, and the composer ships disabled, saying so.
+ *
+ * States: the Wait (§3 — narrated arrival, real 10s polling, never a
+ * progress bar), the partial failure (§8 — honest about missing files),
+ * the terminal failure (§8 — dark panel, a next step, never a stack
+ * trace), and the room itself (RoomStage: hold → reveal → stage 1).
  */
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
-import RoomViewerPanel from "@/components/RoomViewerPanel";
-import StatusBadge from "@/components/StatusBadge";
+import RoomStage from "@/components/RoomStage";
+import Wordmark from "@/components/Wordmark";
+import { PillLink } from "@/components/ui/spring";
+import { DisabledComposer, GuestLine } from "@/components/ui/voice";
 import { getApiClient } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import type { SceneSummary } from "@/lib/api/types";
 import { statusMeta } from "@/lib/status";
+import { elapsedPhrase, minutesSince, roomTitle, waitNarration } from "@/lib/voice";
 
 type Result =
   | { forBundle: string; phase: "error"; message: string }
   | { forBundle: string; phase: "ready"; scene: SceneSummary };
+
+/** Floating chrome shared by every room-page state: the way back, the
+ * placeholder wordmark, the room's derived name, and a right-side slot. */
+function RoomChrome({
+  tone,
+  title,
+  right,
+}: {
+  tone: "ink" | "cream";
+  title: string;
+  right?: React.ReactNode;
+}) {
+  const dim = tone === "cream" ? "text-paper/55 hover:text-paper" : "text-ink/55 hover:text-ink";
+  return (
+    <header className="pointer-events-none absolute inset-x-0 top-0 z-30 flex h-14 items-center justify-between px-6">
+      <div className="flex items-baseline gap-4">
+        <Link
+          href="/rooms"
+          className={`pointer-events-auto text-xs font-medium transition-colors ${dim}`}
+        >
+          ← your house
+        </Link>
+        <Link href="/" className="pointer-events-auto transition-opacity hover:opacity-70">
+          <Wordmark tone={tone} />
+        </Link>
+        <span
+          className={`font-serif text-[15px] italic ${
+            tone === "cream" ? "text-paper/85" : "text-ink/85"
+          }`}
+        >
+          {title}
+        </span>
+      </div>
+      {right && <div className="pointer-events-auto">{right}</div>}
+    </header>
+  );
+}
+
+/** "as captured · 1:38 pm" — the capture moment is real data; the sun
+ * dial only arrives with lighting simulation. Gold = light, never
+ * ornament. */
+function CapturedChip({ createdAt }: { createdAt: string }) {
+  const time = new Date(createdAt).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return (
+    <span className="flex items-center gap-2 rounded-full border border-ink/15 bg-paper/90 px-3.5 py-1.5 text-xs text-ink/75">
+      <span aria-hidden className="h-2 w-2 rounded-full bg-sun" />
+      as captured · {time}
+    </span>
+  );
+}
+
+/** §3 — the wait. Progress is narrated as arrival; the forming stage is
+ * atmosphere, never a percentage. Polling (page-level) is the truth
+ * behind "this page keeps watch". */
+function WaitRoom({ scene }: { scene: SceneSummary }) {
+  const narration = waitNarration(
+    scene.status === "queued" ? "queued" : "processing",
+    minutesSince(scene.created_at),
+  );
+  return (
+    <div className="relative flex min-h-dvh flex-col bg-paper">
+      <RoomChrome
+        tone="ink"
+        title="a new room, being rebuilt"
+        right={
+          <span className="hidden text-xs text-ink/50 sm:block">
+            minutes, not seconds · you can leave — this page keeps watch
+          </span>
+        }
+      />
+      <div className="flex flex-1 flex-col items-center justify-center px-6 pt-14">
+        <div className="hatch breathe h-56 w-full max-w-lg rounded-xl" aria-hidden />
+        <GuestLine className="mt-10 max-w-lg text-center text-[17px]">
+          {narration}
+        </GuestLine>
+        <p className="mt-3 text-xs text-ink/50">{elapsedPhrase(scene.created_at)}</p>
+      </div>
+      <div className="mx-auto mb-10 w-full max-w-xl px-6">
+        <DisabledComposer />
+      </div>
+    </div>
+  );
+}
+
+/** §8, recoverable — part of the scan never arrived. The claim matches
+ * what iOS actually does: reopening the app resumes unfinished uploads. */
+function PartialRoom({ scene }: { scene: SceneSummary }) {
+  const missing = scene.missing_paths?.length ?? 0;
+  return (
+    <div className="relative flex min-h-dvh flex-col bg-paper">
+      <RoomChrome tone="ink" title={roomTitle(scene.created_at)} />
+      <div className="mx-auto flex max-w-lg flex-1 flex-col items-start justify-center px-6 pt-14">
+        <GuestLine className="text-[17px]">
+          Most of the room made the trip, but{" "}
+          {missing === 1 ? "one piece" : `${missing} pieces`} of the scan
+          never arrived. Nothing is lost — reopen the iOS app on your iPhone
+          and it picks up where it left off.
+        </GuestLine>
+        <p className="mt-6 text-xs text-ink/50">
+          this page updates on its own when the rest lands
+        </p>
+        <p className="mt-10 border-t border-ink/10 pt-5 font-mono text-[10px] text-ink/35">
+          {scene.bundle_id}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** §8, terminal — honest words, one concrete next step, no stack trace. */
+function TerminalRoom({ scene }: { scene: SceneSummary }) {
+  const line = `${
+    scene.status === "failed_invalid"
+      ? "I’m sorry — this scan arrived in a form I can’t read, and I’d rather admit that than show you something false."
+      : "I’m sorry — the scan didn’t survive the trip, and there’s nothing here I could honestly show you."
+  } It’s not something you did. When you’re near the room again, let’s try one more pass — slower is better.`;
+  return (
+    <div className="relative flex min-h-dvh flex-col bg-ink">
+      <RoomChrome tone="cream" title={roomTitle(scene.created_at)} />
+      <div className="mx-auto flex max-w-lg flex-1 flex-col items-start justify-center px-6 pt-14">
+        <GuestLine tone="cream" className="text-[17px]">
+          {line}
+        </GuestLine>
+        <div className="mt-9 flex items-center gap-3">
+          <PillLink href="/new" variant="cream">
+            Rescan from your phone
+          </PillLink>
+          <PillLink href="/rooms" variant="creamGhost">
+            your house
+          </PillLink>
+        </div>
+        <p className="mt-10 border-t border-paper/10 pt-5 font-mono text-[10px] text-paper/30">
+          {scene.bundle_id}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function RoomDetail() {
   const bundleId = useSearchParams().get("bundle");
@@ -42,8 +192,8 @@ function RoomDetail() {
     if (!bundleId) return;
     let cancelled = false;
     let timer: number | undefined;
-    // Poll while the room is in flight so "this page updates when the room
-    // is ready" is actually true; stops on terminal states.
+    // Poll while the room is in flight so "this page keeps watch" is
+    // actually true; stops on terminal states.
     const load = () => {
       getApiClient()
         .getSceneByBundle(bundleId)
@@ -68,110 +218,62 @@ function RoomDetail() {
     };
   }, [bundleId]);
 
-  if (state.phase === "missing") {
+  if (state.phase === "missing" || state.phase === "error") {
     return (
-      <p className="text-zinc-400">
-        No room selected.{" "}
-        <Link href="/rooms" className="text-foreground underline underline-offset-4">
-          Back to your rooms
-        </Link>
-      </p>
-    );
-  }
-  if (state.phase === "loading") {
-    return (
-      <div className="h-48 animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.02]" />
-    );
-  }
-  if (state.phase === "error") {
-    return (
-      <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-6">
-        <p className="text-sm font-medium text-red-300">Couldn&apos;t load this room</p>
-        <p className="mt-1 text-sm text-zinc-400">{state.message}</p>
+      <div className="relative flex min-h-dvh flex-col bg-paper">
+        <RoomChrome tone="ink" title="" />
+        <div className="mx-auto flex max-w-lg flex-1 flex-col items-start justify-center px-6 pt-14">
+          {state.phase === "missing" ? (
+            <p className="text-ink/70">
+              No room selected.{" "}
+              <Link href="/rooms" className="text-accent underline underline-offset-4">
+                Back to your house
+              </Link>
+            </p>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-accent">
+                Couldn&apos;t open this room
+              </p>
+              <p className="mt-2 text-sm text-ink/60">{state.message}</p>
+            </>
+          )}
+        </div>
       </div>
     );
+  }
+
+  if (state.phase === "loading") {
+    return <div className="min-h-dvh bg-paper" aria-hidden />;
   }
 
   const { scene } = state;
-  const meta = statusMeta(scene.status);
-  const captured = new Date(scene.created_at);
-  const capturedDay = captured.toLocaleDateString(undefined, {
-    month: "long",
-    day: "numeric",
-  });
 
-  return (
-    <div>
-      <Link
-        href="/rooms"
-        className="text-sm text-zinc-500 transition-colors hover:text-zinc-300"
-      >
-        ← Your rooms
-      </Link>
-
-      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-4">
-        <h1 className="text-3xl font-semibold tracking-tight">Room · {capturedDay}</h1>
-        <StatusBadge status={scene.status} />
+  if (scene.status === "ready") {
+    return (
+      <div className="relative min-h-dvh bg-[#1c1610]">
+        <RoomStage key={scene.scene_id} sceneId={scene.scene_id} />
+        <RoomChrome
+          tone="cream"
+          title={roomTitle(scene.created_at)}
+          right={<CapturedChip createdAt={scene.created_at} />}
+        />
       </div>
-
-      {scene.status === "ready" ? (
-        <div className="mt-8">
-          <RoomViewerPanel
-            sceneId={scene.scene_id}
-            className="h-[62vh]"
-            rail={
-              <div className="border-b border-white/[0.06] pb-8">
-                <h3 className="text-xs font-medium text-zinc-500">Captured</h3>
-                <p className="mt-2 text-sm text-zinc-200">
-                  {captured.toLocaleString(undefined, {
-                    month: "long",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </p>
-                <p className="mt-4 font-mono text-[10px] leading-relaxed text-zinc-600">
-                  {scene.bundle_id}
-                </p>
-              </div>
-            }
-          />
-        </div>
-      ) : (
-        <div className="mt-16 max-w-md">
-          <p className="text-xl font-normal leading-relaxed text-zinc-200">
-            {meta.description}
-          </p>
-          {scene.status === "failed_incomplete" && scene.missing_paths && (
-            <p className="mt-4 text-sm text-zinc-500">
-              {scene.missing_paths.length} capture file
-              {scene.missing_paths.length === 1 ? "" : "s"} still missing.
-            </p>
-          )}
-          {!meta.terminal && (
-            <p className="mt-8 text-xs text-zinc-600">
-              This page updates when the room is ready.
-            </p>
-          )}
-          <p className="mt-10 border-t border-white/[0.06] pt-6 font-mono text-[10px] text-zinc-600">
-            {scene.bundle_id}
-          </p>
-        </div>
-      )}
-    </div>
-  );
+    );
+  }
+  if (scene.status === "failed" || scene.status === "failed_invalid") {
+    return <TerminalRoom scene={scene} />;
+  }
+  if (scene.status === "failed_incomplete") {
+    return <PartialRoom scene={scene} />;
+  }
+  return <WaitRoom scene={scene} />;
 }
 
 export default function RoomPage() {
   return (
-    <div className="mx-auto max-w-6xl px-6 py-14">
-      <Suspense
-        fallback={
-          <div className="h-48 animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.02]" />
-        }
-      >
-        <RoomDetail />
-      </Suspense>
-    </div>
+    <Suspense fallback={<div className="min-h-dvh bg-paper" aria-hidden />}>
+      <RoomDetail />
+    </Suspense>
   );
 }
