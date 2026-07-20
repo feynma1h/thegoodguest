@@ -84,6 +84,17 @@ gcloud run deploy "${SERVICE}" \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
     --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app
 
+# gcloud run deploy creates the revision but does NOT move traffic when the
+# service's traffic spec is pinned to a revision NAME (perception-obj carried
+# such a pin from a 2026-05 rollback: the 2026-07-21 deploy validated, was
+# instantly Retired with zero traffic, and gcloud still printed "serving 100
+# percent" — for the OLD revision). Force follow-latest explicitly; idempotent,
+# and matches this script's intent of deploying straight to 100%.
+gcloud run services update-traffic "${SERVICE}" \
+    --to-latest \
+    --region="${REGION}" \
+    --project="${PROJECT_ID}"
+
 URL=$(gcloud run services describe "${SERVICE}" \
         --region="${REGION}" --project="${PROJECT_ID}" \
         --format='value(status.url)')
