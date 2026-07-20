@@ -1,27 +1,28 @@
 /**
- * Small status pill used on scene cards and the scene detail page.
- * Tone→color mapping is the app's single visual encoding of SceneStatus.
+ * Status indicator: a colored dot + quiet sans label — how state reads in
+ * restrained UI (decision 0056). The dot carries the tone; the text stays
+ * neutral. In-flight states pulse.
  */
 
 import type { SceneStatus } from "@/lib/api/types";
 import { statusMeta, type StatusTone } from "@/lib/status";
 
-const TONE_CLASSES: Record<StatusTone, string> = {
-  progress: "bg-white/[0.04] text-zinc-300 ring-white/10",
-  success: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/25",
-  warning: "bg-accent/10 text-accent ring-accent/25",
-  error: "bg-red-500/10 text-red-300/90 ring-red-500/25",
+const DOT_CLASSES: Record<StatusTone, string> = {
+  progress: "bg-zinc-400",
+  success: "bg-emerald-400",
+  warning: "bg-orange-400",
+  error: "bg-red-400",
 };
 
 export default function StatusBadge({ status }: { status: SceneStatus }) {
   const meta = statusMeta(status);
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-mono text-[10px] uppercase tracking-widest ring-1 ring-inset ${TONE_CLASSES[meta.tone]}`}
-    >
-      {!meta.terminal && (
-        <span className="h-1 w-1 animate-pulse rounded-full bg-current" />
-      )}
+    <span className="inline-flex items-center gap-2 text-xs font-medium text-zinc-400">
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${DOT_CLASSES[meta.tone]} ${
+          meta.terminal ? "" : "animate-pulse"
+        }`}
+      />
       {meta.label}
     </span>
   );

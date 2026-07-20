@@ -6,8 +6,11 @@
  * (useSearchParams requires the Suspense boundary below during prerender).
  *
  * When the room is ready the 3D space is embedded HERE — the room page is
- * the destination, not a status card pointing elsewhere. While processing,
- * the copy narrates the analysis rather than exposing pipeline states.
+ * the destination, not a status card pointing elsewhere. It renders as
+ * viewer + side rail; the rail carries analysis today and is the
+ * conversational interface's future home (decision 0056). While
+ * processing, the copy narrates the analysis (with real 10s polling)
+ * rather than exposing pipeline states.
  */
 
 import Link from "next/link";
@@ -69,7 +72,7 @@ function RoomDetail() {
     return (
       <p className="text-zinc-400">
         No room selected.{" "}
-        <Link href="/rooms" className="text-accent hover:underline">
+        <Link href="/rooms" className="text-foreground underline underline-offset-4">
           Back to your rooms
         </Link>
       </p>
@@ -91,7 +94,8 @@ function RoomDetail() {
 
   const { scene } = state;
   const meta = statusMeta(scene.status);
-  const captured = new Date(scene.created_at).toLocaleDateString(undefined, {
+  const captured = new Date(scene.created_at);
+  const capturedDay = captured.toLocaleDateString(undefined, {
     month: "long",
     day: "numeric",
   });
@@ -105,25 +109,37 @@ function RoomDetail() {
         ← Your rooms
       </Link>
 
-      <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-4xl font-light tracking-tight">
-            Room · {captured}
-          </h1>
-          <p className="mt-2 font-mono text-[10px] tracking-wider text-zinc-600">
-            {scene.bundle_id}
-          </p>
-        </div>
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-4">
+        <h1 className="text-3xl font-semibold tracking-tight">Room · {capturedDay}</h1>
         <StatusBadge status={scene.status} />
       </div>
 
       {scene.status === "ready" ? (
         <div className="mt-8">
-          <RoomViewerPanel sceneId={scene.scene_id} className="h-[62vh]" />
+          <RoomViewerPanel
+            sceneId={scene.scene_id}
+            className="h-[62vh]"
+            rail={
+              <div className="border-b border-white/[0.06] pb-8">
+                <h3 className="text-xs font-medium text-zinc-500">Captured</h3>
+                <p className="mt-2 text-sm text-zinc-200">
+                  {captured.toLocaleString(undefined, {
+                    month: "long",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </p>
+                <p className="mt-4 font-mono text-[10px] leading-relaxed text-zinc-600">
+                  {scene.bundle_id}
+                </p>
+              </div>
+            }
+          />
         </div>
       ) : (
-        <div className="mt-8 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-10">
-          <p className="max-w-md font-serif text-2xl font-light leading-snug text-zinc-200">
+        <div className="mt-16 max-w-md">
+          <p className="text-xl font-normal leading-relaxed text-zinc-200">
             {meta.description}
           </p>
           {scene.status === "failed_incomplete" && scene.missing_paths && (
@@ -133,10 +149,13 @@ function RoomDetail() {
             </p>
           )}
           {!meta.terminal && (
-            <p className="mt-6 font-mono text-[10px] uppercase tracking-widest text-zinc-600">
-              This page updates when the room is ready
+            <p className="mt-8 text-xs text-zinc-600">
+              This page updates when the room is ready.
             </p>
           )}
+          <p className="mt-10 border-t border-white/[0.06] pt-6 font-mono text-[10px] text-zinc-600">
+            {scene.bundle_id}
+          </p>
         </div>
       )}
     </div>

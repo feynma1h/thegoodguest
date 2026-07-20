@@ -2,10 +2,16 @@
 
 /**
  * Embedded viewer for a ready room: fetches the scene's assets, assembles
- * the positioned-splat list, and renders SplatViewer inline with a quiet
- * inventory of what was found. Used by the room page (primary) and the
- * /viewer dev page's ?scene= path — one implementation of the
- * assets → assembled-room flow.
+ * the positioned-splat list, and renders SplatViewer inline. Used by the
+ * room page (primary) and the /viewer dev page's ?scene= path — one
+ * implementation of the assets → assembled-room flow.
+ *
+ * Layout: pass `rail` to get the room page's two-column structure —
+ * viewer left, a side rail right carrying the caller's sections followed
+ * by this panel's object inventory. The rail is deliberately the room
+ * page's growth surface: analysis today, the conversational interface
+ * when it lands (decision 0056). Without `rail`, the viewer renders
+ * full-width with the inventory below (dev viewer).
  */
 
 import { useEffect, useState } from "react";
@@ -30,15 +36,50 @@ type Result =
       unrenderable: FusedObject[];
     };
 
+function Inventory({
+  splats,
+  unrenderable,
+}: {
+  splats: PositionedSplat[];
+  unrenderable: FusedObject[];
+}) {
+  return (
+    <div>
+      <h3 className="text-xs font-medium text-zinc-500">In this room</h3>
+      <ul className="mt-3 space-y-2">
+        {splats.map((s, i) => (
+          <li key={`${s.label}-${i}`} className="flex items-center justify-between text-sm">
+            <span className="capitalize text-zinc-200">{s.label}</span>
+            <span className="text-xs text-zinc-600">placed</span>
+          </li>
+        ))}
+        {unrenderable.map((o) => (
+          <li
+            key={o.object_id}
+            className="flex items-center justify-between text-sm"
+            title={`Seen but not yet placed (${o.reason ?? "no transform"})`}
+          >
+            <span className="capitalize text-zinc-500">{o.label}</span>
+            <span className="text-xs text-zinc-600">seen</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function RoomViewerPanel({
   sceneId,
   className,
+  rail,
 }: {
   sceneId: string;
   className?: string;
+  rail?: React.ReactNode;
 }) {
   const [result, setResult] = useState<Result | null>(null);
-  const state = result && result.forScene === sceneId ? result : { phase: "loading" as const };
+  const state =
+    result && result.forScene === sceneId ? result : { phase: "loading" as const };
 
   useEffect(() => {
     let cancelled = false;
@@ -74,44 +115,37 @@ export default function RoomViewerPanel({
   if (state.phase === "loading") {
     return (
       <div
-        className={`animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.02] ${className ?? ""}`}
+        className={`animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.02] ${className ?? "h-[62vh]"}`}
       />
     );
   }
   if (state.phase === "not_ready" || state.phase === "error") {
     return (
       <div
-        className={`flex items-center justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 text-center ${className ?? ""}`}
+        className={`flex items-center justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 text-center ${className ?? "h-[62vh]"}`}
       >
         <p className="max-w-sm text-sm leading-relaxed text-zinc-400">{state.message}</p>
       </div>
     );
   }
 
+  if (rail !== undefined) {
+    return (
+      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
+        <SplatViewer splats={state.splats} className={className ?? "h-[62vh]"} />
+        <aside className="flex flex-col gap-8">
+          {rail}
+          <Inventory splats={state.splats} unrenderable={state.unrenderable} />
+        </aside>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <SplatViewer splats={state.splats} className={className ?? "h-[60vh]"} />
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span className="mr-1 font-mono text-[10px] uppercase tracking-widest text-zinc-600">
-          Found in this room
-        </span>
-        {state.splats.map((s, i) => (
-          <span
-            key={`${s.label}-${i}`}
-            className="rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1 text-xs text-zinc-300"
-          >
-            {s.label}
-          </span>
-        ))}
-        {state.unrenderable.map((o) => (
-          <span
-            key={o.object_id}
-            className="rounded-full border border-dashed border-white/[0.08] px-3 py-1 text-xs text-zinc-600"
-            title={`Seen but not yet placed (${o.reason ?? "no transform"})`}
-          >
-            {o.label}
-          </span>
-        ))}
+      <SplatViewer splats={state.splats} className={className ?? "h-[62vh]"} />
+      <div className="mt-6">
+        <Inventory splats={state.splats} unrenderable={state.unrenderable} />
       </div>
     </div>
   );

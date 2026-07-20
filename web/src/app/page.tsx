@@ -1,18 +1,14 @@
-import Link from "next/link";
-
 import AmbientHero from "@/components/AmbientHero";
+import { PillLink } from "@/components/ui/spring";
 
 export default function Home() {
   return (
     <>
       <AmbientHero>
         <div className="mx-auto flex min-h-[82vh] max-w-4xl flex-col items-center justify-center px-6 text-center">
-          <p className="font-mono text-[11px] uppercase tracking-[0.35em] text-zinc-500">
-            Spatial intelligence for your home
-          </p>
-          <h1 className="mt-8 max-w-3xl text-balance font-serif text-5xl font-light leading-[1.08] tracking-tight sm:text-6xl">
+          <h1 className="max-w-3xl text-balance text-5xl font-semibold leading-[1.05] tracking-[-0.03em] sm:text-6xl">
             Your room has a version of itself
-            <span className="text-accent"> you&rsquo;ve never seen.</span>
+            <span className="text-zinc-500"> you&rsquo;ve never seen.</span>
           </h1>
           <p className="mt-8 max-w-xl text-pretty text-lg leading-relaxed text-zinc-400">
             Scan it once with your iPhone. It comes back as a living 3D space —
@@ -20,31 +16,25 @@ export default function Home() {
             change stops being guesswork.
           </p>
           <div className="mt-12 flex items-center gap-4">
-            <Link
-              href="/rooms"
-              className="ease-soft rounded-full bg-accent px-7 py-3 text-sm font-medium text-[#171207] transition-all duration-200 hover:scale-[1.03] hover:bg-[#ecb26e] active:scale-[0.98]"
-            >
+            <PillLink href="/rooms" className="!px-7 !py-3">
               Show me
-            </Link>
-            <Link
-              href="/new"
-              className="ease-soft rounded-full border border-white/10 px-7 py-3 text-sm text-zinc-300 transition-all duration-200 hover:scale-[1.02] hover:border-white/25 hover:text-foreground"
-            >
+            </PillLink>
+            <PillLink href="/new" variant="ghost" className="!px-7 !py-3">
               Scan a room
-            </Link>
+            </PillLink>
           </div>
         </div>
       </AmbientHero>
 
       <section className="mx-auto max-w-3xl px-6 py-28 text-center">
-        <div className="space-y-6 font-serif text-2xl font-light leading-snug text-zinc-300 sm:text-[1.7rem]">
+        <div className="space-y-6 text-2xl font-light leading-snug tracking-tight text-zinc-400 sm:text-[1.6rem]">
           <p>Most rooms are shaped by what was available, not by what was wanted.</p>
           <p>Most design tools show you other people&rsquo;s rooms.</p>
-          <p className="text-foreground">This one shows you yours.</p>
+          <p className="font-normal text-foreground">This one shows you yours.</p>
         </div>
       </section>
 
-      <section className="border-t border-white/5">
+      <section className="border-t border-white/[0.06]">
         <div className="mx-auto grid max-w-5xl gap-12 px-6 py-20 sm:grid-cols-3">
           {[
             {
@@ -64,8 +54,10 @@ export default function Home() {
             },
           ].map((step) => (
             <div key={step.n}>
-              <p className="font-mono text-xs tracking-widest text-accent-soft">{step.n}</p>
-              <h2 className="mt-3 font-serif text-xl text-foreground">{step.title}</h2>
+              <p className="text-xs font-medium text-zinc-600">{step.n}</p>
+              <h2 className="mt-3 text-lg font-semibold tracking-tight text-foreground">
+                {step.title}
+              </h2>
               <p className="mt-3 text-sm leading-relaxed text-zinc-500">{step.body}</p>
             </div>
           ))}
