@@ -45,4 +45,20 @@ final class SceneStatusViewTests: XCTestCase {
         // render a negative count.
         XCTAssertEqual(label(afterSeconds: -30), "0s")
     }
+
+    // MARK: - Status copy honesty
+
+    func test_queuedCopy_saysWaiting_neverActiveProcessing() {
+        // The old fixed subline "Processing your room…" contradicted the queued
+        // headline. While queued, the detail line must narrate waiting.
+        let detail = SceneStatusView.statusDetail(.queued)
+        XCTAssertFalse(detail.localizedCaseInsensitiveContains("processing your room"),
+                       "Queued must not claim active processing under a queued headline")
+        XCTAssertNotEqual(detail, SceneStatusView.statusDetail(.processing),
+                          "Queued and processing must narrate differently")
+    }
+
+    func test_processingCopy_headlineClaimsProcessing() {
+        XCTAssertEqual(SceneStatusView.statusLabel(.processing), "Processing your room")
+    }
 }
