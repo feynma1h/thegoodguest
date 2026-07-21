@@ -116,7 +116,7 @@ struct SceneStatusView: View {
                     .font(.headline)
                     .multilineTextAlignment(.center)
 
-                Text(longRunning ? "We'll keep checking — hang tight." : "Processing your room…")
+                Text(longRunning ? "We'll keep checking — hang tight." : Self.statusDetail(latest))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -273,13 +273,25 @@ struct SceneStatusView: View {
 
     // MARK: - Display helpers
 
+    /// Headline + subline are one statement and must agree: while the scene is
+    /// still queued, nothing may claim active processing (the old fixed
+    /// "Processing your room…" subline contradicted the queued headline).
     /// Static + internal so honesty pins in SceneStatusViewTests can assert on
-    /// the exact copy without instantiating the view.
+    /// the copy without instantiating the view.
     static func statusLabel(_ status: SceneStatus) -> String {
         switch status {
         case .queued:      return "Queued for processing"
-        case .processing:  return "Processing"
+        case .processing:  return "Processing your room"
         default:           return "Processing your room"
+        }
+    }
+
+    static func statusDetail(_ status: SceneStatus) -> String {
+        switch status {
+        case .queued: return "Waiting for processing to begin…"
+        // "Come back later" is a verified claim: processing is server-side and
+        // the poll restarts across relaunches (cold-start recovery, 2026-07-21).
+        default:      return "This can take a while — you can come back later."
         }
     }
 
