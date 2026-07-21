@@ -6,21 +6,32 @@ its own world placement. Rendering those directly would put N copies of
 each object in the room. This pass clusters per-frame observations into
 physical objects and fuses their transforms:
 
+What may be fused across observations and what must not be (decision
+0065): positions and METRIC extents are physical quantities — the same
+across frames — so they fuse (median). Rotations and raw scales are
+expressed relative to the observation's own splat frame, and SAM 3D
+samples an ARBITRARY canonical frame per reconstruction: the same chair
+reconstructed from two frames gets two incompatible local frames, each
+with its own compensating layout rotation. Averaging those rotations (or
+their raw scales) mixes frames that have nothing to do with each other.
+The rotation and scale shipped for a cluster therefore come from the SAME
+observation whose splat the cluster renders (the best member).
+
   * Placed observations (LiDAR depth fits) cluster by label + world-center
-    proximity; the fused transform is the per-axis median position, median
-    scale, and Markley-averaged rotation of the members.
+    proximity; fused position is the per-axis median; rotation and scale
+    are the best member's own.
   * Unplaced observations that carry view rays (ARKIT_ONLY frames)
     cluster by label + ray consistency: a ray joins a cluster if the
     cluster's rays plus it still triangulate with low RMS. Clusters with
     a valid triangulation get their center from the ray intersection
     (metric via the ARKit VIO baseline), scale from the median of
-    angular-extent × distance over the member observations against the
-    splat's local extent, and rotation from the average of the members'
-    layout-derived world rotations.
+    angular-extent × distance over the member observations (a metric
+    size) divided by the BEST member's splat extent, and rotation from
+    the best member's layout-derived world rotation.
 
 Each fused object references the single best member's splat (highest
-detection score with a stored splat) — the viewer renders one splat per
-physical object, not a blend.
+detection score) — the viewer renders one splat per physical object, not
+a blend — and the transform it ships is valid for exactly that splat.
 
 Known v1 limitation (deliberate): two same-label objects closer together
 than the cluster threshold (default 0.4 m) can merge into one. The
@@ -40,7 +51,6 @@ from roomstudio_schemas.placement_math import (
     DegenerateGeometryError,
     triangulate_rays,
 )
-from roomstudio_schemas.pose_math import quat_average
 
 logger = logging.getLogger(__name__)
 
@@ -79,16 +89,13 @@ def _center(o: dict) -> Optional[np.ndarray]:
 
 def _fuse_placed_cluster(members: list[dict], object_id: str) -> dict:
     positions = np.stack([_center(m) for m in members])
-    scales = [m["placement"]["world_transform"]["scale"] for m in members]
-    quats = [tuple(m["placement"]["world_transform"]["rotation_xyzw"]) for m in members]
     position = np.median(positions, axis=0)
     spread = float(np.linalg.norm(positions - position, axis=1).max()) if len(members) > 1 else 0.0
     best = max(members, key=lambda m: m["score"])
-    gravity_devs = [
-        m["placement"].get("quality", {}).get("gravity_deviation_deg")
-        for m in members
-    ]
-    gravity_devs = [g for g in gravity_devs if g is not None]
+    # Rotation and scale are relative to the best member's own splat frame
+    # (canonical frames differ per reconstruction — module docstring), so
+    # they ship verbatim from the observation whose splat is rendered.
+    best_wt = best["placement"]["world_transform"]
     return {
         "object_id": object_id,
         "label": best["label"],
@@ -98,13 +105,15 @@ def _fuse_placed_cluster(members: list[dict], object_id: str) -> dict:
         "source": {"frame_index": best["frame_index"], "mask_index": best["mask_index"]},
         "world_transform": {
             "position": [float(c) for c in position],
-            "rotation_xyzw": [float(c) for c in quat_average(quats)],
-            "scale": float(np.median(scales)),
+            "rotation_xyzw": [float(c) for c in best_wt["rotation_xyzw"]],
+            "scale": float(best_wt["scale"]),
         },
         "quality": {
             "frames_observed": len(members),
             "cluster_spread_m": spread,
-            "gravity_deviation_deg": float(np.median(gravity_devs)) if gravity_devs else None,
+            "min_axis_to_vertical_deg": best["placement"]
+            .get("quality", {})
+            .get("min_axis_to_vertical_deg"),
             "score": best["score"],
         },
     }
@@ -162,13 +171,13 @@ def _fuse_ray_cluster(members: list[dict], object_id: str) -> dict:
         return _unplaced_object(members, object_id, "no_scale_reference")
     scale = float(np.median(extents) / splat_extent)
 
-    quats = [
-        tuple(m["placement"]["world_rotation_xyzw"])
-        for m in members
-        if m["placement"].get("world_rotation_xyzw")
-    ]
-    if quats:
-        rotation = [float(c) for c in quat_average(quats)]
+    # Rotation must pair with the splat actually rendered (best's): each
+    # observation's world rotation is relative to its OWN reconstruction's
+    # canonical frame, so other members' rotations do not apply to best's
+    # splat (module docstring; decision 0065).
+    best_rot = best["placement"].get("world_rotation_xyzw")
+    if best_rot:
+        rotation = [float(c) for c in best_rot]
         rotation_source = "sam3d_layout"
     else:
         rotation = [0.0, 0.0, 0.0, 1.0]

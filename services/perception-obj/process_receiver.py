@@ -394,6 +394,10 @@ def _process_frame(
     masks.npz and a per-frame objects.json manifest under
     scenes/{scene_id}/frames/{frame_idx}/. Frame and per-object outputs already
     present in GCS are reused as a cache (partial-run recovery on retry).
+    Each fresh reconstruct also writes a {splat}.layout.json sidecar holding
+    the RAW layout fields, so per-object cache hits on later attempts keep
+    the object's rotation (converted at read time under current
+    conventions).
 
     frame is the CaptureBundle Frame proto (pose/intrinsics/gravity/depth);
     when provided (with bundle_prefix for depth blob resolution), each
@@ -468,9 +472,27 @@ def _process_frame(
             # bytes are downloaded (not just existence-checked) because
             # placement needs the vertex positions either way.
             cached_ply = _gcs_blob_exists_and_get(outputs_bucket, splat_blob)
+            layout_blob = splat_blob[: -len(".ply")] + ".layout.json"
             if cached_ply is not None:
-                # Cache hits have no reconstruct() result, so no layout
-                # prior — placement degrades to rotation_source "none".
+                # The layout sidecar (written at fresh-reconstruct time)
+                # carries the RAW model rotation, so the rotation survives
+                # cross-attempt cache hits; extract_layout re-applies the
+                # current conventions at read time — a stored sidecar can
+                # never go stale against a convention fix. Splats from
+                # before sidecars existed have none and degrade to
+                # rotation_source "none" as before.
+                cached_layout = _gcs_blob_exists_and_get(outputs_bucket, layout_blob)
+                if cached_layout is not None:
+                    try:
+                        layout = placement_mod.extract_layout(
+                            json.loads(cached_layout)
+                        )
+                    except Exception:
+                        logger.warning(
+                            "unreadable layout sidecar %s; placing without "
+                            "rotation", layout_blob,
+                        )
+                        layout = None
                 ply_bytes = cached_ply
                 entry = {
                     **meta,
@@ -528,6 +550,24 @@ def _process_frame(
                     f"gs://{outputs_bucket}/", splat_blob, ply_bytes,
                     "application/octet-stream"
                 )
+                if layout is not None:
+                    # Persist the RAW rotation (+ translation/scale) beside
+                    # the splat so a later attempt's cache hit keeps the
+                    # orientation. Raw, not converted: read-time
+                    # extract_layout applies whatever conventions are then
+                    # current (see the cache-hit branch above).
+                    _gcs_upload_for_scene(
+                        f"gs://{outputs_bucket}/",
+                        layout_blob,
+                        json.dumps(
+                            {
+                                "rotation": layout["raw_rotation"],
+                                "translation": layout["translation"],
+                                "scale": layout["scale"],
+                            }
+                        ).encode("utf-8"),
+                        "application/json",
+                    )
                 entry = {
                     **meta,
                     "ok": True,

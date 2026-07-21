@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import struct
 from unittest.mock import patch
 
@@ -164,14 +165,38 @@ def test_extract_layout_missing_or_degenerate_rotation():
     assert placement.extract_layout({"rotation": object()}) is None
 
 
-def test_rotation_world_from_layout_identity_is_basis_change():
-    """Identity layout rotation + identity camera pose leaves exactly the
-    CV→ARKit camera basis change."""
+def test_rotation_world_from_layout_identity_is_identity():
+    """Identity layout rotation + identity camera pose is the identity:
+    the layout camera frame IS the ARKit camera frame (decision 0065), so
+    _SAM3D_CAM_TO_ARKIT_CAM contributes nothing."""
     frame = CaptureBundle().frames.add()
     frame.camera_pose.quat_w = 1.0
     layout = {"rotation_xyzw": [0.0, 0.0, 0.0, 1.0]}
     R = placement.rotation_world_from_layout(layout, frame.camera_pose)
-    assert np.allclose(R, np.diag([1.0, -1.0, -1.0]), atol=1e-12)
+    assert np.allclose(R, np.eye(3), atol=1e-12)
+
+
+def test_extract_layout_conjugates_wxyz_read():
+    """SAM 3D's quaternion maps camera->local; extract_layout must emit
+    the CONJUGATE (local->camera) in xyzw order (decision 0065). Raw
+    (w,x,y,z) -> stored (-x,-y,-z,w)."""
+    out = placement.extract_layout({"rotation": [0.8, 0.6, 0.0, 0.0]})
+    assert out is not None
+    assert np.allclose(out["rotation_xyzw"], [-0.6, 0.0, 0.0, 0.8])
+    assert out["raw_rotation"] == [0.8, 0.6, 0.0, 0.0]
+
+
+def test_extract_layout_matrix_branch_transposes():
+    """Matrix-form rotation carries the same camera->local semantics: a
+    90-about-Z camera->local matrix must come back as the INVERSE
+    (-90 about Z) local->camera quaternion."""
+    Rz90 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    out = placement.extract_layout({"rotation": Rz90})
+    assert out is not None
+    s = math.sqrt(2) / 2
+    q = np.asarray(out["rotation_xyzw"])
+    expected = np.array([0.0, 0.0, -s, s])
+    assert np.allclose(q, expected) or np.allclose(q, -expected)
 
 
 # -----------------------------------------------------------------------------
@@ -289,7 +314,7 @@ def test_place_object_happy_path_structure():
     assert abs(np.linalg.norm(wt["rotation_xyzw"]) - 1.0) < 1e-6
     q = out["quality"]
     assert q["depth_points"] > 0
-    assert q["gravity_deviation_deg"] is not None
+    assert q["min_axis_to_vertical_deg"] is not None
     assert q["frames_observed"] == 1
 
 
@@ -307,7 +332,7 @@ def test_place_object_without_layout_uses_identity_rotation():
     )
     assert out["placed"] is True
     assert out["rotation_source"] == "none"
-    assert out["quality"]["gravity_deviation_deg"] is None
+    assert out["quality"]["min_axis_to_vertical_deg"] is None
 
 
 def test_place_object_sparse_depth_unplaced():
@@ -497,6 +522,82 @@ def test_run_perception_writes_placement_fields():
     # Per-frame cache carries the same fields.
     frame0_cached = json.loads(uploads["scenes/scene-1/frames/0000/objects.json"])
     assert frame0_cached["objects"][0]["placement"]["placed"] is True
+
+    # Fresh reconstructs persist the RAW layout beside the splat so later
+    # attempts' cache hits keep the rotation (decision 0065).
+    sidecar = json.loads(uploads["scenes/scene-1/frames/0000/splats/00_chair.layout.json"])
+    assert sidecar["rotation"] == [1.0, 0.0, 0.0, 0.0]
+
+
+def _run_perception_with_splat_cache(sidecar_bytes):
+    """run_perception with the per-object splat cache primed for every
+    frame (objects.json misses, splat + optional sidecar hit)."""
+    from process_receiver import PoisonError, run_perception
+
+    bundle = _two_frame_bundle()
+    depth_bytes = np.full((24, 32), 2.0, dtype="<f4").tobytes()
+    blobs = {
+        "gs://caps/captures/b1/bundle.pb": bundle.SerializeToString(),
+        "gs://caps/captures/b1/frames/000000.jpg": _jpeg_bytes(),
+        "gs://caps/captures/b1/frames/000001.jpg": _jpeg_bytes(),
+        "gs://caps/captures/b1/depth/000000.f32": depth_bytes,
+    }
+    uploads: dict[str, bytes] = {}
+    cached_splat = make_gaussian_ply(_box_cloud())
+
+    def fake_download(uri):
+        if uri not in blobs:
+            raise PoisonError(f"missing test blob {uri}")
+        return blobs[uri]
+
+    def fake_upload(prefix, blob_path, data, content_type):
+        uploads[blob_path] = data
+        return f"gs://outputs/{blob_path}"
+
+    def fake_exists_and_get(bucket, blob_path):
+        if blob_path.endswith(".ply"):
+            return cached_splat
+        if blob_path.endswith(".layout.json"):
+            return sidecar_bytes
+        return None  # objects.json miss -> frame recomputes placement
+
+    class ExplodingSam3D:
+        def reconstruct(self, image, mask, seed=42):
+            raise AssertionError("cache hit must not reconstruct")
+
+    with patch("process_receiver._download_gcs_uri", side_effect=fake_download), \
+         patch("process_receiver._gcs_upload_for_scene", side_effect=fake_upload), \
+         patch("process_receiver._gcs_blob_exists_and_get", side_effect=fake_exists_and_get), \
+         patch("process_receiver._gcs_blob_exists", return_value=False):
+        run_perception(
+            scene_id="scene-1",
+            bundle_uri="gs://caps/captures/b1/bundle.pb",
+            outputs_bucket="outputs",
+            sam3_model=FakeSam3(),
+            sam3d_model=ExplodingSam3D(),
+            object_prompt="furniture",
+        )
+    return json.loads(uploads["scenes/scene-1/manifest.json"])
+
+
+def test_splat_cache_hit_with_sidecar_keeps_rotation():
+    """A per-object cache hit reads the layout sidecar and places with
+    rotation_source sam3d_layout — the rotation survives across attempts."""
+    sidecar = json.dumps(
+        {"rotation": [1.0, 0.0, 0.0, 0.0], "translation": [0, 0, 0], "scale": 1.0}
+    ).encode()
+    manifest = _run_perception_with_splat_cache(sidecar)
+    placement_rec = manifest["frames"][0]["objects"][0]["placement"]
+    assert placement_rec["rotation_source"] == "sam3d_layout"
+    assert placement_rec["layout_prior"]["raw_rotation"] == [1.0, 0.0, 0.0, 0.0]
+
+
+def test_splat_cache_hit_without_sidecar_degrades_to_none():
+    """Pre-sidecar splats (no layout.json in GCS) still place, with
+    rotation_source none — the historical degradation, now explicit."""
+    manifest = _run_perception_with_splat_cache(None)
+    placement_rec = manifest["frames"][0]["objects"][0]["placement"]
+    assert placement_rec["rotation_source"] == "none"
 
 
 def test_run_perception_malformed_depth_is_poison():
