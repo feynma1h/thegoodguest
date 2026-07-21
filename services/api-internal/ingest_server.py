@@ -359,8 +359,8 @@ def _run_ingest(
             content=IngestError(error="bundle_parse_failed", detail=str(exc)).model_dump(),
         )
 
-    # 3. Validate contract.
-    err = validate_bundle(bundle)
+    # 3. Validate contract (including the proto-vs-URI bundle_id cross-check).
+    err = validate_bundle(bundle, expected_bundle_id=bundle_id)
     if err:
         error_code, detail = err
         # Create a FAILED_INVALID Scene so the iOS client can observe the rejection
