@@ -16,16 +16,29 @@ depth — to produce a world transform per object:
     object instead; the scene-level fusion pass triangulates object
     centers from those rays across keyframes.
 
-Two conventions here are assumptions about SAM 3D's output, flagged for
-runtime verification (no GPU exists in dev; reconstruct() result keys are
-logged by process_receiver on every call):
-  * LAYOUT_QUAT_ORDER: layout quaternions are taken as (w, x, y, z) —
-    the pytorch3d/Meta-3D-codebase convention.
-  * _SAM3D_CAM_TO_ARKIT_CAM: the layout rotation is expressed in a CV
-    camera frame (+X right, +Y down, +Z forward); ARKit's camera frame is
-    (+X right, +Y up, -Z forward), so the basis change is diag(1, -1, -1).
-A wrong assumption shows up as systematic gravity_deviation_deg values in
-placement quality — it degrades orientation, never crashes.
+Layout conventions — VERIFIED against real data + Meta's source (decision
+0065 closed decision 0063's probe; 0052 shipped different guesses):
+  * LAYOUT_QUAT_ORDER: layout quaternions are (w, x, y, z) — pytorch3d's
+    matrix_to_quaternion emits them in the pose decoder.
+  * _LAYOUT_ROTATION_IS_CAMERA_TO_LOCAL: the quaternion's standard
+    (column-vector) rotation matrix maps CAMERA→LOCAL, so the
+    local→camera rotation placement needs is its CONJUGATE. This is
+    pytorch3d Transform3d row-vector semantics: Meta's own compose path
+    (notebook/inference.py make_scene) applies `points @ R(q)` — i.e.
+    R(q)ᵀ in column terms — and rotates splat covariances by
+    quaternion_invert(q). Both paths agree.
+  * _SAM3D_CAM_TO_ARKIT_CAM: identity. The layout camera frame is
+    GL/Blender-style (+X right, +Y up, -Z forward) — the SAME axes as
+    ARKit's camera frame, NOT the CV pointmap frame 0052 assumed.
+  * The exported splat (gs.save_ply writes get_xyz) is in exactly the
+    frame the layout rotation acts on — make_scene composes raw get_xyz;
+    Meta's _fix_gaussian_alignment is a default-off video helper, not
+    part of the composition contract.
+  * SAM 3D's canonical object frame is per-reconstruction ARBITRARY (the
+    generator samples it; the layout rotation compensates). There is no
+    fixed "canonical up", which is why quality reports
+    min_axis_to_vertical_deg — for boxy furniture SOME canonical axis
+    should be plumb — instead of a fixed-axis gravity deviation.
 
 Everything degrades explicitly: missing layout → identity rotation with
 rotation_source "none"; sparse/degenerate depth → placed: false with a
@@ -60,12 +73,20 @@ from roomstudio_schemas.pose_math import (
 
 logger = logging.getLogger(__name__)
 
-# Layout quaternion component order assumption (see module docstring).
+# Layout quaternion component order (see module docstring). Verified 0065.
 LAYOUT_QUAT_ORDER = "wxyz"
 
-# CV camera frame (+Z forward, +Y down) -> ARKit camera frame (-Z forward,
-# +Y up). Assumption pending runtime verification; see module docstring.
-_SAM3D_CAM_TO_ARKIT_CAM = np.diag([1.0, -1.0, -1.0])
+# The layout quaternion parameterizes camera->local; conjugate on read to
+# get local->camera (pytorch3d row-vector semantics in Meta's make_scene).
+# Verified against real-room data, decision 0065.
+_LAYOUT_ROTATION_IS_CAMERA_TO_LOCAL = True
+
+# Layout camera frame -> ARKit camera frame. The layout frame measured as
+# GL/Blender-style (+X right, +Y up, -Z forward) == ARKit's camera axes,
+# so this is the identity. Kept as the named seam in case a future SAM 3D
+# release changes frames. Verified 0065 (0052's diag(1,-1,-1) CV guess was
+# wrong).
+_SAM3D_CAM_TO_ARKIT_CAM = np.eye(3)
 
 # Translation-only NN polish after the single-view fit (evaluated in the
 # schemas suite: tightens translation, never touches scale/rotation).
@@ -116,16 +137,25 @@ def extract_layout(result: dict) -> Optional[dict]:
     if rot.shape == (4,):
         raw = rot.tolist()
         if LAYOUT_QUAT_ORDER == "wxyz":
-            q_xyzw = [float(rot[1]), float(rot[2]), float(rot[3]), float(rot[0])]
+            w, x, y, z = (float(c) for c in rot)
         else:
-            q_xyzw = [float(c) for c in rot]
+            x, y, z, w = (float(c) for c in rot)
+        if _LAYOUT_ROTATION_IS_CAMERA_TO_LOCAL:
+            # The model's quaternion maps camera->local; placement composes
+            # local->camera, so conjugate (decision 0065).
+            x, y, z = -x, -y, -z
+        q_xyzw = [x, y, z, w]
         norm = math.sqrt(sum(c * c for c in q_xyzw))
         if norm < 1e-6:
             return None
         q_xyzw = [c / norm for c in q_xyzw]
     elif rot.shape == (3, 3):
         raw = rot.tolist()
-        q_xyzw = list(rotmat_to_quat(rot))
+        # Same source semantics for matrix form: pytorch3d-family code
+        # builds row-vector matrices, which read into numpy as the
+        # camera->local column matrix — transpose for local->camera.
+        mat = rot.T if _LAYOUT_ROTATION_IS_CAMERA_TO_LOCAL else rot
+        q_xyzw = list(rotmat_to_quat(mat))
     else:
         logger.warning("sam3d layout rotation has unexpected shape %s", rot.shape)
         return None
@@ -141,9 +171,11 @@ def extract_layout(result: dict) -> Optional[dict]:
 
 
 def rotation_world_from_layout(layout: dict, camera_pose) -> np.ndarray:
-    """World-from-object rotation: lift the layout's camera-frame rotation
-    through the frame's world-from-camera pose (with the CV→ARKit camera
-    basis change in between)."""
+    """World-from-object rotation: lift the layout's local→camera rotation
+    (already conjugated by extract_layout) through the frame's
+    world-from-camera pose. _SAM3D_CAM_TO_ARKIT_CAM is the identity today
+    (layout camera frame == ARKit camera frame, decision 0065) and stays
+    in the chain as the named seam."""
     R_layout = quat_to_rotmat(tuple(layout["rotation_xyzw"]))
     R_wc = quat_to_rotmat(pose_quat(camera_pose))
     return R_wc @ _SAM3D_CAM_TO_ARKIT_CAM @ R_layout
@@ -271,16 +303,19 @@ def object_view_ray(mask: np.ndarray, intrinsics, camera_pose) -> Optional[dict]
     }
 
 
-def _gravity_deviation_deg(R_world_obj: np.ndarray) -> float:
-    """Angle between the object's layout-implied up axis and world up.
+def _min_axis_to_vertical_deg(R_world_obj: np.ndarray) -> float:
+    """Smallest angle between any canonical axis (as an unsigned line) and
+    the world vertical.
 
-    ARKit's world frame is gravity-aligned (+Y up) and SAM 3D's canonical
-    object frame is taken as +Y up, so for most household objects standing
-    normally this should be small; systematically large values indicate a
-    wrong layout-frame assumption (see module docstring)."""
-    up = R_world_obj @ _WORLD_UP
-    cosang = float(np.clip(np.dot(up, _WORLD_UP), -1.0, 1.0))
-    return math.degrees(math.acos(cosang))
+    SAM 3D's canonical frame has no fixed semantic up — the generator
+    samples an arbitrary object frame per reconstruction and the layout
+    rotation compensates (decision 0065). What IS invariant for boxy
+    indoor furniture standing normally: SOME canonical axis ends up plumb.
+    Near-zero values mean the composed rotation is physically coherent;
+    a broadly large distribution indicates a convention regression."""
+    # (R e_i) . y-hat = (R^T y-hat)_i for each canonical axis e_i.
+    cosines = np.abs(R_world_obj.T @ _WORLD_UP)
+    return math.degrees(math.acos(float(np.clip(cosines.max(), 0.0, 1.0))))
 
 
 def compute_frame_placement(
@@ -405,8 +440,10 @@ def place_object(
     quality = {
         "depth_points": int(cam_pts.shape[0]),
         "nn_rms_m": float(nn_rms) if nn_rms is not None else None,
-        "gravity_deviation_deg": (
-            _gravity_deviation_deg(R_world) if rotation_source == "sam3d_layout" else None
+        "min_axis_to_vertical_deg": (
+            _min_axis_to_vertical_deg(R_world)
+            if rotation_source == "sam3d_layout"
+            else None
         ),
         "frames_observed": 1,
     }

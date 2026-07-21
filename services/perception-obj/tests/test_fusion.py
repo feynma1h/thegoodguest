@@ -3,9 +3,10 @@
 Fusion turns per-frame observations into one entry per physical object.
 These tests build synthetic frame_results dicts (the shape the frame loop
 writes) and pin: proximity clustering of placed observations, transform
-fusion (median position/scale, averaged rotation), ray-cluster
-triangulation with metric scale recovery, and every explicit unplaced
-degradation.
+fusion (median position; rotation and scale strictly from the best
+member, whose splat the cluster renders — canonical frames are
+per-reconstruction, decision 0065), ray-cluster triangulation with metric
+scale recovery, and every explicit unplaced degradation.
 
 Run from repo root:
 
@@ -31,7 +32,7 @@ def _placed_obs(
     rotation=(0.0, 0.0, 0.0, 1.0),
     score=0.9,
     mask_index=0,
-    gravity_dev=5.0,
+    min_axis_dev=5.0,
 ):
     return {
         "label": label,
@@ -49,7 +50,7 @@ def _placed_obs(
                 "rotation_xyzw": list(rotation),
                 "scale": scale,
             },
-            "quality": {"gravity_deviation_deg": gravity_dev},
+            "quality": {"min_axis_to_vertical_deg": min_axis_dev},
         },
     }
 
@@ -117,7 +118,9 @@ def test_same_object_across_frames_fuses_to_one():
     assert obj["method"] == "depth_fit"
     assert obj["quality"]["frames_observed"] == 3
     assert obj["world_transform"]["position"] == pytest.approx([1.0, 0.5, -2.0], abs=0.01)
-    assert obj["world_transform"]["scale"] == pytest.approx(1.5)
+    # Scale ships from the best member (frame 1, score 0.95) — it is
+    # relative to that member's own splat, not fusable across members.
+    assert obj["world_transform"]["scale"] == pytest.approx(1.6)
     # Best-score member's splat is referenced.
     assert obj["source"]["frame_index"] == 1
     assert "0001" in obj["splat_gcs_uri"]
@@ -148,17 +151,23 @@ def test_different_labels_never_merge():
     assert {o["label"] for o in out} == {"chair", "table"}
 
 
-def test_fused_rotation_averages_members():
+def test_fused_rotation_is_best_members_not_an_average():
+    """Each observation's rotation is relative to its OWN reconstruction's
+    canonical frame (SAM 3D samples one per reconstruct — decision 0065),
+    so the cluster ships the best member's rotation verbatim, never a
+    cross-member average."""
     q0 = (0.0, 0.0, 0.0, 1.0)
     q90 = (0.0, SQRT2_2, 0.0, SQRT2_2)
-    expected = [0.0, math.sin(math.radians(22.5)), 0.0, math.cos(math.radians(22.5))]
     frames = _frames(
-        [_placed_obs(frame_index=0, rotation=q0)],
-        [_placed_obs(frame_index=1, rotation=q90)],
+        [_placed_obs(frame_index=0, rotation=q0, score=0.7)],
+        [_placed_obs(frame_index=1, rotation=q90, score=0.95)],
     )
     out = fusion.fuse_scene_objects(frames)
     assert len(out) == 1
-    assert np.allclose(out[0]["world_transform"]["rotation_xyzw"], expected, atol=1e-9)
+    assert out[0]["source"]["frame_index"] == 1
+    assert np.allclose(out[0]["world_transform"]["rotation_xyzw"], q90, atol=1e-12)
+    # Quality carries the best member's own alignment figure, unaveraged.
+    assert out[0]["quality"]["min_axis_to_vertical_deg"] == pytest.approx(5.0)
 
 
 def test_not_ok_objects_are_ignored():
@@ -284,6 +293,22 @@ def test_ray_cluster_without_layout_rotation_uses_identity():
     obs = _rays_toward((1.0, 0.5, -2.0), [(0, 0, 0), (1.5, 0, 0)])
     for o in obs:
         o["placement"].pop("world_rotation_xyzw", None)
+    out = fusion.fuse_scene_objects(_frames([obs[0]], [obs[1]]))
+    assert out[0]["placed"] is True
+    assert out[0]["rotation_source"] == "none"
+    assert out[0]["world_transform"]["rotation_xyzw"] == [0.0, 0.0, 0.0, 1.0]
+
+
+def test_ray_cluster_rotation_strictly_paired_with_best_splat():
+    """A rotation from a NON-best member never applies to the best
+    member's splat: canonical frames differ per reconstruction, so if the
+    best member has no layout rotation the cluster ships identity/none —
+    not another member's rotation (decision 0065)."""
+    obs = _rays_toward((1.0, 0.5, -2.0), [(0, 0, 0), (1.5, 0, 0)])
+    best = max(obs, key=lambda o: o["score"])
+    other = next(o for o in obs if o is not best)
+    best["placement"].pop("world_rotation_xyzw", None)
+    assert other["placement"].get("world_rotation_xyzw") is not None
     out = fusion.fuse_scene_objects(_frames([obs[0]], [obs[1]]))
     assert out[0]["placed"] is True
     assert out[0]["rotation_source"] == "none"
