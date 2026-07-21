@@ -51,9 +51,15 @@ enum SceneFetchResult {
 enum ScenePollState: Equatable {
     case idle
     /// Active poll. `latest` is the last known status (shown instantly on resume).
+    /// `since` is when THIS client's poll session started — it anchors poll
+    /// cadence only, never user-facing time. `sceneCreatedAt` is the server-side
+    /// scene creation time from the poll payload (nil until the first 200 — the
+    /// scene document does not exist until ingest); it is the only honest anchor
+    /// for the elapsed clock and the longRunning flip, and it survives
+    /// re-foreground/relaunch because every fresh 200 re-delivers it.
     /// `longRunning` flips messaging after `ScenePoller.longRunningThreshold`.
     /// `connectionTrouble` is set after a transient network failure tick.
-    case polling(latest: SceneStatus, since: Date, longRunning: Bool, connectionTrouble: Bool)
+    case polling(latest: SceneStatus, since: Date, sceneCreatedAt: Date?, longRunning: Bool, connectionTrouble: Bool)
     case succeeded(SceneResponse)             // status == ready
     case failedTerminal(SceneStatus)          // status == failed or failed_invalid
     case recoverable(missingPaths: [String])  // status == failed_incomplete
@@ -71,6 +77,14 @@ final class ScenePoller: ObservableObject {
 
     // MARK: Timing constants
 
+    // Cadence values sanity-checked against the first real capture
+    // (2026-07-21, scene 25a14caf): the 2 s window catches the ~3–5 s
+    // pre-GPU failed_invalid fast-fail; the 10 s/30 s tiers are proportionate
+    // to a pipeline whose GPU cold start alone is ~3.5 min. Deliberately NOT
+    // retuned further yet: the perception envelope is broken for real-sized
+    // captures (no frame sampling, ~10× over budget) and its fix changes the
+    // latency profile these values would be tuned against. Revisit after the
+    // envelope fix ships real completion times.
     /// Elapsed < cadenceShortWindow  → cadenceShort between ticks.
     static let cadenceShortWindow:  TimeInterval = 30
     /// Elapsed < cadenceMediumWindow → cadenceMedium between ticks.
@@ -148,7 +162,7 @@ final class ScenePoller: ObservableObject {
         cancelLoop()
         currentBundleId = bundleId
         let startDate   = now()
-        pollState       = .polling(latest: .queued, since: startDate, longRunning: false, connectionTrouble: false)
+        pollState       = .polling(latest: .queued, since: startDate, sceneCreatedAt: nil, longRunning: false, connectionTrouble: false)
         _runTask        = Task { [weak self] in await self?.run(bundleId: bundleId, startDate: startDate) }
         logger.info("[ScenePoller] start \(bundleId, privacy: .public)")
     }
@@ -171,11 +185,15 @@ final class ScenePoller: ObservableObject {
         default: break
         }
         cancelLoop()
-        // Preserve the original startDate so elapsed time (and cadence) are continuous.
+        // Preserve the original startDate so poll cadence is continuous.
         let startDate = extractStartDate() ?? now()
         // Preserve last-known status so the view doesn't blank.
         let lastStatus = extractLastStatus() ?? .queued
-        pollState = .polling(latest: lastStatus, since: startDate, longRunning: false, connectionTrouble: false)
+        // Preserve the server-side anchor and recompute longRunning from it, so
+        // the resumed UI is honest immediately — before the first fresh tick.
+        let sceneCreatedAt = extractSceneCreatedAt()
+        let longRunning = now().timeIntervalSince(sceneCreatedAt ?? startDate) >= Self.longRunningThreshold
+        pollState = .polling(latest: lastStatus, since: startDate, sceneCreatedAt: sceneCreatedAt, longRunning: longRunning, connectionTrouble: false)
         _runTask  = Task { [weak self] in await self?.run(bundleId: bundleId, startDate: startDate) }
         logger.info("[ScenePoller] resumed \(bundleId, privacy: .public)")
     }
@@ -208,13 +226,24 @@ final class ScenePoller: ObservableObject {
 
     private func run(bundleId: String, startDate: Date) async {
         var lastStatus: SceneStatus = .queued
+        // Server-side scene creation time, learned from the first 200 payload
+        // and carried across notCreated/transient ticks (initialised from the
+        // current state so resume() inherits it). Anchors the elapsed clock and
+        // the longRunning flip. Poll CADENCE stays anchored to startDate: a
+        // relaunch restarting the cadence ladder costs a handful of extra
+        // requests and is by design.
+        var sceneCreatedAt: Date? = extractSceneCreatedAt()
 
         while !Task.isCancelled {
             let tick    = await fetchTick(bundleId: bundleId)
             guard !Task.isCancelled else { return }
 
+            if case .scene(let response) = tick, let createdAt = response.createdAtDate {
+                sceneCreatedAt = createdAt
+            }
+
             let elapsed     = now().timeIntervalSince(startDate)
-            let longRunning = elapsed >= Self.longRunningThreshold
+            let longRunning = now().timeIntervalSince(sceneCreatedAt ?? startDate) >= Self.longRunningThreshold
 
             switch tick {
             case .scene(let response):
@@ -235,15 +264,15 @@ final class ScenePoller: ObservableObject {
                     return
 
                 case .selfResolvingTransient:
-                    pollState = .polling(latest: lastStatus, since: startDate, longRunning: longRunning, connectionTrouble: false)
+                    pollState = .polling(latest: lastStatus, since: startDate, sceneCreatedAt: sceneCreatedAt, longRunning: longRunning, connectionTrouble: false)
                 }
 
             case .notCreated:
-                pollState = .polling(latest: lastStatus, since: startDate, longRunning: longRunning, connectionTrouble: false)
+                pollState = .polling(latest: lastStatus, since: startDate, sceneCreatedAt: sceneCreatedAt, longRunning: longRunning, connectionTrouble: false)
 
             case .transientFail:
                 // Never give up — flip to connectionTrouble sub-state but keep going.
-                pollState = .polling(latest: lastStatus, since: startDate, longRunning: longRunning, connectionTrouble: true)
+                pollState = .polling(latest: lastStatus, since: startDate, sceneCreatedAt: sceneCreatedAt, longRunning: longRunning, connectionTrouble: true)
 
             case .fatal(let msg):
                 pollState = .pollError(msg)
@@ -365,12 +394,17 @@ final class ScenePoller: ObservableObject {
     }
 
     private func extractStartDate() -> Date? {
-        if case .polling(_, let since, _, _) = pollState { return since }
+        if case .polling(_, let since, _, _, _) = pollState { return since }
         return nil
     }
 
     private func extractLastStatus() -> SceneStatus? {
-        if case .polling(let latest, _, _, _) = pollState { return latest }
+        if case .polling(let latest, _, _, _, _) = pollState { return latest }
+        return nil
+    }
+
+    private func extractSceneCreatedAt() -> Date? {
+        if case .polling(_, _, let createdAt, _, _) = pollState { return createdAt }
         return nil
     }
 

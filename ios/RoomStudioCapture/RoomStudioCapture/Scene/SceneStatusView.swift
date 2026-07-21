@@ -82,8 +82,8 @@ struct SceneStatusView: View {
             // independent poll-start path) but renders empty until polling starts.
             EmptyView()
 
-        case .polling(let latest, let since, let longRunning, let connectionTrouble):
-            pollingView(latest: latest, since: since, longRunning: longRunning, connectionTrouble: connectionTrouble)
+        case .polling(let latest, _, let sceneCreatedAt, let longRunning, let connectionTrouble):
+            pollingView(latest: latest, sceneCreatedAt: sceneCreatedAt, longRunning: longRunning, connectionTrouble: connectionTrouble)
 
         case .succeeded(let response):
             successView(response: response)
@@ -103,7 +103,7 @@ struct SceneStatusView: View {
 
     private func pollingView(
         latest: SceneStatus,
-        since: Date,
+        sceneCreatedAt: Date?,
         longRunning: Bool,
         connectionTrouble: Bool
     ) -> some View {
@@ -112,11 +112,11 @@ struct SceneStatusView: View {
                 .scaleEffect(1.4)
 
             VStack(spacing: 6) {
-                Text(longRunning ? "Taking longer than usual" : statusLabel(latest))
+                Text(longRunning ? "Taking longer than usual" : Self.statusLabel(latest))
                     .font(.headline)
                     .multilineTextAlignment(.center)
 
-                Text(longRunning ? "We'll keep checking — hang tight." : "Processing your room…")
+                Text(longRunning ? "We'll keep checking — hang tight." : Self.statusDetail(latest))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -128,10 +128,20 @@ struct SceneStatusView: View {
                         .padding(.top, 4)
                 }
 
-                Text(elapsedLabel(since: since))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 2)
+                // The elapsed clock renders only once the server-side anchor is
+                // known — before the scene document exists there is nothing
+                // honest to count from. It ticks on a 1 s display timeline,
+                // independent of the poll cadence, and survives re-foreground/
+                // relaunch because the anchor comes from the payload, not from
+                // this client's poll session.
+                if let anchor = sceneCreatedAt {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(Self.elapsedLabel(anchor: anchor, now: context.date))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 2)
+                    }
+                }
             }
 
             if longRunning {
@@ -263,11 +273,25 @@ struct SceneStatusView: View {
 
     // MARK: - Display helpers
 
-    private func statusLabel(_ status: SceneStatus) -> String {
+    /// Headline + subline are one statement and must agree: while the scene is
+    /// still queued, nothing may claim active processing (the old fixed
+    /// "Processing your room…" subline contradicted the queued headline).
+    /// Static + internal so honesty pins in SceneStatusViewTests can assert on
+    /// the copy without instantiating the view.
+    static func statusLabel(_ status: SceneStatus) -> String {
         switch status {
         case .queued:      return "Queued for processing"
-        case .processing:  return "Processing"
+        case .processing:  return "Processing your room"
         default:           return "Processing your room"
+        }
+    }
+
+    static func statusDetail(_ status: SceneStatus) -> String {
+        switch status {
+        case .queued: return "Waiting for processing to begin…"
+        // "Come back later" is a verified claim: processing is server-side and
+        // the poll restarts across relaunches (cold-start recovery, 2026-07-21).
+        default:      return "This can take a while — you can come back later."
         }
     }
 
@@ -282,11 +306,17 @@ struct SceneStatusView: View {
         }
     }
 
-    private func elapsedLabel(since: Date) -> String {
-        let secs = Int(Date().timeIntervalSince(since))
-        if secs < 60  { return "\(secs)s" }
-        let m = secs / 60
+    /// Whole-second elapsed since `anchor`, clamped at zero — device/server
+    /// clock skew must never render a negative count. Hours get their own
+    /// field ("1:02:05") because real reconstructions have run past an hour;
+    /// "62:05" reads as broken. Static + internal for direct test pins.
+    static func elapsedLabel(anchor: Date, now: Date) -> String {
+        let secs = max(0, Int(now.timeIntervalSince(anchor)))
+        if secs < 60 { return "\(secs)s" }
+        let h = secs / 3600
+        let m = (secs % 3600) / 60
         let s = secs % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
         return String(format: "%d:%02d", m, s)
     }
 }

@@ -16,15 +16,24 @@ import XCTest
 
 /// Build JSON data for one SceneResponse. Uses JSONSerialization so mixed-type
 /// arrays work without a custom Encodable wrapper.
-private func sceneData(status: String, missingPaths: [String] = [], resultUri: String = "") throws -> Data {
+///
+/// created_at defaults to "now" (a scene created moments ago — the common case)
+/// so that tests not about time never trip the created_at-anchored longRunning
+/// flip. Time-sensitive tests pass an explicit value.
+private func sceneData(
+    status: String,
+    missingPaths: [String] = [],
+    resultUri: String = "",
+    createdAt: String = ISO8601DateFormatter().string(from: Date())
+) throws -> Data {
     let dict: [String: Any] = [
         "scene_id":     "s1",
         "bundle_id":    "b1",
         "status":       status,
         "result_uri":   resultUri,
         "missing_paths": missingPaths,
-        "created_at":   "2026-01-01T00:00:00Z",
-        "updated_at":   "2026-01-01T00:00:00Z",
+        "created_at":   createdAt,
+        "updated_at":   createdAt,
     ]
     return try JSONSerialization.data(withJSONObject: dict)
 }
@@ -118,6 +127,28 @@ final class ScenePollTests: XCTestCase {
             let response = try JSONDecoder().decode(SceneResponse.self, from: data)
             XCTAssertEqual(response.status, expected, "wire '\(wire)' should decode to \(expected)")
         }
+    }
+
+    // MARK: - created_at wire-format parsing
+
+    func test_parseISO8601_bothWireForms_agreeOnTheInstant() {
+        // Server reality: Python datetime.isoformat() → +00:00 offset with a
+        // 6-digit microsecond fraction. Fixtures/docs use the Z-suffix form.
+        // The fraction is stripped (whole-second display), so both forms of the
+        // same instant must parse equal.
+        let py = SceneResponse.parseISO8601("2026-07-21T13:19:47.123456+00:00")
+        let z  = SceneResponse.parseISO8601("2026-07-21T13:19:47Z")
+        XCTAssertNotNil(py)
+        XCTAssertEqual(py, z)
+    }
+
+    func test_parseISO8601_noFraction_offsetForm() {
+        XCTAssertNotNil(SceneResponse.parseISO8601("2026-01-01T00:00:00+00:00"))
+    }
+
+    func test_parseISO8601_garbage_returnsNil() {
+        XCTAssertNil(SceneResponse.parseISO8601("not-a-date"))
+        XCTAssertNil(SceneResponse.parseISO8601(""))
     }
 
     // MARK: - Cadence transitions
@@ -290,7 +321,7 @@ final class ScenePollTests: XCTestCase {
             }
         )
         let sub = p.$pollState.sink { state in
-            if case .polling(_, _, _, let ct) = state, ct { connectionTroubleObserved = true }
+            if case .polling(_, _, _, _, let ct) = state, ct { connectionTroubleObserved = true }
             if case .pollError = state { pollErrorObserved = true }
         }
         p.start(bundleId: "b1")
@@ -389,7 +420,7 @@ final class ScenePollTests: XCTestCase {
             tokenProvider: { "token" }
         )
         let sub = p.$pollState.sink { state in
-            if case .polling(_, _, _, let ct) = state, ct {
+            if case .polling(_, _, _, _, let ct) = state, ct {
                 connectionTroubleObserved = true
             }
         }
@@ -419,15 +450,44 @@ final class ScenePollTests: XCTestCase {
         }
     }
 
-    // MARK: - Long-running threshold
+    // MARK: - Long-running threshold (anchored to scene created_at)
 
-    func test_longRunning_threshold_flipsFlag() async throws {
-        // Make startDate far in the past so elapsed > longRunningThreshold immediately.
+    func test_longRunning_anchorsToSceneCreatedAt_notPollStart() async throws {
+        // Scene created server-side 11 min ago; THIS poll session just started
+        // (e.g. app relaunch mid-processing). The long-running flip must be
+        // immediate — anchored to created_at, never to the client poll start.
+        let past = Date().addingTimeInterval(-(ScenePoller.longRunningThreshold + 60))
+        let iso  = ISO8601DateFormatter().string(from: past)
+        let box  = ResponseBox([
+            .success((200, try sceneData(status: "processing", createdAt: iso))),
+            .success((200, try ready())),
+        ])
+        var longRunningObserved = false
+        let p = ScenePoller(
+            sleep: { _ in },
+            performGET: { _, _ in await box.next() },
+            tokenProvider: { "token" }
+        )
+        let sub = p.$pollState.sink { state in
+            if case .polling(_, _, _, let lr, _) = state, lr {
+                longRunningObserved = true
+            }
+        }
+        p.start(bundleId: "b1")
+        await p._runTask?.value
+        XCTAssertTrue(longRunningObserved,
+                      "created_at older than longRunningThreshold must set longRunning=true on the first tick")
+        _ = sub
+    }
+
+    func test_longRunning_fallsBackToPollStart_whenCreatedAtUnparseable() async throws {
+        // No usable server anchor → the poll-session start is the fallback anchor.
+        // startDate is injected far in the past so elapsed > threshold immediately.
         let past = Date().addingTimeInterval(-(ScenePoller.longRunningThreshold + 10))
         var nowCallCount = 0
         let box = ResponseBox([
-            .success((200, try queued())),   // transient → checks elapsed
-            .success((200, try ready())),    // terminal
+            .success((200, try sceneData(status: "queued", createdAt: "not-a-date"))),
+            .success((200, try ready())),
         ])
         var longRunningObserved = false
         let p = ScenePoller(
@@ -442,7 +502,7 @@ final class ScenePollTests: XCTestCase {
             tokenProvider: { "token" }
         )
         let sub = p.$pollState.sink { state in
-            if case .polling(_, _, let lr, _) = state, lr {
+            if case .polling(_, _, _, let lr, _) = state, lr {
                 longRunningObserved = true
             }
         }
@@ -450,6 +510,68 @@ final class ScenePollTests: XCTestCase {
         await p._runTask?.value
         XCTAssertTrue(longRunningObserved, "Elapsed > longRunningThreshold must set longRunning=true")
         _ = sub
+    }
+
+    // MARK: - Scene created_at anchor propagation
+
+    func test_polling_carriesSceneCreatedAt_andRetainsAcrossNotCreatedTicks() async throws {
+        let createdAt = "2026-07-21T13:19:47+00:00"
+        let box = ResponseBox([
+            .success((200, try sceneData(status: "queued", createdAt: createdAt))),
+            .success((404, Data())),      // notCreated tick must not drop the anchor
+            .success((200, try ready())),
+        ])
+        var observedAnchors: [Date?] = []
+        let p = ScenePoller(
+            sleep: { _ in },
+            performGET: { _, _ in await box.next() },
+            tokenProvider: { "token" }
+        )
+        let sub = p.$pollState.sink { state in
+            if case .polling(_, _, let anchor, _, _) = state { observedAnchors.append(anchor) }
+        }
+        p.start(bundleId: "b1")
+        await p._runTask?.value
+        let expected = SceneResponse.parseISO8601(createdAt)
+        XCTAssertNotNil(expected)
+        XCTAssertEqual(observedAnchors.first ?? nil, nil,
+                       "start() has no server anchor yet — the clock must not be shown")
+        XCTAssertTrue(observedAnchors.contains(expected),
+                      "The anchor from the first 200 payload must reach the polling state")
+        XCTAssertEqual(observedAnchors.last ?? nil, expected,
+                       "A 404 tick after a successful 200 must retain the anchor, not drop it")
+        _ = sub
+    }
+
+    func test_resume_preservesSceneCreatedAt_andRecomputesLongRunning() async throws {
+        // Anchor learned before pause() must survive resume() — and longRunning
+        // must be recomputed from it synchronously, before the first fresh tick.
+        let past = Date().addingTimeInterval(-(ScenePoller.longRunningThreshold + 60))
+        let iso  = ISO8601DateFormatter().string(from: past)
+        let box  = ResponseBox([
+            .success((200, try sceneData(status: "processing", createdAt: iso))),
+            .success((200, try ready())),
+        ])
+        // Long cadence sleep so the loop parks after tick 1 instead of finishing.
+        let p = ScenePoller(
+            sleep: { _ in try? await Task.sleep(nanoseconds: 30_000_000_000) },
+            performGET: { _, _ in await box.next() },
+            tokenProvider: { "token" }
+        )
+        p.start(bundleId: "b1")
+        for _ in 0..<20 { await Task.yield() }   // let tick 1 land
+        guard case .polling(_, _, let anchorBefore, _, _) = p.pollState, anchorBefore != nil else {
+            return XCTFail("Expected an anchored polling state after tick 1, got \(p.pollState)")
+        }
+        p.pause()
+        p.resume()
+        // Read synchronously after resume() — the resumed loop has not ticked yet.
+        guard case .polling(_, _, let anchorAfter, let longRunning, _) = p.pollState else {
+            return XCTFail("Expected .polling immediately after resume, got \(p.pollState)")
+        }
+        XCTAssertEqual(anchorAfter, anchorBefore, "resume() must preserve the server anchor")
+        XCTAssertTrue(longRunning, "resume() must recompute longRunning from the preserved anchor")
+        p.pause()   // stop the resumed loop before the test ends
     }
 
     // MARK: - start() idempotency
