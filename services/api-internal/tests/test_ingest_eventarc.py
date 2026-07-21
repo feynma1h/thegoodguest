@@ -70,11 +70,24 @@ def _post_bundle_event(client: TestClient, bundle_uri: str):
 # Bundle builder
 # ---------------------------------------------------------------------------
 
-def _make_bundle(*, frame_count: int = 2, add_depth: bool = False) -> bytes:
+_BUCKET = "test-bucket"
+_BUNDLE_ID = str(uuid.uuid4())
+_BUNDLE_URI = f"gs://{_BUCKET}/captures/{_BUNDLE_ID}/bundle.pb"
+
+_EVENTARC_BODY = {"bucket": _BUCKET, "name": f"captures/{_BUNDLE_ID}/bundle.pb"}
+
+
+def _make_bundle(
+    *, bundle_id: str = _BUNDLE_ID, frame_count: int = 2, add_depth: bool = False
+) -> bytes:
+    """bundle_id must match the id in the URI the test posts — the
+    validate_bundle cross-check rejects any divergence. The default matches
+    the module-level _BUNDLE_URI/_EVENTARC_BODY; tests minting their own
+    per-test bundle_id must pass it here too."""
     tier = LIDAR_ARKIT if add_depth else ARKIT_ONLY
     b = CaptureBundle()
     b.schema_version = SCHEMA_VERSION
-    b.bundle_id = str(uuid.uuid4())
+    b.bundle_id = bundle_id
     b.user_id = "test-user"
     b.device.device_id = str(uuid.uuid4())
     b.device.hardware_id = "test-device"
@@ -107,13 +120,6 @@ def _make_bundle(*, frame_count: int = 2, add_depth: bool = False) -> bytes:
             f.depth.intrinsics.width = 256
             f.depth.intrinsics.height = 192
     return b.SerializeToString()
-
-
-_BUCKET = "test-bucket"
-_BUNDLE_ID = str(uuid.uuid4())
-_BUNDLE_URI = f"gs://{_BUCKET}/captures/{_BUNDLE_ID}/bundle.pb"
-
-_EVENTARC_BODY = {"bucket": _BUCKET, "name": f"captures/{_BUNDLE_ID}/bundle.pb"}
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +234,7 @@ class TestIngestEventarc:
     def test_idempotency_already_queued_skips_reenqueue(self, client: TestClient) -> None:
         bundle_id = str(uuid.uuid4())
         bundle_uri = f"gs://{_BUCKET}/captures/{bundle_id}/bundle.pb"
-        bundle_bytes = _make_bundle()
+        bundle_bytes = _make_bundle(bundle_id=bundle_id)
         repo = InMemorySceneRepository()
         dispatcher = InMemoryTaskDispatcher()
 
@@ -258,7 +264,7 @@ class TestIngestEventarc:
 
     def test_idempotency_already_processing_skips_reenqueue(self, client: TestClient) -> None:
         bundle_id = str(uuid.uuid4())
-        bundle_bytes = _make_bundle()
+        bundle_bytes = _make_bundle(bundle_id=bundle_id)
         repo = InMemorySceneRepository()
         dispatcher = InMemoryTaskDispatcher()
         event = {"bucket": _BUCKET, "name": f"captures/{bundle_id}/bundle.pb"}
@@ -292,7 +298,7 @@ class TestIngestEventarc:
         FAILED_INVALID means the bytes were present but non-decodable. There
         is nothing a second finalize event can do to fix that."""
         bundle_id = str(uuid.uuid4())
-        bundle_bytes = _make_bundle()
+        bundle_bytes = _make_bundle(bundle_id=bundle_id)
         repo = InMemorySceneRepository()
         dispatcher = InMemoryTaskDispatcher()
         event = {"bucket": _BUCKET, "name": f"captures/{bundle_id}/bundle.pb"}
@@ -327,7 +333,7 @@ class TestIngestEventarc:
 
     def test_failed_incomplete_retries_with_existing_scene(self, client: TestClient) -> None:
         bundle_id = str(uuid.uuid4())
-        bundle_bytes = _make_bundle()
+        bundle_bytes = _make_bundle(bundle_id=bundle_id)
         repo = InMemorySceneRepository()
         dispatcher = InMemoryTaskDispatcher()
         event = {"bucket": _BUCKET, "name": f"captures/{bundle_id}/bundle.pb"}
@@ -372,7 +378,7 @@ class TestIngestEventarc:
         QUEUED) rather than falling through to a fresh ingest and creating a
         duplicate Scene per retry."""
         bundle_id = str(uuid.uuid4())
-        bundle_bytes = _make_bundle()
+        bundle_bytes = _make_bundle(bundle_id=bundle_id)
         repo = InMemorySceneRepository()
         event = {"bucket": _BUCKET, "name": f"captures/{bundle_id}/bundle.pb"}
 
@@ -498,7 +504,7 @@ class TestExistenceCheck:
         upload session, not be left as None (decision 0022)."""
         bundle_id = str(uuid.uuid4())
         bundle_uri = f"gs://{_BUCKET}/captures/{bundle_id}/bundle.pb"
-        bundle_bytes = _make_bundle(frame_count=1)
+        bundle_bytes = _make_bundle(bundle_id=bundle_id, frame_count=1)
 
         upload_repo = InMemoryUploadSessionRepository()
         upload_repo._store[bundle_id] = {
@@ -533,7 +539,7 @@ class TestExistenceCheck:
         (ClaimResult.fcm_token → notify_ready/notify_failed)."""
         bundle_id = str(uuid.uuid4())
         bundle_uri = f"gs://{_BUCKET}/captures/{bundle_id}/bundle.pb"
-        bundle_bytes = _make_bundle(frame_count=1)
+        bundle_bytes = _make_bundle(bundle_id=bundle_id, frame_count=1)
 
         upload_repo = InMemoryUploadSessionRepository()
         upload_repo._store[bundle_id] = {
@@ -565,7 +571,7 @@ class TestExistenceCheck:
     def test_fcm_notifier_called_when_upload_incomplete(self, client: TestClient) -> None:
         bundle_id = str(uuid.uuid4())
         bundle_uri = f"gs://{_BUCKET}/captures/{bundle_id}/bundle.pb"
-        bundle_bytes = _make_bundle(frame_count=1)
+        bundle_bytes = _make_bundle(bundle_id=bundle_id, frame_count=1)
         upload_repo = InMemoryUploadSessionRepository()
 
         # Seed an FCM token for this bundle_id.
@@ -620,7 +626,7 @@ class TestExistenceCheck:
         """A bundle with no frames has no blob paths to check; ingest proceeds."""
         b = CaptureBundle()
         b.schema_version = SCHEMA_VERSION
-        b.bundle_id = str(uuid.uuid4())
+        b.bundle_id = _BUNDLE_ID  # matches _BUNDLE_URI — passes the cross-check
         b.user_id = "u"
         b.device.device_id = str(uuid.uuid4())
         b.device.hardware_id = "d"
