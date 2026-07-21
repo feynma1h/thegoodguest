@@ -183,12 +183,15 @@ COPY services/perception-obj/receiver_repo.py /app/receiver_repo.py
 COPY services/perception-obj/fcm.py /app/fcm.py
 COPY services/perception-obj/placement.py /app/placement.py
 COPY services/perception-obj/fusion.py /app/fusion.py
+COPY services/perception-obj/sampling.py /app/sampling.py
+COPY services/perception-obj/budget.py /app/budget.py
 
-# Deferred-import smoke: placement/fusion are imported lazily inside /process,
-# so a missing COPY above passes /health and every pre-traffic probe, then
-# breaks the first real reconstruction. Fail the BUILD instead. (Light imports
-# only — numpy + roomstudio_schemas; no torch, no model weights.)
-RUN python -c "import placement, fusion"
+# Deferred-import smoke: placement/fusion/sampling/budget are imported lazily
+# inside /process, so a missing COPY above passes /health and every
+# pre-traffic probe, then breaks the first real reconstruction. Fail the
+# BUILD instead. (Light imports only — numpy + roomstudio_schemas; no torch,
+# no model weights.)
+RUN python -c "import placement, fusion, sampling, budget"
 
 ENV PORT=8080
 EXPOSE 8080

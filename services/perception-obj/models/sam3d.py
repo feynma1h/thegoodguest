@@ -16,6 +16,7 @@ import sys
 from typing import Any
 
 import numpy as np
+import torch
 from PIL import Image
 
 
@@ -56,4 +57,14 @@ class SAM3DModel:
         # Use positional args to match Meta's demo/README, which is the only
         # documented call signature. Avoids depending on the internal param
         # names in notebook/inference.py's __call__.
-        return self.inference(rgba, mask, seed=seed)
+        #
+        # no_grad: the pipeline guards most stages internally but run() has
+        # gaps (e.g. the pose decoder runs bare), and any output tensor that
+        # keeps a grad_fn pins its activation graph for as long as the result
+        # lives. This call path never needs autograd. (no_grad, not
+        # inference_mode: the pipeline uses inference_mode(False) sections
+        # internally, and in-place ops on inference tensors outside their
+        # creating context are runtime errors we can't risk on a GPU we
+        # can't test locally.)
+        with torch.no_grad():
+            return self.inference(rgba, mask, seed=seed)
