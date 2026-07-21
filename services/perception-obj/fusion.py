@@ -47,10 +47,12 @@ from typing import Any, Optional
 
 import numpy as np
 
+from placement import min_axis_to_vertical_deg
 from roomstudio_schemas.placement_math import (
     DegenerateGeometryError,
     triangulate_rays,
 )
+from roomstudio_schemas.pose_math import quat_to_rotmat
 
 logger = logging.getLogger(__name__)
 
@@ -179,9 +181,11 @@ def _fuse_ray_cluster(members: list[dict], object_id: str) -> dict:
     if best_rot:
         rotation = [float(c) for c in best_rot]
         rotation_source = "sam3d_layout"
+        min_axis_dev = min_axis_to_vertical_deg(quat_to_rotmat(tuple(rotation)))
     else:
         rotation = [0.0, 0.0, 0.0, 1.0]
         rotation_source = "none"
+        min_axis_dev = None
 
     return {
         "object_id": object_id,
@@ -199,6 +203,7 @@ def _fuse_ray_cluster(members: list[dict], object_id: str) -> dict:
         "quality": {
             "frames_observed": len(members),
             "triangulation_rms_m": float(rms),
+            "min_axis_to_vertical_deg": min_axis_dev,
             "score": best["score"],
         },
     }

@@ -223,6 +223,8 @@ def test_ray_cluster_triangulates_center_and_scale():
     assert obj["quality"]["triangulation_rms_m"] < 1e-9
     assert obj["quality"]["frames_observed"] == 3
     assert obj["rotation_source"] == "sam3d_layout"
+    # Identity world rotation -> a canonical axis is exactly plumb.
+    assert obj["quality"]["min_axis_to_vertical_deg"] == pytest.approx(0.0, abs=1e-9)
 
 
 def test_two_ray_targets_cluster_separately():
@@ -297,6 +299,7 @@ def test_ray_cluster_without_layout_rotation_uses_identity():
     assert out[0]["placed"] is True
     assert out[0]["rotation_source"] == "none"
     assert out[0]["world_transform"]["rotation_xyzw"] == [0.0, 0.0, 0.0, 1.0]
+    assert out[0]["quality"]["min_axis_to_vertical_deg"] is None
 
 
 def test_ray_cluster_rotation_strictly_paired_with_best_splat():
