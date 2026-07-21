@@ -1,6 +1,7 @@
 /// Capture UI: start/stop button, live frame counter, tracking-state indicator,
 /// tier badge, bundle-path readout, upload-session status badge, the upload-failure
-/// banner (UploadFailureView), and the scene processing status panel (SceneStatusView).
+/// banner (UploadFailureView), the scene processing status panel (SceneStatusView),
+/// and the account control (top-trailing — sign-in entry point per decision 0051).
 ///
 /// Triggers UploadCoordinator.beginUploadSession when CaptureManager publishes
 /// bundlePath (stop-capture → assembly complete).
@@ -13,6 +14,9 @@ struct ContentView: View {
     @StateObject private var capture     = CaptureManager()
     @StateObject private var coordinator = UploadCoordinator()
     @ObservedObject private var poller   = ScenePoller.shared
+    @ObservedObject private var auth     = AuthManager.shared
+
+    @State private var showSignInSheet = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -50,9 +54,42 @@ struct ContentView: View {
             guard newPath != nil else { return }
             Task { await coordinator.beginUploadSession(for: capture) }
         }
+        .overlay(alignment: .topTrailing) {
+            accountControl
+                .padding(.top, 12)
+                .padding(.trailing, 20)
+        }
+        .sheet(isPresented: $showSignInSheet) {
+            SignInSheet()
+        }
     }
 
     // MARK: - Subviews
+
+    /// Account control (decision 0051). Anonymous → a quiet "Sign in" entry
+    /// point; linked → the signed-in state, tappable for details. Hidden
+    /// entirely when Firebase isn't configured (simulator tests without the
+    /// plist) — no dead buttons.
+    @ViewBuilder
+    private var accountControl: some View {
+        if auth.isConfigured {
+            Button {
+                showSignInSheet = true
+            } label: {
+                if auth.isAppleLinked {
+                    Label("Signed in", systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Sign in")
+                        .font(.caption.weight(.semibold))
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .clipShape(Capsule())
+        }
+    }
 
     /// Tier chip — shows which capture path is active on this device.
     private var tierBadge: some View {
