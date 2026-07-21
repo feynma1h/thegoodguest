@@ -120,7 +120,7 @@ def test_min_axis_metric_matches_bed_pin():
     """The quality metric (min axis to vertical) on the bed observation
     equals the bed's thin-axis deviation — no other axis is closer."""
     R = _world_rotation(18, 1)
-    got = placement._min_axis_to_vertical_deg(R)
+    got = placement.min_axis_to_vertical_deg(R)
     assert got == pytest.approx(20.7, abs=0.5)
 
 

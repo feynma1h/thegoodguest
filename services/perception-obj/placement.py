@@ -303,7 +303,7 @@ def object_view_ray(mask: np.ndarray, intrinsics, camera_pose) -> Optional[dict]
     }
 
 
-def _min_axis_to_vertical_deg(R_world_obj: np.ndarray) -> float:
+def min_axis_to_vertical_deg(R_world_obj: np.ndarray) -> float:
     """Smallest angle between any canonical axis (as an unsigned line) and
     the world vertical.
 
@@ -441,7 +441,7 @@ def place_object(
         "depth_points": int(cam_pts.shape[0]),
         "nn_rms_m": float(nn_rms) if nn_rms is not None else None,
         "min_axis_to_vertical_deg": (
-            _min_axis_to_vertical_deg(R_world)
+            min_axis_to_vertical_deg(R_world)
             if rotation_source == "sam3d_layout"
             else None
         ),
