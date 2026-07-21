@@ -1,28 +1,33 @@
 "use client";
 
 /**
- * The account surface: who am I, what mode is this, how do I leave. Until
- * decision 0051's linked sign-in ships, identity is thin (anonymous UID in
- * live mode, a named workspace in mock/local) — but the affordance exists
- * NOW so signing in/out has a home the day real accounts land, and so the
- * dev-only Viewer workbench has a dignified place off the primary nav.
+ * The account surface: who am I, what mode is this, how do I leave. In live
+ * mode this is decision 0051's web half: sign in with the Apple ID that was
+ * linked on the iPhone (the web never creates accounts — see lib/firebase),
+ * see who you are, sign out. Mock/local show what the identity actually is
+ * instead of a dead button — honest about the current state, per the
+ * no-fake-UI rule.
  *
- * UID renders in mono (machine data, decision 0056). Sign out is live-mode
- * only; mock/local show what the identity actually is instead of a dead
- * button — honest about the current state, per the no-fake-UI rule.
+ * UID renders in mono (machine data, decision 0056).
  */
 
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
+import AppleSignInButton from "@/components/AppleSignInButton";
 import { SPRING } from "@/components/ui/spring";
 import { apiMode } from "@/lib/api";
+
+type LiveAuth =
+  | { phase: "checking" }
+  | { phase: "signedOut" }
+  | { phase: "signedIn"; uid: string; email: string | null };
 
 export default function AccountMenu() {
   const mode = apiMode();
   const [open, setOpen] = useState(false);
-  const [uid, setUid] = useState<string | null>(null);
+  const [liveAuth, setLiveAuth] = useState<LiveAuth>({ phase: "checking" });
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -31,7 +36,12 @@ export default function AccountMenu() {
     // Deferred import keeps the Firebase SDK out of mock/local bundles.
     import("@/lib/firebase").then(({ getCurrentUser }) =>
       getCurrentUser().then((user) => {
-        if (!cancelled) setUid(user?.uid ?? null);
+        if (cancelled) return;
+        setLiveAuth(
+          user
+            ? { phase: "signedIn", uid: user.uid, email: user.email }
+            : { phase: "signedOut" },
+        );
       }),
     );
     return () => {
@@ -60,15 +70,16 @@ export default function AccountMenu() {
       ? { title: "Demo workspace", detail: "Sample rooms, no account" }
       : mode === "live-local"
         ? { title: "Local dev", detail: "test-uid:dev-user" }
-        : uid
-          ? { title: "Signed in", detail: uid }
-          : { title: "Signing in…", detail: null };
+        : liveAuth.phase === "signedIn"
+          ? { title: "Signed in", detail: liveAuth.email ?? liveAuth.uid }
+          : liveAuth.phase === "signedOut"
+            ? { title: "Not signed in", detail: null }
+            : { title: "One moment…", detail: null };
 
   const onSignOut = async () => {
     const { signOutUser } = await import("@/lib/firebase");
     await signOutUser();
-    // Anonymous auth re-mints a UID on next load; a full reload keeps every
-    // client (API, viewer) consistent with the fresh identity.
+    // Full reload so every client (API, viewer, menus) drops the identity.
     window.location.href = "/";
   };
 
@@ -130,7 +141,17 @@ export default function AccountMenu() {
               </Link>
             )}
 
-            {mode === "live" && (
+            {mode === "live" && liveAuth.phase === "signedOut" && (
+              <div className="px-4 py-4">
+                <p className="mb-3 text-xs leading-relaxed text-ink/55">
+                  Sign in with the Apple ID from your iPhone — the rooms you
+                  scanned there follow it here.
+                </p>
+                <AppleSignInButton compact />
+              </div>
+            )}
+
+            {mode === "live" && liveAuth.phase === "signedIn" && (
               <button
                 type="button"
                 onClick={onSignOut}

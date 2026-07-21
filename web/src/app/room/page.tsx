@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
+import AppleSignInButton from "@/components/AppleSignInButton";
 import RoomStage from "@/components/RoomStage";
 import Wordmark from "@/components/Wordmark";
 import { PillLink } from "@/components/ui/spring";
@@ -35,6 +36,7 @@ import { elapsedPhrase, minutesSince, roomTitle, waitNarration } from "@/lib/voi
 
 type Result =
   | { forBundle: string; phase: "error"; message: string }
+  | { forBundle: string; phase: "signed-out" }
   | { forBundle: string; phase: "ready"; scene: SceneSummary };
 
 /** Floating chrome shared by every room-page state: the way back, the
@@ -209,6 +211,11 @@ function RoomDetail() {
         })
         .catch((exc: unknown) => {
           if (cancelled) return;
+          // no_local_token = live mode, nobody signed in (decision 0051).
+          if (exc instanceof ApiError && exc.code === "no_local_token") {
+            setResult({ forBundle: bundleId, phase: "signed-out" });
+            return;
+          }
           const message =
             exc instanceof ApiError ? exc.message : "Could not reach the server.";
           setResult({ forBundle: bundleId, phase: "error", message });
@@ -220,6 +227,23 @@ function RoomDetail() {
       if (timer !== undefined) clearTimeout(timer);
     };
   }, [bundleId]);
+
+  if (state.phase === "signed-out") {
+    return (
+      <div className="relative flex min-h-dvh flex-col bg-paper">
+        <RoomChrome tone="ink" title="" />
+        <div className="mx-auto flex max-w-lg flex-1 flex-col items-start justify-center px-6 pt-14">
+          <GuestLine className="text-[17px]">
+            This room belongs to an account. Sign in with the Apple ID from
+            your iPhone and I&rsquo;ll open it for you.
+          </GuestLine>
+          <div className="mt-9">
+            <AppleSignInButton />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (state.phase === "missing" || state.phase === "error") {
     return (
