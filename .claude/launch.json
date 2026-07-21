@@ -7,6 +7,24 @@
       "runtimeArgs": ["run", "dev", "--prefix", "web"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "web-dev-livelocal",
+      "runtimeExecutable": "/usr/bin/env",
+      "runtimeArgs": [
+        "NEXT_PUBLIC_API_MODE=live-local",
+        "NEXT_PUBLIC_API_BASE_URL=http://localhost:8080",
+        "/opt/homebrew/opt/node@22/bin/npm",
+        "run",
+        "dev",
+        "--prefix",
+        "web",
+        "--",
+        "--port",
+        "3001"
+      ],
+      "port": 3001,
+      "autoPort": true
     }
   ]
 }
