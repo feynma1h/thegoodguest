@@ -266,6 +266,70 @@ final class ScenePollTests: XCTestCase {
         }
     }
 
+    // MARK: - Token acquisition failure is transient (cold-launch race)
+
+    func test_tokenProviderThrows_isTransient_thenRecovers() async throws {
+        // Cold-launch race: the poll loop can start before the app-level anonymous
+        // sign-in lands, so the initial token acquisition can fail. That must be a
+        // transient tick — the loop keeps polling (connection-trouble sub-state, no
+        // GET fired) and succeeds once auth becomes available — never .pollError.
+        var tokenCalls = 0
+        var getCalls   = 0
+        let box = ResponseBox([.success((200, try ready()))])
+        var connectionTroubleObserved = false
+        var pollErrorObserved         = false
+        let p = ScenePoller(
+            sleep: { _ in },
+            performGET: { _, _ in getCalls += 1; return await box.next() },
+            tokenProvider: {
+                tokenCalls += 1
+                if tokenCalls <= 2 {
+                    throw AuthManager.AuthError.notSignedIn   // sign-in not yet landed
+                }
+                return "token"
+            }
+        )
+        let sub = p.$pollState.sink { state in
+            if case .polling(_, _, _, let ct) = state, ct { connectionTroubleObserved = true }
+            if case .pollError = state { pollErrorObserved = true }
+        }
+        p.start(bundleId: "b1")
+        await p._runTask?.value
+        XCTAssertEqual(tokenCalls, 3, "Two failed acquisitions + the successful one")
+        XCTAssertEqual(getCalls, 1, "No GET may fire on a token-less tick")
+        XCTAssertTrue(connectionTroubleObserved,
+                      "Token-less ticks must surface as connectionTrouble, not error")
+        XCTAssertFalse(pollErrorObserved,
+                       "Initial token acquisition failure must never produce .pollError")
+        if case .succeeded = p.pollState { } else {
+            XCTFail("Expected .succeeded once sign-in lands, got \(p.pollState)")
+        }
+        _ = sub
+    }
+
+    func test_tokenRefreshThrowAfter401_staysFatal() async throws {
+        // Boundary pin: the transient classification covers INITIAL acquisition only.
+        // A tokenProvider failure on the 401-refresh path remains fatal — the server
+        // has already rejected a token a real signed-in user produced, which is
+        // 0038's give-up territory, not a launch race.
+        var tokenCalls = 0
+        let box = ResponseBox([.success((401, Data()))])
+        let p = ScenePoller(
+            sleep: { _ in },
+            performGET: { _, _ in await box.next() },
+            tokenProvider: {
+                tokenCalls += 1
+                if tokenCalls == 1 { return "stale-token" }
+                throw AuthManager.AuthError.notSignedIn
+            }
+        )
+        p.start(bundleId: "b1")
+        await p._runTask?.value
+        if case .pollError = p.pollState { } else {
+            XCTFail("Expected .pollError when the refresh-path token acquisition throws, got \(p.pollState)")
+        }
+    }
+
     // MARK: - Inner 0038: 5xx backoff then transientFail
 
     func test_inner_5xx_exhaustedRetries_yieldsTransientFailThenContinues() async throws {

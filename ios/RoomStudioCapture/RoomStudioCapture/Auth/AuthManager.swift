@@ -61,21 +61,44 @@ final class AuthManager: ObservableObject {
         return Auth.auth().currentUser?.uid
     }
 
+    /// In-flight anonymous sign-in, shared by concurrent callers (single-flight).
+    /// @MainActor serializes ENTRY to signInIfNeeded, but signInAnonymously()
+    /// suspends — without this, two callers overlapping across that suspension
+    /// would both observe currentUser == nil and create two anonymous users, the
+    /// second overwriting the first locally: exactly the UID churn decision 0036
+    /// forbids. Concurrent callers at cold launch are real: ScenePoller's token
+    /// path attempts sign-in and can race the app-level launch .task.
+    private var signInTask: Task<Void, Error>?
+
     /// Ensure an anonymous Firebase user exists. No-op if already signed in
     /// or if Firebase is not configured (test environments without plist).
+    /// Concurrent callers join the same in-flight sign-in (single-flight) —
+    /// signInAnonymously() is never running twice.
     ///
     /// Call at app launch (when network is likely available) and immediately
     /// before any upload call that needs a token. Do NOT call inside
     /// stopCapture() — capture must remain offline-safe.
     ///
     /// Throws on network failure or Firebase configuration error. The caller
-    /// decides whether to retry or surface an error to the user.
+    /// decides whether to retry or surface an error to the user. After a failed
+    /// attempt the in-flight slot is cleared, so a later call retries fresh.
     func signInIfNeeded() async throws {
         guard isConfigured else { return }
         // Reuse existing user — never create a new anonymous UID when one exists.
         if Auth.auth().currentUser != nil { return }
-        let result = try await Auth.auth().signInAnonymously()
-        uid = result.user.uid
+        // Join an in-flight sign-in instead of starting a second one.
+        if let inFlight = signInTask {
+            return try await inFlight.value
+        }
+        // No suspension between the checks above and this assignment (all on the
+        // MainActor executor), so a second caller cannot interleave and double-start.
+        let task = Task { @MainActor in
+            defer { self.signInTask = nil }
+            let result = try await Auth.auth().signInAnonymously()
+            self.uid = result.user.uid
+        }
+        signInTask = task
+        return try await task.value
     }
 
     /// Returns a fresh Firebase ID token. Never cache the return value.
