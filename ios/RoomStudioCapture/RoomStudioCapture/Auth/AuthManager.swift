@@ -1,28 +1,43 @@
-/// Firebase anonymous auth layer for RoomStudio Capture.
+/// Firebase auth layer for RoomStudio Capture.
 ///
 /// Responsibilities:
-///   - Ensure a stable anonymous UID exists before any upload call.
+///   - Ensure a stable UID exists before any upload call (anonymous on first
+///     run; the same UID once upgraded to a linked Apple sign-in).
 ///   - Vend fresh idTokens on demand (never cache the raw string).
+///   - Upgrade the anonymous user to a real Sign in with Apple credential by
+///     LINKING it to the existing user (decision 0051) — the UID never changes
+///     on link; every scene captured before sign-in stays reachable after.
 ///
-/// Key design decisions (decision 0036):
-///   - signInIfNeeded() is idempotent: reuses currentUser if non-nil, never
-///     calls signInAnonymously() twice. UID churn would orphan prior scenes at
-///     poll time — we avoid it by checking for an existing user first.
-///   - currentUID is offline-safe: Firebase persists the anonymous user in
-///     Keychain; the UID is available without a network call after first online
-///     sign-in. Capture and bundle.pb serialization read currentUID and remain
-///     fully offline-capable after the first run.
+/// Key design decisions (decisions 0036, 0051):
+///   - signInIfNeeded() is idempotent: reuses currentUser if non-nil (anonymous
+///     OR linked), never calls signInAnonymously() twice. UID churn would
+///     orphan prior scenes at poll time — we avoid it by checking for an
+///     existing user first.
+///   - linkAppleAccount() calls link(with:) on the EXISTING user, never
+///     signIn(with:). A successful link is asserted UID-unchanged. The only
+///     path that changes the UID is switchToExistingAccount(), which runs
+///     solely on an explicit, warned user choice after a link conflict.
+///   - There is no sign-out on iOS: with no current user, the next launch's
+///     signInIfNeeded() would mint a FRESH anonymous UID and orphan every
+///     local record — exactly the churn 0036 forbids. The web app is where
+///     sign-out lives; this install keeps its identity.
+///   - currentUID is offline-safe: Firebase persists the user in Keychain; the
+///     UID is available without a network call after first online sign-in.
+///     Capture and bundle.pb serialization read currentUID and remain fully
+///     offline-capable after the first run.
 ///   - currentIDToken() is always live: calls getIDToken() on each invocation
 ///     and lets the Firebase SDK handle expiry and refresh transparently. Do
 ///     not cache the returned string — it expires after 1 hour.
 ///
 /// Read by: CaptureManager (UID at stop-capture), UploadCoordinator (sign-in
-///          gate + token vending before upload session call).
+///          gate + token vending before upload session call), SignInSheet
+///          (link/switch flow + published link state).
 
 import Combine
 import FirebaseAuth
 import FirebaseCore
 import Foundation
+import os
 
 @MainActor
 final class AuthManager: ObservableObject {
@@ -31,10 +46,21 @@ final class AuthManager: ObservableObject {
 
     // MARK: - Published state
 
-    /// Current anonymous UID, or nil if not yet signed in (or Firebase not configured).
-    /// Updated on sign-in. Reads Firebase Keychain cache — offline-safe after
-    /// the first online sign-in.
+    /// Current UID (anonymous or linked), or nil if not yet signed in (or
+    /// Firebase not configured). Updated on sign-in. Reads Firebase Keychain
+    /// cache — offline-safe after the first online sign-in.
     @Published private(set) var uid: String?
+
+    /// True when the current user carries an Apple credential (decision 0051's
+    /// linked state). Drives the account UI; false while anonymous.
+    @Published private(set) var isAppleLinked = false
+
+    /// Display email for the linked Apple credential, when Apple shared one
+    /// (private-relay addresses included). Display-only — never sent anywhere.
+    @Published private(set) var appleEmail: String?
+
+    private let logger = Logger(
+        subsystem: "com.roomstudio.RoomStudioCapture", category: "Auth")
 
     // MARK: - Init
 
@@ -46,6 +72,7 @@ final class AuthManager: ObservableObject {
         // The guard here keeps the store nil-safe in those environments.
         if FirebaseApp.app() != nil {
             uid = Auth.auth().currentUser?.uid
+            refreshLinkState()
         }
     }
 
@@ -70,8 +97,10 @@ final class AuthManager: ObservableObject {
     /// path attempts sign-in and can race the app-level launch .task.
     private var signInTask: Task<Void, Error>?
 
-    /// Ensure an anonymous Firebase user exists. No-op if already signed in
-    /// or if Firebase is not configured (test environments without plist).
+    /// Ensure a Firebase user exists — anonymous on first run; a user that
+    /// has since been linked to an Apple credential also satisfies it. No-op
+    /// if already signed in or if Firebase is not configured (test
+    /// environments without plist).
     /// Concurrent callers join the same in-flight sign-in (single-flight) —
     /// signInAnonymously() is never running twice.
     ///
@@ -96,9 +125,124 @@ final class AuthManager: ObservableObject {
             defer { self.signInTask = nil }
             let result = try await Auth.auth().signInAnonymously()
             self.uid = result.user.uid
+            self.refreshLinkState()
         }
         signInTask = task
         return try await task.value
+    }
+
+    // MARK: - Account linking (decision 0051)
+
+    /// Outcome of one Apple link attempt, for the sign-in UI.
+    enum AppleLinkResult {
+        /// Linked to the existing user. UID verified unchanged.
+        case linked
+        /// The Apple ID already belongs to a DIFFERENT account. The credential
+        /// (single-use, from the SDK) switches to it via
+        /// switchToExistingAccount — only on an explicit user choice.
+        case conflict(existingAccountCredential: AuthCredential?)
+        /// User dismissed the Apple sheet; nothing changed, show nothing.
+        case canceled
+        /// Link failed; current account untouched. Message is display-ready.
+        case failed(message: String)
+    }
+
+    /// Upgrade the current (anonymous) user with an Apple credential by
+    /// LINKING — never a fresh sign-in. The UID is asserted unchanged; a
+    /// mismatch is treated as failure, not silently adopted (0036's no-churn
+    /// invariant is load-bearing: the UID owns every scene this install ever
+    /// uploaded).
+    ///
+    /// `idTokenString`/`rawNonce` come from the ASAuthorization flow in
+    /// SignInSheet; `fullName` is only non-nil on the FIRST authorization for
+    /// this Apple ID and is forwarded so Firebase records a display name.
+    func linkAppleAccount(
+        idTokenString: String,
+        rawNonce: String,
+        fullName: PersonNameComponents?
+    ) async -> AppleLinkResult {
+        guard isConfigured else {
+            return .failed(message: AuthError.notConfigured.localizedDescription)
+        }
+        // First-launch edge: the launch sign-in may have failed offline. Link
+        // needs a user to link TO; joining the single-flight sign-in here
+        // cannot churn an existing UID (0036 guard inside signInIfNeeded).
+        if Auth.auth().currentUser == nil {
+            do { try await signInIfNeeded() } catch {
+                return .failed(message:
+                    "Couldn’t reach sign-in. Check the connection and try again.")
+            }
+        }
+        guard let user = Auth.auth().currentUser else {
+            return .failed(message: AuthError.notSignedIn.localizedDescription)
+        }
+
+        let uidBeforeLink = user.uid
+        let credential = OAuthProvider.appleCredential(
+            withIDToken: idTokenString, rawNonce: rawNonce, fullName: fullName)
+        do {
+            let result = try await user.link(with: credential)
+            guard result.user.uid == uidBeforeLink else {
+                // Firebase link semantics guarantee UID preservation; if that
+                // ever breaks, refuse to carry on as a different identity.
+                logger.fault("""
+                    auth.link uid changed across link: \
+                    before=\(uidBeforeLink, privacy: .public) \
+                    after=\(result.user.uid, privacy: .public)
+                    """)
+                return .failed(message:
+                    "Sign-in came back as a different account — nothing was changed. Please try again.")
+            }
+            uid = result.user.uid
+            refreshLinkState()
+            logger.info("""
+                auth.link linked uid=\(uidBeforeLink, privacy: .public) \
+                uid_unchanged=true
+                """)
+            return .linked
+        } catch {
+            switch SignInWithApple.classifyLinkError(error) {
+            case .appleIDOwnedByAnotherAccount(let existing):
+                logger.info("auth.link conflict credential_present=\(existing != nil)")
+                return .conflict(existingAccountCredential: existing)
+            case .canceled:
+                return .canceled
+            case .retryable(let message), .other(let message):
+                logger.error("auth.link failed: \(error as NSError, privacy: .public)")
+                return .failed(message: message)
+            }
+        }
+    }
+
+    /// Sign in to the account that already owns the Apple ID — the one
+    /// deliberate exception to the no-UID-churn rule, and it only runs after
+    /// SignInSheet has shown the explicit warning and the user confirmed.
+    /// Rooms scanned on this phone under the old anonymous UID stop being
+    /// reachable from this install afterward.
+    func switchToExistingAccount(_ credential: AuthCredential) async throws {
+        guard isConfigured else { throw AuthError.notConfigured }
+        let uidBefore = Auth.auth().currentUser?.uid ?? "none"
+        let result = try await Auth.auth().signIn(with: credential)
+        uid = result.user.uid
+        refreshLinkState()
+        logger.notice("""
+            auth.switch user-confirmed account switch: \
+            from=\(uidBefore, privacy: .public) \
+            to=\(result.user.uid, privacy: .public)
+            """)
+    }
+
+    /// Recompute the published Apple-link state from the current user's
+    /// provider list. Call after every auth-state mutation.
+    private func refreshLinkState() {
+        guard isConfigured, let user = Auth.auth().currentUser else {
+            isAppleLinked = false
+            appleEmail = nil
+            return
+        }
+        let apple = user.providerData.first { $0.providerID == "apple.com" }
+        isAppleLinked = apple != nil
+        appleEmail = apple?.email ?? user.email
     }
 
     /// Returns a fresh Firebase ID token. Never cache the return value.
