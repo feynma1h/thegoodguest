@@ -15,15 +15,18 @@ import { motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import AppleSignInButton from "@/components/AppleSignInButton";
 import { SPRING } from "@/components/ui/spring";
 import { Eyebrow, GuestLine } from "@/components/ui/voice";
 import { getApiClient } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
 
 const POLL_MS = 10_000;
 const HEARD_LINGER_MS = 1_600;
 
 type Listening =
   | { phase: "listening"; trouble: boolean }
+  | { phase: "signed-out" }
   | { phase: "heard"; bundleId: string | null };
 
 export default function BridgePage() {
@@ -60,8 +63,15 @@ export default function BridgePage() {
           }
           timer = window.setTimeout(tick, POLL_MS);
         })
-        .catch(() => {
+        .catch((exc: unknown) => {
           if (cancelled) return;
+          // no_local_token = live mode, nobody signed in (decision 0051).
+          // The desk can't listen for an account that isn't here; stop
+          // polling — sign-in reloads the page and starts fresh.
+          if (exc instanceof ApiError && exc.code === "no_local_token") {
+            setState((s) => (s.phase === "heard" ? s : { phase: "signed-out" }));
+            return;
+          }
           setState((s) =>
             s.phase === "heard" ? s : { phase: "listening", trouble: true },
           );
@@ -127,6 +137,16 @@ export default function BridgePage() {
               <GuestLine className="text-[15px]">
                 It&rsquo;s here. Give me a few minutes with it.
               </GuestLine>
+            ) : state.phase === "signed-out" ? (
+              <>
+                <p className="text-[13.5px] font-medium">
+                  The desk listens for the rooms of an account — sign in with
+                  the Apple ID from your iPhone.
+                </p>
+                <div className="mt-3">
+                  <AppleSignInButton compact />
+                </div>
+              </>
             ) : (
               <>
                 <div className="flex items-center gap-2.5">

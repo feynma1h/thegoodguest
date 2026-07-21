@@ -10,6 +10,7 @@
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
+import AppleSignInButton from "@/components/AppleSignInButton";
 import RoomCard from "@/components/RoomCard";
 import { openNewRoomSheet } from "@/components/NewRoomSheet";
 import { PillLink } from "@/components/ui/spring";
@@ -21,6 +22,7 @@ import { smallCount } from "@/lib/voice";
 
 type State =
   | { phase: "loading" }
+  | { phase: "signed-out" }
   | { phase: "error"; message: string }
   | { phase: "ready"; scenes: SceneSummary[] };
 
@@ -34,6 +36,12 @@ export default function RoomsPage() {
       .then((scenes) => !cancelled && setState({ phase: "ready", scenes }))
       .catch((exc: unknown) => {
         if (cancelled) return;
+        // no_local_token = live mode, nobody signed in (decision 0051) —
+        // an invitation, not an error.
+        if (exc instanceof ApiError && exc.code === "no_local_token") {
+          setState({ phase: "signed-out" });
+          return;
+        }
         const message =
           exc instanceof ApiError ? exc.message : "Could not reach the server.";
         setState({ phase: "error", message });
@@ -70,6 +78,18 @@ export default function RoomsPage() {
               className="h-72 animate-pulse rounded-xl border border-ink/10 bg-parchment/60"
             />
           ))}
+        </div>
+      )}
+
+      {state.phase === "signed-out" && (
+        <div className="mt-28 flex flex-col items-center text-center">
+          <GuestLine className="max-w-md text-[19px]">
+            Your rooms are signed in on your iPhone. Sign in here with the
+            same Apple ID, and the house follows.
+          </GuestLine>
+          <div className="mt-9">
+            <AppleSignInButton />
+          </div>
         </div>
       )}
 
