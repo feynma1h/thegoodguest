@@ -88,3 +88,38 @@ struct SceneResponse: Decodable, Equatable {
         case updatedAt    = "updated_at"
     }
 }
+
+// MARK: - created_at parsing
+
+extension SceneResponse {
+
+    /// `created_at` as a Date, or nil if the wire string is unparseable.
+    ///
+    /// This is the server-side scene creation time — the only honest anchor for
+    /// the user-facing elapsed clock (the scene has been in the pipeline since
+    /// this instant, regardless of when this client started polling).
+    var createdAtDate: Date? { Self.parseISO8601(createdAt) }
+
+    /// The server writes Python `datetime.isoformat()`: `+00:00` offset, usually
+    /// with a 6-digit microsecond fraction (`2026-07-21T13:19:47.123456+00:00`).
+    /// ISO8601DateFormatter's fractional-seconds option is unreliable beyond
+    /// 3 digits, so the fraction is stripped before parsing — the elapsed display
+    /// consumes whole seconds only. `Z`-suffix timestamps parse too.
+    static func parseISO8601(_ raw: String) -> Date? {
+        var s = raw
+        if let dot = s.firstIndex(of: ".") {
+            let fractionStart = s.index(after: dot)
+            var fractionEnd = fractionStart
+            while fractionEnd < s.endIndex, s[fractionEnd].isNumber {
+                fractionEnd = s.index(after: fractionEnd)
+            }
+            if fractionEnd > fractionStart {
+                s.removeSubrange(dot..<fractionEnd)
+            }
+        }
+        // A fresh formatter per call: parsing happens at most once per poll tick
+        // (≥ 2 s apart), and a shared static instance would need concurrency
+        // annotations for no measurable win.
+        return ISO8601DateFormatter().date(from: s)
+    }
+}
