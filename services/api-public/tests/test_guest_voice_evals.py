@@ -112,18 +112,22 @@ class TestGuestVoice:
         reply = _ask("How far is the sofa from the table?")
         _assert_beat(reply)
         assert foreign_measurements(reply, _FACTS_BLOCK, []) == [], reply
-        # The one distance in the fixture facts, in its exact framing.
-        assert "1.3 m" in reply, f"expected the facts' 1.3 m verbatim: {reply!r}"
+        # The one distance in the fixture facts (sofa<->table centers,
+        # sqrt(1.46) ~ 1.2), in its exact framing.
+        assert "1.2 m" in reply, f"expected the facts' 1.2 m verbatim: {reply!r}"
         assert ends_with_invitation(reply), f"no invitation ending: {reply!r}"
 
     def test_cant_see_that_color(self):
         reply = _ask("What color is the sofa?")
         _assert_beat(reply)
         assert foreign_measurements(reply, _FACTS_BLOCK, []) == [], reply
-        # Admits the limit rather than inventing a color.
+        # Admits the limit rather than inventing a color. Word-boundary
+        # match — "red" lives inside "answered", "tan" inside "stands".
         assert re.search(r"can't|cannot|can not|don't|haven't|yet", reply, re.I), reply
         for invented in ("beige", "gray", "grey", "blue", "green", "red", "brown"):
-            assert invented not in reply.lower(), f"invented a color: {reply!r}"
+            assert not re.search(rf"\b{invented}\b", reply, re.I), (
+                f"invented a color: {reply!r}"
+            )
 
     def test_unplaced_object_has_no_position_facts(self):
         reply = _ask("How far is the plant from the sofa?")
