@@ -13,6 +13,7 @@ struct ContentView: View {
     @StateObject private var capture     = CaptureManager()
     @StateObject private var coordinator = UploadCoordinator()
     @ObservedObject private var poller   = ScenePoller.shared
+    @ObservedObject private var failureMonitor = UploadFailureMonitor.shared
 
     var body: some View {
         VStack(spacing: 24) {
@@ -128,23 +129,33 @@ struct ContentView: View {
 
     /// Upload session status badge — shown after stop-capture triggers the
     /// upload-session pipeline.
+    ///
+    /// .ready means exactly one thing: the /upload_session mint succeeded and
+    /// the blob PUTs were handed to the background URLSession. It is the least
+    /// meaningful of the upload milestones (~10 s in), so the copy must not
+    /// read as "done" — and once a superseding surface activates, the badge
+    /// stands down: after upload completion the scene-status panel owns the
+    /// narrative (an "uploading" claim would go stale), after a terminal upload
+    /// failure the failure banner does.
     @ViewBuilder
     private var uploadSessionBadge: some View {
-        let (label, color): (String, Color) = switch coordinator.sessionState {
-        case .idle:              ("", .clear)
-        case .authenticating:    ("Authenticating…", .orange)
-        case .patchingBundle:    ("Patching bundle…", .orange)
-        case .buildingManifest:  ("Building manifest…", .orange)
-        case .creatingSession:   ("Creating session…", .orange)
-        case .ready:             ("Session ready ✓", .green)
-        case .failed(let msg):   ("Session error: \(msg)", .red)
-        }
-        if !label.isEmpty {
-            Text(label)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(color)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
+        if poller.pollState == .idle, failureMonitor.latestFailure == nil {
+            let (label, color): (String, Color) = switch coordinator.sessionState {
+            case .idle:              ("", .clear)
+            case .authenticating:    ("Authenticating…", .orange)
+            case .patchingBundle:    ("Patching bundle…", .orange)
+            case .buildingManifest:  ("Building manifest…", .orange)
+            case .creatingSession:   ("Creating session…", .orange)
+            case .ready:             ("Upload authorized — uploading in background", .blue)
+            case .failed(let msg):   ("Session error: \(msg)", .red)
+            }
+            if !label.isEmpty {
+                Text(label)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(color)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+            }
         }
     }
 
