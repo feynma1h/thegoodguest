@@ -55,6 +55,7 @@ import logging
 import os
 import signal
 import threading
+import time
 import uuid
 from typing import Any, Optional
 
@@ -299,6 +300,72 @@ def _safe_label(label: str) -> str:
     return "".join(c if c.isalnum() else "_" for c in label)[:32]
 
 
+def _free_gpu_memory() -> None:
+    """Collect Python garbage, then release CUDA cache blocks to the driver.
+
+    gc.collect() must come first: exception tracebacks form frame<->traceback
+    reference cycles, so tensors pinned by a handled exception's frames are
+    only reclaimed by the cycle collector — after which empty_cache() can
+    actually return their blocks. Cheap no-op without CUDA (dev/tests).
+    """
+    gc.collect()
+    try:
+        import torch as _torch
+        if _torch.cuda.is_available():
+            _torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+
+def _log_vram(scene_id: str, point: str) -> None:
+    """One structured line of CUDA memory state; resets the peak counter.
+
+    The memory-lifecycle invariant — allocated VRAM roughly flat across
+    frames — is verified in production from these lines. peak_mib is the
+    high-water mark since the previous _log_vram call (per-frame peak when
+    called at frame boundaries). Never raises; no-op without CUDA.
+    """
+    try:
+        import torch as _torch
+        if not _torch.cuda.is_available():
+            return
+        allocated = float(_torch.cuda.memory_allocated()) / 2**20
+        reserved = float(_torch.cuda.memory_reserved()) / 2**20
+        peak = float(_torch.cuda.max_memory_allocated()) / 2**20
+        logger.info(
+            "vram scene_id=%s point=%s allocated_mib=%.0f reserved_mib=%.0f peak_mib=%.0f",
+            scene_id, point, allocated, reserved, peak,
+        )
+        _torch.cuda.reset_peak_memory_stats()
+    except Exception:
+        pass  # observability must never break processing
+
+
+def _reconstruct_with_retry(sam3d_model: Any, pil, mask, seed: int):
+    """One SAM 3D reconstruct with a single retry that can actually succeed.
+
+    The retry MUST run after the except block exits. While an exception is
+    being handled, its traceback pins every frame of the failed attempt —
+    including the pipeline's intermediate GPU tensors — so a retry launched
+    inside the handler competes against the very memory it needs freed.
+    Production evidence (scene 25a14caf, 2026-07-21): every logged OOM
+    reported ~21.7 GiB "allocated by PyTorch" with <90 MiB reserved-but-
+    unallocated — the retry was double-booked against the pinned first
+    attempt, so a 20 MiB allocation failed on a 22 GiB card. Restructured,
+    the first attempt's tensors are collectable (traceback cycles swept by
+    _free_gpu_memory's gc.collect) before attempt two begins.
+    """
+    try:
+        return sam3d_model.reconstruct(pil, mask, seed=seed)
+    except Exception:
+        logger.warning(
+            "reconstruct attempt 1 failed; retrying once after freeing GPU memory",
+            exc_info=True,
+        )
+    _free_gpu_memory()
+    return sam3d_model.reconstruct(pil, mask, seed=seed)
+
+
 def _process_frame(
     *,
     scene_id: str,
@@ -310,8 +377,17 @@ def _process_frame(
     object_prompt: str,
     frame=None,
     bundle_prefix: Optional[str] = None,
+    budget=None,
 ) -> dict:
     """Run SAM 3 + SAM 3D on one frame. Returns a dict with per-object results.
+
+    budget is an optional budget.BudgetTracker. When provided, each fresh
+    (non-cached) reconstruction is admitted against the remaining request
+    budget; on refusal the frame stops early and the returned dict carries
+    "budget_stopped": True. A budget-stopped frame is NOT cached to GCS
+    (neither objects.json nor masks.npz) — caching would make the partial
+    result permanent, since cache hits skip reprocessing. Its completed
+    objects keep their per-object splat cache for a future attempt.
 
     Per frame: fetch the RGB image from GCS, segment it with SAM 3, reconstruct
     each detected object with SAM 3D, and upload each splat PLY plus a packed
@@ -371,6 +447,7 @@ def _process_frame(
 
     # SAM 3D per object.
     objects_out: list[dict] = []
+    budget_stopped = False
     for i, obj in enumerate(detections):
         result = None
         ply_bytes = None
@@ -402,17 +479,24 @@ def _process_frame(
                     "splat_gcs_uri": f"gs://{outputs_bucket}/{splat_blob}",
                 }
             else:
-                try:
-                    result = sam3d_model.reconstruct(pil, obj["mask"], seed=42 + i)
-                except Exception as oom:
-                    gc.collect()
-                    try:
-                        import torch as _torch
-                        if _torch.cuda.is_available():
-                            _torch.cuda.empty_cache()
-                    except ImportError:
-                        pass
-                    result = sam3d_model.reconstruct(pil, obj["mask"], seed=42 + i)
+                # Budget admission gates only FRESH reconstructions —
+                # cache hits above cost seconds, a reconstruct costs tens.
+                if budget is not None and not budget.can_start_object():
+                    budget_stopped = True
+                    logger.info(
+                        "budget_stop point=object scene_id=%s frame=%d "
+                        "objects_done=%d objects_detected=%d %s",
+                        scene_id, frame_idx, len(objects_out), len(detections),
+                        budget.snapshot(),
+                    )
+                    break
+
+                object_started = time.monotonic()
+                result = _reconstruct_with_retry(
+                    sam3d_model, pil, obj["mask"], seed=42 + i
+                )
+                if budget is not None:
+                    budget.note_object(time.monotonic() - object_started)
 
                 # Runtime confirmation seam for the layout-key/convention
                 # assumptions in placement.py (no GPU exists in dev).
@@ -431,6 +515,14 @@ def _process_frame(
                     gs.save_ply(tmp.name)
                     with open(tmp.name, "rb") as f:
                         ply_bytes = f.read()
+
+                # Everything downstream needs is now on the CPU (layout is
+                # numpy via extract_layout, the splat is bytes). Drop the
+                # result dict — 15 keys of GPU tensors — BEFORE the upload
+                # and placement tail work, not seconds later in finally.
+                result = None
+                del gs
+                _free_gpu_memory()
 
                 splat_uri = _gcs_upload_for_scene(
                     f"gs://{outputs_bucket}/", splat_blob, ply_bytes,
@@ -476,15 +568,25 @@ def _process_frame(
             )
             objects_out.append({**meta, "ok": False, "error": str(exc)})
         finally:
+            # Safety net: the fresh path already dropped result eagerly; this
+            # covers the cache-hit and exception paths, and sweeps the
+            # traceback cycles a soft-failed object leaves behind.
             del result
             del ply_bytes
-            gc.collect()
-            try:
-                import torch as _torch
-                if _torch.cuda.is_available():
-                    _torch.cuda.empty_cache()
-            except ImportError:
-                pass
+            _free_gpu_memory()
+
+    if budget_stopped:
+        # Incomplete frame: no masks.npz, no objects.json cache (see
+        # docstring). The caller banks the completed objects and stops.
+        return {
+            "frame_index": frame_idx,
+            "rgb_gcs_uri": rgb_gcs_uri,
+            "image_size": [pil.width, pil.height],
+            "masks_gcs_uri": None,
+            "objects": objects_out,
+            "ok": True,
+            "budget_stopped": True,
+        }
 
     # Upload masks.npz.
     import numpy as np  # deferred: heavy dep, only needed during actual processing
@@ -539,11 +641,30 @@ def run_perception(
     sam3_model: Any,
     sam3d_model: Any,
     object_prompt: str,
+    max_frames: Optional[int] = None,
+    budget=None,
 ) -> str:
-    """Process all frames in the bundle. Returns the gs:// URI of the manifest.
+    """Process a bounded, pose-diverse subset of the bundle's frames.
+    Returns the gs:// URI of the manifest.
+
+    max_frames caps how many frames are reconstructed (None → sampling
+    module default, env PERCEPTION_MAX_FRAMES). budget is an optional
+    budget.BudgetTracker anchored at request entry; when the remaining
+    budget can't fit another frame (or another object, mid-frame), the loop
+    stops early and the scene ships with what's banked — a degraded-but-
+    ready scene beats a request-timeout zombie. If NO frame completed in
+    full, raises EnvironmentalError instead: the Cloud Tasks retry starts
+    with warm models and per-object splat caches, so it gets strictly
+    further than this attempt did.
 
     Raises PoisonError or EnvironmentalError as appropriate.
     """
+    import sampling as sampling_mod  # deferred with the other heavy imports
+    from budget import BudgetTracker
+
+    if budget is None:
+        budget = BudgetTracker(None)  # unlimited (tests/local callers)
+
     # Fetch + parse the bundle proto.
     raw = _download_gcs_uri(bundle_uri)
     bundle = CaptureBundle()
@@ -555,10 +676,30 @@ def run_perception(
     if not bundle.frames:
         raise PoisonError("Bundle has no frames")
 
+    frames_total = len(bundle.frames)
+    effective_max = max_frames if max_frames is not None else sampling_mod.DEFAULT_MAX_FRAMES
+    selected = sampling_mod.select_frames(bundle.frames, effective_max)
+    selected_indices = [f.frame_index for f in selected]
+    logger.info(
+        "sampling scene_id=%s frames_total=%d frames_sampled=%d indices=%s",
+        scene_id, frames_total, len(selected), selected_indices,
+    )
+
     prefix = _bundle_prefix(bundle_uri)
     frame_results: list[dict] = []
+    budget_stopped = False
+    run_started = time.monotonic()
 
-    for frame in bundle.frames:
+    for frame in selected:
+        if not budget.can_start_frame():
+            budget_stopped = True
+            logger.info(
+                "budget_stop point=frame scene_id=%s frames_done=%d "
+                "frames_planned=%d %s",
+                scene_id, len(frame_results), len(selected), budget.snapshot(),
+            )
+            break
+        frame_started = time.monotonic()
         rgb_uri = prefix + frame.rgb_gcs_path
         frame_result = _process_frame(
             scene_id=scene_id,
@@ -570,12 +711,32 @@ def run_perception(
             object_prompt=object_prompt,
             frame=frame,
             bundle_prefix=prefix,
+            budget=budget,
         )
+        frame_s = time.monotonic() - frame_started
         frame_results.append(frame_result)
         logger.info(
-            "scene %s frame %d done (%d objects)",
+            "scene %s frame %d done (%d objects) frame_s=%.1f elapsed_s=%.1f %s",
             scene_id, frame.frame_index,
             sum(1 for o in frame_result.get("objects", []) if o.get("ok")),
+            frame_s, time.monotonic() - run_started, budget.snapshot(),
+        )
+        if frame_result.get("budget_stopped"):
+            # Mid-frame stop: bank this partial frame's objects and finish.
+            budget_stopped = True
+            break
+        budget.note_frame(frame_s)
+        _free_gpu_memory()
+        _log_vram(scene_id, f"after_frame_{frame.frame_index}")
+
+    complete_frames = [fr for fr in frame_results if not fr.get("budget_stopped")]
+    if not complete_frames:
+        # Nothing trustworthy banked. 5xx so Cloud Tasks retries: the retry
+        # runs against warm models and this attempt's per-object splat
+        # caches, so it makes strictly more progress per second.
+        raise EnvironmentalError(
+            f"budget exhausted before any frame completed "
+            f"(frames_planned={len(selected)}); {budget.snapshot()}"
         )
 
     # Scene-level fusion: one entry per physical object, with a fused world
@@ -589,7 +750,16 @@ def run_perception(
         "bundle_uri": bundle_uri,
         "schema_version": bundle.schema_version,
         "manifest_version": 2,
-        "frame_count": len(bundle.frames),
+        "frame_count": frames_total,
+        "frames_total": frames_total,
+        "frames_sampled": len(selected),
+        "sampling": {
+            "policy": "pose_diverse_fps_v1",
+            "max_frames": effective_max,
+            "selected_frame_indices": selected_indices,
+            "frames_processed": len(frame_results),
+            "budget_stopped": budget_stopped,
+        },
         "objects": scene_objects,
         "frames": frame_results,
     }
@@ -616,8 +786,14 @@ async def handle_process(
     sam3_model: Any,
     sam3d_model: Any,
     object_prompt: str,
+    deadline: Optional[float] = None,
 ) -> JSONResponse:
     """Core handler for POST /process. Injected into the FastAPI route in server.py.
+
+    deadline is a time.monotonic() value captured at REQUEST ENTRY in
+    server.py (before the lazy model load), bounding all reconstruction
+    work so the handler finishes inside the Cloud Run request window —
+    see budget.py for why. None disables budgeting (tests).
 
     Separating the handler from the route registration makes the logic testable
     without standing up a full FastAPI app or loading the SAM models.
@@ -671,6 +847,13 @@ async def handle_process(
     with _held_scenes_lock:
         _held_scene_ids.add(scene_id)
 
+    # Budget: everything from here runs against the time left in the request
+    # window. On a cold start the lazy model load already consumed minutes of
+    # it — the snapshot logged here shows exactly how much.
+    from budget import BudgetTracker
+    budget = BudgetTracker(deadline)
+    logger.info("process budget scene_id=%s %s", scene_id, budget.snapshot())
+
     # 3. Run perception.
     try:
         result_uri = run_perception(
@@ -680,6 +863,7 @@ async def handle_process(
             sam3_model=sam3_model,
             sam3d_model=sam3d_model,
             object_prompt=object_prompt,
+            budget=budget,
         )
     except PoisonError as exc:
         logger.error("process: poison failure for scene %s: %s", scene_id, exc)

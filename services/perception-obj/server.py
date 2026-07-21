@@ -72,6 +72,16 @@ PERCEPTION_OUTPUTS_BUCKET = os.environ.get(
     "PERCEPTION_OUTPUTS_BUCKET", "roomstudio-perception-outputs"
 )
 
+# Wall-clock budget for one /process request. Must mirror the Cloud Run
+# request timeout (infra/deploy_perception.sh --timeout=900): the receiver
+# uses it to stop reconstruction early and finish INSIDE the request instead
+# of computing past the platform cutoff as an unreachable zombie (see
+# budget.py). Deliberately a mirror, not gospel — if the deploy flag changes,
+# set this env var to match.
+PROCESS_REQUEST_BUDGET_SECONDS = float(
+    os.environ.get("PROCESS_REQUEST_BUDGET_SECONDS", "900")
+)
+
 # -----------------------------------------------------------------------------
 # Lazy model registry
 # -----------------------------------------------------------------------------
@@ -306,6 +316,10 @@ async def process(
     """
     from process_receiver import handle_process
 
+    # Deadline anchors at REQUEST ENTRY — the lazy model load below spends
+    # minutes of the same request window, and the budget must know that.
+    deadline = time.monotonic() + PROCESS_REQUEST_BUDGET_SECONDS
+
     # Accessors load models on first call (~195s combined on a cold container);
     # run them off the event-loop thread so /health and /ready stay responsive
     # during the load. The accessors' locking already serializes concurrent
@@ -323,6 +337,7 @@ async def process(
         sam3_model=sam3_model,
         sam3d_model=sam3d_model,
         object_prompt=DEFAULT_OBJECT_PROMPT,
+        deadline=deadline,
     )
 
 
