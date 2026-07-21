@@ -77,6 +77,14 @@ final class ScenePoller: ObservableObject {
 
     // MARK: Timing constants
 
+    // Cadence values sanity-checked against the first real capture
+    // (2026-07-21, scene 25a14caf): the 2 s window catches the ~3–5 s
+    // pre-GPU failed_invalid fast-fail; the 10 s/30 s tiers are proportionate
+    // to a pipeline whose GPU cold start alone is ~3.5 min. Deliberately NOT
+    // retuned further yet: the perception envelope is broken for real-sized
+    // captures (no frame sampling, ~10× over budget) and its fix changes the
+    // latency profile these values would be tuned against. Revisit after the
+    // envelope fix ships real completion times.
     /// Elapsed < cadenceShortWindow  → cadenceShort between ticks.
     static let cadenceShortWindow:  TimeInterval = 30
     /// Elapsed < cadenceMediumWindow → cadenceMedium between ticks.
