@@ -1,7 +1,7 @@
 # 0063 — SAM 3D layout conventions: measured verdict (systematic ~90°) and the fix candidate
 
 **Date:** 2026-07-21
-**Status:** Decided (diagnosis recorded; fix deferred to a controlled probe)
+**Status:** Closed by 0065 (probe run 2026-07-22; the xyzw candidate below was a near-miss — the true fix is wxyz CONJUGATED + identity basis, and the confound resolved as "no shared canonical frame", not a missing splat transform)
 
 ## Context
 
