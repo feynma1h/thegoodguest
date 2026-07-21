@@ -17,9 +17,10 @@
  *     the phone whose UID owns the actual rooms — would then hit a conflict
  *     with an account that owns nothing. Identity roots on the phone.
  *
- * Config comes from NEXT_PUBLIC_FIREBASE_* (see .env.example). The appId
- * currently registered is the roomstudio-smoke-test web app; a proper web
- * app registration is a launch task.
+ * Config comes from NEXT_PUBLIC_FIREBASE_* (see .env.example; the committed
+ * .env.production carries the deploy build's values). The registered app is
+ * roomstudio-web (2026-07-22) — the proper registration that replaced the
+ * roomstudio-smoke-test appId.
  */
 
 import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
