@@ -12,6 +12,11 @@
 /// go undelivered (permission denied, device offline) or arrive too late to
 /// act on (background processing is throttled by the OS). The loop therefore
 /// NEVER hard-gives-up on transient failures while the screen is foregrounded.
+/// Token acquisition is part of that posture: a tick that cannot obtain an auth
+/// token (cold-launch race against the app-level sign-in, or offline sign-in
+/// failure) is a transient tick, and the default token path re-attempts
+/// signInIfNeeded each tick so the loop self-heals. The 0038 hard give-up —
+/// 401 AFTER a successful refresh — is a different judgment and stays fatal.
 ///
 /// Testability: all I/O is injected (now, sleep, performGET, tokenProvider).
 /// Tests drive pure logic without real clocks or network.
@@ -115,7 +120,13 @@ final class ScenePoller: ObservableObject {
         },
         performGET:    @escaping (String, String) async -> GETOutcome = ScenePoller.liveGET,
         tokenProvider: @escaping () async throws -> String = {
-            try await AuthManager.shared.currentIDToken()
+            // Cold-launch order safety: ensure the anonymous user exists before
+            // vending a token, instead of assuming the app-level launch sign-in
+            // already won the race. No-op when signed in; single-flighted inside
+            // AuthManager, so racing the launch .task cannot double-sign-in
+            // (UID churn, decision 0036).
+            try await AuthManager.shared.signInIfNeeded()
+            return try await AuthManager.shared.currentIDToken()
         }
     ) {
         self.now           = now
@@ -257,7 +268,16 @@ final class ScenePoller: ObservableObject {
         do {
             token = try await tokenProvider()
         } catch {
-            return .fatal("auth: \(error.localizedDescription)")
+            // TRANSIENT, not fatal — mirroring the network-down posture at the
+            // HTTP layer. At cold launch this tick can precede the first
+            // successful sign-in (no cached user yet, sign-in still in flight or
+            // failed offline); polling is the sole completion channel, so a
+            // permanent stop here would strand the scene status behind an app
+            // relaunch. The loop keeps ticking (connection-trouble sub-state)
+            // and the default token path re-attempts sign-in until it lands.
+            // The 0038 hard give-up (401 AFTER a refresh) stays in handleStatus.
+            logger.info("[ScenePoller] token unavailable this tick (transient): \(error.localizedDescription, privacy: .public)")
+            return .transientFail
         }
         return await fetchWithRetry(bundleId: bundleId, idToken: token, attempt: 0, didRefresh401: false)
     }
