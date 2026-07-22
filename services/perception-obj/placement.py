@@ -27,9 +27,13 @@ Layout conventions — VERIFIED against real data + Meta's source (decision
     (notebook/inference.py make_scene) applies `points @ R(q)` — i.e.
     R(q)ᵀ in column terms — and rotates splat covariances by
     quaternion_invert(q). Both paths agree.
-  * _SAM3D_CAM_TO_ARKIT_CAM: identity. The layout camera frame is
-    GL/Blender-style (+X right, +Y up, -Z forward) — the SAME axes as
-    ARKit's camera frame, NOT the CV pointmap frame 0052 assumed.
+  * _SAM3D_CAM_TO_ARKIT_CAM: diag(-1, 1, -1). The layout camera frame is
+    the pytorch3d camera convention (+X LEFT, +Y up, +Z forward), NOT the
+    CV pointmap frame 0052 assumed and NOT the GL/identity frame this
+    session first concluded — identity is the 180°-about-camera-Y twin
+    that every axis-line instrument is blind to; the sign-sensitive
+    layout-translation test (and face-color checks on the real beds)
+    settled it.
   * The exported splat (gs.save_ply writes get_xyz) is in exactly the
     frame the layout rotation acts on — make_scene composes raw get_xyz;
     Meta's _fix_gaussian_alignment is a default-off video helper, not
@@ -81,12 +85,17 @@ LAYOUT_QUAT_ORDER = "wxyz"
 # Verified against real-room data, decision 0065.
 _LAYOUT_ROTATION_IS_CAMERA_TO_LOCAL = True
 
-# Layout camera frame -> ARKit camera frame. The layout frame measured as
-# GL/Blender-style (+X right, +Y up, -Z forward) == ARKit's camera axes,
-# so this is the identity. Kept as the named seam in case a future SAM 3D
-# release changes frames. Verified 0065 (0052's diag(1,-1,-1) CV guess was
-# wrong).
-_SAM3D_CAM_TO_ARKIT_CAM = np.eye(3)
+# Layout camera frame -> ARKit camera frame. The layout frame is the
+# pytorch3d camera convention (+X LEFT, +Y up, +Z forward) — the frame
+# pytorch3d's PerspectiveCameras and the tdfy training stack use — so the
+# basis change to ARKit's camera (+X right, +Y up, -Z forward) is
+# diag(-1, 1, -1). Pinned by the sign-sensitive layout-TRANSLATION test
+# (decision 0065): B @ t_layout aligns with the triangulated true center
+# direction at dot 0.94-1.00 across all placed objects, while the
+# identity basis (the 180-about-camera-Y twin every axis-LINE instrument
+# cannot distinguish) scores negative. 0052's CV diag(1,-1,-1) guess was
+# also wrong.
+_SAM3D_CAM_TO_ARKIT_CAM = np.diag([-1.0, 1.0, -1.0])
 
 # Translation-only NN polish after the single-view fit (evaluated in the
 # schemas suite: tightens translation, never touches scale/rotation).

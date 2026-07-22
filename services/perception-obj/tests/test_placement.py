@@ -165,15 +165,16 @@ def test_extract_layout_missing_or_degenerate_rotation():
     assert placement.extract_layout({"rotation": object()}) is None
 
 
-def test_rotation_world_from_layout_identity_is_identity():
-    """Identity layout rotation + identity camera pose is the identity:
-    the layout camera frame IS the ARKit camera frame (decision 0065), so
-    _SAM3D_CAM_TO_ARKIT_CAM contributes nothing."""
+def test_rotation_world_from_layout_identity_is_p3dcam_basis():
+    """Identity layout rotation + identity camera pose leaves exactly the
+    pytorch3d-camera -> ARKit-camera basis change diag(-1, 1, -1)
+    (decision 0065; pinned sign-sensitively by the translation-direction
+    tests in test_layout_conventions_real_data.py)."""
     frame = CaptureBundle().frames.add()
     frame.camera_pose.quat_w = 1.0
     layout = {"rotation_xyzw": [0.0, 0.0, 0.0, 1.0]}
     R = placement.rotation_world_from_layout(layout, frame.camera_pose)
-    assert np.allclose(R, np.eye(3), atol=1e-12)
+    assert np.allclose(R, np.diag([-1.0, 1.0, -1.0]), atol=1e-12)
 
 
 def test_extract_layout_conjugates_wxyz_read():
