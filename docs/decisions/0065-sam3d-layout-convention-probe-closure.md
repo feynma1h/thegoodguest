@@ -1,4 +1,4 @@
-# 0065 — SAM 3D layout conventions: probe closure (conjugate wxyz, identity basis, arbitrary canonical frames)
+# 0065 — SAM 3D layout conventions: probe closure (conjugate wxyz, pytorch3d camera basis, arbitrary canonical frames)
 
 **Date:** 2026-07-22
 **Status:** Decided (closes 0063's probe; supersedes 0052's two flagged assumptions)
@@ -62,16 +62,33 @@ rendered orientation.
    it; the layout rotation compensates). Verified independently by the
    probe objects' canonical extents: the bed's up is canonical −Z, the
    door's height is canonical +X — there is no shared semantic frame.
+6. **The identity-basis near-miss, caught by the first real-user look.**
+   The five instruments above converged on identity basis — and shipped
+   a room whose beds, lamp, and chair rendered 180° flipped (duvet
+   face-down; confirmed by slab color asymmetry on 4/4 sign-checkable
+   objects) while doors/cabinet/curtain stood correct. Identity and
+   diag(−1,1,−1) differ by 180° about camera-Y, which preserves every
+   axis LINE — all five instruments were provably blind to the
+   difference (for portrait captures even the line-angle VALUES nearly
+   coincide). The sign-sensitive discriminator that settled it: the
+   model's own layout TRANSLATIONS. B·t_layout must point from the
+   camera at the triangulated (convention-independent) fused center;
+   diag(−1,1,−1) scores dot 0.94–1.00 on all five placed objects,
+   identity scores negative on all five, CV in between. Production
+   rotations were separately confirmed to match the offline chain to
+   0.03°, exonerating the pipeline — the error was in the verdict
+   itself.
 
 ## What we chose
 
 - `extract_layout` reads wxyz and **conjugates** (the model's quaternion
   maps camera→local; placement composes local→camera). Matrix-form
   rotations transpose for the same reason.
-- `_SAM3D_CAM_TO_ARKIT_CAM = identity` — the layout camera frame is
-  GL/Blender-style (+X right, +Y up, −Z forward), the SAME axes as
-  ARKit's camera frame, not the CV pointmap frame 0052 assumed. The
-  constant stays as the named seam.
+- `_SAM3D_CAM_TO_ARKIT_CAM = diag(−1, 1, −1)` — the layout camera frame
+  is the **pytorch3d camera convention** (+X left, +Y up, +Z forward),
+  the frame the pytorch3d-native tdfy training stack works in; not the
+  CV pointmap frame 0052 assumed, and not the identity this probe first
+  concluded (see try 6). The constant stays as the named seam.
 - **Fusion stops averaging rotations and raw scales across
   observations** (they are relative to per-reconstruction canonical
   frames); a cluster ships the best member's rotation + scale, strictly
@@ -88,25 +105,32 @@ rendered orientation.
   budget-split scene silently lost orientations for cache-carried
   objects; storing RAW fields means a sidecar can never go stale against
   a future convention change.
-- Real-data regression pins (`test_layout_conventions_real_data.py`):
-  the six probe objects' recorded rotations + poses, pinned at achieved
-  accuracy (door 2.5°, cabinet 1.6°, curtain 5.0°, artwork 6.2°, chair
-  14.6°, bed 20.7° — tolerances a couple of degrees above each), plus
-  discriminator tests proving both prior conventions fail the bed by
-  >45° on the same data.
+- Real-data regression pins (`test_layout_conventions_real_data.py`) in
+  three sign-sensitivity tiers: axis-LINE pins at achieved accuracy
+  (door 2.5°, cabinet 1.7°, curtain 4.8°, artwork 6.2°, chair 14.9°,
+  bed 20.7°), SIGNED semantic-up pins (bed duvet face and chair +Z must
+  point UP — the identity twin sends both negative), and
+  TRANSLATION-DIRECTION pins (dot ≥ 0.90 under the production basis AND
+  < 0 under identity, so the pin can never pass vacuously), plus
+  discriminator tests proving 0052's shipped chain and 0063's candidate
+  fail the bed by >45°.
 
 ## Why
 
-0063's insistence on the visual half was vindicated twice over: the
-single-axis metric alone had crowned a wrong candidate (21° was the best
-score a convention-with-one-wrong-link could reach on an aggregate the
-probe showed to be ill-posed), and the confound it named was real in
+0063's insistence on the visual half was vindicated three times over:
+the single-axis metric alone had crowned a wrong candidate (21° was the
+best score a convention-with-one-wrong-link could reach on an aggregate
+the probe showed to be ill-posed); the confound it named was real in
 spirit — not a missing splat transform, but the nonexistence of a shared
 canonical frame, which invalidated the metric's design AND fusion's
-rotation averaging. Every element of the verdict is now triangulated by
-at least three independent instruments (source reading, exhaustive
-metric search, per-object physics, pixels), and the regression pins make
-the convention un-regressable without a loud test failure.
+rotation averaging; and even the probe's own five-instrument convergence
+shipped a line-blind twin of the truth that only a human looking at the
+rendered room caught. The durable lesson: every instrument in the kit
+must be classified by what it CANNOT see (line metrics can't see signs;
+sign metrics can't see yaw), and closure requires at least one
+instrument per error dimension — the translation-direction test now
+covers signs geometrically, and the regression pins encode all three
+tiers so no single-blind-spot regression can pass quietly.
 
 ## What would change this decision
 
