@@ -56,6 +56,8 @@ function sceneFixture(idx: number, status: SceneStatus, minutesAgo: number): Sce
 
 const GS = (name: string) =>
   `gs://mock-outputs/scenes/${MOCK_READY_SCENE_ID}/splats/${name}.ply`;
+const SHELL_GS = (name: string) =>
+  `gs://mock-outputs/scenes/${MOCK_READY_SCENE_ID}/shell/textures/${name}.png`;
 
 /** A small synthetic room: objects placed around the origin, +Y up. */
 const READY_ASSETS: SceneAssets = {
@@ -112,10 +114,67 @@ const READY_ASSETS: SceneAssets = {
     ],
     frames: [],
   },
+  // Room shell (decision 0066): floor + back/side walls in the same
+  // world frame as the objects above. wall_01 ships UNTEXTURED (source
+  // "unobserved") so the neutral treatment is reachable offline. Corner
+  // winding fronts the room interior; corner 0 is the texture origin.
+  shell: {
+    shell_version: 1,
+    scene_id: MOCK_READY_SCENE_ID,
+    status: "ready",
+    reason: null,
+    method: "arkit_planes",
+    floor: {
+      quad: [
+        [-2.2, 0, 1.4],
+        [1.8, 0, 1.4],
+        [1.8, 0, -2.6],
+        [-2.2, 0, -2.6],
+      ],
+      y: 0,
+      texture_gcs_uri: SHELL_GS("floor"),
+      observed_fraction: 0.82,
+      inpainted_fraction: 0.11,
+      source: "baked",
+    },
+    walls: [
+      {
+        wall_id: "wall_00",
+        quad: [
+          [-2.2, 0, -2.6],
+          [1.8, 0, -2.6],
+          [1.8, 2.2, -2.6],
+          [-2.2, 2.2, -2.6],
+        ],
+        texture_gcs_uri: SHELL_GS("wall_00"),
+        observed_fraction: 0.74,
+        inpainted_fraction: 0.18,
+        source: "baked",
+        classification: "wall",
+      },
+      {
+        wall_id: "wall_01",
+        quad: [
+          [-2.2, 0, 1.4],
+          [-2.2, 0, -2.6],
+          [-2.2, 2.2, -2.6],
+          [-2.2, 2.2, 1.4],
+        ],
+        texture_gcs_uri: null,
+        observed_fraction: 0.09,
+        inpainted_fraction: 0,
+        source: "unobserved",
+        classification: null,
+      },
+    ],
+    quality: { planes_in_bundle: 4, frames_used: 9 },
+  },
   asset_urls: {
     [GS("sofa")]: "/dev-fixtures/sofa.ply",
     [GS("table")]: "/dev-fixtures/table.ply",
     [GS("lamp")]: "/dev-fixtures/lamp.ply",
+    [SHELL_GS("floor")]: "/dev-fixtures/shell_floor.png",
+    [SHELL_GS("wall_00")]: "/dev-fixtures/shell_wall_00.png",
   },
   expires_at: new Date(Date.now() + 3600_000).toISOString(),
 };

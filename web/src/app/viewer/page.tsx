@@ -23,6 +23,7 @@ import {
   type FusedObject,
   type PositionedSplat,
   type SceneAssets,
+  type ShellPlane,
 } from "@/lib/api/types";
 
 /** Async-only result, stamped with the source key it was loaded for — a
@@ -34,6 +35,7 @@ type Result =
       key: string;
       phase: "ready";
       splats: PositionedSplat[];
+      shell: ShellPlane[] | null;
       unrenderable: FusedObject[];
     };
 
@@ -41,6 +43,7 @@ function singleSplat(key: string, url: string, label: string): Result {
   return {
     key,
     phase: "ready",
+    shell: null,
     unrenderable: [],
     splats: [
       { url, label, position: [0, 0.5, 0], rotation_xyzw: [0, 0, 0, 1], scale: 1 },
@@ -68,10 +71,10 @@ function DevViewerContent({ directUrl }: { directUrl: string | null }) {
         if (!resp.ok) throw new Error("no fixture");
         const assets = (await resp.json()) as SceneAssets;
         if (cancelled) return;
-        const { splats, unrenderable } = assembleScene(assets);
+        const { splats, shell, unrenderable } = assembleScene(assets);
         setResult(
-          splats.length
-            ? { key, phase: "ready", splats, unrenderable }
+          splats.length || shell?.length
+            ? { key, phase: "ready", splats, shell, unrenderable }
             : { key, phase: "idle" },
         );
       } catch {
@@ -113,7 +116,11 @@ function DevViewerContent({ directUrl }: { directUrl: string | null }) {
 
       {state.phase === "ready" && (
         <>
-          <SplatViewer splats={state.splats} className="mt-8 h-[62vh]" />
+          <SplatViewer
+            splats={state.splats}
+            shell={state.shell}
+            className="mt-8 h-[62vh]"
+          />
           {state.unrenderable.length > 0 && (
             <p className="mt-3 text-sm text-ink/55">
               Not shown:{" "}

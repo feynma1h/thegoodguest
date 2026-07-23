@@ -64,6 +64,15 @@ describe("arrival and settled lines", () => {
     expect(settledLine(0)).toContain("slower pass");
     expect(settledLine(5)).toContain("As you left it");
   });
+
+  it("never denies walls that are standing (shell present — 0066)", () => {
+    // With a shell, the "walls still on their way" framing would be false.
+    expect(arrivalLine(8, true)).not.toContain("on their way");
+    expect(arrivalLine(8, true)).toContain("walls");
+    expect(arrivalLine(0, true)).toContain("honest");
+    // And without one, the classic line stays literally true.
+    expect(arrivalLine(8, false)).toContain("on their way");
+  });
 });
 
 describe("countsLine", () => {

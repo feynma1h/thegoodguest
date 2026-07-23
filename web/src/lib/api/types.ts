@@ -61,10 +61,45 @@ export interface SceneManifest {
   frames?: unknown[];
 }
 
+/**
+ * One plane entry as scenes/{id}/shell.json carries it (decision 0066).
+ * quad corners are wound so the front face points into the room; corner 0
+ * is the texture origin (+U to corner 1, +V to corner 3).
+ */
+export interface ShellPlaneEntry {
+  quad: [number, number, number][]; // 4 world-frame corners, meters
+  texture_gcs_uri: string | null; // null when source is "unobserved"
+  observed_fraction: number;
+  inpainted_fraction: number;
+  source: string; // "baked" | "unobserved"
+  wall_id?: string; // walls only
+  classification?: string | null; // walls only; ARKit verbatim
+  y?: number; // floor only
+}
+
+/**
+ * The room shell document, verbatim from the assets response's sibling
+ * `shell` field. The distinction the room page relies on: the FIELD being
+ * null/absent = the shell stage hasn't landed yet (brief grace window);
+ * a document with status "unavailable" = never coming (keep the grid).
+ */
+export interface ShellDoc {
+  shell_version: number;
+  scene_id: string;
+  status: "ready" | "unavailable";
+  reason: string | null; // "no_geometry_source" | "capture_expired" | null
+  method: string; // "arkit_planes" today
+  floor: ShellPlaneEntry | null;
+  walls: ShellPlaneEntry[];
+  quality?: Record<string, number>;
+}
+
 /** GET /scenes/{scene_id}/assets response. */
 export interface SceneAssets {
   scene_id: string;
   manifest: SceneManifest;
+  /** Room shell sibling (decision 0066). Absent/null = not yet. */
+  shell?: ShellDoc | null;
   asset_urls: Record<string, string>; // gs:// URI -> signed HTTPS URL
   expires_at: string; // ISO 8601
 }
@@ -123,8 +158,29 @@ export interface PositionedSplat {
   scale: number;
 }
 
+/**
+ * Renderer-agnostic shell plane (the PositionedSplat trick applied to the
+ * shell): four world corners plus a fetchable texture URL. SplatViewer
+ * consumes ONLY this shape — nothing renderer-shaped leaks either way
+ * (decision 0053's containment rule).
+ */
+export interface ShellPlane {
+  kind: "floor" | "wall";
+  corners: [number, number, number][]; // 4, front face toward the room
+  /** Signed HTTPS texture URL; null = untextured ("unobserved" plane) —
+   * the viewer gives it a neutral treatment, never a fake texture. */
+  texture_url: string | null;
+  observed_fraction: number;
+  inpainted_fraction: number;
+}
+
 export interface AssembledScene {
   splats: PositionedSplat[];
+  /** Shell planes when the shell doc is present with status "ready";
+   * null when absent OR unavailable. The absent-vs-unavailable
+   * distinction stays readable on assets.shell — the room page's grace
+   * window reads that, not this. */
+  shell: ShellPlane[] | null;
   /** Fused objects that could not be placed or lack a fetchable splat —
    * surfaced in the UI rather than silently dropped. */
   unrenderable: FusedObject[];
@@ -133,7 +189,8 @@ export interface AssembledScene {
 /**
  * Map an assets response to the viewer's input: placed fused objects whose
  * splat URI has a signed URL become PositionedSplats; everything else is
- * reported as unrenderable.
+ * reported as unrenderable. The shell doc, when ready, becomes ShellPlanes
+ * (floor first, then walls) with signed texture URLs resolved.
  */
 export function assembleScene(assets: SceneAssets): AssembledScene {
   const splats: PositionedSplat[] = [];
@@ -152,5 +209,24 @@ export function assembleScene(assets: SceneAssets): AssembledScene {
       unrenderable.push(obj);
     }
   }
-  return { splats, unrenderable };
+
+  let shell: ShellPlane[] | null = null;
+  const doc = assets.shell;
+  if (doc && doc.status === "ready") {
+    const toPlane = (kind: ShellPlane["kind"], e: ShellPlaneEntry): ShellPlane => ({
+      kind,
+      corners: e.quad,
+      texture_url: e.texture_gcs_uri
+        ? (assets.asset_urls[e.texture_gcs_uri] ?? null)
+        : null,
+      observed_fraction: e.observed_fraction,
+      inpainted_fraction: e.inpainted_fraction,
+    });
+    const planes: ShellPlane[] = [];
+    if (doc.floor) planes.push(toPlane("floor", doc.floor));
+    for (const wall of doc.walls ?? []) planes.push(toPlane("wall", wall));
+    if (planes.length > 0) shell = planes;
+  }
+
+  return { splats, shell, unrenderable };
 }
