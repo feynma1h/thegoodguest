@@ -90,6 +90,40 @@ def _manifest(objects: list[dict] | None = None) -> dict:
     }
 
 
+_SHELL_URI = "gs://outputs/scenes/s1/shell.json"
+
+
+def _shell_doc(*, with_textures: bool = True) -> dict:
+    tex = "gs://outputs/scenes/s1/shell/textures/{}.png"
+    return {
+        "shell_version": 1,
+        "scene_id": "s1",
+        "status": "ready",
+        "reason": None,
+        "method": "arkit_planes",
+        "floor": {
+            "quad": [[0, -1, 0], [2, -1, 0], [2, -1, 2], [0, -1, 2]],
+            "y": -1.0,
+            "texture_gcs_uri": tex.format("floor") if with_textures else None,
+            "observed_fraction": 0.8,
+            "inpainted_fraction": 0.1,
+            "source": "baked" if with_textures else "unobserved",
+        },
+        "walls": [
+            {
+                "wall_id": "wall_00",
+                "quad": [[0, -1, 0], [2, -1, 0], [2, 1, 0], [0, 1, 0]],
+                "texture_gcs_uri": tex.format("wall_00") if with_textures else None,
+                "observed_fraction": 0.7,
+                "inpainted_fraction": 0.2,
+                "source": "baked" if with_textures else "unobserved",
+                "classification": "wall",
+            }
+        ],
+        "quality": {"planes_in_bundle": 2, "frames_used": 3},
+    }
+
+
 def _get_assets(
     client: TestClient,
     scene: Scene,
@@ -98,11 +132,15 @@ def _get_assets(
     signer: FakeSigner | None = None,
     scene_id: str | None = None,
     headers: dict | None = None,
+    shell_bytes: bytes | None = None,
+    fetcher: InMemoryManifestFetcher | None = None,
 ):
     repo = InMemorySceneReadRepository({scene.scene_id: scene})
-    fetcher = InMemoryManifestFetcher()
+    fetcher = fetcher or InMemoryManifestFetcher()
     if manifest_bytes is not None:
         fetcher.store[_MANIFEST_URI] = manifest_bytes
+    if shell_bytes is not None:
+        fetcher.store[_SHELL_URI] = shell_bytes
     if headers is None:
         headers = {"Authorization": f"Bearer test-uid:{uid}"}
     with (
@@ -213,6 +251,103 @@ class TestAssetsAuthAndLookup:
     def test_unowned_scene_403(self, client) -> None:
         resp = _get_assets(client, _scene(user_id=None))
         assert resp.status_code == 403
+
+
+class TestAssetsShellSibling:
+    """The shell field (decision 0066): verbatim sibling, null when the
+    blob is absent, texture URIs joining the signing walk."""
+
+    def test_shell_absent_is_null(self, client) -> None:
+        resp = _get_assets(
+            client, _scene(), manifest_bytes=json.dumps(_manifest()).encode()
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["shell"] is None  # absent = not yet; NOT an error
+        # And the manifest half is unaffected.
+        assert set(body["asset_urls"]) == {
+            "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply",
+            "gs://outputs/scenes/s1/frames/0001/splats/00_lamp.ply",
+        }
+
+    def test_shell_present_verbatim_and_textures_signed(self, client) -> None:
+        shell = _shell_doc()
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            shell_bytes=json.dumps(shell).encode(),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["shell"] == shell  # verbatim, not rewritten
+        urls = body["asset_urls"]
+        assert "gs://outputs/scenes/s1/shell/textures/floor.png" in urls
+        assert "gs://outputs/scenes/s1/shell/textures/wall_00.png" in urls
+        # Splats still there too — one signing walk.
+        assert "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply" in urls
+
+    def test_unavailable_shell_passes_through(self, client) -> None:
+        """status 'unavailable' is a real document the client must see —
+        it is what stops the grace window."""
+        shell = {
+            "shell_version": 1,
+            "scene_id": "s1",
+            "status": "unavailable",
+            "reason": "no_geometry_source",
+            "method": "arkit_planes",
+            "floor": None,
+            "walls": [],
+            "quality": {"planes_in_bundle": 0, "frames_used": 0},
+        }
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            shell_bytes=json.dumps(shell).encode(),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["shell"]["status"] == "unavailable"
+
+    def test_untextured_planes_add_no_urls(self, client) -> None:
+        shell = _shell_doc(with_textures=False)
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            shell_bytes=json.dumps(shell).encode(),
+        )
+        assert resp.status_code == 200
+        urls = resp.json()["asset_urls"]
+        assert not any("shell/textures" in u for u in urls)
+
+    def test_shell_fetch_error_degrades_to_null(self, client) -> None:
+        """A flaking shell fetch must not 502 the room — the optional
+        sibling degrades to null with a log."""
+
+        class ExplodingShellFetcher(InMemoryManifestFetcher):
+            def fetch_optional(self, gs_uri: str):
+                raise server.ManifestFetchError("gcs flaked")
+
+        fetcher = ExplodingShellFetcher()
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            fetcher=fetcher,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["shell"] is None
+
+    def test_malformed_shell_degrades_to_null(self, client) -> None:
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            shell_bytes=b"not json {",
+        )
+        assert resp.status_code == 200
+        assert resp.json()["shell"] is None
 
 
 class TestAssetsUpstreamFailures:
