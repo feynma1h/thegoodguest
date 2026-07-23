@@ -293,6 +293,23 @@ class GcsManifestFetcher:
         except Exception as exc:
             raise ManifestFetchError(f"manifest fetch failed for {gs_uri}: {exc}") from exc
 
+    def fetch_optional(self, gs_uri: str) -> bytes | None:
+        """fetch(), except a missing object returns None instead of raising.
+
+        Exists for blobs whose ABSENCE is a meaningful state — shell.json
+        (decision 0066: absent = not yet; the client keeps its grace
+        window). Non-404 failures still raise ManifestFetchError."""
+        from google.cloud import storage  # deferred
+        from google.cloud.exceptions import NotFound
+
+        try:
+            bucket, path = _split_gs_uri(gs_uri)
+            return storage.Client().bucket(bucket).blob(path).download_as_bytes()
+        except NotFound:
+            return None
+        except Exception as exc:
+            raise ManifestFetchError(f"fetch failed for {gs_uri}: {exc}") from exc
+
 
 class InMemoryManifestFetcher:
     """Test/dev fetcher: serves from a settable {gs_uri: bytes} store."""
@@ -304,6 +321,9 @@ class InMemoryManifestFetcher:
         if gs_uri not in self.store:
             raise ManifestFetchError(f"no such manifest in store: {gs_uri}")
         return self.store[gs_uri]
+
+    def fetch_optional(self, gs_uri: str) -> bytes | None:
+        return self.store.get(gs_uri)
 
 
 class IamV4UrlSigner:
@@ -886,7 +906,17 @@ def get_scene_assets(
 
     Response (200):
       {scene_id, manifest: <verbatim manifest.json>,
+       shell: <verbatim shell.json> | null,
        asset_urls: {<gs_uri>: <signed https url>}, expires_at: <ISO 8601>}
+
+    shell (decision 0066) is a SIBLING of the manifest, read from
+    scenes/{id}/shell.json beside the manifest: null means the shell
+    stage hasn't landed yet (the room-shell task runs a beat after ready
+    — clients keep a brief grace window); a present document with
+    status "unavailable" means it is never coming (keep the grid). Shell
+    texture gs:// URIs join asset_urls with the same TTL. A shell fetch
+    ERROR degrades to null with a log — the optional shell never 502s
+    the room.
 
     Errors:
       400 invalid_scene_id — scene_id is not a UUIDv4
@@ -921,6 +951,21 @@ def get_scene_assets(
             content={"error": "upstream_error", "detail": "manifest unavailable"},
         )
 
+    # The room shell (decision 0066): a sibling blob beside the manifest.
+    # Absent (None) = the shell stage hasn't landed; a fetch ERROR also
+    # degrades to null with a log — the shell is optional and must never
+    # take the room down with it.
+    shell = None
+    shell_uri = scene.result_uri.rsplit("/", 1)[0] + "/shell.json"
+    try:
+        shell_bytes = _get_manifest_fetcher().fetch_optional(shell_uri)
+        if shell_bytes is not None:
+            shell = json.loads(shell_bytes)
+    except (ManifestFetchError, ValueError) as exc:
+        logger.warning("assets: shell fetch degraded to null for scene %s: %s",
+                       scene_id, exc)
+        shell = None
+
     # Sign the splats the viewer renders: the scene-level fused objects.
     # (Pre-v2 manifests have no "objects" array and yield no URLs; no such
     # scenes exist with real users, so no compatibility shim.)
@@ -929,6 +974,16 @@ def get_scene_assets(
         for obj in manifest.get("objects", [])
         if isinstance(obj, dict) and obj.get("splat_gcs_uri")
     }
+    # Shell texture URIs join the same signing walk (same TTL).
+    if isinstance(shell, dict):
+        floor = shell.get("floor")
+        shell_entries = [floor] if isinstance(floor, dict) else []
+        walls = shell.get("walls")
+        if isinstance(walls, list):
+            shell_entries += [w for w in walls if isinstance(w, dict)]
+        splat_uris |= {
+            e["texture_gcs_uri"] for e in shell_entries if e.get("texture_gcs_uri")
+        }
     signer = _get_url_signer()
     asset_urls = {}
     try:
@@ -947,6 +1002,7 @@ def get_scene_assets(
         content={
             "scene_id": scene_id,
             "manifest": manifest,
+            "shell": shell,
             "asset_urls": asset_urls,
             "expires_at": expires_at.isoformat(),
         },
