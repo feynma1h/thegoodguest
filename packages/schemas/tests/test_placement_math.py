@@ -25,6 +25,7 @@ from roomstudio_schemas.placement_math import (
     fit_similarity,
     footprint_bbox,
     mask_containment,
+    prepare_mask,
     project_points,
     rasterize_mask_density,
     rasterize_point_density,
@@ -35,6 +36,7 @@ from roomstudio_schemas.placement_math import (
     soft_containment,
     soft_iou,
     triangulate_rays,
+    union_bbox,
     unproject_depth,
 )
 from roomstudio_schemas.pose_math import quat_average, quat_to_rotmat, rotmat_to_quat
@@ -745,3 +747,47 @@ def test_soft_containment_empty_is_zero():
     a = np.zeros((3, 3))
     b = np.ones((3, 3))
     assert soft_containment(a, b) == 0.0
+
+
+def test_prepare_mask_evidence_fields():
+    mask = np.zeros((8, 12), dtype=bool)
+    mask[2:5, 3:9] = True
+    ev = prepare_mask(mask)
+    assert ev.shape == (8, 12)
+    assert ev.area == 3 * 6
+    assert ev.bounds == (3.0, 2.0, 8.0, 4.0)
+    assert ev.integral[-1, -1] == pytest.approx(18.0)
+    empty = prepare_mask(np.zeros((4, 4), dtype=bool))
+    assert empty.bounds is None
+    assert empty.area == 0
+
+
+def test_rasterize_mask_density_evidence_matches_raw_mask_path():
+    rng = np.random.RandomState(7)
+    mask = rng.rand(40, 60) > 0.5
+    ev = prepare_mask(mask)
+    bbox = (3.7, 2.2, 55.1, 38.9)  # deliberately fractional
+    via_mask = rasterize_mask_density(mask, bbox, grid_size=16)
+    via_evidence = rasterize_mask_density(ev, bbox, grid_size=16)
+    assert np.allclose(via_mask, via_evidence, atol=1e-12)
+
+
+def test_rasterize_mask_density_fractional_box_is_exact():
+    """One True pixel at (u=2..3, v=1..2); a query box covering exactly its
+    left half must read 0.5 occupancy — the summed-area table's bilinear
+    sampling is exact for axis-aligned boxes, not an approximation."""
+    mask = np.zeros((4, 6), dtype=bool)
+    mask[1, 2] = True
+    grid = rasterize_mask_density(mask, (2.0, 1.0, 2.5, 2.0), grid_size=1)
+    assert grid[0, 0] == pytest.approx(1.0)  # box fully inside the pixel
+    grid = rasterize_mask_density(mask, (1.5, 1.0, 2.5, 2.0), grid_size=1)
+    assert grid[0, 0] == pytest.approx(0.5)  # half the box covers the pixel
+
+
+def test_union_bbox_matches_footprint_bbox():
+    mask = np.zeros((50, 80), dtype=bool)
+    mask[10:20, 30:60] = True
+    uv = np.array([[5.0, 5.0], [70.0, 45.0]])
+    valid = np.array([True, True])
+    ev = prepare_mask(mask)
+    assert union_bbox(mask.shape, ev.bounds, uv, valid) == footprint_bbox(mask, uv, valid)
