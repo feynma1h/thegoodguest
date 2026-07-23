@@ -669,6 +669,69 @@ def _gcs_blob_exists_and_get(bucket_name: str, blob_path: str) -> Optional[bytes
     return None
 
 
+def _build_refinement_context(*, bundle: CaptureBundle, scene_id: str, outputs_bucket: str, budget):
+    """Wire fusion.py's RefinementContext (decision 0067) to this
+    service's actual GCS-backed evidence sources.
+
+    tier 2 (get_appearance / get_rgb) is deliberately left unwired here:
+    fusion.py/reproject.py fully support it (degrading to tier-1-only
+    when absent, exactly as for any other cache miss), but adding it
+    means fetching frame RGB from the captures bucket's 1-day-lifecycle
+    objects on every refinement pass — a second IO/decode path this
+    session didn't get to live-verify. Tier 1 (masks + camera poses,
+    already durably cached) is what ships; tier 2 is a fast-follow that
+    only needs two more accessors here, not a fusion.py/reproject.py
+    change.
+    """
+    import fusion as fusion_mod
+    import placement as placement_mod
+
+    frames_by_idx = {f.frame_index: f for f in bundle.frames}
+    splat_cache: dict[str, Optional[Any]] = {}
+
+    def get_camera(frame_index):
+        frame = frames_by_idx.get(frame_index)
+        if frame is None:
+            return None
+        return (frame.camera_pose, frame.intrinsics)
+
+    def get_mask_stack(frame_index):
+        import numpy as np  # deferred: heavy dep, only needed during refinement
+
+        raw = _gcs_blob_exists_and_get(
+            outputs_bucket, f"scenes/{scene_id}/frames/{frame_index:04d}/masks.npz"
+        )
+        if raw is None:
+            return None
+        try:
+            return np.load(io.BytesIO(raw))["masks"]
+        except Exception:
+            logger.warning("refinement: unreadable masks.npz for frame %d", frame_index)
+            return None
+
+    def get_splat(splat_uri: str):
+        if splat_uri in splat_cache:
+            return splat_cache[splat_uri]
+        pts = None
+        if splat_uri.startswith("gs://"):
+            bucket_name, blob_path = splat_uri[5:].split("/", 1)
+            raw = _gcs_blob_exists_and_get(bucket_name, blob_path)
+            if raw is not None:
+                try:
+                    pts = placement_mod.parse_ply_vertices(raw)
+                except Exception:
+                    logger.warning("refinement: unparseable splat %s", splat_uri)
+        splat_cache[splat_uri] = pts
+        return pts
+
+    return fusion_mod.RefinementContext(
+        get_camera=get_camera,
+        get_mask_stack=get_mask_stack,
+        get_splat=get_splat,
+        budget=budget,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level processing orchestrator
 # ---------------------------------------------------------------------------
@@ -783,7 +846,10 @@ def run_perception(
     # transform — the array the web viewer renders. Frames stay for
     # provenance/debug. See fusion.py.
     import fusion as fusion_mod
-    scene_objects = fusion_mod.fuse_scene_objects(frame_results)
+    refine_ctx = _build_refinement_context(
+        bundle=bundle, scene_id=scene_id, outputs_bucket=outputs_bucket, budget=budget,
+    )
+    scene_objects, fusion_meta = fusion_mod.fuse_scene_objects_with_meta(frame_results, refine_ctx)
 
     manifest = {
         "scene_id": scene_id,
@@ -799,6 +865,7 @@ def run_perception(
             "selected_frame_indices": selected_indices,
             "frames_processed": len(frame_results),
             "budget_stopped": budget_stopped,
+            "refinement_skipped": fusion_meta["refinement_skipped"],
         },
         "objects": scene_objects,
         "frames": frame_results,
