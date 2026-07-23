@@ -1,0 +1,1 @@
+{"frame_index": 83, "rgb_gcs_uri": "gs://roomstudio-captures/captures/42bba2b9-66b9-45b2-aad3-61ac822367c4/frames/000083.jpg", "image_size": [1920, 1440], "masks_gcs_uri": "gs://roomstudio-perception-outputs/scenes/25a14caf-db19-487d-9a60-3bd4034cd4c4/frames/0083/masks.npz", "objects": [], "ok": true}
