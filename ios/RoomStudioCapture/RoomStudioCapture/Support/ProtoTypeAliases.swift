@@ -11,3 +11,5 @@ typealias RSIntrinsics    = Roomstudio_Capture_V1_Intrinsics
 typealias RSGravity       = Roomstudio_Capture_V1_Gravity
 typealias RSDepth         = Roomstudio_Capture_V1_Depth
 typealias RSRoomPlanModel = Roomstudio_Capture_V1_RoomPlanModel
+typealias RSPlaneAnchor    = Roomstudio_Capture_V1_PlaneAnchor
+typealias RSPlaneAlignment = Roomstudio_Capture_V1_PlaneAlignment

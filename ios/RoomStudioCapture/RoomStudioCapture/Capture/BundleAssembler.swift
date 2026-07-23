@@ -22,6 +22,9 @@ struct BundleAssembler {
     let endedAtDeviceUs:   Int64
     let startedAtWallUs:   Int64
     let frames:            [CapturedKeyframe]
+    /// The session's final plane-anchor set (decision 0066). Empty is
+    /// valid — the shell degrades to "unavailable" server-side.
+    let planeAnchors:      [RSPlaneAnchor]
     let outputDir:         URL
 
     // MARK: - Public API
@@ -56,6 +59,8 @@ struct BundleAssembler {
             if let d = kf.depth { frame.depth = d }
             bundle.frames.append(frame)
         }
+
+        bundle.planeAnchors = planeAnchors
 
         let data = try bundle.serializedData()
         let url  = outputDir.appendingPathComponent("bundle.pb")

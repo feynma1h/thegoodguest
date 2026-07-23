@@ -73,6 +73,12 @@ final class CaptureManager: NSObject, ObservableObject {
     /// Accumulated keyframes in acceptance order.
     private(set) var capturedFrames: [CapturedKeyframe] = []
 
+    /// The session's FINAL plane-anchor set, converted at stopCapture()
+    /// (decision 0066: the room shell's measured geometry source). Empty
+    /// until first stop; reset at startCapture(). Converted immediately so
+    /// no ARKit anchor objects outlive the session snapshot.
+    private(set) var capturedPlaneAnchors: [RSPlaneAnchor] = []
+
     /// Tier selected at session start based on hardware capability.
     private(set) var tier: RSCaptureTier = .arkitOnly
 
@@ -116,6 +122,7 @@ final class CaptureManager: NSObject, ObservableObject {
         bundlePath = nil
         assembledWithoutUserId = false
         capturedFrames  = []
+        capturedPlaneAnchors = []
         accumulator.reset()
         frameCount      = 0
         bundleId        = UUID()
@@ -133,6 +140,10 @@ final class CaptureManager: NSObject, ObservableObject {
 
         let config = ARWorldTrackingConfiguration()
         config.worldAlignment = .gravity
+        // Plane detection on every tier (decision 0066): ARKit measures
+        // floors and walls on all devices; the final anchor set is read at
+        // stopCapture() and shipped in the bundle as plane_anchors.
+        config.planeDetection = [.horizontal, .vertical]
         if hasLidar, ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
             config.frameSemantics.insert(.sceneDepth)
         }
@@ -143,9 +154,23 @@ final class CaptureManager: NSObject, ObservableObject {
 
     /// Stop the session. Waits for in-flight writes, logs summary, assembles bundle.pb.
     func stopCapture() {
+        // Snapshot the FINAL plane-anchor set before pausing — the last
+        // frame's anchors are the session's best merged/refined planes
+        // (decision 0066). Same world frame as every camera pose.
+        let arAnchors = (arSession.currentFrame?.anchors ?? [])
+            .compactMap { $0 as? ARPlaneAnchor }
+        capturedPlaneAnchors = arAnchors.map { PlaneAnchorExtractor.from($0) }
+
         arSession.pause()
         isRunning = false
         endedAtDeviceUs = Int64(CACurrentMediaTime() * 1_000_000)
+
+        // V3-walk observability: counts by alignment + classification tell
+        // the on-device plane-quality story without any new UI.
+        let horiz = capturedPlaneAnchors.filter { $0.alignment == .horizontal }.count
+        let vert  = capturedPlaneAnchors.filter { $0.alignment == .vertical }.count
+        let classified = capturedPlaneAnchors.filter { !$0.classification.isEmpty }.count
+        logger.info("[CaptureManager] plane anchors at stop: total=\(self.capturedPlaneAnchors.count, privacy: .public) horizontal=\(horiz, privacy: .public) vertical=\(vert, privacy: .public) classified=\(classified, privacy: .public)")
 
         // Snapshot immutable session state before hopping off MainActor.
         // userId: read from Keychain-backed Firebase cache — offline-safe.
@@ -161,6 +186,7 @@ final class CaptureManager: NSObject, ObservableObject {
             endedAtDeviceUs:   endedAtDeviceUs,
             startedAtWallUs:   startedAtWallUs,
             frames:            frames,
+            planeAnchors:      capturedPlaneAnchors,
             outputDir:         outDir
         )
         let stats     = writeStats
