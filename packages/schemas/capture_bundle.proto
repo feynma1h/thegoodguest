@@ -98,6 +98,17 @@ message CaptureBundle {
   // Free-form client annotation. Reserved for fields that don't deserve a
   // schema bump (e.g. "user labeled this room: 'living room'").
   map<string, string> client_notes = 10;
+
+  // ARKit plane anchors — the session's FINAL detected-plane set, serialized
+  // once at capture stop (ARKit merges and refines anchors continuously
+  // mid-session; only the final set is meaningful). The measured geometry
+  // source for the room shell (decision 0066): floor and walls are assembled
+  // from these, never inferred. Same world frame as the camera poses — the
+  // anchors come from the same ARSession. Bundles from clients that predate
+  // plane capture simply carry none; the shell degrades to "unavailable"
+  // downstream and the bundle stays valid (additive field, schema_version
+  // unchanged).
+  repeated PlaneAnchor plane_anchors = 12;
 }
 
 // -----------------------------------------------------------------------------
@@ -266,6 +277,65 @@ message Depth {
   // Depth raster's intrinsics — usually a downscale of the RGB frame's,
   // since ARKit's sceneDepth is 256x192 while RGB is e.g. 1920x1440.
   Intrinsics intrinsics = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Plane anchors (room shell geometry source — decision 0066)
+// -----------------------------------------------------------------------------
+
+// One detected ARKit plane (ARPlaneAnchor), serialized at capture stop.
+//
+// Frame semantics:
+//   - `pose` is world_from_anchor (the Pose message reused with "anchor" in
+//     place of "camera": p_world = position + rotate(rotation, p_anchor)).
+//   - The plane lies in the anchor's local X-Z plane; anchor-local +Y is the
+//     plane normal. For HORIZONTAL planes the normal is world ±Y; for
+//     VERTICAL planes it points out of the wall.
+//   - `center_*` is ARPlaneAnchor.center: the plane's center in ANCHOR
+//     space. The anchor origin drifts off-center as ARKit grows the plane,
+//     so the center is NOT the anchor origin.
+//   - `extent_width` / `extent_height` are ARPlaneExtent.width/.height
+//     (meters): the detected extent of the plane along the extent
+//     rectangle's own axes. `rotation_on_y_rad` is
+//     ARPlaneExtent.rotationOnYAxis: the rotation of that rectangle around
+//     the anchor's +Y, applied about the plane center. Detected extent only
+//     — consumers must not extrapolate beyond it.
+message PlaneAnchor {
+  // world_from_anchor. Same world frame and conventions as Frame.camera_pose.
+  Pose pose = 1;
+
+  // Plane center in anchor space, meters (ARPlaneAnchor.center).
+  float center_x = 2;
+  float center_y = 3;
+  float center_z = 4;
+
+  // Detected extent, meters (ARPlaneExtent.width / .height).
+  float extent_width = 5;
+  float extent_height = 6;
+
+  // Rotation of the extent rectangle around anchor-local +Y, radians
+  // (ARPlaneExtent.rotationOnYAxis).
+  float rotation_on_y_rad = 7;
+
+  // Horizontal (floor/table/ceiling) vs vertical (wall/door/window).
+  PlaneAlignment alignment = 8;
+
+  // ARKit's plane classification, verbatim (e.g. "wall", "floor",
+  // "ceiling", "table", "seat", "window", "door"). Empty when the device
+  // doesn't classify (pre-A12) or ARKit reports none — consumers treat
+  // empty as "unclassified", never guess.
+  string classification = 9;
+
+  // Optional anchor-space boundary polygon: ARPlaneGeometry.boundaryVertices
+  // projected onto the plane, flattened as (x, z) pairs
+  // [x0, z0, x1, z1, ...]. Even length; empty when the client omits it.
+  repeated float boundary_xz = 10;
+}
+
+enum PlaneAlignment {
+  PLANE_ALIGNMENT_UNSPECIFIED = 0;
+  HORIZONTAL = 1;
+  VERTICAL = 2;
 }
 
 // -----------------------------------------------------------------------------

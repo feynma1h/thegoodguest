@@ -191,3 +191,50 @@ class TestBundlePbValidity:
         b = CaptureBundle()
         b.ParseFromString(arts.blobs["bundle.pb"])
         assert b.user_id == "firebase-uid-xyz"
+
+
+# ---------------------------------------------------------------------------
+# Plane anchors (decision 0066)
+# ---------------------------------------------------------------------------
+
+class TestPlaneAnchors:
+    def test_default_has_no_plane_anchors(self):
+        """The default mirrors pre-plane clients — the shell's honest
+        'unavailable' degrade path starts from an empty list."""
+        from roomstudio_schemas import CaptureBundle
+        arts = build_capture_bundle(tier=TIER_ARKIT_ONLY, frame_count=1)
+        b = CaptureBundle()
+        b.ParseFromString(arts.blobs["bundle.pb"])
+        assert len(b.plane_anchors) == 0
+
+    def test_plane_anchors_are_valid_and_pass_validation(self):
+        """A plane-carrying bundle: first anchor floor/horizontal, rest
+        wall/vertical, all unit-norm poses — and the ingest validator
+        accepts it unchanged (the additive-field contract, exercised
+        through the real validate_bundle)."""
+        import math
+
+        from roomstudio_schemas import (
+            PLANE_HORIZONTAL,
+            PLANE_VERTICAL,
+            CaptureBundle,
+        )
+
+        arts = build_capture_bundle(
+            tier=TIER_ARKIT_ONLY, frame_count=1, plane_anchor_count=3
+        )
+        b = CaptureBundle()
+        b.ParseFromString(arts.blobs["bundle.pb"])
+        assert len(b.plane_anchors) == 3
+        assert b.plane_anchors[0].alignment == PLANE_HORIZONTAL
+        assert b.plane_anchors[0].classification == "floor"
+        for a in b.plane_anchors[1:]:
+            assert a.alignment == PLANE_VERTICAL
+            assert a.classification == "wall"
+        for a in b.plane_anchors:
+            norm = math.sqrt(
+                a.pose.quat_x**2 + a.pose.quat_y**2 + a.pose.quat_z**2 + a.pose.quat_w**2
+            )
+            assert abs(norm - 1.0) < 1e-3
+            assert a.extent_width > 0 and a.extent_height > 0
+        assert validate_bundle(b) is None

@@ -168,6 +168,98 @@ def test_room_plan_with_summary():
     assert b2.room_plan.summary.objects[0].category == "sofa"
 
 
+def test_plane_alignment_enum_values_stable():
+    """Plane-anchor alignment values are joined on by the shell stage; if
+    the integers move, every archived bundle's planes silently flip
+    meaning. Pin them (decision 0066)."""
+    from roomstudio_schemas import PlaneAlignment
+
+    assert PlaneAlignment.Value("PLANE_ALIGNMENT_UNSPECIFIED") == 0
+    assert PlaneAlignment.Value("HORIZONTAL") == 1
+    assert PlaneAlignment.Value("VERTICAL") == 2
+
+
+def test_plane_anchors_absent_by_default():
+    """Every existing bundle in GCS predates plane capture. Parsing one
+    with today's schema must yield an EMPTY plane_anchors list — the
+    'degrade to unavailable' contract depends on absence being clean."""
+    b = _minimal_bundle()
+    wire = b.SerializeToString()
+    b2 = CaptureBundle()
+    b2.ParseFromString(wire)
+    assert len(b2.plane_anchors) == 0
+
+
+def test_plane_anchor_roundtrip():
+    """Full PlaneAnchor round-trip: world_from_anchor pose, anchor-space
+    center, extent + rotation, alignment, classification, boundary."""
+    from roomstudio_schemas import PLANE_VERTICAL
+
+    b = _minimal_bundle()
+    a = b.plane_anchors.add()
+    a.pose.pos_x, a.pose.pos_y, a.pose.pos_z = 0.5, -1.2, 2.0
+    a.pose.quat_x = 0.0
+    a.pose.quat_y = 0.7071067811865476
+    a.pose.quat_z = 0.0
+    a.pose.quat_w = 0.7071067811865476
+    a.center_x, a.center_y, a.center_z = 0.1, 0.0, -0.2
+    a.extent_width = 3.25
+    a.extent_height = 2.5
+    a.rotation_on_y_rad = 0.125
+    a.alignment = PLANE_VERTICAL
+    a.classification = "wall"
+    a.boundary_xz.extend([-1.0, -0.5, 1.0, -0.5, 1.0, 0.5, -1.0, 0.5])
+
+    b2 = CaptureBundle()
+    b2.ParseFromString(b.SerializeToString())
+    a2 = b2.plane_anchors[0]
+    assert abs(a2.pose.pos_y - (-1.2)) < 1e-6
+    assert abs(a2.pose.quat_w - 0.7071067811865476) < 1e-6
+    assert abs(a2.center_z - (-0.2)) < 1e-6
+    assert abs(a2.extent_width - 3.25) < 1e-6
+    assert abs(a2.extent_height - 2.5) < 1e-6
+    assert abs(a2.rotation_on_y_rad - 0.125) < 1e-6
+    assert a2.alignment == PLANE_VERTICAL
+    assert a2.classification == "wall"
+    assert list(a2.boundary_xz) == pytest.approx(
+        [-1.0, -0.5, 1.0, -0.5, 1.0, 0.5, -1.0, 0.5]
+    )
+    # boundary_xz is (x, z) pairs — even length by construction.
+    assert len(a2.boundary_xz) % 2 == 0
+
+
+def test_plane_anchor_defaults_document_the_gotchas():
+    """A fresh PlaneAnchor: alignment defaults to UNSPECIFIED (writers must
+    set it), classification defaults to empty (meaning 'unclassified' —
+    NOT an error), and the pose carries the same all-zero-quaternion trap
+    as Frame.camera_pose."""
+    b = _minimal_bundle()
+    a = b.plane_anchors.add()
+    from roomstudio_schemas import PlaneAlignment
+
+    assert a.alignment == PlaneAlignment.Value("PLANE_ALIGNMENT_UNSPECIFIED")
+    assert a.classification == ""
+    assert (a.pose.quat_x, a.pose.quat_y, a.pose.quat_z, a.pose.quat_w) == (
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+
+
+def test_bundle_with_planes_parses_under_plane_naive_reader():
+    """Additive-field guarantee, exercised in the direction that matters:
+    a bundle CARRYING planes must parse cleanly for readers that don't
+    know the field (proto3 unknown-field semantics keep old servers
+    working during the rollout window). Serializing with planes and
+    parsing as CaptureBundle is trivially true in-process; what we can
+    pin here is that schema_version is untouched by the addition."""
+    b = _minimal_bundle()
+    a = b.plane_anchors.add()
+    a.extent_width = 1.0
+    assert b.schema_version == SCHEMA_VERSION  # still "1" — no bump
+
+
 def test_paths_are_relative_not_gs_uris():
     """rgb_gcs_path et al. are documented as paths WITHIN the bundle
     prefix, not full gs:// URIs. The schema can't enforce this, but
