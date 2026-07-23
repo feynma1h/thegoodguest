@@ -56,8 +56,32 @@ function sceneFixture(idx: number, status: SceneStatus, minutesAgo: number): Sce
 
 const GS = (name: string) =>
   `gs://mock-outputs/scenes/${MOCK_READY_SCENE_ID}/splats/${name}.ply`;
-const SHELL_GS = (name: string) =>
-  `gs://mock-outputs/scenes/${MOCK_READY_SCENE_ID}/shell/textures/${name}.png`;
+
+/** A shell.json v2 material {} (decision 0069). */
+function mockMaterial(
+  family: string | null,
+  albedo: string | null,
+  roughness: number,
+  observed: number,
+): import("./types").ShellMaterialEntry {
+  return {
+    family,
+    family_confidence: family ? 0.82 : null,
+    albedo_hex: albedo,
+    secondary_hex: null,
+    params: family === "wood" ? { plank_direction_deg: 90 } : {},
+    render: { roughness },
+    source: {
+      observed_fraction: observed,
+      texel_count: Math.round(observed * 12000),
+      frames_used: observed > 0 ? 6 : 0,
+    },
+    inference: {
+      model: family ? "claude-sonnet-5" : null,
+      material_version: 1,
+    },
+  };
+}
 
 /** A small synthetic room: objects placed around the origin, +Y up. */
 const READY_ASSETS: SceneAssets = {
@@ -114,28 +138,46 @@ const READY_ASSETS: SceneAssets = {
     ],
     frames: [],
   },
-  // Room shell (decision 0066): floor + back/side walls in the same
-  // world frame as the objects above. wall_01 ships UNTEXTURED (source
-  // "unobserved") so the neutral treatment is reachable offline. Corner
-  // winding fronts the room interior; corner 0 is the texture origin.
+  // Room shell v2 (decision 0069): parametric materials, no textures.
+  // The floor is an L-ish polygon (exercises triangulation); wall_00
+  // carries a door opening + closure provenance; wall_01 ships fully
+  // UNOBSERVED (albedo null) so the neutral treatment stays reachable
+  // offline. Corner winding fronts the room interior.
   shell: {
-    shell_version: 1,
+    shell_version: 2,
     scene_id: MOCK_READY_SCENE_ID,
     status: "ready",
     reason: null,
     method: "arkit_planes",
     floor: {
-      quad: [
+      polygon: [
         [-2.2, 0, 1.4],
-        [1.8, 0, 1.4],
+        [0.6, 0, 1.4],
+        [0.6, 0, 0.9],
+        [1.8, 0, 0.9],
         [1.8, 0, -2.6],
         [-2.2, 0, -2.6],
       ],
+      measured_polygon: [
+        [-2.1, 0, 1.3],
+        [0.6, 0, 1.3],
+        [0.6, 0, 0.9],
+        [1.7, 0, 0.9],
+        [1.7, 0, -2.5],
+        [-2.1, 0, -2.5],
+      ],
       y: 0,
-      texture_gcs_uri: SHELL_GS("floor"),
-      observed_fraction: 0.82,
-      inpainted_fraction: 0.11,
-      source: "baked",
+      provenance: {
+        edges: [
+          "observed",
+          "observed",
+          "observed",
+          "extended_to_wall:wall_00",
+          "extended_to_wall:wall_01",
+          "observed",
+        ],
+      },
+      material: mockMaterial("wood", "#8a6f52", 0.6, 0.62),
     },
     walls: [
       {
@@ -146,11 +188,29 @@ const READY_ASSETS: SceneAssets = {
           [1.8, 2.2, -2.6],
           [-2.2, 2.2, -2.6],
         ],
-        texture_gcs_uri: SHELL_GS("wall_00"),
-        observed_fraction: 0.74,
-        inpainted_fraction: 0.18,
-        source: "baked",
+        measured_quad: [
+          [-2.2, 0.3, -2.6],
+          [1.8, 0.3, -2.6],
+          [1.8, 2.2, -2.6],
+          [-2.2, 2.2, -2.6],
+        ],
+        edges: {
+          bottom: { state: "extended_to_floor", extension_m: 0.3 },
+          top: { state: "observed", extension_m: 0 },
+          left: { state: "observed", extension_m: 0 },
+          right: { state: "extended_to_wall:wall_01", extension_m: 0.2 },
+        },
+        openings: [
+          {
+            classification: "door",
+            rect_uv: [
+              [0.62, 0],
+              [0.84, 0.86],
+            ],
+          },
+        ],
         classification: "wall",
+        material: mockMaterial("painted", "#c9b9a4", 0.85, 0.55),
       },
       {
         wall_id: "wall_01",
@@ -160,21 +220,34 @@ const READY_ASSETS: SceneAssets = {
           [-2.2, 2.2, -2.6],
           [-2.2, 2.2, 1.4],
         ],
-        texture_gcs_uri: null,
-        observed_fraction: 0.09,
-        inpainted_fraction: 0,
-        source: "unobserved",
+        measured_quad: [
+          [-2.2, 0, 1.4],
+          [-2.2, 0, -2.6],
+          [-2.2, 2.2, -2.6],
+          [-2.2, 2.2, 1.4],
+        ],
+        edges: {
+          bottom: { state: "observed", extension_m: 0 },
+          top: { state: "observed", extension_m: 0 },
+          left: { state: "observed", extension_m: 0 },
+          right: { state: "observed", extension_m: 0 },
+        },
+        openings: [],
         classification: null,
+        material: mockMaterial(null, null, 0.9, 0.04),
       },
     ],
-    quality: { planes_in_bundle: 4, frames_used: 9 },
+    quality: {
+      planes_in_bundle: 4,
+      frames_used: 9,
+      material_version: 1,
+      fragments_dropped: 1,
+    },
   },
   asset_urls: {
     [GS("sofa")]: "/dev-fixtures/sofa.ply",
     [GS("table")]: "/dev-fixtures/table.ply",
     [GS("lamp")]: "/dev-fixtures/lamp.ply",
-    [SHELL_GS("floor")]: "/dev-fixtures/shell_floor.png",
-    [SHELL_GS("wall_00")]: "/dev-fixtures/shell_wall_00.png",
   },
   expires_at: new Date(Date.now() + 3600_000).toISOString(),
 };

@@ -91,31 +91,49 @@ describe("assembleScene", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Shell mapping (decision 0066)
+// Shell mapping (decisions 0066/0069 — shell.json v2)
 // ---------------------------------------------------------------------------
 
-const FLOOR_TEX = "gs://outputs/scenes/s1/shell/textures/floor.png";
-const WALL_TEX = "gs://outputs/scenes/s1/shell/textures/wall_00.png";
+function material(
+  family: string | null,
+  albedo: string | null,
+  roughness = 0.85,
+) {
+  return {
+    family,
+    family_confidence: family ? 0.8 : null,
+    albedo_hex: albedo,
+    secondary_hex: null,
+    params: {},
+    render: { roughness },
+    source: { observed_fraction: 0.5, texel_count: 800, frames_used: 3 },
+    inference: {
+      model: family ? "claude-sonnet-5" : null,
+      material_version: 1,
+    },
+  };
+}
+
+const FLOOR_POLYGON: [number, number, number][] = [
+  [0, -1, 2],
+  [4, -1, 2],
+  [4, -1, -2],
+  [0, -1, -2],
+];
 
 function shellDoc(overrides: Partial<ShellDoc> = {}): ShellDoc {
   return {
-    shell_version: 1,
+    shell_version: 2,
     scene_id: "s1",
     status: "ready",
     reason: null,
     method: "arkit_planes",
     floor: {
-      quad: [
-        [0, -1, 2],
-        [4, -1, 2],
-        [4, -1, -2],
-        [0, -1, -2],
-      ],
+      polygon: FLOOR_POLYGON,
+      measured_polygon: FLOOR_POLYGON,
       y: -1,
-      texture_gcs_uri: FLOOR_TEX,
-      observed_fraction: 0.8,
-      inpainted_fraction: 0.1,
-      source: "baked",
+      provenance: { edges: ["observed", "observed", "observed", "observed"] },
+      material: material("wood", "#8a6f52", 0.6),
     },
     walls: [
       {
@@ -126,11 +144,23 @@ function shellDoc(overrides: Partial<ShellDoc> = {}): ShellDoc {
           [4, 1, -2],
           [0, 1, -2],
         ],
-        texture_gcs_uri: WALL_TEX,
-        observed_fraction: 0.7,
-        inpainted_fraction: 0.2,
-        source: "baked",
+        measured_quad: [
+          [0, -0.7, -2],
+          [4, -0.7, -2],
+          [4, 1, -2],
+          [0, 1, -2],
+        ],
+        edges: {
+          bottom: { state: "extended_to_floor", extension_m: 0.3 },
+          top: { state: "observed", extension_m: 0 },
+          left: { state: "observed", extension_m: 0 },
+          right: { state: "observed", extension_m: 0 },
+        },
+        openings: [
+          { classification: "door", rect_uv: [[0.2, 0], [0.4, 0.9]] },
+        ],
         classification: "wall",
+        material: material("painted", "#c9b9a4"),
       },
       {
         wall_id: "wall_01",
@@ -140,14 +170,24 @@ function shellDoc(overrides: Partial<ShellDoc> = {}): ShellDoc {
           [0, 1, -2],
           [0, 1, 2],
         ],
-        texture_gcs_uri: null,
-        observed_fraction: 0.05,
-        inpainted_fraction: 0,
-        source: "unobserved",
+        measured_quad: [
+          [0, -1, 2],
+          [0, -1, -2],
+          [0, 1, -2],
+          [0, 1, 2],
+        ],
+        edges: {
+          bottom: { state: "observed", extension_m: 0 },
+          top: { state: "observed", extension_m: 0 },
+          left: { state: "observed", extension_m: 0 },
+          right: { state: "observed", extension_m: 0 },
+        },
+        openings: [],
         classification: null,
+        material: material(null, null, 0.9),
       },
     ],
-    quality: { planes_in_bundle: 3, frames_used: 4 },
+    quality: { planes_in_bundle: 3, frames_used: 4, material_version: 1 },
     ...overrides,
   };
 }
@@ -172,42 +212,57 @@ describe("assembleScene shell mapping", () => {
     expect(a.shell.status).toBe("unavailable");
   });
 
-  it("maps a ready shell to planes: floor first, signed texture URLs", () => {
+  it("maps a ready shell: floor polygon first, then wall quads, with materials", () => {
     const a = assets();
     a.shell = shellDoc();
-    a.asset_urls[FLOOR_TEX] = "https://signed.example/floor.png";
-    a.asset_urls[WALL_TEX] = "https://signed.example/wall_00.png";
     const { shell } = assembleScene(a);
     expect(shell).not.toBeNull();
     expect(shell!.map((p) => p.kind)).toEqual(["floor", "wall", "wall"]);
-    expect(shell![0].texture_url).toBe("https://signed.example/floor.png");
-    expect(shell![0].corners).toEqual(shellDoc().floor!.quad);
-    expect(shell![1].texture_url).toBe("https://signed.example/wall_00.png");
-    expect(shell![0].observed_fraction).toBe(0.8);
-    expect(shell![0].inpainted_fraction).toBe(0.1);
+    // The floor's corners ARE the rendered polygon (not a quad).
+    expect(shell![0].corners).toEqual(FLOOR_POLYGON);
+    expect(shell![0].material).toEqual({
+      albedo_hex: "#8a6f52",
+      roughness: 0.6,
+      family: "wood",
+    });
+    expect(shell![1].material.albedo_hex).toBe("#c9b9a4");
+    // Nothing fetchable exists on the renderer contract (0069).
+    expect("texture_url" in shell![0]).toBe(false);
   });
 
-  it("maps untextured (unobserved) planes with texture_url null", () => {
+  it("carries wall openings through; the floor always has none", () => {
     const a = assets();
     a.shell = shellDoc();
-    a.asset_urls[FLOOR_TEX] = "https://signed.example/floor.png";
-    a.asset_urls[WALL_TEX] = "https://signed.example/wall_00.png";
     const { shell } = assembleScene(a);
-    expect(shell![2].texture_url).toBeNull();
+    expect(shell![0].openings).toEqual([]);
+    expect(shell![1].openings).toEqual([
+      { classification: "door", rect_uv: [[0.2, 0], [0.4, 0.9]] },
+    ]);
+    expect(shell![2].openings).toEqual([]);
   });
 
-  it("maps a textured plane whose URL was not signed to texture_url null", () => {
+  it("maps an unobserved plane to the null-albedo neutral treatment", () => {
     const a = assets();
     a.shell = shellDoc();
-    // No asset_urls entries for the shell textures at all.
     const { shell } = assembleScene(a);
-    expect(shell![0].texture_url).toBeNull();
+    expect(shell![2].material.albedo_hex).toBeNull();
+    expect(shell![2].material.family).toBeNull();
+    expect(shell![2].material.roughness).toBe(0.9);
   });
 
   it("yields shell null for a ready doc with no planes at all", () => {
     const a = assets();
     a.shell = shellDoc({ floor: null, walls: [] });
     expect(assembleScene(a).shell).toBeNull();
+  });
+
+  it("skips a degenerate floor polygon (fewer than 3 vertices)", () => {
+    const a = assets();
+    const doc = shellDoc();
+    doc.floor = { ...doc.floor!, polygon: [[0, -1, 0], [1, -1, 0]] };
+    a.shell = doc;
+    const { shell } = assembleScene(a);
+    expect(shell!.map((p) => p.kind)).toEqual(["wall", "wall"]);
   });
 
   it("handles a walls-only shell (open dollhouse ships as detected)", () => {

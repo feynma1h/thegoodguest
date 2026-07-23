@@ -27,12 +27,16 @@
  * objects assemble on the honest grid, as before. Reduced motion
  * collapses everything to an immediate full room.
  *
- * Shell rendering: single-sided textured quads (`shell` prop —
- * renderer-agnostic ShellPlane[]), depthWrite:true with an alphaTest
- * cutout for the floor's shape; textures fetch via fetch()+ImageBitmap
- * (connect-src covers storage.googleapis.com; no CSP change). Untextured
- * planes render a flat warm neutral. The V1 depth probe proved this
- * exact mesh configuration composites correctly with Spark splats.
+ * Shell rendering (decision 0069): single-sided PARAMETRIC surfaces —
+ * MeshStandardMaterial built from each plane's measured albedo + family
+ * roughness (no textures exist in the v2 contract; the bake left
+ * serving). Walls are quads; the floor is a triangulated polygon
+ * (rendered shape from closure); door/window openings render as inset
+ * patches on their wall. A small warm light rig shades the standard
+ * materials — Spark's splat shaders ignore three.js lights, so objects
+ * are unaffected. Planes without a measured albedo render the flat warm
+ * neutral (honestly unobserved; nothing fake). depthWrite:true meshes
+ * composite correctly with Spark splats (the 0066 V1 depth probe).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -41,11 +45,12 @@ import type { PositionedSplat, ShellPlane } from "@/lib/api/types";
 
 interface SplatViewerProps {
   splats: PositionedSplat[];
-  /** Room shell (decision 0066): textured world-space quads rendered as
-   * the stage under the objects. Single-sided, so the orbiting camera
-   * sees through the near wall (the dollhouse cutaway — proven with the
-   * V1 depth probe: Spark splats depth-composite correctly against
-   * depthWrite:true meshes both ways). Absent/null keeps the grid. */
+  /** Room shell (decisions 0066/0069): parametric world-space surfaces
+   * rendered as the stage under the objects. Single-sided, so the
+   * orbiting camera sees through the near wall (the dollhouse cutaway —
+   * proven with the V1 depth probe: Spark splats depth-composite
+   * correctly against depthWrite:true meshes both ways). Absent/null
+   * keeps the grid. */
   shell?: ShellPlane[] | null;
   className?: string;
   /** Slow auto-orbit until the user grabs the scene (landing demo). */
@@ -122,9 +127,15 @@ const REVEAL_DROP_M = 0.4;
 const SHELL_FLOOR_MS = 600;
 const SHELL_WALL_STEP_MS = 350;
 
-/** Untextured ("unobserved") planes get a flat warm neutral — a surface
- * honestly present but never photographed; nothing fake renders. */
+/** Unobserved planes (albedo null) get a flat warm neutral — a surface
+ * honestly present but never measured; nothing fake renders. */
 const SHELL_NEUTRAL = 0x4a4136;
+/** Opening insets darken their wall's surface color — a recessed panel
+ * reading, not a guessed door/window appearance. */
+const OPENING_DARKEN = 0.78;
+/** Inset patches float this far off the wall toward the room (meters) so
+ * they never z-fight the wall quad. */
+const OPENING_OFFSET_M = 0.006;
 
 export default function SplatViewer({
   splats,
@@ -141,7 +152,9 @@ export default function SplatViewer({
     () =>
       splats.map((s) => `${s.url}@${s.position.join(",")}`).join("|") +
       "|shell:" +
-      (shell?.map((p) => p.texture_url ?? p.kind).join(",") ?? "none"),
+      (shell
+        ?.map((p) => `${p.kind}:${p.material.albedo_hex ?? "-"}:${p.corners.length}`)
+        .join(",") ?? "none"),
     [splats, shell],
   );
   const [outcome, setOutcome] = useState<LoadOutcome | null>(null);
@@ -219,63 +232,111 @@ export default function SplatViewer({
         ground.rotation.x = -Math.PI / 2;
         if (!shellHasFloor) scene.add(ground);
 
-        // --- Room shell (0066): one single-sided textured quad per plane.
-        // depthWrite:true + alphaTest cutout on the floor — exactly the
-        // configuration the V1 probe proved composites with Spark splats.
-        const shellMeshes = shellPlanes.map((p) => {
-          const geom = new THREE.BufferGeometry();
-          geom.setAttribute(
-            "position",
-            new THREE.Float32BufferAttribute(p.corners.flat(), 3),
-          );
-          // Texture frame: corner0 = (0,0), +U to corner1, +V to corner3
-          // (the bake's orientation contract; PNG top row = +V far edge,
-          // which matches bottom-origin UVs).
-          geom.setAttribute(
-            "uv",
-            new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2),
-          );
-          geom.setIndex([0, 1, 2, 0, 2, 3]);
-          geom.computeVertexNormals();
-          const mat = new THREE.MeshBasicMaterial({
-            color: p.texture_url ? 0xffffff : SHELL_NEUTRAL,
+        // --- Light rig for the parametric surfaces (0069): warm ambient +
+        // a soft warm key from high in the room. Spark's splat shaders
+        // ignore three.js lights, so objects render exactly as before;
+        // only the shell's MeshStandardMaterials read these.
+        scene.add(new THREE.AmbientLight(0xfff2df, 0.85));
+        const keyLight = new THREE.DirectionalLight(0xffe7c4, 0.9);
+        keyLight.position.set(3, 6, 2);
+        scene.add(keyLight);
+
+        // --- Room shell (0069): one single-sided parametric surface per
+        // plane. Walls are quads; the floor triangulates its rendered
+        // polygon. Material = measured albedo + family-looked-up
+        // roughness; albedo null renders the honest neutral.
+        // depthWrite:true — the configuration the 0066 V1 probe proved
+        // composites with Spark splats.
+        const makeShellMaterial = (p: ShellPlane, darken = 1) => {
+          const color = new THREE.Color(
+            p.material.albedo_hex ? p.material.albedo_hex : SHELL_NEUTRAL,
+          ).multiplyScalar(darken);
+          return new THREE.MeshStandardMaterial({
+            color,
+            roughness: p.material.roughness,
+            metalness: 0,
             side: THREE.FrontSide,
             depthWrite: true,
-            ...(p.kind === "floor" ? { transparent: true, alphaTest: 0.5 } : {}),
           });
-          const mesh = new THREE.Mesh(geom, mat);
-          scene.add(mesh);
-          return { mesh, plane: p };
-        });
+        };
 
-        // Shell textures load via fetch() + createImageBitmap — covered by
-        // connect-src (storage.googleapis.com); THREE.TextureLoader's <img>
-        // path would need an img-src CSP change, so it is deliberately NOT
-        // used. A failed fetch keeps the neutral material (never fake).
-        for (const { mesh, plane } of shellMeshes) {
-          if (!plane.texture_url) continue;
-          fetch(plane.texture_url)
-            .then((r) => {
-              if (!r.ok) throw new Error(`texture fetch ${r.status}`);
-              return r.blob();
-            })
-            .then((b) => createImageBitmap(b, { imageOrientation: "flipY" }))
-            .then((bmp) => {
-              if (disposed) return;
-              const tex = new THREE.Texture(bmp);
-              // The bitmap is pre-flipped; three must not flip again
-              // (it wouldn't for ImageBitmap uploads anyway).
-              tex.flipY = false;
-              tex.colorSpace = THREE.SRGBColorSpace;
-              tex.needsUpdate = true;
-              mesh.material.map = tex;
-              mesh.material.color.set(0xffffff);
-              mesh.material.needsUpdate = true;
-            })
-            .catch(() => {
-              /* neutral material stays — an honest untextured plane */
-            });
-        }
+        const shellMeshes = shellPlanes.map((p) => {
+          const geom = new THREE.BufferGeometry();
+          if (p.kind === "wall" && p.corners.length === 4) {
+            geom.setAttribute(
+              "position",
+              new THREE.Float32BufferAttribute(p.corners.flat(), 3),
+            );
+            geom.setIndex([0, 1, 2, 0, 2, 3]);
+          } else {
+            // Floor polygon: triangulate in the XZ plane (handles concave
+            // shapes), then orient front-face-up regardless of the source
+            // winding — checked against the first triangle's normal.
+            const pts2d = p.corners.map(
+              (c) => new THREE.Vector2(c[0], c[2]),
+            );
+            const tris = THREE.ShapeUtils.triangulateShape(pts2d, []);
+            const indices = tris.flat();
+            geom.setAttribute(
+              "position",
+              new THREE.Float32BufferAttribute(p.corners.flat(), 3),
+            );
+            if (indices.length >= 3) {
+              const [a, b, c] = indices;
+              const va = new THREE.Vector3(...p.corners[a]);
+              const vb = new THREE.Vector3(...p.corners[b]);
+              const vc = new THREE.Vector3(...p.corners[c]);
+              const n = vb.sub(va).cross(vc.sub(va));
+              geom.setIndex(
+                n.y >= 0
+                  ? indices
+                  : tris.map((t) => [t[2], t[1], t[0]]).flat(),
+              );
+            }
+          }
+          geom.computeVertexNormals();
+          const mesh = new THREE.Mesh(geom, makeShellMaterial(p));
+          scene.add(mesh);
+
+          // Door/window openings (0069): inset patches slightly off the
+          // wall toward the room — a recessed panel in the wall's own
+          // darkened color, never a guessed appearance.
+          const extras: InstanceType<typeof THREE.Mesh>[] = [];
+          if (p.kind === "wall" && p.corners.length === 4) {
+            const c0 = new THREE.Vector3(...p.corners[0]);
+            const u = new THREE.Vector3(...p.corners[1]).sub(c0);
+            const v = new THREE.Vector3(...p.corners[3]).sub(c0);
+            const normal = u.clone().cross(v).normalize();
+            for (const op of p.openings) {
+              const [[u0, v0], [u1, v1]] = op.rect_uv;
+              const at = (uu: number, vv: number) =>
+                c0
+                  .clone()
+                  .addScaledVector(u, uu)
+                  .addScaledVector(v, vv)
+                  .addScaledVector(normal, OPENING_OFFSET_M);
+              const og = new THREE.BufferGeometry();
+              og.setAttribute(
+                "position",
+                new THREE.Float32BufferAttribute(
+                  [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)].flatMap(
+                    (w) => [w.x, w.y, w.z],
+                  ),
+                  3,
+                ),
+              );
+              og.setIndex([0, 1, 2, 0, 2, 3]);
+              og.computeVertexNormals();
+              const patch = new THREE.Mesh(
+                og,
+                makeShellMaterial(p, OPENING_DARKEN),
+              );
+              scene.add(patch);
+              extras.push(patch);
+            }
+          }
+          return { mesh, plane: p, extras };
+        });
 
         const meshes = splats.map((s) => {
           const mesh = new SplatMesh({ url: s.url });
@@ -400,6 +461,7 @@ export default function SplatViewer({
                   wallSeq++ * SHELL_WALL_STEP_MS;
             shellStartAt.set(idx, at);
             entry.mesh.visible = false;
+            for (const extra of entry.extras) extra.visible = false;
           });
           for (const { i, seq } of revealOrder) {
             revealStartAt.set(
@@ -443,6 +505,7 @@ export default function SplatViewer({
             for (const [i, startMs] of shellStartAt) {
               if (now >= startMs) {
                 shellMeshes[i].mesh.visible = true;
+                for (const extra of shellMeshes[i].extras) extra.visible = true;
               } else {
                 allSettled = false;
               }
@@ -499,10 +562,14 @@ export default function SplatViewer({
             scene.remove(m);
             m.dispose?.();
           }
-          for (const { mesh } of shellMeshes) {
+          for (const { mesh, extras } of shellMeshes) {
+            for (const extra of extras) {
+              scene.remove(extra);
+              extra.geometry.dispose();
+              (extra.material as { dispose(): void }).dispose();
+            }
             scene.remove(mesh);
             mesh.geometry.dispose();
-            mesh.material.map?.dispose();
             mesh.material.dispose();
           }
           ground.geometry.dispose();

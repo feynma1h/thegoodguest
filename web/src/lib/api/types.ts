@@ -62,19 +62,56 @@ export interface SceneManifest {
 }
 
 /**
- * One plane entry as scenes/{id}/shell.json carries it (decision 0066).
- * quad corners are wound so the front face points into the room; corner 0
- * is the texture origin (+U to corner 1, +V to corner 3).
+ * One plane's material {} as shell.json v2 carries it (decision 0069):
+ * parametric, inferred from observed pixels — no raster textures exist
+ * anywhere in the shell contract.
  */
-export interface ShellPlaneEntry {
-  quad: [number, number, number][]; // 4 world-frame corners, meters
-  texture_gcs_uri: string | null; // null when source is "unobserved"
-  observed_fraction: number;
-  inpainted_fraction: number;
-  source: string; // "baked" | "unobserved"
-  wall_id?: string; // walls only
-  classification?: string | null; // walls only; ARKit verbatim
-  y?: number; // floor only
+export interface ShellMaterialEntry {
+  family: string | null; // null = below gate / failed / no key -> clean neutral
+  family_confidence: number | null;
+  albedo_hex: string | null; // null = unobserved plane -> neutral treatment
+  secondary_hex: string | null;
+  params: { plank_direction_deg?: number };
+  render: { roughness: number };
+  source: { observed_fraction: number; texel_count: number; frames_used: number };
+  inference: { model: string | null; material_version: number };
+}
+
+export interface ShellOpeningEntry {
+  classification: string; // "door" | "window"
+  /** [[u0,v0],[u1,v1]] normalized on the RENDERED quad (corner0 origin). */
+  rect_uv: [[number, number], [number, number]];
+}
+
+export interface ShellEdgeState {
+  state: string; // "observed" | "extended_to_floor" | "extended_to_common_height" | "extended_to_wall:<id>"
+  extension_m: number;
+}
+
+/**
+ * One wall entry (shell.json v2, decision 0069). quad is the RENDERED
+ * (closure-extended) geometry the viewer draws; measured_quad is the
+ * DETECTED extent — what the AI layer may read; closure never mutates it.
+ * Corners are wound so the front face points into the room; corner 0 is
+ * the plane-frame origin (+U to corner 1, +V to corner 3).
+ */
+export interface ShellWallEntry {
+  wall_id: string;
+  quad: [number, number, number][]; // 4 rendered corners, meters
+  measured_quad: [number, number, number][]; // 4 detected corners
+  edges: Record<string, ShellEdgeState>; // bottom / top / left / right
+  openings: ShellOpeningEntry[];
+  classification: string | null; // ARKit verbatim (majority, non-opening)
+  material: ShellMaterialEntry;
+}
+
+/** The floor entry (shell.json v2): an explicit polygon, not a quad. */
+export interface ShellFloorEntry {
+  polygon: [number, number, number][]; // rendered, N>=3, CCW in XZ
+  measured_polygon: [number, number, number][]; // detected boundary
+  y: number;
+  provenance: { edges: string[] }; // per rendered segment
+  material: ShellMaterialEntry;
 }
 
 /**
@@ -89,9 +126,9 @@ export interface ShellDoc {
   status: "ready" | "unavailable";
   reason: string | null; // "no_geometry_source" | "capture_expired" | null
   method: string; // "arkit_planes" today
-  floor: ShellPlaneEntry | null;
-  walls: ShellPlaneEntry[];
-  quality?: Record<string, number>;
+  floor: ShellFloorEntry | null;
+  walls: ShellWallEntry[];
+  quality?: Record<string, unknown>;
 }
 
 /** GET /scenes/{scene_id}/assets response. */
@@ -160,18 +197,28 @@ export interface PositionedSplat {
 
 /**
  * Renderer-agnostic shell plane (the PositionedSplat trick applied to the
- * shell): four world corners plus a fetchable texture URL. SplatViewer
- * consumes ONLY this shape — nothing renderer-shaped leaks either way
- * (decision 0053's containment rule).
+ * shell, v2 per decision 0069): world geometry plus parametric material —
+ * nothing fetchable, nothing renderer-shaped. SplatViewer consumes ONLY
+ * this shape (decision 0053's containment rule).
  */
 export interface ShellPlane {
   kind: "floor" | "wall";
-  corners: [number, number, number][]; // 4, front face toward the room
-  /** Signed HTTPS texture URL; null = untextured ("unobserved" plane) —
-   * the viewer gives it a neutral treatment, never a fake texture. */
-  texture_url: string | null;
-  observed_fraction: number;
-  inpainted_fraction: number;
+  /** Walls: the rendered quad's 4 corners (front face toward the room,
+   * corner 0 the plane origin, +U to 1, +V to 3). Floor: the rendered
+   * polygon (N>=3, CCW in the XZ plane). */
+  corners: [number, number, number][];
+  material: {
+    /** Measured dominant color; null = unobserved -> neutral treatment,
+     * never a fake color. */
+    albedo_hex: string | null;
+    roughness: number;
+    /** Confidence-gated family (null = clean matte); enables family-typed
+     * micro-treatment later. */
+    family: string | null;
+  };
+  /** Door/window sub-regions in the rendered quad's normalized UV
+   * (walls only; always [] for the floor). */
+  openings: ShellOpeningEntry[];
 }
 
 export interface AssembledScene {
@@ -213,18 +260,28 @@ export function assembleScene(assets: SceneAssets): AssembledScene {
   let shell: ShellPlane[] | null = null;
   const doc = assets.shell;
   if (doc && doc.status === "ready") {
-    const toPlane = (kind: ShellPlane["kind"], e: ShellPlaneEntry): ShellPlane => ({
-      kind,
-      corners: e.quad,
-      texture_url: e.texture_gcs_uri
-        ? (assets.asset_urls[e.texture_gcs_uri] ?? null)
-        : null,
-      observed_fraction: e.observed_fraction,
-      inpainted_fraction: e.inpainted_fraction,
+    const toMaterial = (m: ShellMaterialEntry | undefined): ShellPlane["material"] => ({
+      albedo_hex: m?.albedo_hex ?? null,
+      roughness: m?.render?.roughness ?? 0.9,
+      family: m?.family ?? null,
     });
     const planes: ShellPlane[] = [];
-    if (doc.floor) planes.push(toPlane("floor", doc.floor));
-    for (const wall of doc.walls ?? []) planes.push(toPlane("wall", wall));
+    if (doc.floor && (doc.floor.polygon?.length ?? 0) >= 3) {
+      planes.push({
+        kind: "floor",
+        corners: doc.floor.polygon,
+        material: toMaterial(doc.floor.material),
+        openings: [],
+      });
+    }
+    for (const wall of doc.walls ?? []) {
+      planes.push({
+        kind: "wall",
+        corners: wall.quad,
+        material: toMaterial(wall.material),
+        openings: wall.openings ?? [],
+      });
+    }
     if (planes.length > 0) shell = planes;
   }
 
