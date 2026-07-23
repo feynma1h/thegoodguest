@@ -30,29 +30,83 @@ observation whose splat the cluster renders (the best member).
     the best member's layout-derived world rotation.
 
 Each fused object references the single best member's splat (highest
-detection score) — the viewer renders one splat per physical object, not
-a blend — and the transform it ships is valid for exactly that splat.
+detection score, or — under refinement, see below — the reprojection
+instrument's score) — the viewer renders one splat per physical object,
+not a blend — and the transform it ships is valid for exactly that splat.
 
-Known v1 limitation (deliberate): two same-label objects closer together
-than the cluster threshold (default 0.4 m) can merge into one. The
-threshold is env-tunable (FUSION_CLUSTER_DIST_M / FUSION_RAY_RMS_M).
+Known v1 limitation (deliberate, legacy path only — see below):
+two same-label objects closer together than the cluster threshold
+(default 0.4 m) can merge into one. The threshold is env-tunable
+(FUSION_CLUSTER_DIST_M / FUSION_RAY_RMS_M).
 
-Consumers: process_receiver.run_perception (manifest "objects" array).
+--- Placement-quality refinement (decision 0067) ---------------------------
+
+Everything above is the LEGACY algorithm, preserved verbatim as the
+fallback: it runs unchanged whenever no RefinementContext is supplied, or
+PLACEMENT_REFINE=0 (the rollback lever — must reproduce today's manifests
+byte-for-byte). When a RefinementContext IS supplied and PLACEMENT_REFINE
+is not "0", fusion additionally:
+
+  1. Dedups same-frame same-label observations whose masks are a "mutual
+     singleton" nested pair (intersection-over-smaller >=
+     PLACEMENT_DEDUP_CONTAINMENT, and neither mask overlaps any THIRD
+     same-label mask in that frame — a mask containing multiple disjoint
+     children is a coarse parent region, not a duplicate detection, and
+     must not absorb its children). Runs BEFORE clustering, so a
+     duplicate detection never gets the chance to fork a cluster via the
+     frame-uniqueness guard.
+  2. Relaxes the ray-cluster merge pass's "no shared frames" veto: two
+     clusters sharing a frame may still merge if that frame's two masks
+     are themselves mutual-singleton-consistent (the same test as dedup);
+     genuinely disjoint same-frame masks still refuse the merge.
+  3. Adds a footprint-agreement join test (project the cluster's
+     provisional volume into a candidate's frame; require soft-containment
+     agreement) alongside the existing RMS/proximity gate — a second,
+     photometrically-grounded signal for objects too large for centroid
+     triangulation to serve well.
+  4. Runs a bounded multi-view silhouette fit (reproject.fit_silhouette)
+     for >=2-view ray clusters, refining (scale, translation) — rotation
+     stays fixed from the best member. Ships only if it beats the
+     triangulated init's tier-1 score.
+  5. Resolves in-plane ambiguity for planar splats (reproject.is_planar)
+     by scoring 4 candidates 90 degrees apart about the object's own
+     normal; ships the winner only with a clear margin.
+  6. Flags (never auto-corrects) a materially-better-scoring 180-about-
+     view-axis "mirrored twin" of the shipped rotation.
+  7. Selects the best member by the reprojection instrument's combined
+     score (detection score stays recorded as a tiebreak-only field).
+  8. Emits `reprojection_score`, `position_source`, `constraints_applied`,
+     `in_plane_resolved`, `sign_flag`, `extent_m_sorted`,
+     `deduped_observations` on every refined object.
+
+Refinement is CPU-only, bounded (fixed iteration budgets, no RNG —
+identical inputs always produce identical manifests) and skips itself
+under time pressure when ctx.budget is supplied (recorded scene-level as
+refinement_skipped, not per object) — see fuse_scene_objects_with_meta.
+The per-frame cache contract is untouched: everything here reads masks /
+splats / poses that already exist; nothing new is written per frame.
+
+Consumers: process_receiver.run_perception (manifest "objects" array +
+sampling.refinement_skipped).
 """
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any, Callable, Optional
 
 import numpy as np
 
+import reproject
 from placement import min_axis_to_vertical_deg
 from roomstudio_schemas.placement_math import (
     DegenerateGeometryError,
+    mask_containment,
+    robust_cloud_stats,
     triangulate_rays,
 )
-from roomstudio_schemas.pose_math import quat_to_rotmat
+from roomstudio_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +117,67 @@ _CLUSTER_DIST_M = float(os.environ.get("FUSION_CLUSTER_DIST_M", "0.4"))
 # RMS perpendicular distance under this bound.
 _RAY_RMS_M = float(os.environ.get("FUSION_RAY_RMS_M", "0.3"))
 
+# --- Refinement (decision 0067) env knobs -----------------------------------
+_DEDUP_CONTAINMENT = float(os.environ.get("PLACEMENT_DEDUP_CONTAINMENT", "0.8"))
+_FOOTPRINT_MIN = float(os.environ.get("PLACEMENT_FOOTPRINT_MIN", "0.5"))
+_INPLANE_MARGIN = float(os.environ.get("PLACEMENT_INPLANE_MARGIN", "0.03"))
+_SIGNFLAG_MARGIN = float(os.environ.get("PLACEMENT_SIGNFLAG_MARGIN", "0.03"))
+_REFINE_MIN_REMAINING_S = float(os.environ.get("PLACEMENT_REFINE_MIN_REMAINING_S", "20"))
+
+
+def _refinement_enabled() -> bool:
+    return os.environ.get("PLACEMENT_REFINE", "1") == "1"
+
+
+# -----------------------------------------------------------------------------
+# Refinement context: the IO seam. Fusion never touches GCS directly — the
+# caller (process_receiver.py, or a test) supplies plain accessor callables.
+# -----------------------------------------------------------------------------
+
+@dataclass
+class RefinementContext:
+    """Fusion-time data access for decision 0067's refinement pass.
+
+    get_camera(frame_index) -> (pose, intrinsics) | None
+    get_mask_stack(frame_index) -> (N, H, W) bool | None — this frame's
+        full detection-order mask stack (masks.npz), fetched once and
+        reused for every observation in that frame.
+    get_splat(splat_gcs_uri) -> (M, 3) float64 local-frame points | None
+    get_appearance(splat_gcs_uri) -> reproject.SplatAppearance | None —
+        optional; absence degrades every tier-2 use to tier-1-only.
+    get_rgb(frame_index) -> (H, W, 3) float64 in [0, 1] | None — optional,
+        same degrade.
+    budget: object exposing .remaining() -> float (seconds), or None for
+        no limit (e.g. tests). Refinement is skipped scene-wide (not
+        per-object — a half-refined scene is worse than a legacy one) if
+        remaining() < min_remaining_s at the point fusion runs.
+    """
+    get_camera: Callable[[int], Optional[tuple]]
+    get_mask_stack: Callable[[int], Optional[np.ndarray]]
+    get_splat: Callable[[str], Optional[np.ndarray]]
+    get_appearance: Optional[Callable[[str], Optional["reproject.SplatAppearance"]]] = None
+    get_rgb: Optional[Callable[[int], Optional[np.ndarray]]] = None
+    budget: Optional[Any] = None
+    min_remaining_s: float = _REFINE_MIN_REMAINING_S
+
+    def mask_for(self, frame_index, mask_index) -> Optional[np.ndarray]:
+        if mask_index is None:
+            return None
+        stack = self.get_mask_stack(frame_index)
+        if stack is None or mask_index >= stack.shape[0]:
+            return None
+        return stack[mask_index]
+
+
+def _budget_allows(ctx: Optional[RefinementContext]) -> bool:
+    if ctx is None or ctx.budget is None:
+        return True
+    return ctx.budget.remaining() >= ctx.min_remaining_s
+
+
+# -----------------------------------------------------------------------------
+# Shared observation helpers (legacy + refined paths)
+# -----------------------------------------------------------------------------
 
 def _collect_observations(frame_results: list[dict]) -> list[dict]:
     obs = []
@@ -88,6 +203,38 @@ def _center(o: dict) -> Optional[np.ndarray]:
         return None
     return np.asarray(wt["position"], dtype=np.float64)
 
+
+def _has_frame(cluster: list[dict], frame_index) -> bool:
+    """One physical object appears at most once per frame — a cluster must
+    never take two observations from the same frame_index."""
+    return any(m["frame_index"] == frame_index for m in cluster)
+
+
+def _try_triangulate(members: list[dict]):
+    """Triangulate the view rays of a set of observations, or None.
+
+    Rejects solutions that land behind (or essentially at) any contributing
+    camera: rays from a shared origin intersect exactly at that origin, so
+    without this check two different objects seen by the same camera would
+    'triangulate' perfectly at the camera center."""
+    rays = [m["view_ray"] for m in members if m.get("view_ray")]
+    if len(rays) < 2:
+        return None
+    origins = np.array([r["origin"] for r in rays])
+    dirs = np.array([r["direction"] for r in rays])
+    try:
+        center, rms = triangulate_rays(origins, dirs)
+    except DegenerateGeometryError:
+        return None
+    along = ((center - origins) * dirs).sum(axis=1)
+    if np.any(along < 0.1):
+        return None
+    return center, rms
+
+
+# -----------------------------------------------------------------------------
+# Legacy fusion (unchanged) — the PLACEMENT_REFINE=0 / no-ctx fallback
+# -----------------------------------------------------------------------------
 
 def _fuse_placed_cluster(members: list[dict], object_id: str) -> dict:
     positions = np.stack([_center(m) for m in members])
@@ -119,34 +266,6 @@ def _fuse_placed_cluster(members: list[dict], object_id: str) -> dict:
             "score": best["score"],
         },
     }
-
-
-def _try_triangulate(members: list[dict]):
-    """Triangulate the view rays of a set of observations, or None.
-
-    Rejects solutions that land behind (or essentially at) any contributing
-    camera: rays from a shared origin intersect exactly at that origin, so
-    without this check two different objects seen by the same camera would
-    'triangulate' perfectly at the camera center."""
-    rays = [m["view_ray"] for m in members if m.get("view_ray")]
-    if len(rays) < 2:
-        return None
-    origins = np.array([r["origin"] for r in rays])
-    dirs = np.array([r["direction"] for r in rays])
-    try:
-        center, rms = triangulate_rays(origins, dirs)
-    except DegenerateGeometryError:
-        return None
-    along = ((center - origins) * dirs).sum(axis=1)
-    if np.any(along < 0.1):
-        return None
-    return center, rms
-
-
-def _has_frame(cluster: list[dict], frame_index) -> bool:
-    """One physical object appears at most once per frame — a cluster must
-    never take two observations from the same frame_index."""
-    return any(m["frame_index"] == frame_index for m in cluster)
 
 
 def _fuse_ray_cluster(members: list[dict], object_id: str) -> dict:
@@ -224,12 +343,9 @@ def _unplaced_object(members: list[dict], object_id: str, reason: str) -> dict:
     }
 
 
-def fuse_scene_objects(frame_results: list[dict]) -> list[dict]:
-    """Cluster per-frame observations into fused scene objects.
-
-    Returns the manifest's scene-level "objects" array. Never raises; a
-    pathological input degrades to unplaced entries, not a failed scene.
-    """
+def _fuse_scene_objects_legacy(frame_results: list[dict]) -> list[dict]:
+    """The original (pre-0067) algorithm, untouched. This is
+    PLACEMENT_REFINE=0's bit-parity target and the no-ctx fallback."""
     observations = _collect_observations(frame_results)
 
     by_label: dict[str, list[dict]] = {}
@@ -309,3 +425,528 @@ def fuse_scene_objects(frame_results: list[dict]) -> list[dict]:
         len(observations), len(fused), placed_count,
     )
     return fused
+
+
+# -----------------------------------------------------------------------------
+# Refinement lock 1: same-frame duplicate-detection dedup
+# -----------------------------------------------------------------------------
+
+def _dedup_same_frame(observations: list[dict], ctx: RefinementContext) -> tuple[list[dict], list[dict]]:
+    """Absorb same-frame same-label duplicate detections before clustering.
+
+    A pair (i, j) is a duplicate detection only if it is a MUTUAL
+    singleton: i's only >=threshold containment match in this frame is j,
+    and vice versa. A mask containing multiple mutually-disjoint same-
+    label children (a coarse parent region — e.g. a "doorway" mask that
+    happens to contain two genuinely separate doors) fails this test for
+    every child and is left alone, preserving the "disjoint same-label
+    masks are different objects" invariant the legacy frame-uniqueness
+    guard also protects.
+    """
+    by_frame: dict[Any, list[dict]] = {}
+    for o in observations:
+        by_frame.setdefault(o["frame_index"], []).append(o)
+
+    keep: list[dict] = []
+    records: list[dict] = []
+    for frame_index, group in by_frame.items():
+        if len(group) < 2:
+            keep.extend(group)
+            continue
+        masks = [ctx.mask_for(frame_index, o.get("mask_index")) for o in group]
+        if any(m is None for m in masks):
+            keep.extend(group)
+            continue
+        n = len(group)
+        containment = [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(n):
+                if i != j:
+                    containment[i][j] = mask_containment(masks[i], masks[j])
+        neighbors = [
+            [j for j in range(n) if j != i and containment[i][j] >= _DEDUP_CONTAINMENT]
+            for i in range(n)
+        ]
+        absorbed = [False] * n
+        for i in range(n):
+            if len(neighbors[i]) != 1:
+                continue
+            j = neighbors[i][0]
+            if i >= j or neighbors[j] != [i]:
+                continue  # only a clean, mutual, singleton pair dedups
+            lo, hi = (i, j) if group[i]["score"] <= group[j]["score"] else (j, i)
+            absorbed[lo] = True
+            records.append({
+                "frame_index": frame_index,
+                "kept_mask_index": group[hi]["mask_index"],
+                "absorbed_mask_index": group[lo]["mask_index"],
+                "containment": containment[lo][hi],
+            })
+        keep.extend(group[k] for k in range(n) if not absorbed[k])
+    return keep, records
+
+
+# -----------------------------------------------------------------------------
+# Refinement lock 1(b): footprint-based join / merge
+# -----------------------------------------------------------------------------
+
+def _provisional_ray_volume(cluster: list[dict], ctx: RefinementContext):
+    """Best-effort (splat_local_points, rotation_xyzw, translation, scale)
+    for a ray cluster's CURRENT members — the same recipe _fuse_ray_cluster
+    uses, computed early so a candidate frame can be footprint-tested
+    against it. None if the cluster can't yet support one (fewer than 2
+    triangulatable members, or the splat/rotation aren't available)."""
+    tri = _try_triangulate(cluster)
+    if tri is None:
+        return None
+    center, _rms = tri
+    best = max(cluster, key=lambda m: m["score"])
+    rot = best["placement"].get("world_rotation_xyzw")
+    if not rot:
+        return None
+    splat = ctx.get_splat(best["splat_gcs_uri"])
+    if splat is None:
+        return None
+    extents = []
+    for m in cluster:
+        ray = m.get("view_ray")
+        if not ray:
+            continue
+        dist = float(np.linalg.norm(center - np.asarray(ray["origin"])))
+        extents.append(ray["angular_extent_rad"] * dist)
+    splat_extent = best["placement"].get("splat_max_extent")
+    if not extents or not splat_extent:
+        return None
+    scale = float(np.median(extents) / splat_extent)
+    return splat, rot, center, scale
+
+
+def _footprint_agrees(volume, frame_index, mask_index, ctx: RefinementContext, threshold: float) -> bool:
+    if volume is None:
+        return False
+    splat, rot, translation, scale = volume
+    cam = ctx.get_camera(frame_index)
+    mask = ctx.mask_for(frame_index, mask_index)
+    if cam is None or mask is None:
+        return False
+    pose, intrinsics = cam
+    world_pts = reproject.transform_points(splat, rot, translation, scale)
+    score = reproject.score_tier1_containment(world_pts, mask, intrinsics, pose)
+    return score >= threshold
+
+
+def _shared_frames_compatible(
+    cluster_a: list[dict], cluster_b: list[dict], ctx: Optional[RefinementContext]
+) -> bool:
+    """True if every frame shared between two clusters is duplicate-
+    consistent (dedup-style containment) rather than genuinely disjoint
+    same-label objects. No shared frames -> trivially compatible. No ctx
+    (no mask evidence) -> the legacy hard veto stands."""
+    by_frame_a = {m["frame_index"]: m for m in cluster_a}
+    shared = [m for m in cluster_b if m["frame_index"] in by_frame_a]
+    if not shared:
+        return True
+    if ctx is None:
+        return False
+    for mb in shared:
+        ma = by_frame_a[mb["frame_index"]]
+        mask_a = ctx.mask_for(ma["frame_index"], ma.get("mask_index"))
+        mask_b = ctx.mask_for(mb["frame_index"], mb.get("mask_index"))
+        if mask_a is None or mask_b is None:
+            return False
+        if mask_containment(mask_a, mask_b) < _DEDUP_CONTAINMENT:
+            return False
+    return True
+
+
+def _merge_cluster_pair(cluster_a: list[dict], cluster_b: list[dict]) -> list[dict]:
+    """Merge two (shared-frame-compatible) clusters, keeping only the
+    higher-scored observation for any frame present in both."""
+    by_frame_a = {m["frame_index"]: m for m in cluster_a}
+    merged = list(cluster_a)
+    for mb in cluster_b:
+        ma = by_frame_a.get(mb["frame_index"])
+        if ma is None:
+            merged.append(mb)
+        elif mb["score"] > ma["score"]:
+            merged.remove(ma)
+            merged.append(mb)
+    return merged
+
+
+def _cluster_ray_observations(
+    with_rays: list[dict], ctx: Optional[RefinementContext], refine: bool
+) -> list[list[dict]]:
+    ray_clusters: list[list[dict]] = []
+    for o in with_rays:
+        joined = False
+        for cluster in ray_clusters:
+            if _has_frame(cluster, o["frame_index"]):
+                continue
+            candidate = cluster + [o]
+            tri = _try_triangulate(candidate)
+            rms_ok = tri is not None and tri[1] <= _RAY_RMS_M
+            footprint_ok = False
+            if not rms_ok and refine and ctx is not None and len(cluster) >= 2:
+                volume = _provisional_ray_volume(cluster, ctx)
+                footprint_ok = _footprint_agrees(
+                    volume, o["frame_index"], o.get("mask_index"), ctx, _FOOTPRINT_MIN
+                )
+            if rms_ok or footprint_ok:
+                cluster.append(o)
+                joined = True
+                break
+        if not joined:
+            ray_clusters.append([o])
+
+    merged = True
+    while merged and len(ray_clusters) > 1:
+        merged = False
+        for i in range(len(ray_clusters)):
+            for j in range(i + 1, len(ray_clusters)):
+                ctx_for_veto = ctx if refine else None
+                if not _shared_frames_compatible(ray_clusters[i], ray_clusters[j], ctx_for_veto):
+                    continue
+                candidate = _merge_cluster_pair(ray_clusters[i], ray_clusters[j])
+                tri = _try_triangulate(candidate)
+                if tri is not None and tri[1] <= _RAY_RMS_M:
+                    ray_clusters[i] = candidate
+                    del ray_clusters[j]
+                    merged = True
+                    break
+            if merged:
+                break
+    return ray_clusters
+
+
+def _cluster_placed_observations(
+    placed: list[dict], ctx: Optional[RefinementContext], refine: bool
+) -> list[list[dict]]:
+    clusters: list[list[dict]] = []
+    for o in placed:
+        c = _center(o)
+        joined = False
+        for cluster in clusters:
+            if _has_frame(cluster, o["frame_index"]):
+                continue
+            ref = np.median(np.stack([_center(m) for m in cluster]), axis=0)
+            proximity_ok = np.linalg.norm(c - ref) <= _CLUSTER_DIST_M
+            footprint_ok = False
+            if not proximity_ok and refine and ctx is not None:
+                best = max(cluster, key=lambda m: m["score"])
+                best_wt = best["placement"]["world_transform"]
+                splat = ctx.get_splat(best["splat_gcs_uri"])
+                if splat is not None:
+                    volume = (splat, best_wt["rotation_xyzw"], ref, best_wt["scale"])
+                    footprint_ok = _footprint_agrees(
+                        volume, o["frame_index"], o.get("mask_index"), ctx, _FOOTPRINT_MIN
+                    )
+            if proximity_ok or footprint_ok:
+                cluster.append(o)
+                joined = True
+                break
+        if not joined:
+            clusters.append([o])
+
+    if not refine or ctx is None:
+        return clusters
+    merged = True
+    while merged and len(clusters) > 1:
+        merged = False
+        for i in range(len(clusters)):
+            for j in range(i + 1, len(clusters)):
+                if not _shared_frames_compatible(clusters[i], clusters[j], ctx):
+                    continue
+                candidate = _merge_cluster_pair(clusters[i], clusters[j])
+                positions = np.stack([_center(m) for m in candidate])
+                spread = float(np.linalg.norm(positions - np.median(positions, axis=0), axis=1).max())
+                if spread <= _CLUSTER_DIST_M:
+                    clusters[i] = candidate
+                    del clusters[j]
+                    merged = True
+                    break
+            if merged:
+                break
+    return clusters
+
+
+# -----------------------------------------------------------------------------
+# Refinement locks 3-6: silhouette fit, in-plane resolution, sign-flag,
+# instrument-scored best-member selection
+# -----------------------------------------------------------------------------
+
+def _member_observations(cluster: list[dict], ctx: RefinementContext):
+    """[(mask, intrinsics, pose), ...] for every cluster member fusion has
+    real evidence for. Members missing a mask/camera are silently dropped
+    (a partial cache miss degrades refinement, never crashes it)."""
+    out = []
+    for m in cluster:
+        cam = ctx.get_camera(m["frame_index"])
+        mask = ctx.mask_for(m["frame_index"], m.get("mask_index"))
+        if cam is None or mask is None:
+            continue
+        pose, intrinsics = cam
+        out.append((mask, intrinsics, pose))
+    return out
+
+
+def _score_candidate_over_frames(
+    local_points: np.ndarray,
+    rotation_xyzw,
+    translation,
+    scale: float,
+    frame_specs: list[tuple[int, Optional[int]]],
+    ctx: RefinementContext,
+    appearance: Optional["reproject.SplatAppearance"] = None,
+) -> Optional[float]:
+    """Mean combined (tier2-weighted-when-present) score of one candidate
+    transform across a set of (frame_index, mask_index) observations.
+    None if no observation had usable evidence."""
+    scores = []
+    for frame_index, mask_index in frame_specs:
+        cam = ctx.get_camera(frame_index)
+        mask = ctx.mask_for(frame_index, mask_index)
+        if cam is None or mask is None:
+            continue
+        pose, intrinsics = cam
+        rgb = ctx.get_rgb(frame_index) if (appearance is not None and ctx.get_rgb is not None) else None
+        result = reproject.score_placement(
+            local_points=local_points,
+            rotation_xyzw=rotation_xyzw,
+            translation=translation,
+            scale=scale,
+            mask=mask,
+            intrinsics=intrinsics,
+            pose=pose,
+            appearance=appearance,
+            rgb=rgb,
+        )
+        scores.append(reproject.combined_score(result))
+    return float(np.mean(scores)) if scores else None
+
+
+def _reselect_best_placed_member(obj: dict, cluster: list[dict], wt: dict, ctx: RefinementContext) -> None:
+    """Instrument-scored best-member selection for depth_fit clusters
+    (decision 0067 lock 2: rank by instrument score, detection score only
+    as a tiebreak). Each member already carries its own complete
+    world_transform (a single-view fit), so this is a well-defined,
+    non-circular per-member self-consistency check: does THIS member's own
+    splat+rotation+scale, at ITS OWN position, explain ITS OWN frame's
+    mask? Mutates obj/wt in place when a different member wins; a no-op
+    (silent) for single-member clusters or when evidence is missing.
+
+    Ray (layout_triangulated) clusters keep legacy detection-score
+    selection: unlike a depth_fit member, a ray member has no complete
+    per-member transform of its own (translation/scale are cluster-level,
+    derived FROM whichever member is "best"), so re-ranking members here
+    would require calibrating each candidate's scale against a transform
+    fit for a different splat's extent — a real correctness risk left for
+    a future pass rather than shipped unverified.
+    """
+    if len(cluster) < 2:
+        return
+    scored = []
+    for m in cluster:
+        m_wt = m["placement"].get("world_transform")
+        if not m_wt:
+            continue
+        m_splat = ctx.get_splat(m["splat_gcs_uri"])
+        mask = ctx.mask_for(m["frame_index"], m.get("mask_index"))
+        cam = ctx.get_camera(m["frame_index"])
+        if m_splat is None or mask is None or cam is None:
+            continue
+        pose, intrinsics = cam
+        m_appearance = ctx.get_appearance(m["splat_gcs_uri"]) if ctx.get_appearance is not None else None
+        rgb = ctx.get_rgb(m["frame_index"]) if (m_appearance is not None and ctx.get_rgb is not None) else None
+        result = reproject.score_placement(
+            local_points=m_splat, rotation_xyzw=m_wt["rotation_xyzw"], translation=m_wt["position"],
+            scale=m_wt["scale"], mask=mask, intrinsics=intrinsics, pose=pose,
+            appearance=m_appearance, rgb=rgb,
+        )
+        scored.append((reproject.combined_score(result), m["score"], m))
+    if not scored:
+        return
+    scored.sort(key=lambda c: (c[0], c[1]), reverse=True)
+    _best_score, _tiebreak, best_member = scored[0]
+    if best_member["splat_gcs_uri"] == obj["splat_gcs_uri"]:
+        return
+    best_wt = best_member["placement"]["world_transform"]
+    wt["rotation_xyzw"] = [float(c) for c in best_wt["rotation_xyzw"]]
+    wt["scale"] = float(best_wt["scale"])
+    obj["splat_gcs_uri"] = best_member["splat_gcs_uri"]
+    obj["source"] = {"frame_index": best_member["frame_index"], "mask_index": best_member["mask_index"]}
+
+
+def _refine_fused_object(obj: dict, cluster: list[dict], ctx: RefinementContext) -> dict:
+    """Apply instrument-scored best-member selection, silhouette fit,
+    in-plane resolution, and sign-flagging to one already-fused
+    (placed=True) object, in place on a copy. Every step degrades to a
+    no-op (recorded, never a crash) when evidence for it is missing."""
+    obj = dict(obj)
+    quality = dict(obj.get("quality", {}))
+    wt = dict(obj["world_transform"])
+    if obj["method"] == "depth_fit":
+        _reselect_best_placed_member(obj, cluster, wt, ctx)
+    local_points = ctx.get_splat(obj["splat_gcs_uri"])
+    appearance = ctx.get_appearance(obj["splat_gcs_uri"]) if ctx.get_appearance is not None else None
+    position_source = "triangulated" if obj["method"] == "layout_triangulated" else "depth_fit"
+    constraints_applied: list[str] = []
+    in_plane_resolved = False
+    sign_flag = False
+
+    frame_specs = [(m["frame_index"], m.get("mask_index")) for m in cluster]
+
+    if local_points is not None:
+        # --- Silhouette fit (>=2-view ray clusters only). ---
+        if obj["method"] == "layout_triangulated" and len(cluster) >= 2:
+            observations = _member_observations(cluster, ctx)
+            if len(observations) >= 2:
+                fit = reproject.fit_silhouette(
+                    local_points, wt["rotation_xyzw"], wt["scale"], wt["position"], observations
+                )
+                if fit["improved"]:
+                    wt["position"] = fit["translation"]
+                    wt["scale"] = fit["scale"]
+                    position_source = "silhouette_fit"
+                    quality["silhouette_fit_tier1_mean"] = fit["tier1_mean"]
+                    quality["silhouette_fit_init_tier1_mean"] = fit["init_tier1_mean"]
+
+        # --- In-plane resolution (planar splats only). ---
+        if reproject.is_planar(local_points):
+            candidates = reproject.in_plane_candidates(wt["rotation_xyzw"], local_points)
+            scored = []
+            for cand_rot in candidates:
+                s = _score_candidate_over_frames(
+                    local_points, cand_rot, wt["position"], wt["scale"], frame_specs, ctx, appearance
+                )
+                scored.append(s if s is not None else -1.0)
+            order = sorted(range(len(scored)), key=lambda i: -scored[i])
+            best_i, second_i = order[0], order[1]
+            margin = scored[best_i] - scored[second_i]
+            quality["in_plane_scores"] = scored
+            if scored[best_i] > -1.0 and margin >= _INPLANE_MARGIN:
+                wt["rotation_xyzw"] = list(candidates[best_i])
+                in_plane_resolved = True
+
+        # --- Sign-flag diagnostic (never auto-corrects). ---
+        best_member = max(cluster, key=lambda m: m["score"])
+        cam = ctx.get_camera(best_member["frame_index"])
+        if cam is not None:
+            pose, _intr = cam
+            R_wc = quat_to_rotmat(pose_quat(pose))
+            view_dir_world = R_wc @ np.array([0.0, 0.0, -1.0])
+            twin_rot = reproject.mirrored_twin(wt["rotation_xyzw"], view_dir_world)
+            true_score = _score_candidate_over_frames(
+                local_points, wt["rotation_xyzw"], wt["position"], wt["scale"], frame_specs, ctx, appearance
+            )
+            twin_score = _score_candidate_over_frames(
+                local_points, twin_rot, wt["position"], wt["scale"], frame_specs, ctx, appearance
+            )
+            if true_score is not None and twin_score is not None:
+                sign_flag = bool(twin_score > true_score + _SIGNFLAG_MARGIN)
+                quality["sign_flag_true_score"] = true_score
+                quality["sign_flag_twin_score"] = twin_score
+
+        # --- Final reprojection score + physical extents. ---
+        final_score = _score_candidate_over_frames(
+            local_points, wt["rotation_xyzw"], wt["position"], wt["scale"], frame_specs, ctx, appearance
+        )
+        if final_score is not None:
+            obj["reprojection_score"] = final_score
+        try:
+            stats = robust_cloud_stats(local_points)
+            extents_m = sorted((stats.extents * wt["scale"]).tolist(), reverse=True)
+            obj["extent_m_sorted"] = [float(v) for v in extents_m]
+        except DegenerateGeometryError:
+            pass
+
+    obj["world_transform"] = wt
+    obj["position_source"] = position_source
+    obj["constraints_applied"] = constraints_applied
+    obj["in_plane_resolved"] = in_plane_resolved
+    obj["sign_flag"] = sign_flag
+    obj["quality"] = quality
+    return obj
+
+
+# -----------------------------------------------------------------------------
+# Top-level entry points
+# -----------------------------------------------------------------------------
+
+def fuse_scene_objects_with_meta(
+    frame_results: list[dict], ctx: Optional[RefinementContext] = None
+) -> tuple[list[dict], dict]:
+    """Cluster per-frame observations into fused scene objects.
+
+    Returns (objects, meta) where meta = {"refinement_enabled": bool,
+    "refinement_skipped": bool}. refinement_skipped is True only when
+    refinement was requested (PLACEMENT_REFINE != "0") and a
+    RefinementContext was supplied, but the budget didn't leave enough
+    slack — the scene still gets a fully-formed manifest via the legacy
+    algorithm, just without the new fields. Never raises; a pathological
+    input degrades to unplaced entries, not a failed scene.
+    """
+    refine_flag = _refinement_enabled()
+    has_ctx = ctx is not None
+    budget_ok = _budget_allows(ctx) if has_ctx else True
+    run_refine = has_ctx and refine_flag and budget_ok
+    refinement_skipped = has_ctx and refine_flag and not budget_ok
+
+    if not run_refine:
+        return _fuse_scene_objects_legacy(frame_results), {
+            "refinement_enabled": run_refine,
+            "refinement_skipped": refinement_skipped,
+        }
+
+    observations = _collect_observations(frame_results)
+    by_label: dict[str, list[dict]] = {}
+    for o in observations:
+        by_label.setdefault(o["label"] or "", []).append(o)
+
+    fused: list[dict] = []
+    dedup_counts: dict[tuple, int] = {}
+    counter = 0
+    for label in sorted(by_label):
+        group = sorted(by_label[label], key=lambda o: -o["score"])
+        placed = [o for o in group if o["placement"].get("placed")]
+        with_rays = [
+            o for o in group
+            if not o["placement"].get("placed") and o.get("view_ray")
+        ]
+
+        placed, placed_dedup = _dedup_same_frame(placed, ctx)
+        with_rays, ray_dedup = _dedup_same_frame(with_rays, ctx)
+        for rec in placed_dedup + ray_dedup:
+            key = (rec["frame_index"], rec["kept_mask_index"])
+            dedup_counts[key] = dedup_counts.get(key, 0) + 1
+
+        for cluster in _cluster_placed_observations(placed, ctx, run_refine):
+            obj = _fuse_placed_cluster(cluster, f"obj_{counter:03d}")
+            counter += 1
+            obj = _refine_fused_object(obj, cluster, ctx)
+            n_dedup = sum(dedup_counts.get((m["frame_index"], m.get("mask_index")), 0) for m in cluster)
+            obj["deduped_observations"] = n_dedup
+            fused.append(obj)
+
+        for cluster in _cluster_ray_observations(with_rays, ctx, run_refine):
+            obj = _fuse_ray_cluster(cluster, f"obj_{counter:03d}")
+            counter += 1
+            if obj["placed"]:
+                obj = _refine_fused_object(obj, cluster, ctx)
+            n_dedup = sum(dedup_counts.get((m["frame_index"], m.get("mask_index")), 0) for m in cluster)
+            obj["deduped_observations"] = n_dedup
+            fused.append(obj)
+
+    placed_count = sum(1 for f in fused if f["placed"])
+    logger.info(
+        "fusion (refined): %d observations -> %d objects (%d placed)",
+        len(observations), len(fused), placed_count,
+    )
+    return fused, {"refinement_enabled": run_refine, "refinement_skipped": refinement_skipped}
+
+
+def fuse_scene_objects(frame_results: list[dict], ctx: Optional[RefinementContext] = None) -> list[dict]:
+    """Convenience wrapper over fuse_scene_objects_with_meta for callers
+    (and the existing test suite) that only need the objects array."""
+    objects, _meta = fuse_scene_objects_with_meta(frame_results, ctx)
+    return objects
