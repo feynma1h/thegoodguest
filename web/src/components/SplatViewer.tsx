@@ -19,20 +19,34 @@
  * disc, bounded orbit, and a short dolly-in on arrival. Spark's splat
  * shaders ignore three.js fog, so all depth falloff here is texture/CSS.
  *
- * Reveal (design §4, the objects-first assembly — literally our path,
- * since the room-shell pipeline is unbuilt): with `reveal`, objects
- * arrive one at a time onto the bare ground plane, largest first, each
- * dropping softly into place; `onRevealStep` fires as each arrives (the
- * DOM layer names it) and `onRevealDone` when the room is assembled.
- * Reduced motion collapses the assembly to an immediate full room.
+ * Reveal (design §4 + decision 0066): with `reveal`, the shell arrives
+ * first — floor, then walls, the stage standing up — and then objects
+ * one at a time, largest first, each dropping softly into place;
+ * `onRevealStep` fires as each object arrives (the DOM layer names it)
+ * and `onRevealDone` when the room is assembled. Without a shell the
+ * objects assemble on the honest grid, as before. Reduced motion
+ * collapses everything to an immediate full room.
+ *
+ * Shell rendering: single-sided textured quads (`shell` prop —
+ * renderer-agnostic ShellPlane[]), depthWrite:true with an alphaTest
+ * cutout for the floor's shape; textures fetch via fetch()+ImageBitmap
+ * (connect-src covers storage.googleapis.com; no CSP change). Untextured
+ * planes render a flat warm neutral. The V1 depth probe proved this
+ * exact mesh configuration composites correctly with Spark splats.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { PositionedSplat } from "@/lib/api/types";
+import type { PositionedSplat, ShellPlane } from "@/lib/api/types";
 
 interface SplatViewerProps {
   splats: PositionedSplat[];
+  /** Room shell (decision 0066): textured world-space quads rendered as
+   * the stage under the objects. Single-sided, so the orbiting camera
+   * sees through the near wall (the dollhouse cutaway — proven with the
+   * V1 depth probe: Spark splats depth-composite correctly against
+   * depthWrite:true meshes both ways). Absent/null keeps the grid. */
+  shell?: ShellPlane[] | null;
   className?: string;
   /** Slow auto-orbit until the user grabs the scene (landing demo). */
   idleOrbit?: boolean;
@@ -102,9 +116,19 @@ const REVEAL_LEAD_MS = 500;
 const REVEAL_STEP_MS = 650;
 const REVEAL_DROP_MS = 700;
 const REVEAL_DROP_M = 0.4;
+// Shell staging (0066: the shell is the stage — floor, then walls, then
+// the objects): floor appears at REVEAL_LEAD, each wall SHELL_WALL_STEP
+// later, and the object assembly starts a beat after the last wall.
+const SHELL_FLOOR_MS = 600;
+const SHELL_WALL_STEP_MS = 350;
+
+/** Untextured ("unobserved") planes get a flat warm neutral — a surface
+ * honestly present but never photographed; nothing fake renders. */
+const SHELL_NEUTRAL = 0x4a4136;
 
 export default function SplatViewer({
   splats,
+  shell = null,
   className,
   idleOrbit = false,
   frameless = false,
@@ -114,8 +138,11 @@ export default function SplatViewer({
 }: SplatViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const key = useMemo(
-    () => splats.map((s) => `${s.url}@${s.position.join(",")}`).join("|"),
-    [splats],
+    () =>
+      splats.map((s) => `${s.url}@${s.position.join(",")}`).join("|") +
+      "|shell:" +
+      (shell?.map((p) => p.texture_url ?? p.kind).join(",") ?? "none"),
+    [splats, shell],
   );
   const [outcome, setOutcome] = useState<LoadOutcome | null>(null);
 
@@ -128,16 +155,16 @@ export default function SplatViewer({
     revealDoneRef.current = onRevealDone;
   });
 
-  const phase: "empty" | "loading" | "ready" | "error" =
-    splats.length === 0
-      ? "empty"
-      : outcome?.key === key
-        ? outcome.phase
-        : "loading";
+  const hasContent = splats.length > 0 || (shell?.length ?? 0) > 0;
+  const phase: "empty" | "loading" | "ready" | "error" = !hasContent
+    ? "empty"
+    : outcome?.key === key
+      ? outcome.phase
+      : "loading";
   const error = outcome?.key === key && outcome.phase === "error" ? outcome.error : null;
 
   useEffect(() => {
-    if (splats.length === 0) return;
+    if (splats.length === 0 && (shell?.length ?? 0) === 0) return;
     const container = containerRef.current;
     if (!container) return;
 
@@ -176,6 +203,11 @@ export default function SplatViewer({
         const spark = new SparkRenderer({ renderer });
         scene.add(spark);
 
+        const shellPlanes = shell ?? [];
+        const shellHasFloor = shellPlanes.some((p) => p.kind === "floor");
+
+        // The grid is the honest no-shell stage; when the shell brings the
+        // room's real measured floor, the grid stands down.
         const ground = new THREE.Mesh(
           new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE),
           new THREE.MeshBasicMaterial({
@@ -185,7 +217,65 @@ export default function SplatViewer({
           }),
         );
         ground.rotation.x = -Math.PI / 2;
-        scene.add(ground);
+        if (!shellHasFloor) scene.add(ground);
+
+        // --- Room shell (0066): one single-sided textured quad per plane.
+        // depthWrite:true + alphaTest cutout on the floor — exactly the
+        // configuration the V1 probe proved composites with Spark splats.
+        const shellMeshes = shellPlanes.map((p) => {
+          const geom = new THREE.BufferGeometry();
+          geom.setAttribute(
+            "position",
+            new THREE.Float32BufferAttribute(p.corners.flat(), 3),
+          );
+          // Texture frame: corner0 = (0,0), +U to corner1, +V to corner3
+          // (the bake's orientation contract; PNG top row = +V far edge,
+          // which matches bottom-origin UVs).
+          geom.setAttribute(
+            "uv",
+            new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2),
+          );
+          geom.setIndex([0, 1, 2, 0, 2, 3]);
+          geom.computeVertexNormals();
+          const mat = new THREE.MeshBasicMaterial({
+            color: p.texture_url ? 0xffffff : SHELL_NEUTRAL,
+            side: THREE.FrontSide,
+            depthWrite: true,
+            ...(p.kind === "floor" ? { transparent: true, alphaTest: 0.5 } : {}),
+          });
+          const mesh = new THREE.Mesh(geom, mat);
+          scene.add(mesh);
+          return { mesh, plane: p };
+        });
+
+        // Shell textures load via fetch() + createImageBitmap — covered by
+        // connect-src (storage.googleapis.com); THREE.TextureLoader's <img>
+        // path would need an img-src CSP change, so it is deliberately NOT
+        // used. A failed fetch keeps the neutral material (never fake).
+        for (const { mesh, plane } of shellMeshes) {
+          if (!plane.texture_url) continue;
+          fetch(plane.texture_url)
+            .then((r) => {
+              if (!r.ok) throw new Error(`texture fetch ${r.status}`);
+              return r.blob();
+            })
+            .then((b) => createImageBitmap(b, { imageOrientation: "flipY" }))
+            .then((bmp) => {
+              if (disposed) return;
+              const tex = new THREE.Texture(bmp);
+              // The bitmap is pre-flipped; three must not flip again
+              // (it wouldn't for ImageBitmap uploads anyway).
+              tex.flipY = false;
+              tex.colorSpace = THREE.SRGBColorSpace;
+              tex.needsUpdate = true;
+              mesh.material.map = tex;
+              mesh.material.color.set(0xffffff);
+              mesh.material.needsUpdate = true;
+            })
+            .catch(() => {
+              /* neutral material stays — an honest untextured plane */
+            });
+        }
 
         const meshes = splats.map((s) => {
           const mesh = new SplatMesh({ url: s.url });
@@ -199,19 +289,26 @@ export default function SplatViewer({
         // --- Framing: fit the camera to the content, not the content to a
         // hardcoded camera. Object extents aren't known until meshes load,
         // so the radius is estimated from placements (position spread +
-        // per-object scale as a proxy for size).
-        const centroid = splats
-          .reduce(
-            (acc, s) => acc.add(new THREE.Vector3(...s.position)),
-            new THREE.Vector3(),
-          )
-          .divideScalar(splats.length);
+        // per-object scale as a proxy for size). Shell corners join the
+        // fit so the whole room frames; with no objects (a shell-only
+        // room) they carry the centroid too.
+        const shellCorners = shellPlanes.flatMap((p) =>
+          p.corners.map((c) => new THREE.Vector3(...c)),
+        );
+        const centroidSource =
+          splats.length > 0
+            ? splats.map((s) => new THREE.Vector3(...s.position))
+            : shellCorners;
+        const centroid = centroidSource
+          .reduce((acc, v) => acc.add(v), new THREE.Vector3())
+          .divideScalar(centroidSource.length);
         const radius = Math.max(
           1.4,
           ...splats.map(
             (s) =>
               centroid.distanceTo(new THREE.Vector3(...s.position)) + s.scale * 1.2,
           ),
+          ...shellCorners.map((c) => centroid.distanceTo(c)),
         );
         const target = new THREE.Vector3(
           centroid.x,
@@ -260,13 +357,28 @@ export default function SplatViewer({
         setOutcome({ key, phase: "ready" });
         renderer.domElement.style.opacity = "1";
 
-        // --- Assembly (design §4): largest pieces first, each dropped
-        // softly onto the ground plane. Reduced motion skips straight to
-        // the assembled room.
+        // --- Assembly (design §4, extended by 0066): the shell is the
+        // stage — floor, then walls — then the largest pieces first, each
+        // dropped softly onto it. Reduced motion skips straight to the
+        // assembled room.
         const reducedMotion = window.matchMedia(
           "(prefers-reduced-motion: reduce)",
         ).matches;
-        const assembling = reveal && !reducedMotion && meshes.length > 0;
+        const assembling =
+          reveal && !reducedMotion && (meshes.length > 0 || shellMeshes.length > 0);
+        // Shell first: floor at the lead, each wall a step later; objects
+        // begin a beat after the last wall (or at the lead when no shell).
+        const shellOrder = [...shellMeshes].sort((a) =>
+          a.plane.kind === "floor" ? -1 : 1,
+        );
+        const shellStartAt = new Map<number, number>(); // shell idx -> start ms
+        const shellDelayMs =
+          shellMeshes.length > 0
+            ? SHELL_FLOOR_MS +
+              shellOrder.filter((s) => s.plane.kind === "wall").length *
+                SHELL_WALL_STEP_MS +
+              250
+            : 0;
         const revealOrder = splats
           .map((s, i) => ({ i, size: s.scale }))
           .sort((a, b) => b.size - a.size)
@@ -276,8 +388,24 @@ export default function SplatViewer({
         let revealDoneFired = !assembling;
         const revealT0 = performance.now();
         if (assembling) {
+          let wallSeq = 0;
+          shellOrder.forEach((entry) => {
+            const idx = shellMeshes.indexOf(entry);
+            const at =
+              entry.plane.kind === "floor"
+                ? revealT0 + REVEAL_LEAD_MS
+                : revealT0 +
+                  REVEAL_LEAD_MS +
+                  SHELL_FLOOR_MS +
+                  wallSeq++ * SHELL_WALL_STEP_MS;
+            shellStartAt.set(idx, at);
+            entry.mesh.visible = false;
+          });
           for (const { i, seq } of revealOrder) {
-            revealStartAt.set(i, revealT0 + REVEAL_LEAD_MS + seq * REVEAL_STEP_MS);
+            revealStartAt.set(
+              i,
+              revealT0 + REVEAL_LEAD_MS + shellDelayMs + seq * REVEAL_STEP_MS,
+            );
             meshes[i].visible = false;
           }
         } else if (reveal && !disposed) {
@@ -312,6 +440,13 @@ export default function SplatViewer({
           }
           if (assembling && !revealDoneFired) {
             let allSettled = true;
+            for (const [i, startMs] of shellStartAt) {
+              if (now >= startMs) {
+                shellMeshes[i].mesh.visible = true;
+              } else {
+                allSettled = false;
+              }
+            }
             for (const [i, startMs] of revealStartAt) {
               const p = (now - startMs) / REVEAL_DROP_MS;
               if (p < 0) {
@@ -364,6 +499,12 @@ export default function SplatViewer({
             scene.remove(m);
             m.dispose?.();
           }
+          for (const { mesh } of shellMeshes) {
+            scene.remove(mesh);
+            mesh.geometry.dispose();
+            mesh.material.map?.dispose();
+            mesh.material.dispose();
+          }
           ground.geometry.dispose();
           (ground.material as { map?: { dispose(): void } }).map?.dispose();
           (ground.material as { dispose(): void }).dispose();
@@ -385,7 +526,7 @@ export default function SplatViewer({
       disposed = true;
       cleanup?.();
     };
-  }, [key, splats, idleOrbit, reveal]);
+  }, [key, splats, shell, idleOrbit, reveal]);
 
   return (
     <div

@@ -146,6 +146,94 @@ def make_plant(rng):
 
 SCENE_ID = "11111111-1111-4111-8111-111111111111"  # matches the mock fixture
 GS_PREFIX = f"gs://mock-outputs/scenes/{SCENE_ID}/splats"
+SHELL_GS_PREFIX = f"gs://mock-outputs/scenes/{SCENE_ID}/shell/textures"
+
+
+# ---------------------------------------------------------------------------
+# Room shell fixture (decision 0066) — kept in sync with mock.ts's shell doc
+# ---------------------------------------------------------------------------
+
+def _texture_png(rng, base_rgb, size=512, *, alpha_inset=False) -> bytes:
+    """A flat material texture: base tone + fine noise + soft banding.
+    alpha_inset rounds the corners off (exercises the floor's alpha-shape
+    path without pretending to be a detected polygon)."""
+    from PIL import Image  # local import: PIL is a dev-tool dep here
+
+    noise = rng.normal(0.0, 0.02, size=(size, size, 1))
+    band = 0.03 * np.sin(np.linspace(0, 14 * math.pi, size))[None, :, None]
+    img = np.clip(np.array(base_rgb)[None, None, :] + noise + band, 0, 1)
+    rgba = np.dstack([
+        (img * 255).astype(np.uint8),
+        np.full((size, size), 255, dtype=np.uint8),
+    ])
+    if alpha_inset:
+        # Rounded-rect mask: transparent beyond radius r of the inset rect.
+        r = size * 0.06
+        yy, xx = np.mgrid[0:size, 0:size].astype(np.float64)
+        dx = np.maximum(np.maximum(r - xx, xx - (size - 1 - r)), 0)
+        dy = np.maximum(np.maximum(r - yy, yy - (size - 1 - r)), 0)
+        rgba[dx * dx + dy * dy > r * r, 3] = 0
+    import io as _io
+
+    buf = _io.BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def write_shell_fixture(rng) -> dict:
+    """Write shell_*.png textures and return the shell doc + url entries.
+    Geometry mirrors mock.ts: floor at y=0, back wall at z=-2.6, side wall
+    at x=-2.2 (UNTEXTURED — the neutral-treatment state), corners wound
+    with the front face toward the room interior."""
+    floor_png = _texture_png(rng, [0.62, 0.5, 0.36], alpha_inset=True)  # warm wood
+    wall_png = _texture_png(rng, [0.82, 0.76, 0.66])  # plaster
+    (OUT_DIR / "shell_floor.png").write_bytes(floor_png)
+    (OUT_DIR / "shell_wall_00.png").write_bytes(wall_png)
+    print(f"  shell_floor.png / shell_wall_00.png → {OUT_DIR}")
+
+    shell = {
+        "shell_version": 1,
+        "scene_id": SCENE_ID,
+        "status": "ready",
+        "reason": None,
+        "method": "arkit_planes",
+        "floor": {
+            "quad": [[-2.2, 0, 1.4], [1.8, 0, 1.4], [1.8, 0, -2.6], [-2.2, 0, -2.6]],
+            "y": 0,
+            "texture_gcs_uri": f"{SHELL_GS_PREFIX}/floor.png",
+            "observed_fraction": 0.82,
+            "inpainted_fraction": 0.11,
+            "source": "baked",
+        },
+        "walls": [
+            {
+                "wall_id": "wall_00",
+                "quad": [[-2.2, 0, -2.6], [1.8, 0, -2.6],
+                         [1.8, 2.2, -2.6], [-2.2, 2.2, -2.6]],
+                "texture_gcs_uri": f"{SHELL_GS_PREFIX}/wall_00.png",
+                "observed_fraction": 0.74,
+                "inpainted_fraction": 0.18,
+                "source": "baked",
+                "classification": "wall",
+            },
+            {
+                "wall_id": "wall_01",
+                "quad": [[-2.2, 0, 1.4], [-2.2, 0, -2.6],
+                         [-2.2, 2.2, -2.6], [-2.2, 2.2, 1.4]],
+                "texture_gcs_uri": None,
+                "observed_fraction": 0.09,
+                "inpainted_fraction": 0,
+                "source": "unobserved",
+                "classification": None,
+            },
+        ],
+        "quality": {"planes_in_bundle": 4, "frames_used": 9},
+    }
+    urls = {
+        f"{SHELL_GS_PREFIX}/floor.png": "/dev-fixtures/shell_floor.png",
+        f"{SHELL_GS_PREFIX}/wall_00.png": "/dev-fixtures/shell_wall_00.png",
+    }
+    return {"shell": shell, "urls": urls}
 
 # World transforms (ARKit frame: +Y up, meters) forming a small living-room
 # corner. Kept in sync with web/src/lib/api/mock.ts's READY_ASSETS.
@@ -190,6 +278,9 @@ def main() -> None:
             asset_urls[gs_uri] = f"/dev-fixtures/{name}.ply"
         print(f"  {path.name}: {xyz.shape[0]} gaussians, {path.stat().st_size / 1e6:.1f} MB")
 
+    shell_fixture = write_shell_fixture(rng)
+    asset_urls.update(shell_fixture["urls"])
+
     assets = {
         "scene_id": SCENE_ID,
         "manifest": {
@@ -198,6 +289,7 @@ def main() -> None:
             "objects": manifest_objects,
             "frames": [],
         },
+        "shell": shell_fixture["shell"],
         "asset_urls": asset_urls,
         "expires_at": "2099-01-01T00:00:00+00:00",
     }

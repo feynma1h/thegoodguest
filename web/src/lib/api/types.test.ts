@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { assembleScene, type SceneAssets } from "./types";
+import { assembleScene, type SceneAssets, type ShellDoc } from "./types";
 
 const GS = "gs://outputs/scenes/s1/splats/00_chair.ply";
 
@@ -87,5 +87,134 @@ describe("assembleScene", () => {
     const { splats, unrenderable } = assembleScene(a);
     expect(splats).toEqual([]);
     expect(unrenderable).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shell mapping (decision 0066)
+// ---------------------------------------------------------------------------
+
+const FLOOR_TEX = "gs://outputs/scenes/s1/shell/textures/floor.png";
+const WALL_TEX = "gs://outputs/scenes/s1/shell/textures/wall_00.png";
+
+function shellDoc(overrides: Partial<ShellDoc> = {}): ShellDoc {
+  return {
+    shell_version: 1,
+    scene_id: "s1",
+    status: "ready",
+    reason: null,
+    method: "arkit_planes",
+    floor: {
+      quad: [
+        [0, -1, 2],
+        [4, -1, 2],
+        [4, -1, -2],
+        [0, -1, -2],
+      ],
+      y: -1,
+      texture_gcs_uri: FLOOR_TEX,
+      observed_fraction: 0.8,
+      inpainted_fraction: 0.1,
+      source: "baked",
+    },
+    walls: [
+      {
+        wall_id: "wall_00",
+        quad: [
+          [0, -1, -2],
+          [4, -1, -2],
+          [4, 1, -2],
+          [0, 1, -2],
+        ],
+        texture_gcs_uri: WALL_TEX,
+        observed_fraction: 0.7,
+        inpainted_fraction: 0.2,
+        source: "baked",
+        classification: "wall",
+      },
+      {
+        wall_id: "wall_01",
+        quad: [
+          [0, -1, 2],
+          [0, -1, -2],
+          [0, 1, -2],
+          [0, 1, 2],
+        ],
+        texture_gcs_uri: null,
+        observed_fraction: 0.05,
+        inpainted_fraction: 0,
+        source: "unobserved",
+        classification: null,
+      },
+    ],
+    quality: { planes_in_bundle: 3, frames_used: 4 },
+    ...overrides,
+  };
+}
+
+describe("assembleScene shell mapping", () => {
+  it("yields shell null when the field is absent (not yet)", () => {
+    const { shell } = assembleScene(assets());
+    expect(shell).toBeNull();
+  });
+
+  it("yields shell null when the field is explicitly null", () => {
+    const a = assets();
+    a.shell = null;
+    expect(assembleScene(a).shell).toBeNull();
+  });
+
+  it("yields shell null for an unavailable document (never coming)", () => {
+    const a = assets();
+    a.shell = shellDoc({ status: "unavailable", reason: "no_geometry_source", floor: null, walls: [] });
+    expect(assembleScene(a).shell).toBeNull();
+    // The raw distinction stays readable on the assets object itself.
+    expect(a.shell.status).toBe("unavailable");
+  });
+
+  it("maps a ready shell to planes: floor first, signed texture URLs", () => {
+    const a = assets();
+    a.shell = shellDoc();
+    a.asset_urls[FLOOR_TEX] = "https://signed.example/floor.png";
+    a.asset_urls[WALL_TEX] = "https://signed.example/wall_00.png";
+    const { shell } = assembleScene(a);
+    expect(shell).not.toBeNull();
+    expect(shell!.map((p) => p.kind)).toEqual(["floor", "wall", "wall"]);
+    expect(shell![0].texture_url).toBe("https://signed.example/floor.png");
+    expect(shell![0].corners).toEqual(shellDoc().floor!.quad);
+    expect(shell![1].texture_url).toBe("https://signed.example/wall_00.png");
+    expect(shell![0].observed_fraction).toBe(0.8);
+    expect(shell![0].inpainted_fraction).toBe(0.1);
+  });
+
+  it("maps untextured (unobserved) planes with texture_url null", () => {
+    const a = assets();
+    a.shell = shellDoc();
+    a.asset_urls[FLOOR_TEX] = "https://signed.example/floor.png";
+    a.asset_urls[WALL_TEX] = "https://signed.example/wall_00.png";
+    const { shell } = assembleScene(a);
+    expect(shell![2].texture_url).toBeNull();
+  });
+
+  it("maps a textured plane whose URL was not signed to texture_url null", () => {
+    const a = assets();
+    a.shell = shellDoc();
+    // No asset_urls entries for the shell textures at all.
+    const { shell } = assembleScene(a);
+    expect(shell![0].texture_url).toBeNull();
+  });
+
+  it("yields shell null for a ready doc with no planes at all", () => {
+    const a = assets();
+    a.shell = shellDoc({ floor: null, walls: [] });
+    expect(assembleScene(a).shell).toBeNull();
+  });
+
+  it("handles a walls-only shell (open dollhouse ships as detected)", () => {
+    const a = assets();
+    const doc = shellDoc({ floor: null });
+    a.shell = doc;
+    const { shell } = assembleScene(a);
+    expect(shell!.map((p) => p.kind)).toEqual(["wall", "wall"]);
   });
 });

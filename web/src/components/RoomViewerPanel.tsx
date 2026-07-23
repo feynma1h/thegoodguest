@@ -18,6 +18,7 @@ import {
   assembleScene,
   type FusedObject,
   type PositionedSplat,
+  type ShellPlane,
 } from "@/lib/api/types";
 import { statusMeta } from "@/lib/status";
 
@@ -28,6 +29,7 @@ type Result =
       forScene: string;
       phase: "ready";
       splats: PositionedSplat[];
+      shell: ShellPlane[] | null;
       unrenderable: FusedObject[];
     };
 
@@ -80,8 +82,8 @@ export default function RoomViewerPanel({
       .getSceneAssets(sceneId)
       .then((assets) => {
         if (cancelled) return;
-        const { splats, unrenderable } = assembleScene(assets);
-        setResult({ forScene: sceneId, phase: "ready", splats, unrenderable });
+        const { splats, shell, unrenderable } = assembleScene(assets);
+        setResult({ forScene: sceneId, phase: "ready", splats, shell, unrenderable });
       })
       .catch((exc: unknown) => {
         if (cancelled) return;
@@ -124,7 +126,11 @@ export default function RoomViewerPanel({
 
   return (
     <div>
-      <SplatViewer splats={state.splats} className={className ?? "h-[62vh]"} />
+      <SplatViewer
+        splats={state.splats}
+        shell={state.shell}
+        className={className ?? "h-[62vh]"}
+      />
       <div className="mt-6">
         <Inventory splats={state.splats} unrenderable={state.unrenderable} />
       </div>

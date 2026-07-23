@@ -26,6 +26,7 @@ import {
   assembleScene,
   type FusedObject,
   type PositionedSplat,
+  type ShellPlane,
 } from "@/lib/api/types";
 import { hasSeenReveal, markRevealSeen } from "@/lib/seen";
 import { statusMeta } from "@/lib/status";
@@ -43,8 +44,17 @@ type AssetsResult =
       forScene: string;
       phase: "ready";
       splats: PositionedSplat[];
+      shell: ShellPlane[] | null;
       unrenderable: FusedObject[];
     };
+
+// Shell grace window (0066): the shell task lands a beat after `ready`,
+// so an ABSENT shell (field null — distinct from a written "unavailable"
+// document, which settles immediately) earns a couple of quiet refetches
+// before the room proceeds with the grid. Placeholder pacing — tune at
+// the real-browser reveal watch CLAUDE.md already schedules.
+const SHELL_GRACE_ATTEMPTS = 3; // total fetches, first included
+const SHELL_GRACE_DELAY_MS = 4000;
 
 type RevealPhase = "hold" | "assembling" | "settled";
 
@@ -67,14 +77,25 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    getApiClient()
-      .getSceneAssets(sceneId)
-      .then((sceneAssets) => {
+    (async () => {
+      try {
+        let sceneAssets = await getApiClient().getSceneAssets(sceneId);
+        // Absent shell (null/undefined) may just be a beat behind ready —
+        // refetch briefly. A present doc (ready OR unavailable) settles
+        // immediately; exhausted retries proceed with the grid.
+        for (
+          let attempt = 1;
+          sceneAssets.shell == null && attempt < SHELL_GRACE_ATTEMPTS;
+          attempt++
+        ) {
+          await new Promise((r) => setTimeout(r, SHELL_GRACE_DELAY_MS));
+          if (cancelled) return;
+          sceneAssets = await getApiClient().getSceneAssets(sceneId);
+        }
         if (cancelled) return;
-        const { splats, unrenderable } = assembleScene(sceneAssets);
-        setResult({ forScene: sceneId, phase: "ready", splats, unrenderable });
-      })
-      .catch((exc: unknown) => {
+        const { splats, shell, unrenderable } = assembleScene(sceneAssets);
+        setResult({ forScene: sceneId, phase: "ready", splats, shell, unrenderable });
+      } catch (exc: unknown) {
         if (cancelled) return;
         if (exc instanceof SceneNotReadyError) {
           setResult({
@@ -90,7 +111,8 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
               exc instanceof ApiError ? exc.message : "Could not load this room.",
           });
         }
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -98,10 +120,15 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
 
   const placed = assets.phase === "ready" ? assets.splats.length : 0;
   const seen = assets.phase === "ready" ? assets.unrenderable.length : 0;
+  const hasShell = assets.phase === "ready" && (assets.shell?.length ?? 0) > 0;
 
   const comeIn = () => {
     setFreshReveal(true);
-    if (assets.phase === "ready" && assets.splats.length === 0) {
+    if (
+      assets.phase === "ready" &&
+      assets.splats.length === 0 &&
+      (assets.shell?.length ?? 0) === 0
+    ) {
       // Nothing to assemble — settle straight into the honest empty room.
       markRevealSeen(sceneId);
       setPhase("settled");
@@ -122,6 +149,7 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
       {assets.phase === "ready" && phase !== "hold" && (
         <SplatViewer
           splats={assets.splats}
+          shell={assets.shell}
           frameless
           reveal={phase === "assembling"}
           onRevealStep={(_, label) => setArrival(label)}
@@ -168,7 +196,9 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
               {assets.phase === "ready" && !convDown ? (
                 <Conversation
                   sceneId={sceneId}
-                  greeting={freshReveal ? arrivalLine(placed) : settledLine(placed)}
+                  greeting={
+                    freshReveal ? arrivalLine(placed, hasShell) : settledLine(placed)
+                  }
                   countsNote={countsLine(placed, seen)}
                   onUnavailable={onConvUnavailable}
                 />
@@ -176,7 +206,9 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
                 <>
                   <div className="rounded-[14px] border border-ink/15 bg-paper/[0.96] px-5 py-4 shadow-deep">
                     <GuestLine className="text-[15px]">
-                      {freshReveal ? arrivalLine(placed) : settledQuietLine(placed)}
+                      {freshReveal
+                        ? arrivalLine(placed, hasShell)
+                        : settledQuietLine(placed)}
                     </GuestLine>
                     {assets.phase === "ready" && (
                       <p className="mt-2 text-[11.5px] text-ink/55">

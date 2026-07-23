@@ -63,9 +63,18 @@ export function waitNarration(
   return "I’m inside — meeting each piece, working out where it stands.";
 }
 
-/** First words after the objects-first reveal. The furniture-before-walls
- * framing is literally true: the room-shell pipeline is unbuilt. */
-export function arrivalLine(placed: number): string {
+/** First words after the reveal. Which framing is honest depends on what
+ * actually rendered: with a room shell (decision 0066) the walls are
+ * literally standing; without one, the furniture-before-walls line stays
+ * literally true. Never claim walls that aren't there — or deny ones
+ * that are. */
+export function arrivalLine(placed: number, hasShell: boolean = false): string {
+  if (hasShell) {
+    if (placed === 0) {
+      return "The room itself stood up — floor and walls — but I couldn’t place a single piece inside it with enough confidence to show you. Better honest than wrong; a slower pass would help me.";
+    }
+    return "The room stood up first — floor, then walls — and your furniture settled in where it belongs. Come look at how it sits.";
+  }
   if (placed === 0) {
     return "I could see your room, but I couldn’t place a single piece with enough confidence to show you — better honest than wrong. A slower pass would help me.";
   }
