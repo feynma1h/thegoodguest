@@ -42,11 +42,6 @@ class FakePose:
     quat_w: float = 1.0
 
 
-def _pose_from(R: np.ndarray, t) -> FakePose:
-    qx, qy, qz, qw = rotmat_to_quat(R)
-    return FakePose(t[0], t[1], t[2], qx, qy, qz, qw)
-
-
 GAUSSIAN_PROPS = [
     "x", "y", "z",
     "nx", "ny", "nz",

@@ -48,10 +48,15 @@ FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "scene_25a14caf" / 
 DEV_FIXTURES_DIR = Path("/Users/aubrey/projects/roomstudio/web/public/dev-fixtures")
 CURTAIN_PLY = DEV_FIXTURES_DIR / "real_obj_009_curtain.ply"
 BED_PLY = DEV_FIXTURES_DIR / "real_obj_003_bed.ply"
+REAL_FRAMES_DIR = Path("/Users/aubrey/projects/roomstudio/outputs/real-capture-25a14caf/frames")
 
 _needs_real_splats = pytest.mark.skipif(
     not (CURTAIN_PLY.exists() and BED_PLY.exists()),
     reason="real splat PLYs only available in the main checkout's web/public/dev-fixtures/",
+)
+_needs_real_frames = pytest.mark.skipif(
+    not REAL_FRAMES_DIR.exists(),
+    reason="real RGB frames only available in the main checkout's outputs/real-capture-25a14caf/",
 )
 
 
@@ -368,7 +373,7 @@ def test_sign_flag_bed_true_rotation_beats_identity_twin(refined_objects):
 
 
 @_needs_real_splats
-def test_in_plane_shipped_curtain_rotation_scores_worst_of_four_candidates(refined_objects):
+def test_in_plane_shipped_curtain_rotation_is_not_the_winner(refined_objects):
     """V1's first requirement (post chunk-B position fix, matching
     production ordering -- in-plane resolution runs after silhouette fit):
     the shipped (known-wrong) k=0 in-plane candidate must not be the
@@ -377,3 +382,71 @@ def test_in_plane_shipped_curtain_rotation_scores_worst_of_four_candidates(refin
     scores = curtain["quality"]["in_plane_scores"]
     shipped_rank = sorted(scores, reverse=True).index(scores[0])
     assert shipped_rank >= 1  # k=0 (shipped) is not the winner
+
+
+# -----------------------------------------------------------------------------
+# The chunk-C instrument-limit verdict, pinned (0065 method: record what
+# each instrument can and cannot see).
+# -----------------------------------------------------------------------------
+
+@_needs_real_splats
+@_needs_real_frames
+def test_in_plane_with_tier2_ranks_shipped_last_but_margin_gate_declines():
+    """The honest V1 chunk-C gate verdict on the real curtain, with tier 2
+    FULLY wired (appearance from the real PLYs, RGB from the preserved
+    frames — the exact production configuration):
+
+      * the instrument ranks the shipped (known ~90-degrees-wrong) k=0
+        candidate LAST of four — it sees the right direction; and
+      * the winner's margin (~0.0007 measured 2026-07-23, tier-2 grid 128)
+        is far below PLACEMENT_INPLANE_MARGIN, so resolution is DECLINED
+        and the layout rotation stands.
+
+    Decision 0067 required "a clear margin on tier 2" for this case; the
+    quasi-periodic wave pattern doesn't provide one between the 90-degree
+    candidates. Per 0067's "what would change this decision", that
+    re-opens the instrument fork for near-square planar objects — this
+    test pins the current instrument's limit so a future instrument that
+    CAN discriminate shows up as this pin failing (a good failure).
+    """
+    from PIL import Image
+
+    appearances = {
+        "curtain": reproject.load_splat_appearance(CURTAIN_PLY.read_bytes()),
+        "bed": reproject.load_splat_appearance(BED_PLY.read_bytes()),
+    }
+    rgb_cache: dict = {}
+
+    def get_rgb(frame_index):
+        if frame_index not in rgb_cache:
+            path = REAL_FRAMES_DIR / f"{frame_index:06d}.jpg"
+            rgb_cache[frame_index] = (
+                np.asarray(Image.open(path).convert("RGB")) if path.exists() else None
+            )
+        return rgb_cache[frame_index]
+
+    base = _real_ctx()
+    ctx = fusion.RefinementContext(
+        get_camera=base.get_camera,
+        get_mask_stack=base.get_mask_stack,
+        get_splat=base.get_splat,
+        get_appearance=lambda uri: (
+            appearances["curtain"] if "curtain" in uri
+            else appearances["bed"] if "bed" in uri
+            else None
+        ),
+        get_rgb=get_rgb,
+    )
+    objects = fusion.fuse_scene_objects(_full_scene_frame_results(), ctx)
+    curtain = next(o for o in objects if o["label"] == "curtain")
+
+    scores = curtain["quality"]["in_plane_scores"]
+    order = sorted(range(4), key=lambda i: -scores[i])
+    assert order.index(0) == 3, "shipped k=0 must rank last of the four candidates"
+    assert curtain["in_plane_resolved"] is False, (
+        "margin gate must DECLINE on the near-square curtain until a better instrument exists"
+    )
+    # The bed's sign-flag stays clean under full tier-2 wiring too.
+    bed = next(o for o in objects if o["label"] == "bed" and o["placed"])
+    assert bed["sign_flag"] is False
+    assert bed["quality"]["sign_flag_true_score"] > bed["quality"]["sign_flag_twin_score"] + 0.05
