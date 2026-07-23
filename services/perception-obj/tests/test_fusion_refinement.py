@@ -140,7 +140,7 @@ def _bed_like_scene_with_duplicate():
     return frames, masks_by_frame, dup_frame
 
 
-def test_nested_duplicate_does_not_fork_without_dedup_but_fuses_with_it():
+def test_nested_duplicate_forks_legacy_but_fuses_under_dedup():
     frames, masks_by_frame, _dup_frame = _bed_like_scene_with_duplicate()
 
     # Legacy (no ctx): the frame-uniqueness guard forces the duplicate
@@ -314,6 +314,39 @@ def test_sufficient_budget_runs_refinement():
     objects, meta = fusion.fuse_scene_objects_with_meta(frames, ctx)
     assert len(objects) == 1
     assert meta == {"refinement_enabled": True, "refinement_skipped": False}
+
+
+class DrainingBudget:
+    """remaining() returns scripted values in order, repeating the last —
+    lets a test drain the budget mid-pass deterministically."""
+
+    def __init__(self, values):
+        self._values = list(values)
+
+    def remaining(self):
+        if len(self._values) > 1:
+            return self._values.pop(0)
+        return self._values[0]
+
+
+def test_budget_draining_mid_pass_halts_further_refinement():
+    """The mid-pass safety valve (the 0060 zombie-request guard): if the
+    budget drains below min_remaining_s while refining, objects already
+    refined keep their refined fields, the REMAINING objects ship legacy
+    values (no refined fields), and refinement_skipped is recorded. Two
+    single-cluster labels, alphabetical order: 'apple' refines, then the
+    budget drains and 'banana' does not."""
+    a = _rays_toward((1.0, 0.5, -2.0), [(0, 0, 0), (1.2, 0.1, 0)], label="apple")
+    b = _rays_toward((-2.0, 1.0, -3.0), [(0, 0, 0), (1.2, 0.1, 0)], label="banana")
+    frames = _frames([a[0], b[0]], [a[1], b[1]])
+    # Calls: up-front gate, then one per cluster before refining it.
+    budget = DrainingBudget([600.0, 600.0, 1.0])
+    ctx = _ctx({}, budget=budget)
+    objects, meta = fusion.fuse_scene_objects_with_meta(frames, ctx)
+    by_label = {o["label"]: o for o in objects}
+    assert "position_source" in by_label["apple"]
+    assert "position_source" not in by_label["banana"]
+    assert meta == {"refinement_enabled": True, "refinement_skipped": True}
 
 
 # -----------------------------------------------------------------------------

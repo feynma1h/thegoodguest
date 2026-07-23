@@ -73,16 +73,21 @@ is not "0", fusion additionally:
      normal; ships the winner only with a clear margin.
   6. Flags (never auto-corrects) a materially-better-scoring 180-about-
      view-axis "mirrored twin" of the shipped rotation.
-  7. Selects the best member by the reprojection instrument's combined
-     score (detection score stays recorded as a tiebreak-only field).
+  7. Re-selects the best member by the reprojection instrument's combined
+     score for depth_fit clusters ONLY (detection score becomes the
+     tiebreak); ray clusters keep detection-score selection — a ray
+     member has no complete per-member transform of its own, so
+     instrument-ranking those members isn't well-defined yet (see
+     _reselect_best_placed_member's docstring for the full rationale).
   8. Emits `reprojection_score`, `position_source`, `constraints_applied`,
-     `in_plane_resolved`, `sign_flag`, `extent_m_sorted`,
-     `deduped_observations` on every refined object.
+     `in_plane_resolved`, `sign_flag`, `extent_m_sorted` on every refined
+     PLACED object, and `deduped_observations` on every object.
 
 Refinement is CPU-only, bounded (fixed iteration budgets, no RNG —
-identical inputs always produce identical manifests) and skips itself
-under time pressure when ctx.budget is supplied (recorded scene-level as
-refinement_skipped, not per object) — see fuse_scene_objects_with_meta.
+identical inputs always produce identical manifests) and budget-aware
+when ctx.budget is supplied: skipped whole up front without slack, and
+halted between objects if the budget drains mid-pass (recorded scene-
+level as refinement_skipped) — see fuse_scene_objects_with_meta.
 The per-frame cache contract is untouched: everything here reads masks /
 splats / poses that already exist; nothing new is written per frame.
 
@@ -93,20 +98,22 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 import numpy as np
-
 import reproject
 from placement import min_axis_to_vertical_deg
 from roomstudio_schemas.placement_math import (
     DegenerateGeometryError,
+    MaskEvidence,
     mask_containment,
+    prepare_mask,
     robust_cloud_stats,
     triangulate_rays,
 )
-from roomstudio_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
+from roomstudio_schemas.pose_math import pose_quat, quat_to_rotmat
 
 logger = logging.getLogger(__name__)
 
@@ -145,20 +152,24 @@ class RefinementContext:
     get_splat(splat_gcs_uri) -> (M, 3) float64 local-frame points | None
     get_appearance(splat_gcs_uri) -> reproject.SplatAppearance | None —
         optional; absence degrades every tier-2 use to tier-1-only.
-    get_rgb(frame_index) -> (H, W, 3) float64 in [0, 1] | None — optional,
-        same degrade.
+    get_rgb(frame_index) -> (H, W, 3) RGB at mask resolution | None —
+        optional, same degrade. uint8 or float both work (tier 2's NCC is
+        intensity-scale-invariant), so callers can cache the small form.
     budget: object exposing .remaining() -> float (seconds), or None for
-        no limit (e.g. tests). Refinement is skipped scene-wide (not
-        per-object — a half-refined scene is worse than a legacy one) if
-        remaining() < min_remaining_s at the point fusion runs.
+        no limit (e.g. tests). Refinement is skipped scene-wide if
+        remaining() < min_remaining_s when fusion starts, and stops
+        refining FURTHER objects if the budget drains below that line
+        mid-pass (each object is either fully refined or fully legacy —
+        never half-refined; see fuse_scene_objects_with_meta).
     """
     get_camera: Callable[[int], Optional[tuple]]
     get_mask_stack: Callable[[int], Optional[np.ndarray]]
     get_splat: Callable[[str], Optional[np.ndarray]]
-    get_appearance: Optional[Callable[[str], Optional["reproject.SplatAppearance"]]] = None
+    get_appearance: Optional[Callable[[str], Optional[reproject.SplatAppearance]]] = None
     get_rgb: Optional[Callable[[int], Optional[np.ndarray]]] = None
     budget: Optional[Any] = None
     min_remaining_s: float = _REFINE_MIN_REMAINING_S
+    _evidence_cache: dict = field(default_factory=dict, repr=False)
 
     def mask_for(self, frame_index, mask_index) -> Optional[np.ndarray]:
         if mask_index is None:
@@ -167,6 +178,16 @@ class RefinementContext:
         if stack is None or mask_index >= stack.shape[0]:
             return None
         return stack[mask_index]
+
+    def evidence_for(self, frame_index, mask_index) -> Optional[MaskEvidence]:
+        """mask_for + prepare_mask, memoized — every scoring path hits the
+        same handful of (frame, mask) pairs dozens of times per pass, and
+        the summed-area table build is the expensive part of each."""
+        key = (frame_index, mask_index)
+        if key not in self._evidence_cache:
+            mask = self.mask_for(frame_index, mask_index)
+            self._evidence_cache[key] = None if mask is None else prepare_mask(mask)
+        return self._evidence_cache[key]
 
 
 def _budget_allows(ctx: Optional[RefinementContext]) -> bool:
@@ -526,12 +547,12 @@ def _footprint_agrees(volume, frame_index, mask_index, ctx: RefinementContext, t
         return False
     splat, rot, translation, scale = volume
     cam = ctx.get_camera(frame_index)
-    mask = ctx.mask_for(frame_index, mask_index)
-    if cam is None or mask is None:
+    evidence = ctx.evidence_for(frame_index, mask_index)
+    if cam is None or evidence is None:
         return False
     pose, intrinsics = cam
     world_pts = reproject.transform_points(splat, rot, translation, scale)
-    score = reproject.score_tier1_containment(world_pts, mask, intrinsics, pose)
+    score = reproject.score_tier1_containment(world_pts, evidence, intrinsics, pose)
     return score >= threshold
 
 
@@ -676,17 +697,17 @@ def _cluster_placed_observations(
 # -----------------------------------------------------------------------------
 
 def _member_observations(cluster: list[dict], ctx: RefinementContext):
-    """[(mask, intrinsics, pose), ...] for every cluster member fusion has
-    real evidence for. Members missing a mask/camera are silently dropped
-    (a partial cache miss degrades refinement, never crashes it)."""
+    """[(evidence, intrinsics, pose), ...] for every cluster member fusion
+    has real evidence for. Members missing a mask/camera are silently
+    dropped (a partial cache miss degrades refinement, never crashes it)."""
     out = []
     for m in cluster:
         cam = ctx.get_camera(m["frame_index"])
-        mask = ctx.mask_for(m["frame_index"], m.get("mask_index"))
-        if cam is None or mask is None:
+        evidence = ctx.evidence_for(m["frame_index"], m.get("mask_index"))
+        if cam is None or evidence is None:
             continue
         pose, intrinsics = cam
-        out.append((mask, intrinsics, pose))
+        out.append((evidence, intrinsics, pose))
     return out
 
 
@@ -697,7 +718,7 @@ def _score_candidate_over_frames(
     scale: float,
     frame_specs: list[tuple[int, Optional[int]]],
     ctx: RefinementContext,
-    appearance: Optional["reproject.SplatAppearance"] = None,
+    appearance: Optional[reproject.SplatAppearance] = None,
 ) -> Optional[float]:
     """Mean combined (tier2-weighted-when-present) score of one candidate
     transform across a set of (frame_index, mask_index) observations.
@@ -705,8 +726,8 @@ def _score_candidate_over_frames(
     scores = []
     for frame_index, mask_index in frame_specs:
         cam = ctx.get_camera(frame_index)
-        mask = ctx.mask_for(frame_index, mask_index)
-        if cam is None or mask is None:
+        evidence = ctx.evidence_for(frame_index, mask_index)
+        if cam is None or evidence is None:
             continue
         pose, intrinsics = cam
         rgb = ctx.get_rgb(frame_index) if (appearance is not None and ctx.get_rgb is not None) else None
@@ -715,7 +736,7 @@ def _score_candidate_over_frames(
             rotation_xyzw=rotation_xyzw,
             translation=translation,
             scale=scale,
-            mask=mask,
+            mask=evidence,
             intrinsics=intrinsics,
             pose=pose,
             appearance=appearance,
@@ -751,16 +772,16 @@ def _reselect_best_placed_member(obj: dict, cluster: list[dict], wt: dict, ctx: 
         if not m_wt:
             continue
         m_splat = ctx.get_splat(m["splat_gcs_uri"])
-        mask = ctx.mask_for(m["frame_index"], m.get("mask_index"))
+        evidence = ctx.evidence_for(m["frame_index"], m.get("mask_index"))
         cam = ctx.get_camera(m["frame_index"])
-        if m_splat is None or mask is None or cam is None:
+        if m_splat is None or evidence is None or cam is None:
             continue
         pose, intrinsics = cam
         m_appearance = ctx.get_appearance(m["splat_gcs_uri"]) if ctx.get_appearance is not None else None
         rgb = ctx.get_rgb(m["frame_index"]) if (m_appearance is not None and ctx.get_rgb is not None) else None
         result = reproject.score_placement(
             local_points=m_splat, rotation_xyzw=m_wt["rotation_xyzw"], translation=m_wt["position"],
-            scale=m_wt["scale"], mask=mask, intrinsics=intrinsics, pose=pose,
+            scale=m_wt["scale"], mask=evidence, intrinsics=intrinsics, pose=pose,
             appearance=m_appearance, rgb=rgb,
         )
         scored.append((reproject.combined_score(result), m["score"], m))
@@ -879,12 +900,19 @@ def fuse_scene_objects_with_meta(
     """Cluster per-frame observations into fused scene objects.
 
     Returns (objects, meta) where meta = {"refinement_enabled": bool,
-    "refinement_skipped": bool}. refinement_skipped is True only when
-    refinement was requested (PLACEMENT_REFINE != "0") and a
-    RefinementContext was supplied, but the budget didn't leave enough
-    slack — the scene still gets a fully-formed manifest via the legacy
-    algorithm, just without the new fields. Never raises; a pathological
-    input degrades to unplaced entries, not a failed scene.
+    "refinement_skipped": bool}. refinement_skipped is True when
+    refinement was requested (PLACEMENT_REFINE != "0", ctx supplied) but
+    the budget forced any of it to be skipped — either up front (the whole
+    pass; the scene ships via the legacy algorithm without the new
+    fields), or mid-pass if the budget drains below min_remaining_s while
+    refining (already-refined objects keep their refined values; the
+    REMAINING objects ship legacy values — each object is either fully
+    refined or fully legacy, never half-refined, which is 0067's actual
+    invariant). The mid-pass check exists because refinement runs during
+    the request's final reserve window: without it, an unexpectedly slow
+    pass would recreate the request-timeout zombie that decisions
+    0060-0061 eliminated. Never raises; a pathological input degrades to
+    unplaced entries, not a failed scene.
     """
     refine_flag = _refinement_enabled()
     has_ctx = ctx is not None
@@ -923,7 +951,10 @@ def fuse_scene_objects_with_meta(
         for cluster in _cluster_placed_observations(placed, ctx, run_refine):
             obj = _fuse_placed_cluster(cluster, f"obj_{counter:03d}")
             counter += 1
-            obj = _refine_fused_object(obj, cluster, ctx)
+            if _budget_allows(ctx):
+                obj = _refine_fused_object(obj, cluster, ctx)
+            else:
+                refinement_skipped = True
             n_dedup = sum(dedup_counts.get((m["frame_index"], m.get("mask_index")), 0) for m in cluster)
             obj["deduped_observations"] = n_dedup
             fused.append(obj)
@@ -932,15 +963,18 @@ def fuse_scene_objects_with_meta(
             obj = _fuse_ray_cluster(cluster, f"obj_{counter:03d}")
             counter += 1
             if obj["placed"]:
-                obj = _refine_fused_object(obj, cluster, ctx)
+                if _budget_allows(ctx):
+                    obj = _refine_fused_object(obj, cluster, ctx)
+                else:
+                    refinement_skipped = True
             n_dedup = sum(dedup_counts.get((m["frame_index"], m.get("mask_index")), 0) for m in cluster)
             obj["deduped_observations"] = n_dedup
             fused.append(obj)
 
     placed_count = sum(1 for f in fused if f["placed"])
     logger.info(
-        "fusion (refined): %d observations -> %d objects (%d placed)",
-        len(observations), len(fused), placed_count,
+        "fusion (refined): %d observations -> %d objects (%d placed) refinement_skipped=%s",
+        len(observations), len(fused), placed_count, refinement_skipped,
     )
     return fused, {"refinement_enabled": run_refine, "refinement_skipped": refinement_skipped}
 

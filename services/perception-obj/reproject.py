@@ -32,18 +32,17 @@ silhouette fit objective, in-plane resolution, sign-flagging).
 """
 from __future__ import annotations
 
-import logging
 import math
 import os
 from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-
 import placement
 from roomstudio_schemas.placement_math import (
     DegenerateGeometryError,
-    footprint_bbox,
+    MaskEvidence,
+    prepare_mask,
     project_points,
     rasterize_mask_density,
     rasterize_point_density,
@@ -51,10 +50,9 @@ from roomstudio_schemas.placement_math import (
     rotation_about_axis,
     soft_containment,
     soft_iou,
+    union_bbox,
 )
 from roomstudio_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
-
-logger = logging.getLogger(__name__)
 
 # Standard 3DGS SH0 -> RGB DC-term constant (1 / (2*sqrt(pi))): color =
 # clip(0.5 + C0 * f_dc, 0, 1). Same convention every 3DGS viewer uses.
@@ -68,7 +66,8 @@ _TIER1_GRID = int(os.environ.get("PLACEMENT_TIER1_GRID", "32"))
 # work otherwise. Tier 2's render_splat already subsamples; tier 1 didn't,
 # which is a real production-viability bug, not just slow tests.
 _TIER1_MAX_POINTS = int(os.environ.get("PLACEMENT_TIER1_MAX_POINTS", "8000"))
-_TIER2_GRID = int(os.environ.get("PLACEMENT_TIER2_GRID", "64"))
+# ~128 px per decision 0067's instrument spec.
+_TIER2_GRID = int(os.environ.get("PLACEMENT_TIER2_GRID", "128"))
 _TIER2_MAX_POINTS = int(os.environ.get("PLACEMENT_TIER2_MAX_POINTS", "40000"))
 _TIER2_MIN_WEIGHTED_PIXELS = int(os.environ.get("PLACEMENT_TIER2_MIN_PIXELS", "12"))
 
@@ -122,32 +121,50 @@ def _subsample_for_scoring(world_points: np.ndarray, max_points: Optional[int]) 
     return world_points[idx]
 
 
-def score_tier1(
-    world_points: np.ndarray, mask: np.ndarray, intrinsics, pose,
-    grid_size: Optional[int] = None, max_points: Optional[int] = None,
-) -> float:
-    """Crop-aware soft-IoU between the projected splat footprint and mask."""
-    grid_size = grid_size or _TIER1_GRID
+def _as_evidence(mask) -> MaskEvidence:
+    return mask if isinstance(mask, MaskEvidence) else prepare_mask(mask)
+
+
+def _tier1_densities(
+    world_points: np.ndarray, evidence: MaskEvidence, intrinsics, pose,
+    grid_size: int, max_points: Optional[int],
+):
     pts = _subsample_for_scoring(world_points, max_points)
     uv, _depth, valid = project_points(pts, intrinsics, pose)
-    bbox = footprint_bbox(mask, uv, valid)
+    bbox = union_bbox(evidence.shape, evidence.bounds, uv, valid)
     density_pts = rasterize_point_density(uv, valid, bbox, grid_size)
-    density_mask = rasterize_mask_density(mask, bbox, grid_size)
+    density_mask = rasterize_mask_density(evidence, bbox, grid_size)
+    return density_pts, density_mask
+
+
+def score_tier1(
+    world_points: np.ndarray, mask, intrinsics, pose,
+    grid_size: Optional[int] = None, max_points: Optional[int] = None,
+) -> float:
+    """Crop-aware soft-IoU between the projected splat footprint and mask.
+
+    mask may be a raw (H, W) bool array or a prepared MaskEvidence —
+    callers scoring the same mask repeatedly (fitting, candidate ranking)
+    should prepare once; the raw form pays an O(H·W) table build per call.
+    """
+    ev = _as_evidence(mask)
+    density_pts, density_mask = _tier1_densities(
+        world_points, ev, intrinsics, pose, grid_size or _TIER1_GRID, max_points
+    )
     return soft_iou(density_pts, density_mask)
 
 
 def score_tier1_containment(
-    world_points: np.ndarray, mask: np.ndarray, intrinsics, pose,
+    world_points: np.ndarray, mask, intrinsics, pose,
     grid_size: Optional[int] = None, max_points: Optional[int] = None,
 ) -> float:
     """Crop-aware soft-containment (tolerant of partial framing) — the
-    footprint join/merge signal, distinct from tier-1 selection scoring."""
-    grid_size = grid_size or _TIER1_GRID
-    pts = _subsample_for_scoring(world_points, max_points)
-    uv, _depth, valid = project_points(pts, intrinsics, pose)
-    bbox = footprint_bbox(mask, uv, valid)
-    density_pts = rasterize_point_density(uv, valid, bbox, grid_size)
-    density_mask = rasterize_mask_density(mask, bbox, grid_size)
+    footprint join/merge signal, distinct from tier-1 selection scoring.
+    Accepts a raw mask or a prepared MaskEvidence, like score_tier1."""
+    ev = _as_evidence(mask)
+    density_pts, density_mask = _tier1_densities(
+        world_points, ev, intrinsics, pose, grid_size or _TIER1_GRID, max_points
+    )
     return soft_containment(density_pts, density_mask)
 
 
@@ -202,8 +219,9 @@ def render_splat(
     if pts.shape[0] == 0:
         return None
 
+    ev = _as_evidence(mask)
     uv, depth, valid = project_points(pts, intrinsics, pose)
-    bbox = footprint_bbox(mask, uv, valid)
+    bbox = union_bbox(ev.shape, ev.bounds, uv, valid)
     u0, v0, u1, v1 = bbox
     if u1 <= u0 or v1 <= v0:
         return None
@@ -227,11 +245,25 @@ def render_splat(
     )
 
 
+# Target sample count per grid cell for _rasterize_average's strided
+# estimate — 3x3 per cell balances estimate quality against the bounded
+# work guarantee (the whole point: cost scales with grid_size², never
+# with crop pixel count).
+_AVERAGE_SAMPLES_PER_CELL_SIDE = 3
+
+
 def _rasterize_average(values: np.ndarray, bbox, grid_size: int) -> np.ndarray:
-    """Box-filter downsample of a (H, W) or (H, W, C) array into a
-    grid_size x grid_size (or grid_size x grid_size x C) average grid over
-    bbox. Same binning convention as rasterize_mask_density, generalized
-    to float-valued (not just boolean) sources — used for the RGB crop."""
+    """Strided-sample average of a (H, W) or (H, W, C) array into a
+    grid_size x grid_size (x C) grid over bbox — used for the RGB crop.
+
+    Deterministic estimate, not an exact box average: pixels are sampled
+    on a fixed stride chosen so each cell sees roughly
+    _AVERAGE_SAMPLES_PER_CELL_SIDE² samples, bounding the work by the
+    GRID size instead of the crop size. Profiling showed the exact
+    version (histogramming every crop pixel) at ~310 ms per call was
+    ~90% of the whole refinement pass; an appearance-NCC input doesn't
+    need exactness, it needs a stable per-cell color estimate.
+    """
     h, w = values.shape[:2]
     u0, v0, u1, v1 = bbox
     iu0, iv0 = max(int(np.floor(u0)), 0), max(int(np.floor(v0)), 0)
@@ -239,8 +271,13 @@ def _rasterize_average(values: np.ndarray, bbox, grid_size: int) -> np.ndarray:
     out_shape = (grid_size, grid_size) if values.ndim == 2 else (grid_size, grid_size, values.shape[2])
     if iu1 <= iu0 or iv1 <= iv0 or u1 <= u0 or v1 <= v0:
         return np.zeros(out_shape, dtype=np.float64)
-    crop = values[iv0:iv1, iu0:iu1]
-    vv, uu = np.meshgrid(np.arange(iv0, iv1) + 0.5, np.arange(iu0, iu1) + 0.5, indexing="ij")
+    target = grid_size * _AVERAGE_SAMPLES_PER_CELL_SIDE
+    step_v = max(1, (iv1 - iv0) // target)
+    step_u = max(1, (iu1 - iu0) // target)
+    crop = values[iv0:iv1:step_v, iu0:iu1:step_u]
+    vs = np.arange(iv0, iv1, step_v, dtype=np.float64) + 0.5
+    us = np.arange(iu0, iu1, step_u, dtype=np.float64) + 0.5
+    vv, uu = np.meshgrid(vs, us, indexing="ij")
     count_all, _, _ = np.histogram2d(
         vv.ravel(), uu.ravel(), bins=grid_size, range=[[v0, v1], [u0, u1]]
     )
@@ -284,11 +321,16 @@ def _masked_ncc(render: np.ndarray, rgb_crop: np.ndarray, weight: np.ndarray) ->
 
 
 def score_tier2(
-    render: np.ndarray, coverage: np.ndarray, mask: np.ndarray, rgb: np.ndarray, bbox, grid_size: int
+    render: np.ndarray, coverage: np.ndarray, mask, rgb: np.ndarray, bbox, grid_size: int
 ) -> Optional[float]:
-    """Masked-NCC appearance score, mapped from [-1, 1] to [0, 1]. rgb is
-    (H, W, 3) float in [0, 1] at the mask's resolution."""
-    mask_density = rasterize_mask_density(mask, bbox, grid_size)
+    """Masked-NCC appearance score, mapped from [-1, 1] to [0, 1].
+
+    mask may be raw or a prepared MaskEvidence. rgb is (H, W, 3) at the
+    mask's resolution, in ANY linear scale (float [0, 1] or uint8 [0, 255]
+    both work — NCC is invariant to affine intensity scaling, which lets
+    production cache the much smaller uint8 form).
+    """
+    mask_density = rasterize_mask_density(_as_evidence(mask), bbox, grid_size)
     weight = coverage * mask_density
     rgb_grid = _rasterize_average(rgb, bbox, grid_size)
     ncc = _masked_ncc(render, rgb_grid, weight)
@@ -307,7 +349,7 @@ def score_placement(
     rotation_xyzw,
     translation,
     scale: float,
-    mask: np.ndarray,
+    mask,
     intrinsics,
     pose,
     appearance: Optional[SplatAppearance] = None,
@@ -318,24 +360,27 @@ def score_placement(
 ) -> dict:
     """Score one candidate placement against one observing frame.
 
-    Returns {tier1: float, tier2: float | None, tiers_used: [...]}. tier2
-    requires both `appearance` (from load_splat_appearance) and `rgb` (the
-    frame's RGB, decoded to (H, W, 3) float [0, 1] at the mask's
-    resolution) — either missing degrades to tier1-only, recorded.
+    mask may be raw or a prepared MaskEvidence (prepare once when scoring
+    several candidates against the same frame). Returns {tier1: float,
+    tier2: float | None, tiers_used: [...]}. tier2 requires both
+    `appearance` (from load_splat_appearance) and `rgb` (the frame's RGB
+    at the mask's resolution; float [0, 1] or uint8 — see score_tier2) —
+    either missing degrades to tier1-only, recorded.
     """
+    ev = _as_evidence(mask)
     world_points = transform_points(local_points, rotation_xyzw, translation, scale)
-    tier1 = score_tier1(world_points, mask, intrinsics, pose, tier1_grid_size)
+    tier1 = score_tier1(world_points, ev, intrinsics, pose, tier1_grid_size)
     tier2 = None
     tiers_used = ["tier1"]
     if appearance is not None and rgb is not None:
         rendered = render_splat(
-            world_points, appearance.colors, appearance.opacity, mask, intrinsics, pose,
+            world_points, appearance.colors, appearance.opacity, ev, intrinsics, pose,
             tier2_grid_size, max_points,
         )
         if rendered is not None:
             render, coverage, bbox = rendered
             g = tier2_grid_size or _TIER2_GRID
-            tier2 = score_tier2(render, coverage, mask, rgb, bbox, g)
+            tier2 = score_tier2(render, coverage, ev, rgb, bbox, g)
             if tier2 is not None:
                 tiers_used.append("tier2")
     return {"tier1": tier1, "tier2": tier2, "tiers_used": tiers_used}
@@ -389,7 +434,9 @@ def fit_silhouette(
     meaningful).
 
     observations: [(mask, intrinsics, pose), ...] — one per member frame,
-    each already the frame's own SAM mask for its own detection.
+    each already the frame's own SAM mask for its own detection (raw or
+    MaskEvidence; prepared once here regardless, since the objective is
+    evaluated up to max_iters times against every observation).
 
     Bounded, no RNG: a fixed candidate set (+-scale, +-x, +-y, +-z) per
     round, halving the step whenever no candidate improves, stopping at
@@ -411,10 +458,14 @@ def fit_silhouette(
     scale_lo, scale_hi = float(init_scale) / factor, float(init_scale) * factor
     idx = _subsample_indices(local_points.shape[0], max_points)
     pts_local = local_points[idx]
+    prepared = [(_as_evidence(mask), intr, pose) for mask, intr, pose in observations]
 
     def objective(scale: float, t: np.ndarray) -> float:
         world_pts = transform_points(pts_local, rotation_xyzw, t, scale)
-        scores = [score_tier1(world_pts, mask, intr, pose, grid_size) for mask, intr, pose in observations]
+        scores = [
+            score_tier1(world_pts, ev, intr, pose, grid_size, max_points)
+            for ev, intr, pose in prepared
+        ]
         return float(np.mean(scores)) if scores else 0.0
 
     scale = float(init_scale)
