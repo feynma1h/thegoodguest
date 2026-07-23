@@ -32,6 +32,8 @@ from roomstudio_schemas import (  # noqa: E402
     ARKIT_ONLY,
     LIDAR_ARKIT,
     LIDAR_ROOMPLAN,
+    PLANE_HORIZONTAL,
+    PLANE_VERTICAL,
     CaptureBundle,
     SCHEMA_VERSION,
 )
@@ -97,6 +99,7 @@ def build_capture_bundle(
     include_confidence: bool = True,
     include_roomplan: bool = True,
     use_hardware_id_fallback: bool = False,
+    plane_anchor_count: int = 0,
 ) -> TestBundleArtifacts:
     """Build a synthetic CaptureBundle and return all blob bytes.
 
@@ -115,6 +118,11 @@ def build_capture_bundle(
             lidar-roomplan tier).
         use_hardware_id_fallback: leave device_id empty; set hardware_id
             instead. Tests the FALLBACK_HARDWARE_ID ingester path.
+        plane_anchor_count: number of PlaneAnchor entries to add (decision
+            0066). 0 (default) mirrors pre-plane clients — the shell's
+            "unavailable" degrade path. When > 0, the first anchor is a
+            floor-classified horizontal plane and the rest are vertical
+            walls, all with valid unit-norm poses.
     """
     if tier not in _TIER_PROTO_VALUE:
         raise ValueError(f"unknown tier {tier!r}; expected one of {list(_TIER_PROTO_VALUE)}")
@@ -195,6 +203,25 @@ def build_capture_bundle(
         usdz_path = "roomplan/room.usdz"
         blobs[usdz_path] = _USDZ_BYTES
         bundle.room_plan.usdz_gcs_path = usdz_path
+
+    for j in range(plane_anchor_count):
+        a = bundle.plane_anchors.add()
+        if j == 0:
+            # Floor: anchor +Y (plane normal) already world +Y — identity.
+            a.pose.pos_y = -1.4
+            a.pose.quat_w = 1.0
+            a.alignment = PLANE_HORIZONTAL
+            a.classification = "floor"
+        else:
+            # Wall: +90° about X points anchor +Y (the normal) at world +Z.
+            a.pose.pos_x = float(j)
+            a.pose.pos_z = -2.0
+            a.pose.quat_x = 0.7071067811865476
+            a.pose.quat_w = 0.7071067811865476
+            a.alignment = PLANE_VERTICAL
+            a.classification = "wall"
+        a.extent_width = 2.0
+        a.extent_height = 2.0
 
     blobs["bundle.pb"] = bundle.SerializeToString()
     return TestBundleArtifacts(bundle_id=bid, blobs=blobs)

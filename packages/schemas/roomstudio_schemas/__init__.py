@@ -29,6 +29,8 @@ from .capture_bundle_pb2 import (  # noqa: F401
     Frame,
     Gravity,
     Intrinsics,
+    PlaneAlignment,
+    PlaneAnchor,
     Pose,
     RoomPlanModel,
     RoomPlanObject,
@@ -41,5 +43,9 @@ from . import pose_math  # noqa: F401
 ARKIT_ONLY = CaptureTier.Value("ARKIT_ONLY")
 LIDAR_ARKIT = CaptureTier.Value("LIDAR_ARKIT")
 LIDAR_ROOMPLAN = CaptureTier.Value("LIDAR_ROOMPLAN")
+
+# Plane-anchor alignment (decision 0066: the room-shell geometry source).
+PLANE_HORIZONTAL = PlaneAlignment.Value("HORIZONTAL")
+PLANE_VERTICAL = PlaneAlignment.Value("VERTICAL")
 
 SCHEMA_VERSION = "1"

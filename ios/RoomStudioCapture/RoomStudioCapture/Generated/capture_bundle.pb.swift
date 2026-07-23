@@ -115,6 +115,44 @@ public nonisolated enum Roomstudio_Capture_V1_CaptureTier: SwiftProtobuf.Enum, S
 
 }
 
+public nonisolated enum Roomstudio_Capture_V1_PlaneAlignment: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case horizontal // = 1
+  case vertical // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .horizontal
+    case 2: self = .vertical
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .horizontal: return 1
+    case .vertical: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Roomstudio_Capture_V1_PlaneAlignment] = [
+    .unspecified,
+    .horizontal,
+    .vertical,
+  ]
+
+}
+
 public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -206,6 +244,20 @@ public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendab
   public var clientNotes: Dictionary<String,String> {
     get {_storage._clientNotes}
     set {_uniqueStorage()._clientNotes = newValue}
+  }
+
+  /// ARKit plane anchors — the session's FINAL detected-plane set, serialized
+  /// once at capture stop (ARKit merges and refines anchors continuously
+  /// mid-session; only the final set is meaningful). The measured geometry
+  /// source for the room shell (decision 0066): floor and walls are assembled
+  /// from these, never inferred. Same world frame as the camera poses — the
+  /// anchors come from the same ARSession. Bundles from clients that predate
+  /// plane capture simply carry none; the shell degrades to "unavailable"
+  /// downstream and the bundle stays valid (additive field, schema_version
+  /// unchanged).
+  public var planeAnchors: [Roomstudio_Capture_V1_PlaneAnchor] {
+    get {_storage._planeAnchors}
+    set {_uniqueStorage()._planeAnchors = newValue}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -474,6 +526,75 @@ public nonisolated struct Roomstudio_Capture_V1_Depth: Sendable {
   fileprivate var _intrinsics: Roomstudio_Capture_V1_Intrinsics? = nil
 }
 
+/// One detected ARKit plane (ARPlaneAnchor), serialized at capture stop.
+///
+/// Frame semantics:
+///   - `pose` is world_from_anchor (the Pose message reused with "anchor" in
+///     place of "camera": p_world = position + rotate(rotation, p_anchor)).
+///   - The plane lies in the anchor's local X-Z plane; anchor-local +Y is the
+///     plane normal. For HORIZONTAL planes the normal is world ±Y; for
+///     VERTICAL planes it points out of the wall.
+///   - `center_*` is ARPlaneAnchor.center: the plane's center in ANCHOR
+///     space. The anchor origin drifts off-center as ARKit grows the plane,
+///     so the center is NOT the anchor origin.
+///   - `extent_width` / `extent_height` are ARPlaneExtent.width/.height
+///     (meters): the detected extent of the plane along the extent
+///     rectangle's own axes. `rotation_on_y_rad` is
+///     ARPlaneExtent.rotationOnYAxis: the rotation of that rectangle around
+///     the anchor's +Y, applied about the plane center. Detected extent only
+///     — consumers must not extrapolate beyond it.
+public nonisolated struct Roomstudio_Capture_V1_PlaneAnchor: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// world_from_anchor. Same world frame and conventions as Frame.camera_pose.
+  public var pose: Roomstudio_Capture_V1_Pose {
+    get {_pose ?? Roomstudio_Capture_V1_Pose()}
+    set {_pose = newValue}
+  }
+  /// Returns true if `pose` has been explicitly set.
+  public var hasPose: Bool {self._pose != nil}
+  /// Clears the value of `pose`. Subsequent reads from it will return its default value.
+  public mutating func clearPose() {self._pose = nil}
+
+  /// Plane center in anchor space, meters (ARPlaneAnchor.center).
+  public var centerX: Float = 0
+
+  public var centerY: Float = 0
+
+  public var centerZ: Float = 0
+
+  /// Detected extent, meters (ARPlaneExtent.width / .height).
+  public var extentWidth: Float = 0
+
+  public var extentHeight: Float = 0
+
+  /// Rotation of the extent rectangle around anchor-local +Y, radians
+  /// (ARPlaneExtent.rotationOnYAxis).
+  public var rotationOnYRad: Float = 0
+
+  /// Horizontal (floor/table/ceiling) vs vertical (wall/door/window).
+  public var alignment: Roomstudio_Capture_V1_PlaneAlignment = .unspecified
+
+  /// ARKit's plane classification, verbatim (e.g. "wall", "floor",
+  /// "ceiling", "table", "seat", "window", "door"). Empty when the device
+  /// doesn't classify (pre-A12) or ARKit reports none — consumers treat
+  /// empty as "unclassified", never guess.
+  public var classification: String = String()
+
+  /// Optional anchor-space boundary polygon: ARPlaneGeometry.boundaryVertices
+  /// projected onto the plane, flattened as (x, z) pairs
+  /// [x0, z0, x1, z1, ...]. Even length; empty when the client omits it.
+  public var boundaryXz: [Float] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _pose: Roomstudio_Capture_V1_Pose? = nil
+}
+
 public nonisolated struct Roomstudio_Capture_V1_RoomPlanModel: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -565,9 +686,13 @@ nonisolated extension Roomstudio_Capture_V1_CaptureTier: SwiftProtobuf._ProtoNam
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CAPTURE_TIER_UNSPECIFIED\0\u{1}ARKIT_ONLY\0\u{1}LIDAR_ARKIT\0\u{1}LIDAR_ROOMPLAN\0")
 }
 
+nonisolated extension Roomstudio_Capture_V1_PlaneAlignment: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PLANE_ALIGNMENT_UNSPECIFIED\0\u{1}HORIZONTAL\0\u{1}VERTICAL\0")
+}
+
 nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CaptureBundle"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}schema_version\0\u{3}bundle_id\0\u{3}user_id\0\u{1}device\0\u{1}tier\0\u{3}started_at_device_us\0\u{3}ended_at_device_us\0\u{1}frames\0\u{3}room_plan\0\u{3}client_notes\0\u{3}started_at_wall_us\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}schema_version\0\u{3}bundle_id\0\u{3}user_id\0\u{1}device\0\u{1}tier\0\u{3}started_at_device_us\0\u{3}ended_at_device_us\0\u{1}frames\0\u{3}room_plan\0\u{3}client_notes\0\u{3}started_at_wall_us\0\u{3}plane_anchors\0")
 
   fileprivate class _StorageClass {
     var _schemaVersion: String = String()
@@ -581,6 +706,7 @@ nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message
     var _frames: [Roomstudio_Capture_V1_Frame] = []
     var _roomPlan: Roomstudio_Capture_V1_RoomPlanModel? = nil
     var _clientNotes: Dictionary<String,String> = [:]
+    var _planeAnchors: [Roomstudio_Capture_V1_PlaneAnchor] = []
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -602,6 +728,7 @@ nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message
       _frames = source._frames
       _roomPlan = source._roomPlan
       _clientNotes = source._clientNotes
+      _planeAnchors = source._planeAnchors
     }
   }
 
@@ -631,6 +758,7 @@ nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message
         case 9: try { try decoder.decodeSingularMessageField(value: &_storage._roomPlan) }()
         case 10: try { try decoder.decodeMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufString,SwiftProtobuf.ProtobufString>.self, value: &_storage._clientNotes) }()
         case 11: try { try decoder.decodeSingularInt64Field(value: &_storage._startedAtWallUs) }()
+        case 12: try { try decoder.decodeRepeatedMessageField(value: &_storage._planeAnchors) }()
         default: break
         }
       }
@@ -676,6 +804,9 @@ nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message
       if _storage._startedAtWallUs != 0 {
         try visitor.visitSingularInt64Field(value: _storage._startedAtWallUs, fieldNumber: 11)
       }
+      if !_storage._planeAnchors.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._planeAnchors, fieldNumber: 12)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -696,6 +827,7 @@ nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message
         if _storage._frames != rhs_storage._frames {return false}
         if _storage._roomPlan != rhs_storage._roomPlan {return false}
         if _storage._clientNotes != rhs_storage._clientNotes {return false}
+        if _storage._planeAnchors != rhs_storage._planeAnchors {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -1071,6 +1203,85 @@ nonisolated extension Roomstudio_Capture_V1_Depth: SwiftProtobuf.Message, SwiftP
     if lhs.width != rhs.width {return false}
     if lhs.height != rhs.height {return false}
     if lhs._intrinsics != rhs._intrinsics {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Roomstudio_Capture_V1_PlaneAnchor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaneAnchor"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}pose\0\u{3}center_x\0\u{3}center_y\0\u{3}center_z\0\u{3}extent_width\0\u{3}extent_height\0\u{3}rotation_on_y_rad\0\u{1}alignment\0\u{1}classification\0\u{3}boundary_xz\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._pose) }()
+      case 2: try { try decoder.decodeSingularFloatField(value: &self.centerX) }()
+      case 3: try { try decoder.decodeSingularFloatField(value: &self.centerY) }()
+      case 4: try { try decoder.decodeSingularFloatField(value: &self.centerZ) }()
+      case 5: try { try decoder.decodeSingularFloatField(value: &self.extentWidth) }()
+      case 6: try { try decoder.decodeSingularFloatField(value: &self.extentHeight) }()
+      case 7: try { try decoder.decodeSingularFloatField(value: &self.rotationOnYRad) }()
+      case 8: try { try decoder.decodeSingularEnumField(value: &self.alignment) }()
+      case 9: try { try decoder.decodeSingularStringField(value: &self.classification) }()
+      case 10: try { try decoder.decodeRepeatedFloatField(value: &self.boundaryXz) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._pose {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.centerX.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.centerX, fieldNumber: 2)
+    }
+    if self.centerY.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.centerY, fieldNumber: 3)
+    }
+    if self.centerZ.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.centerZ, fieldNumber: 4)
+    }
+    if self.extentWidth.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.extentWidth, fieldNumber: 5)
+    }
+    if self.extentHeight.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.extentHeight, fieldNumber: 6)
+    }
+    if self.rotationOnYRad.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.rotationOnYRad, fieldNumber: 7)
+    }
+    if self.alignment != .unspecified {
+      try visitor.visitSingularEnumField(value: self.alignment, fieldNumber: 8)
+    }
+    if !self.classification.isEmpty {
+      try visitor.visitSingularStringField(value: self.classification, fieldNumber: 9)
+    }
+    if !self.boundaryXz.isEmpty {
+      try visitor.visitPackedFloatField(value: self.boundaryXz, fieldNumber: 10)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Roomstudio_Capture_V1_PlaneAnchor, rhs: Roomstudio_Capture_V1_PlaneAnchor) -> Bool {
+    if lhs._pose != rhs._pose {return false}
+    if lhs.centerX != rhs.centerX {return false}
+    if lhs.centerY != rhs.centerY {return false}
+    if lhs.centerZ != rhs.centerZ {return false}
+    if lhs.extentWidth != rhs.extentWidth {return false}
+    if lhs.extentHeight != rhs.extentHeight {return false}
+    if lhs.rotationOnYRad != rhs.rotationOnYRad {return false}
+    if lhs.alignment != rhs.alignment {return false}
+    if lhs.classification != rhs.classification {return false}
+    if lhs.boundaryXz != rhs.boundaryXz {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
