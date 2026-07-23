@@ -89,6 +89,19 @@ is not "0", fusion additionally:
      wall — which ships only if it reprojects onto the object's own mask
      (the evidence gate). No planes in the bundle → inert; the object stays
      `insufficient_observations` and the rest of refinement is unchanged.
+ 10. Applies a room-sanity gate to every PLACED object (the triangulated /
+     silhouette / depth_fit path — NOT chunk D's contact placements, which
+     are self-gated against a measured surface). A placement whose position
+     lands OUTSIDE the measured room (beyond the detected floor rectangle +
+     margin, below the floor, or above the wall top), whose physical size is
+     implausible, or whose class the shell already renders as a structural
+     opening (door/window — a free splat mid-room is double-wrong) is
+     demoted to unplaced with an explicit reason rather than rendered as a
+     guessed transform. This is the "never emit a guessed transform" rule
+     (0052/0067) applied to triangulation blow-ups — the floating mirror,
+     the 5 cm speck, the mid-room door. The outside-room half needs measured
+     planes and is inert without them (the degrade lock); the class/scale
+     halves need no geometry.
 
 Refinement is CPU-only, bounded (fixed iteration budgets, no RNG —
 identical inputs always produce identical manifests) and budget-aware
@@ -146,6 +159,42 @@ _REFINE_MIN_REMAINING_S = float(os.environ.get("PLACEMENT_REFINE_MIN_REMAINING_S
 # emitted", carried through priors). One-capture-calibrated placeholder like
 # the other PLACEMENT_* knobs.
 _SINGLE_VIEW_MIN_TIER1 = float(os.environ.get("PLACEMENT_SINGLE_VIEW_MIN_TIER1", "0.1"))
+
+# --- Room-sanity gate (refinement lock 10) env knobs ------------------------
+# A placed object's center may sit this far outside the detected floor
+# rectangle (XZ) and still count as in-room — objects near a wall have
+# centers on the floor boundary; a wall-mounted object's center sits ON the
+# wall. Generous enough to keep edge furniture, far tighter than the metres a
+# triangulation blow-up lands out (the reference mirror was 2.24 m beyond the
+# floor). One-capture-calibrated placeholder like the other PLACEMENT_* knobs.
+_ROOM_MARGIN_M = float(os.environ.get("PLACEMENT_ROOM_MARGIN_M", "0.5"))
+# Vertical slack below the floor / above the wall top before a center is
+# "outside" the room. An object center is above the floor by ~half its height,
+# so the below-floor test only catches placements that went genuinely
+# subterranean; the above-top test catches ceiling-punching blow-ups.
+_ROOM_VERTICAL_MARGIN_M = float(os.environ.get("PLACEMENT_ROOM_VERTICAL_MARGIN_M", "0.3"))
+# Physical-size plausibility on the largest object extent (extent_m_sorted[0]).
+# Nothing in a home room is larger than a few metres across its biggest axis,
+# and a whole object under a few cm is a collapsed reconstruction (the
+# reference artwork rendered as a 5 cm speck). Needs no room geometry.
+_MAX_EXTENT_M = float(os.environ.get("PLACEMENT_MAX_EXTENT_M", "5.0"))
+_MIN_EXTENT_M = float(os.environ.get("PLACEMENT_MIN_EXTENT_M", "0.08"))
+# SAM object classes the room SHELL already renders as structural openings:
+# door/window are ARKit plane-anchor classifications AND SAM labels — a door
+# is a wall_NN opening, not a free splat floating in the room. Never
+# FREE-place (triangulate) these; a measured wall-contact placement (chunk D)
+# is exempt (it sits on the actual wall, not mid-room). Env-overridable.
+_SHELL_OPENING_CLASSES = frozenset(
+    s.strip().lower()
+    for s in os.environ.get("PLACEMENT_SHELL_OPENING_CLASSES", "door,window").split(",")
+    if s.strip()
+)
+# Placements produced by chunk D's measured-surface contact priors — exempt
+# from the room-sanity gate (they are placed ON the measured floor/wall by
+# construction and carry their own bounds + evidence gates).
+_CONTACT_POSITION_SOURCES = frozenset(
+    ("single_view_floor_contact", "single_view_wall_contact")
+)
 
 
 def _refinement_enabled() -> bool:
@@ -1008,6 +1057,120 @@ def _try_single_view_prior(
 
 
 # -----------------------------------------------------------------------------
+# Refinement lock 10: room-sanity gate (never emit a guessed transform)
+# -----------------------------------------------------------------------------
+
+def _room_planes(ctx: Optional[RefinementContext]):
+    if ctx is None or ctx.get_room_planes is None:
+        return None
+    return ctx.get_room_planes()
+
+
+def _wall_top_y(planes) -> Optional[float]:
+    tops = [float(w.corners_world[:, 1].max()) for w in getattr(planes, "walls", [])]
+    return max(tops) if tops else None
+
+
+def _position_outside_room(pos: np.ndarray, planes) -> bool:
+    """True if a world position lands outside the MEASURED room: beyond the
+    detected floor rectangle in XZ (padded), below the floor, or above the
+    wall top. Each sub-test is skipped when its measured input is absent, so
+    a room with a floor but no walls still gates XZ + below-floor."""
+    floor = getattr(planes, "floor", None)
+    if floor is not None:
+        rel = pos - floor.origin
+        u = float(np.dot(rel, floor.axis_u))
+        v = float(np.dot(rel, floor.axis_v))
+        m = _ROOM_MARGIN_M
+        if not (-m <= u <= floor.width_m + m and -m <= v <= floor.height_m + m):
+            return True
+        floor_y = planes.floor_y
+        if floor_y is not None and pos[1] < floor_y - _ROOM_VERTICAL_MARGIN_M:
+            return True
+    top = _wall_top_y(planes)
+    if top is not None and pos[1] > top + _ROOM_VERTICAL_MARGIN_M:
+        return True
+    return False
+
+
+def _room_sanity_reason(obj: dict, ctx: Optional[RefinementContext]) -> Optional[str]:
+    """Why a placed object should be demoted to unplaced, or None if it
+    passes. Applies to the triangulated / silhouette / depth_fit path only —
+    chunk D's measured-surface contact placements are exempt (self-gated).
+
+      * `represented_as_shell_opening` — a door/window class the shell already
+        renders as a wall opening; a free (triangulated) splat for it, at a
+        mid-room position, is double-wrong. Needs no geometry.
+      * `implausible_scale` — the largest physical extent is absurdly small (a
+        collapsed reconstruction) or larger than any home-room object. Uses
+        extent_m_sorted when present; needs no geometry.
+      * `outside_room` — the position lands outside the measured room. Needs
+        measured planes; inert without them (the degrade lock).
+    """
+    # Contact placements sit ON a measured surface by construction — never
+    # mid-room, never a guess — and carry their own gates. Exempt entirely.
+    if obj.get("position_source") in _CONTACT_POSITION_SOURCES:
+        return None
+
+    label = (obj.get("label") or "").strip().lower()
+    if label in _SHELL_OPENING_CLASSES:
+        return "represented_as_shell_opening"
+
+    extents = obj.get("extent_m_sorted")
+    if extents:
+        largest = float(extents[0])
+        if largest > _MAX_EXTENT_M or largest < _MIN_EXTENT_M:
+            return "implausible_scale"
+
+    planes = _room_planes(ctx)
+    if planes is None or not getattr(planes, "has_geometry", False):
+        return None
+    wt = obj.get("world_transform") or {}
+    pos = wt.get("position")
+    if pos is None:
+        return None
+    if _position_outside_room(np.asarray(pos, dtype=np.float64), planes):
+        return "outside_room"
+    return None
+
+
+def _demote_object(obj: dict, reason: str) -> dict:
+    """Turn an over-placed object into an honest unplaced entry, preserving
+    its identity/provenance so the manifest still lists it (as inventory, not
+    rendered). deduped_observations is added by the caller after this."""
+    quality = obj.get("quality", {})
+    return {
+        "object_id": obj["object_id"],
+        "label": obj["label"],
+        "placed": False,
+        "method": None,
+        "reason": reason,
+        "splat_gcs_uri": obj.get("splat_gcs_uri"),
+        "source": obj.get("source"),
+        "world_transform": None,
+        "quality": {
+            "frames_observed": quality.get("frames_observed"),
+            "score": quality.get("score"),
+        },
+    }
+
+
+def _apply_room_sanity(obj: dict, ctx: Optional[RefinementContext]) -> dict:
+    """Demote obj to unplaced if the room-sanity gate rejects it; otherwise
+    return it unchanged. Only ever consulted for placed objects."""
+    if not obj.get("placed"):
+        return obj
+    reason = _room_sanity_reason(obj, ctx)
+    if reason is None:
+        return obj
+    logger.info(
+        "fusion: demoting %s (%s) -> unplaced: %s",
+        obj.get("object_id"), obj.get("label"), reason,
+    )
+    return _demote_object(obj, reason)
+
+
+# -----------------------------------------------------------------------------
 # Top-level entry points
 # -----------------------------------------------------------------------------
 
@@ -1072,6 +1235,7 @@ def fuse_scene_objects_with_meta(
                 obj = _refine_fused_object(obj, cluster, ctx)
             else:
                 refinement_skipped = True
+            obj = _apply_room_sanity(obj, ctx)
             n_dedup = sum(dedup_counts.get((m["frame_index"], m.get("mask_index")), 0) for m in cluster)
             obj["deduped_observations"] = n_dedup
             fused.append(obj)
@@ -1095,6 +1259,7 @@ def fuse_scene_objects_with_meta(
                         obj = placed
                 else:
                     refinement_skipped = True
+            obj = _apply_room_sanity(obj, ctx)
             n_dedup = sum(dedup_counts.get((m["frame_index"], m.get("mask_index")), 0) for m in cluster)
             obj["deduped_observations"] = n_dedup
             fused.append(obj)
