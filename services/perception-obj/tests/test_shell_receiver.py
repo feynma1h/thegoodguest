@@ -1,6 +1,8 @@
-"""/shell receiver invariants (decision 0066): the absent-vs-unavailable
-contract, drain-vs-retry classification, byte-determinism of shell.json,
-and the never-touch-Firestore rule — against an in-memory GCS fake.
+"""/shell receiver invariants (decisions 0066/0069): the
+absent-vs-unavailable contract, drain-vs-retry classification,
+byte-determinism of shell.json v2, the measured-geometry immutability
+pin, the no-texture serving contract, and the never-touch-Firestore
+rule — against an in-memory GCS fake. No test touches the network.
 
 Run: python -m pytest services/perception-obj/tests/test_shell_receiver.py
 """
@@ -15,8 +17,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import shell_material
+import shell_observation
 import shell_receiver
-import shell_texture
 from PIL import Image
 from process_receiver import EnvironmentalError, PoisonError
 from roomstudio_schemas import PLANE_HORIZONTAL, PLANE_VERTICAL, CaptureBundle
@@ -34,7 +37,7 @@ _BUNDLE_URI = "gs://test-captures/captures/abc/bundle.pb"
 
 
 # ---------------------------------------------------------------------------
-# Fake GCS
+# Fake GCS + deterministic classifier
 # ---------------------------------------------------------------------------
 
 class FakeGcs:
@@ -59,6 +62,12 @@ class FakeGcs:
         return f"gs://{bucket}/{path}"
 
 
+def _fake_classify(crops, kind):
+    """Deterministic stand-in for the vision call — the receiver tests
+    must never reach the network."""
+    return ("wood", 0.9) if kind == "floor" else ("painted", 0.85)
+
+
 @pytest.fixture
 def gcs(monkeypatch) -> FakeGcs:
     fake = FakeGcs()
@@ -66,24 +75,31 @@ def gcs(monkeypatch) -> FakeGcs:
     monkeypatch.setattr(shell_receiver, "_download_gcs_uri", fake.download)
     monkeypatch.setattr(shell_receiver, "_gcs_upload_for_scene", fake.upload)
     # Coarse texels: the synthetic planes are meters wide, tests stay fast.
-    monkeypatch.setattr(shell_texture, "SHELL_METERS_PER_TEXEL", 0.25)
+    monkeypatch.setattr(shell_observation, "SHELL_METERS_PER_TEXEL", 0.25)
+    monkeypatch.setattr(shell_observation, "SHELL_EVIDENCE_CROP_PX", 16)
+    # No live vision calls, ever (also keeps determinism assertions exact).
+    monkeypatch.setattr(shell_material, "classify_family_via_api", _fake_classify)
     return fake
 
 
 # ---------------------------------------------------------------------------
-# Synthetic scene: a floor + one wall, one complete frame observing both
+# Synthetic scene: a floor + one wall, one complete frame observing both.
+# The wall's detected bottom (-1.0) floats 0.4 above the floor (-1.4), so
+# closure demonstrably extends it (measured_quad != quad in the doc).
 # ---------------------------------------------------------------------------
 
 _R = 1.0 / math.sqrt(2.0)
 
 
-def _bundle_with_planes(*, planes: bool = True, frames: bool = True) -> CaptureBundle:
+def _bundle_with_planes(
+    *, planes: bool = True, frames: bool = True, door: bool = False
+) -> CaptureBundle:
     b = CaptureBundle()
     b.schema_version = "1"
     b.bundle_id = "abc"
     if planes:
         floor = b.plane_anchors.add()
-        floor.pose.pos_y = -1.0
+        floor.pose.pos_y = -1.4
         floor.pose.quat_w = 1.0
         floor.extent_width = 3.0
         floor.extent_height = 3.0
@@ -98,6 +114,18 @@ def _bundle_with_planes(*, planes: bool = True, frames: bool = True) -> CaptureB
         wall.extent_height = 2.0
         wall.alignment = PLANE_VERTICAL
         wall.classification = "wall"
+        if door:
+            d = b.plane_anchors.add()
+            # Same plane as the wall; x in [-1.0, -0.2], y in [-1.0, 0.2].
+            d.pose.pos_x = -0.6
+            d.pose.pos_y = -0.4
+            d.pose.pos_z = -1.0
+            d.pose.quat_x = _R
+            d.pose.quat_w = _R
+            d.extent_width = 0.8
+            d.extent_height = 1.2
+            d.alignment = PLANE_VERTICAL
+            d.classification = "door"
     if frames:
         f = b.frames.add()
         f.frame_index = 0
@@ -168,7 +196,7 @@ def _shell_doc(gcs: FakeGcs) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Happy path
+# Happy path (v2)
 # ---------------------------------------------------------------------------
 
 class TestHappyPath:
@@ -177,53 +205,76 @@ class TestHappyPath:
         body = _run()
         assert body == {"status": "ready", "reason": None}
         doc = _shell_doc(gcs)
-        assert doc["shell_version"] == 1
+        assert doc["shell_version"] == 2
         assert doc["status"] == "ready"
         assert doc["method"] == "arkit_planes"
         assert doc["floor"] is not None
         assert len(doc["walls"]) == 1
         assert doc["quality"]["frames_used"] == 1
+        assert doc["quality"]["material_version"] == 1
+
+    def test_no_texture_blobs_no_texture_uris(self, gcs):
+        """The 0069 serving contract: no raster textures anywhere — no
+        texture blob uploads, no texture_gcs_uri key in the doc."""
+        _seed_ready_scene(gcs)
+        _run()
+        assert not any("shell/textures" in k for k in gcs.blobs)
+        raw = gcs.blobs[f"{_BUCKET}/scenes/{_SCENE}/shell.json"]
+        assert b"texture_gcs_uri" not in raw
+        assert b"inpainted_fraction" not in raw
 
     def test_floor_entry_shape(self, gcs):
         _seed_ready_scene(gcs)
         _run()
         floor = _shell_doc(gcs)["floor"]
-        assert len(floor["quad"]) == 4 and len(floor["quad"][0]) == 3
-        assert floor["y"] == pytest.approx(-1.0, abs=1e-3)
-        assert 0.0 <= floor["observed_fraction"] <= 1.0
-        assert 0.0 <= floor["inpainted_fraction"] <= 1.0
-        assert floor["source"] in ("baked", "unobserved")
+        assert len(floor["polygon"]) >= 3 and len(floor["polygon"][0]) == 3
+        assert len(floor["measured_polygon"]) >= 3
+        assert floor["y"] == pytest.approx(-1.4, abs=1e-3)
+        assert len(floor["provenance"]["edges"]) == len(floor["polygon"])
+        mat = floor["material"]
+        # The camera grazes the floor: no tile clears the evidence gate,
+        # so no crops -> family stays null (the wall test covers family
+        # threading). The dict SHAPE is the contract here.
+        assert set(mat) == {
+            "family", "family_confidence", "albedo_hex", "secondary_hex",
+            "params", "render", "source", "inference",
+        }
+        assert set(mat["source"]) == {"observed_fraction", "texel_count", "frames_used"}
+        assert mat["inference"]["material_version"] == 1
+        assert 0.0 <= mat["source"]["observed_fraction"] <= 1.0
 
-    def test_wall_entry_shape(self, gcs):
+    def test_wall_entry_shape_and_measured_immutability(self, gcs):
+        """The wall's detected bottom is 0.4 above the floor: the rendered
+        quad reaches the floor, the measured_quad stays detected — the
+        0069 immutability pin at the DOC level."""
         _seed_ready_scene(gcs)
         _run()
         wall = _shell_doc(gcs)["walls"][0]
         assert wall["wall_id"] == "wall_00"
         assert wall["classification"] == "wall"
-        assert len(wall["quad"]) == 4
+        rendered_ys = [c[1] for c in wall["quad"]]
+        measured_ys = [c[1] for c in wall["measured_quad"]]
+        assert min(rendered_ys) == pytest.approx(-1.4, abs=1e-3)
+        assert min(measured_ys) == pytest.approx(-1.0, abs=1e-3)
+        assert wall["edges"]["bottom"]["state"] == "extended_to_floor"
+        assert wall["edges"]["bottom"]["extension_m"] == pytest.approx(0.4, abs=1e-3)
+        assert wall["material"]["family"] == "painted"
 
-    def test_baked_textures_uploaded_with_uris(self, gcs):
-        _seed_ready_scene(gcs)
-        _run()
-        doc = _shell_doc(gcs)
-        for entry in [doc["floor"], *doc["walls"]]:
-            if entry["source"] == "baked":
-                uri = entry["texture_gcs_uri"]
-                assert uri.startswith(f"gs://{_BUCKET}/scenes/{_SCENE}/shell/textures/")
-                blob_key = uri[5:]
-                assert blob_key in gcs.blobs
-                # Valid PNG with alpha.
-                img = Image.open(io.BytesIO(gcs.blobs[blob_key]))
-                assert img.mode == "RGBA"
-
-    def test_wall_texture_actually_baked(self, gcs):
-        """The synthetic camera fully faces the wall — it must come out
-        baked (not unobserved), proving the projection path end-to-end."""
-        _seed_ready_scene(gcs)
+    def test_door_member_ships_as_normalized_opening(self, gcs):
+        _seed_ready_scene(gcs, bundle=_bundle_with_planes(door=True))
         _run()
         wall = _shell_doc(gcs)["walls"][0]
-        assert wall["source"] == "baked"
-        assert wall["observed_fraction"] > 0.5
+        assert wall["classification"] == "wall"  # majority of NON-opening members
+        assert len(wall["openings"]) == 1
+        op = wall["openings"][0]
+        assert op["classification"] == "door"
+        (u0, v0), (u1, v1) = op["rect_uv"]
+        assert 0.0 <= u0 < u1 <= 1.0
+        assert 0.0 <= v0 < v1 <= 1.0
+        # The door starts AT the rendered bottom (the wall was extended
+        # 0.4 down to the floor; the door's detected bottom sat at the
+        # wall's detected bottom, so its v0 is the extension offset).
+        assert v0 == pytest.approx(0.4 / 2.4, abs=0.02)
 
     def test_no_timestamps_and_byte_deterministic(self, gcs):
         _seed_ready_scene(gcs)
@@ -275,6 +326,7 @@ class TestUnavailable:
         assert body == {"status": "unavailable", "reason": "capture_expired"}
         doc = _shell_doc(gcs)
         assert doc["status"] == "unavailable"
+        assert doc["shell_version"] == 2
         assert doc["floor"] is None and doc["walls"] == []
 
     def test_no_plane_anchors_writes_no_geometry_source(self, gcs):
@@ -295,6 +347,25 @@ class TestUnavailable:
         assert body == {"status": "unavailable", "reason": "no_geometry_source"}
         assert _shell_doc(gcs)["quality"]["planes_in_bundle"] == 1
 
+    def test_all_fragments_filtered_writes_no_geometry_source(self, gcs):
+        """No floor + every vertical dropped by the fragment filter: the
+        closure stats are recorded but nothing measured is shippable."""
+        b = _bundle_with_planes(planes=False)
+        frag = b.plane_anchors.add()
+        # Unclassified 0.35 m² vertical, floating, no partners.
+        frag.pose.pos_z = -1.0
+        frag.pose.quat_x = _R
+        frag.pose.quat_w = _R
+        frag.extent_width = 0.7
+        frag.extent_height = 0.5
+        frag.alignment = PLANE_VERTICAL
+        _seed_ready_scene(gcs, bundle=b)
+        body = _run()
+        assert body == {"status": "unavailable", "reason": "no_geometry_source"}
+        doc = _shell_doc(gcs)
+        assert doc["quality"]["fragments_dropped"] == 1
+        assert doc["walls"] == []
+
     def test_all_rgb_swept_writes_capture_expired(self, gcs):
         _seed_ready_scene(gcs)
         del gcs.blobs["test-captures/captures/abc/frames/000000.jpg"]
@@ -304,7 +375,8 @@ class TestUnavailable:
     def test_budget_stopped_frames_excluded(self, gcs):
         """A budget-stopped manifest frame has no masks.npz by contract —
         it must not be sampled; with no complete frames and no missing
-        RGB the shell still writes (all planes unobserved)."""
+        RGB the shell still writes (all planes unobserved, materials
+        fully null: the clean-neutral treatment)."""
         _seed_ready_scene(gcs)
         gcs.blobs[f"{_BUCKET}/scenes/{_SCENE}/manifest.json"] = json.dumps(
             _manifest(frames_complete=False)
@@ -314,8 +386,11 @@ class TestUnavailable:
         doc = _shell_doc(gcs)
         assert doc["quality"]["frames_used"] == 0
         for entry in [doc["floor"], *doc["walls"]]:
-            assert entry["source"] == "unobserved"
-            assert entry["texture_gcs_uri"] is None
+            mat = entry["material"]
+            assert mat["family"] is None
+            assert mat["albedo_hex"] is None
+            assert mat["source"]["observed_fraction"] == 0.0
+            assert mat["inference"]["model"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +425,7 @@ def _fake_request(headers: dict | None = None):
     })
 
 
-def _call_handle(oidc=None, monkey_run=None):
+def _call_handle(oidc=None):
     async def _go():
         return await handle_shell(
             _fake_request(),
@@ -447,7 +522,7 @@ class TestStructuralInvariants:
             scene_id=_SCENE, status="unavailable", reason="capture_expired",
         )
         assert doc == {
-            "shell_version": 1,
+            "shell_version": 2,
             "scene_id": _SCENE,
             "status": "unavailable",
             "reason": "capture_expired",

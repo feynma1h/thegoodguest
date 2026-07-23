@@ -93,34 +93,56 @@ def _manifest(objects: list[dict] | None = None) -> dict:
 _SHELL_URI = "gs://outputs/scenes/s1/shell.json"
 
 
-def _shell_doc(*, with_textures: bool = True) -> dict:
-    tex = "gs://outputs/scenes/s1/shell/textures/{}.png"
+def _material(family: str | None = "painted") -> dict:
     return {
-        "shell_version": 1,
+        "family": family,
+        "family_confidence": 0.8 if family else None,
+        "albedo_hex": "#aab9c3",
+        "secondary_hex": None,
+        "params": {},
+        "render": {"roughness": 0.85},
+        "source": {"observed_fraction": 0.5, "texel_count": 900, "frames_used": 3},
+        "inference": {"model": "claude-sonnet-5" if family else None,
+                      "material_version": 1},
+    }
+
+
+def _shell_doc() -> dict:
+    """A shell.json v2 document (decision 0069): parametric materials,
+    NO fetchable blobs — nothing here may join the signing walk."""
+    return {
+        "shell_version": 2,
         "scene_id": "s1",
         "status": "ready",
         "reason": None,
         "method": "arkit_planes",
         "floor": {
-            "quad": [[0, -1, 0], [2, -1, 0], [2, -1, 2], [0, -1, 2]],
+            "polygon": [[0, -1, 0], [2, -1, 0], [2, -1, 2], [0, -1, 2]],
+            "measured_polygon": [[0, -1, 0], [2, -1, 0], [2, -1, 2], [0, -1, 2]],
             "y": -1.0,
-            "texture_gcs_uri": tex.format("floor") if with_textures else None,
-            "observed_fraction": 0.8,
-            "inpainted_fraction": 0.1,
-            "source": "baked" if with_textures else "unobserved",
+            "provenance": {"edges": ["observed"] * 4},
+            "material": _material("wood"),
         },
         "walls": [
             {
                 "wall_id": "wall_00",
-                "quad": [[0, -1, 0], [2, -1, 0], [2, 1, 0], [0, 1, 0]],
-                "texture_gcs_uri": tex.format("wall_00") if with_textures else None,
-                "observed_fraction": 0.7,
-                "inpainted_fraction": 0.2,
-                "source": "baked" if with_textures else "unobserved",
+                "quad": [[0, -1.4, 0], [2, -1.4, 0], [2, 1, 0], [0, 1, 0]],
+                "measured_quad": [[0, -1, 0], [2, -1, 0], [2, 1, 0], [0, 1, 0]],
+                "edges": {
+                    "bottom": {"state": "extended_to_floor", "extension_m": 0.4},
+                    "top": {"state": "observed", "extension_m": 0.0},
+                    "left": {"state": "observed", "extension_m": 0.0},
+                    "right": {"state": "observed", "extension_m": 0.0},
+                },
+                "openings": [
+                    {"classification": "door", "rect_uv": [[0.1, 0.0], [0.4, 0.8]]}
+                ],
                 "classification": "wall",
+                "material": _material("painted"),
             }
         ],
-        "quality": {"planes_in_bundle": 2, "frames_used": 3},
+        "quality": {"planes_in_bundle": 2, "frames_used": 3,
+                    "material_version": 1},
     }
 
 
@@ -254,8 +276,8 @@ class TestAssetsAuthAndLookup:
 
 
 class TestAssetsShellSibling:
-    """The shell field (decision 0066): verbatim sibling, null when the
-    blob is absent, texture URIs joining the signing walk."""
+    """The shell field (decisions 0066/0069): verbatim sibling, null when
+    the blob is absent, contributing NOTHING to the signing walk."""
 
     def test_shell_absent_is_null(self, client) -> None:
         resp = _get_assets(
@@ -270,7 +292,9 @@ class TestAssetsShellSibling:
             "gs://outputs/scenes/s1/frames/0001/splats/00_lamp.ply",
         }
 
-    def test_shell_present_verbatim_and_textures_signed(self, client) -> None:
+    def test_shell_present_verbatim_and_signs_nothing(self, client) -> None:
+        """A v2 shell passes through byte-for-byte and adds no asset URLs
+        — parametric materials have no fetchable blobs (0069)."""
         shell = _shell_doc()
         resp = _get_assets(
             client,
@@ -281,17 +305,17 @@ class TestAssetsShellSibling:
         assert resp.status_code == 200
         body = resp.json()
         assert body["shell"] == shell  # verbatim, not rewritten
-        urls = body["asset_urls"]
-        assert "gs://outputs/scenes/s1/shell/textures/floor.png" in urls
-        assert "gs://outputs/scenes/s1/shell/textures/wall_00.png" in urls
-        # Splats still there too — one signing walk.
-        assert "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply" in urls
+        # The signing walk carries exactly the splats, nothing shell-borne.
+        assert set(body["asset_urls"]) == {
+            "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply",
+            "gs://outputs/scenes/s1/frames/0001/splats/00_lamp.ply",
+        }
 
     def test_unavailable_shell_passes_through(self, client) -> None:
         """status 'unavailable' is a real document the client must see —
         it is what stops the grace window."""
         shell = {
-            "shell_version": 1,
+            "shell_version": 2,
             "scene_id": "s1",
             "status": "unavailable",
             "reason": "no_geometry_source",
@@ -309,8 +333,27 @@ class TestAssetsShellSibling:
         assert resp.status_code == 200
         assert resp.json()["shell"]["status"] == "unavailable"
 
-    def test_untextured_planes_add_no_urls(self, client) -> None:
-        shell = _shell_doc(with_textures=False)
+    def test_legacy_texture_uris_no_longer_signed(self, client) -> None:
+        """The v1 bake's texture_gcs_uri keys left the signing walk with
+        0069 — even a stale v1 doc adds no URLs (population of ready v1
+        shells is zero after the migration re-drive)."""
+        shell = {
+            "shell_version": 1,
+            "scene_id": "s1",
+            "status": "ready",
+            "reason": None,
+            "method": "arkit_planes",
+            "floor": {
+                "quad": [[0, -1, 0], [2, -1, 0], [2, -1, 2], [0, -1, 2]],
+                "y": -1.0,
+                "texture_gcs_uri": "gs://outputs/scenes/s1/shell/textures/floor.png",
+                "observed_fraction": 0.8,
+                "inpainted_fraction": 0.1,
+                "source": "baked",
+            },
+            "walls": [],
+            "quality": {"planes_in_bundle": 1, "frames_used": 3},
+        }
         resp = _get_assets(
             client,
             _scene(),

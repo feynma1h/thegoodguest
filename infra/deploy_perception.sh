@@ -82,7 +82,13 @@ gcloud run deploy "${SERVICE}" \
     --no-cpu-throttling \
     --cpu-boost \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
-    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app,CLOUD_TASKS_PROJECT=roomstudio,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15
+    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app,CLOUD_TASKS_PROJECT=roomstudio,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15,SHELL_MATERIAL_MODEL=claude-sonnet-5 \
+    --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
+    # SHELL_MATERIAL_MODEL is the material-family classifier (decision
+    # 0069; shell_material.py). Swapping it changes what families ship —
+    # adjudicate on the reference room before widening. The secret mount
+    # powers the same call; without it the 0069 fallback rule nulls every
+    # family (clean neutral) rather than failing the shell.
 
 # Shell-stage IAM (decision 0066; folds in the runtime-SA audit item):
 # /process enqueues /shell tasks itself, so THIS service's runtime SA needs
@@ -107,6 +113,17 @@ if [[ "${WHICH}" == "obj" ]]; then
         --member="serviceAccount:${RUNTIME_SA}" \
         --role="roles/iam.serviceAccountUser" >/dev/null
     echo "shell-stage IAM ensured (cloudtasks.enqueuer + serviceAccountUser)"
+
+    # Runtime SA reads the Anthropic key for shell material inference
+    # (decision 0069). SECRET-scoped, not project-scoped — the api-public
+    # pattern. Idempotent; the deploy above already fails legibly if the
+    # secret is missing (--set-secrets validates at deploy time).
+    gcloud secrets add-iam-policy-binding anthropic-api-key \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/secretmanager.secretAccessor" \
+        --project="${PROJECT_ID}" \
+        --quiet >/dev/null
+    echo "secretAccessor on anthropic-api-key ensured for ${RUNTIME_SA}"
 fi
 
 # gcloud run deploy creates the revision but does NOT move traffic when the

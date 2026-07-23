@@ -96,8 +96,10 @@ _ROUGHNESS: dict[str | None, float] = {
 # orientations) to claim a direction at all.
 _PLANK_MIN_RESULTANT = 0.2
 
-# Vision call bounds.
-_API_TIMEOUT_S = 60.0
+# Vision call bounds: one attempt + one SDK retry at a 30 s timeout keeps
+# a plane's worst case inside shell_receiver's 90 s budget reserve.
+_API_TIMEOUT_S = 30.0
+_API_MAX_RETRIES = 1
 _API_MAX_TOKENS = 256
 
 # classify_fn contract: (crops, kind) -> (family, confidence) | None.
@@ -191,7 +193,7 @@ def classify_family_via_api(
         import anthropic  # deferred: tests never touch the SDK
 
         client = anthropic.Anthropic(
-            api_key=api_key, timeout=_API_TIMEOUT_S, max_retries=2
+            api_key=api_key, timeout=_API_TIMEOUT_S, max_retries=_API_MAX_RETRIES
         )
         content: list[dict] = []
         for i, crop in enumerate(crops):

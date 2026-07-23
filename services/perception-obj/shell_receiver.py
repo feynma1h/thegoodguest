@@ -1,18 +1,25 @@
-"""POST /shell receiver — the room-shell second stage (decision 0066).
+"""POST /shell receiver — the room-shell second stage (decisions 0066
+architecture / 0069 parametric surfaces).
 
 Enqueued by /process's success path after release_ready (fire-and-forget;
-see shell_enqueue.py). Assembles floor+wall quads from the bundle's
-plane anchors (shell_geometry), bakes textures from the capture's own
-RGB with SAM 3 masks excluding furniture (shell_texture + shell_inpaint),
-and writes:
+see shell_enqueue.py). Assembles the measured floor + wall set from the
+bundle's plane anchors (room_planes via shell_geometry), closes the
+envelope (0069: wall→floor, wall→wall seams, common top, floor snapped
+and bounded to wall lines — joints, never loops), observes each plane
+from the capture's own RGB (shell_observation), infers per-plane
+parametric materials (shell_material: measured albedo + confidence-gated
+family + roughness lookup), and writes ONE blob:
 
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/shell.json
-  gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/shell/textures/*.png
 
-NEVER manifest.json (single writer stays /process), NEVER Firestore —
-shell failure cannot un-ready a room, and there is no scene lease: the
-shell.json write is a single idempotent blob PUT, deterministic for
-identical inputs, so concurrent runs are benign.
+No raster textures exist in the serving contract (SHELL_VERSION 2 — the
+photographic bake and its inpainting left serving per 0069; the viewer
+renders materials from parameters). NEVER manifest.json (single writer
+stays /process), NEVER Firestore — shell failure cannot un-ready a room,
+and there is no scene lease: the shell.json write is a single idempotent
+blob PUT, deterministic for identical inputs (the material vision call is
+made at most once per plane per scene lifetime thanks to the write-once
+noop; MATERIAL_VERSION + model are recorded in the doc).
 
 The client-relied distinction (0066): shell.json ABSENT = not yet (keep
 the grace window); status "unavailable" = never coming (stop waiting,
@@ -21,13 +28,18 @@ keep the grid). Unavailable is a WRITTEN file with a reason
 "capture_expired" when the captures bucket's 1-day lifecycle swept the
 pixels), not an error.
 
+Honesty invariants carried in the doc (0069, test-pinned): every wall
+ships measured_quad (the DETECTED extent — what facts may read) beside
+the rendered quad, with per-edge provenance; the floor ships
+measured_polygon beside the rendered polygon with per-segment states;
+closure never mutates measured geometry.
+
 Response classification mirrors 0004's receiver semantics: completed
 runs AND poison-class outcomes return 200 (Cloud Tasks drains);
 environmental failures return 5xx (Cloud Tasks retries, maxAttempts=3).
 A request-entry deadline (server.py, SHELL_REQUEST_BUDGET_SECONDS)
 bounds the handler inside the Cloud Run request window; running out of
-budget is environmental — the retry starts over (textures re-upload
-idempotently).
+budget is environmental — the retry starts over.
 
 reads: bundle proto (poses/intrinsics/plane_anchors) from the captures
 bucket; manifest.json READ-ONLY for the complete-frame list; masks.npz
@@ -51,7 +63,6 @@ from fastapi.responses import JSONResponse
 from process_receiver import (
     EnvironmentalError,
     PoisonError,
-    _bundle_prefix,
     _download_gcs_uri,
     _gcs_blob_exists_and_get,
     _gcs_upload_for_scene,
@@ -59,15 +70,18 @@ from process_receiver import (
 from pydantic import BaseModel
 from roomstudio_schemas import CaptureBundle
 from roomstudio_schemas.placement_math import resize_mask_to
-from shell_geometry import ShellGeometry, assemble_shell
-from shell_texture import BakeResult, FrameSample, bake_plane_texture
+from shell_geometry import ShellClosure, ShellGeometry, assemble_shell, close_shell
+from shell_material import MATERIAL_VERSION, MaterialResult, infer_material
+from shell_observation import FrameSample, ObservationResult, observe_plane
 
 logger = logging.getLogger(__name__)
 
-SHELL_VERSION = 1
+SHELL_VERSION = 2
 
-# Seconds held back from the deadline for the shell.json upload + response.
-SHELL_BUDGET_RESERVE_S = 30.0
+# Seconds held back from the deadline before STARTING a plane's
+# observation + inference: must cover one plane's worst case (projection
+# over the complete frames plus one bounded vision call with a retry).
+SHELL_BUDGET_RESERVE_S = 90.0
 
 
 class ShellRequest(BaseModel):
@@ -82,12 +96,32 @@ class ShellRequest(BaseModel):
 # rounded floats)
 # ---------------------------------------------------------------------------
 
-def _round3(values) -> list:
+def _round4(values) -> list:
     return [round(float(v), 4) for v in values]
 
 
-def _quad(corners: np.ndarray) -> list[list[float]]:
-    return [_round3(c) for c in corners]
+def _points(arr: np.ndarray) -> list[list[float]]:
+    return [_round4(p) for p in arr]
+
+
+def _material_dict(mat: MaterialResult, obs: ObservationResult) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if mat.plank_direction_deg is not None:
+        params["plank_direction_deg"] = mat.plank_direction_deg
+    return {
+        "family": mat.family,
+        "family_confidence": mat.family_confidence,
+        "albedo_hex": mat.albedo_hex,
+        "secondary_hex": mat.secondary_hex,
+        "params": params,
+        "render": {"roughness": mat.roughness},
+        "source": {
+            "observed_fraction": obs.observed_fraction,
+            "texel_count": obs.texel_count,
+            "frames_used": obs.frames_used,
+        },
+        "inference": {"model": mat.model, "material_version": MATERIAL_VERSION},
+    }
 
 
 def build_shell_json(
@@ -96,12 +130,13 @@ def build_shell_json(
     status: str,
     reason: str | None,
     geometry: ShellGeometry | None = None,
-    bakes: dict[str, tuple[BakeResult, str | None]] | None = None,
+    closure: ShellClosure | None = None,
+    plane_results: dict[str, tuple[ObservationResult, MaterialResult]] | None = None,
     frames_used: int = 0,
 ) -> dict[str, Any]:
-    """The shell.json document. bakes maps plane key ("floor" / wall_id) to
-    (BakeResult, texture_gcs_uri | None). Deterministic for identical
-    inputs — the body carries no timestamps and floats are rounded."""
+    """The shell.json v2 document. plane_results maps plane key ("floor" /
+    wall_id) to (observation, material). Deterministic for identical
+    inputs — no timestamps, floats rounded."""
     doc: dict[str, Any] = {
         "shell_version": SHELL_VERSION,
         "scene_id": scene_id,
@@ -115,33 +150,70 @@ def build_shell_json(
     if geometry is None:
         return doc
 
-    doc["quality"] = {**geometry.quality, "frames_used": frames_used}
+    quality: dict[str, Any] = {
+        **geometry.quality,
+        "frames_used": frames_used,
+    }
+    if closure is not None:
+        quality.update(closure.quality)
+        quality["walls_detected"] = geometry.quality["wall_count"]
+        quality["wall_count"] = len(closure.walls)
+        quality["dropped_wall_ids"] = list(closure.dropped_wall_ids)
+        quality["material_version"] = MATERIAL_VERSION
+    doc["quality"] = quality
 
-    if bakes is None:
-        # Geometry known but nothing baked (an unavailable status that
+    if closure is None or plane_results is None:
+        # Geometry known but nothing shipped (an unavailable status that
         # still records quality counts) — floor/walls stay empty.
         return doc
 
-    if geometry.floor is not None:
-        bake, uri = bakes["floor"]
+    if (
+        geometry.floor is not None
+        and closure.floor_polygon_rendered is not None
+        and "floor" in plane_results
+    ):
+        obs, mat = plane_results["floor"]
         doc["floor"] = {
-            "quad": _quad(geometry.floor.corners_world),
+            "polygon": _points(closure.floor_polygon_rendered),
+            "measured_polygon": _points(closure.floor_polygon_measured),
             "y": round(float(geometry.floor.origin[1]), 4),
-            "texture_gcs_uri": uri,
-            "observed_fraction": bake.observed_fraction,
-            "inpainted_fraction": bake.inpainted_fraction,
-            "source": bake.source,
+            "provenance": {"edges": list(closure.floor_edge_states)},
+            "material": _material_dict(mat, obs),
         }
-    for wall in geometry.walls:
-        bake, uri = bakes[wall.wall_id]
+
+    for cw in closure.walls:
+        geom = cw.geom
+        obs, mat = plane_results[geom.wall_id]
+        rw = float(np.linalg.norm(cw.rendered_corners[1] - cw.rendered_corners[0]))
+        rh = float(np.linalg.norm(cw.rendered_corners[3] - cw.rendered_corners[0]))
+        ext_left = cw.edges["left"].extension_m
+        ext_bottom = cw.edges["bottom"].extension_m
+        openings = []
+        for op in geom.openings:
+            openings.append({
+                "classification": op.classification,
+                "rect_uv": [
+                    _round4([
+                        np.clip((op.u0 + ext_left) / rw, 0.0, 1.0),
+                        np.clip((op.v0 + ext_bottom) / rh, 0.0, 1.0),
+                    ]),
+                    _round4([
+                        np.clip((op.u1 + ext_left) / rw, 0.0, 1.0),
+                        np.clip((op.v1 + ext_bottom) / rh, 0.0, 1.0),
+                    ]),
+                ],
+            })
         doc["walls"].append({
-            "wall_id": wall.wall_id,
-            "quad": _quad(wall.corners_world),
-            "texture_gcs_uri": uri,
-            "observed_fraction": bake.observed_fraction,
-            "inpainted_fraction": bake.inpainted_fraction,
-            "source": bake.source,
-            "classification": wall.classification or None,
+            "wall_id": geom.wall_id,
+            "quad": _points(cw.rendered_corners),
+            "measured_quad": _points(geom.corners_world),
+            "edges": {
+                name: {"state": e.state, "extension_m": round(e.extension_m, 4)}
+                for name, e in cw.edges.items()
+            },
+            "openings": openings,
+            "classification": geom.classification or None,
+            "material": _material_dict(mat, obs),
         })
     return doc
 
@@ -157,7 +229,7 @@ def shell_json_bytes(doc: dict[str, Any]) -> bytes:
 # ---------------------------------------------------------------------------
 
 def _load_frame_samples(
-    bundle: CaptureBundle, manifest: dict, bundle_prefix: str
+    bundle: CaptureBundle, manifest: dict
 ) -> tuple[list[FrameSample], int]:
     """Build FrameSamples for the manifest's COMPLETE frames (entries
     without budget_stopped — the ones whose masks.npz exists).
@@ -225,30 +297,6 @@ def _load_frame_samples(
     return samples, rgb_missing
 
 
-def _production_inpaint_fn():
-    """shell_inpaint when its baked weights exist; a deterministic mean-
-    color fill otherwise (dev/local only — the image build asserts
-    availability, so production always has the model)."""
-    import shell_inpaint
-
-    if shell_inpaint.is_available():
-        return shell_inpaint.inpaint
-
-    logger.warning(
-        "shell: LaMa weights unavailable; holes get a mean-color fill "
-        "(dev fallback — production images bake the model)"
-    )
-
-    def _mean_fill(rgb: np.ndarray, holes: np.ndarray) -> np.ndarray:
-        out = rgb.copy()
-        observed = ~holes
-        if np.any(observed):
-            out[holes] = rgb[observed].mean(axis=0).astype(np.uint8)
-        return out
-
-    return _mean_fill
-
-
 # ---------------------------------------------------------------------------
 # Core (sync; run via asyncio.to_thread from the route)
 # ---------------------------------------------------------------------------
@@ -260,8 +308,8 @@ def run_shell(
     outputs_bucket: str,
     deadline: float | None,
 ) -> dict[str, Any]:
-    """Produce shell.json + textures for one scene. Returns the response
-    body. Raises EnvironmentalError for retryable failures."""
+    """Produce shell.json for one scene. Returns the response body.
+    Raises EnvironmentalError for retryable failures."""
     shell_blob = f"scenes/{scene_id}/shell.json"
 
     # Redelivery fast-path: the output is deterministic, so an existing
@@ -299,7 +347,7 @@ def run_shell(
         logger.error("shell: scene %s bundle unparseable: %s", scene_id, exc)
         return {"status": "noop", "reason": "bundle_unparseable"}
 
-    # Pre-plane bundles (every capture before chunk A) → unavailable.
+    # Pre-plane bundles (every capture before the wire change) → unavailable.
     if len(bundle.plane_anchors) == 0:
         return _write(build_shell_json(
             scene_id=scene_id, status="unavailable", reason="no_geometry_source",
@@ -322,57 +370,53 @@ def run_shell(
             geometry=geometry,
         ))
 
-    samples, rgb_missing = _load_frame_samples(
-        bundle, manifest, _bundle_prefix(bundle_uri)
-    )
+    closure = close_shell(geometry)
+    if geometry.floor is None and not closure.walls:
+        # Everything vertical was a filtered fragment and no floor exists:
+        # nothing measured is shippable — same honest degrade as unusable
+        # anchors, with the closure stats recorded.
+        return _write(build_shell_json(
+            scene_id=scene_id, status="unavailable", reason="no_geometry_source",
+            geometry=geometry, closure=closure,
+        ))
+
+    samples, rgb_missing = _load_frame_samples(bundle, manifest)
     if not samples and rgb_missing > 0:
         return _write(build_shell_json(
             scene_id=scene_id, status="unavailable", reason="capture_expired",
-            geometry=geometry,
+            geometry=geometry, closure=closure,
         ))
 
-    inpaint_fn = _production_inpaint_fn()
-    wall_planes = [(w.normal, w.origin) for w in geometry.walls]
+    planes: list[tuple[str, Any, list | None]] = []
+    if geometry.floor is not None:
+        planes.append(("floor", geometry.floor, geometry.floor_member_polygons))
+    for cw in closure.walls:
+        planes.append((cw.geom.wall_id, cw.geom, None))
 
-    planes = ([("floor", geometry.floor)] if geometry.floor else []) + [
-        (w.wall_id, w) for w in geometry.walls
-    ]
-    bakes: dict[str, tuple[BakeResult, str | None]] = {}
-    for key, geom in planes:
+    plane_results: dict[str, tuple[ObservationResult, MaterialResult]] = {}
+    for key, geom, polygons in planes:
         if deadline is not None and time.monotonic() > deadline - SHELL_BUDGET_RESERVE_S:
-            # Out of request budget mid-bake: environmental — the Cloud
+            # Out of request budget mid-run: environmental — the Cloud
             # Tasks retry redoes the (deterministic) work from the top.
             raise EnvironmentalError(
                 f"shell budget exhausted before plane {key} "
-                f"({len(bakes)}/{len(planes)} baked)"
+                f"({len(plane_results)}/{len(planes)} inferred)"
             )
-        bake = bake_plane_texture(
-            geom,
-            samples,
-            inpaint_fn=inpaint_fn,
-            floor_member_polygons=(
-                geometry.floor_member_polygons if key == "floor" else None
-            ),
-            wall_planes=wall_planes if key == "floor" else None,
-        )
-        uri: str | None = None
-        if bake.png_bytes is not None:
-            uri = _gcs_upload_for_scene(
-                f"gs://{outputs_bucket}/",
-                f"scenes/{scene_id}/shell/textures/{key}.png",
-                bake.png_bytes,
-                "image/png",
-            )
-        bakes[key] = (bake, uri)
+        obs = observe_plane(geom, samples, floor_member_polygons=polygons)
+        kind = "floor" if key == "floor" else "wall"
+        mat = infer_material(obs, kind)
+        plane_results[key] = (obs, mat)
         logger.info(
-            "shell: scene %s plane %s source=%s observed=%.3f inpainted=%.3f",
-            scene_id, key, bake.source, bake.observed_fraction,
-            bake.inpainted_fraction,
+            "shell: scene %s plane %s observed=%.3f texels=%d crops=%d "
+            "family=%s albedo=%s",
+            scene_id, key, obs.observed_fraction, obs.texel_count,
+            len(obs.crops), mat.family, mat.albedo_hex,
         )
 
     return _write(build_shell_json(
         scene_id=scene_id, status="ready", reason=None,
-        geometry=geometry, bakes=bakes, frames_used=len(samples),
+        geometry=geometry, closure=closure, plane_results=plane_results,
+        frames_used=len(samples),
     ))
 
 
@@ -390,7 +434,7 @@ async def handle_shell(
 ) -> JSONResponse:
     """Core handler for POST /shell. No scene lease, no Firestore — see the
     module docstring. The sync core runs off the event loop so /health
-    stays responsive during minutes-long bakes."""
+    stays responsive during the observation + inference walk."""
     from oidc import OIDCError
 
     if oidc_verifier is not None:

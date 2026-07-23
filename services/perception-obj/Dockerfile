@@ -162,7 +162,8 @@ RUN pip install \
         "google-cloud-storage==2.18.2" \
         "google-cloud-firestore>=2.14,<3.0" \
         "google-cloud-tasks>=2.13,<3.0" \
-        "firebase-admin>=6.0,<7.0"
+        "firebase-admin>=6.0,<7.0" \
+        "anthropic>=0.100,<1.0"
 
 # ── App-level deps: Layer B — protobuf upgrade + roomstudio-schemas ──────────
 # Force-reinstall protobuf to >=7.35.0 BEFORE installing roomstudio-schemas so
@@ -172,22 +173,6 @@ RUN pip install \
 COPY packages/schemas/ packages/schemas/
 RUN pip install --no-deps --force-reinstall "protobuf>=7.35.0" \
     && pip install packages/schemas/
-
-# ── LaMa inpainting weights (decision 0066 V2; baked per decision 0008) ──────
-# big-lama TorchScript export (LaMa, Apache-2.0; see shell_inpaint.py's
-# docstring for the full provenance). Fetched with stdlib urllib so no new
-# system deps; sha256-pinned so a moved/tampered artifact fails the BUILD,
-# never a cold start. shell_inpaint loads it CPU-only via torch.jit.load.
-ENV LAMA_MODEL_PATH=/opt/lama/big-lama.pt
-RUN mkdir -p /opt/lama && python -c "\
-import hashlib, urllib.request; \
-url = 'https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt'; \
-print('Downloading big-lama weights...', flush=True); \
-urllib.request.urlretrieve(url, '/opt/lama/big-lama.pt'); \
-h = hashlib.sha256(open('/opt/lama/big-lama.pt', 'rb').read()).hexdigest(); \
-expected = '7ba7aa7ac37a4d41fdbbeba3a2af7ead18058552997e3a3cd1a3b2210c9e6b4c'; \
-assert h == expected, f'big-lama sha256 mismatch: {h}'; \
-print('big-lama cached and verified', flush=True)"
 
 # ── Server code ───────────────────────────────────────────────────────────────
 # All Python modules that make up the perception-obj service, including the
@@ -203,9 +188,10 @@ COPY services/perception-obj/fusion.py /app/fusion.py
 COPY services/perception-obj/reproject.py /app/reproject.py
 COPY services/perception-obj/sampling.py /app/sampling.py
 COPY services/perception-obj/budget.py /app/budget.py
+COPY services/perception-obj/room_planes.py /app/room_planes.py
 COPY services/perception-obj/shell_geometry.py /app/shell_geometry.py
-COPY services/perception-obj/shell_texture.py /app/shell_texture.py
-COPY services/perception-obj/shell_inpaint.py /app/shell_inpaint.py
+COPY services/perception-obj/shell_observation.py /app/shell_observation.py
+COPY services/perception-obj/shell_material.py /app/shell_material.py
 COPY services/perception-obj/shell_receiver.py /app/shell_receiver.py
 COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 
@@ -214,13 +200,12 @@ COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 # above passes /health and every pre-traffic probe, then breaks the first
 # real reconstruction (the board-item-1 trap). Fail the BUILD instead.
 # (Light imports only — numpy + roomstudio_schemas; no torch, no model
-# weights.) The second line asserts the baked LaMa weights are visible to
-# shell_inpaint — the shell's inpainting must never degrade in production.
+# weights.) `anthropic` is on the line because shell_material defers it:
+# a missing pip install would not crash — the 0069 fallback rule would
+# silently null every family forever, which the build must catch instead.
 RUN python -c "import placement, fusion, reproject, sampling, budget, \
-shell_geometry, shell_texture, shell_inpaint, shell_receiver, shell_enqueue"
-RUN python -c "\
-import shell_inpaint; \
-assert shell_inpaint.is_available(), 'LaMa weights missing or torch unimportable'"
+room_planes, shell_geometry, shell_observation, shell_material, \
+shell_receiver, shell_enqueue, anthropic"
 
 ENV PORT=8080
 EXPOSE 8080
