@@ -181,10 +181,10 @@ def extract_layout(result: dict) -> Optional[dict]:
 
 def rotation_world_from_layout(layout: dict, camera_pose) -> np.ndarray:
     """World-from-object rotation: lift the layout's local→camera rotation
-    (already conjugated by extract_layout) through the frame's
-    world-from-camera pose. _SAM3D_CAM_TO_ARKIT_CAM is the identity today
-    (layout camera frame == ARKit camera frame, decision 0065) and stays
-    in the chain as the named seam."""
+    (already conjugated by extract_layout) through
+    _SAM3D_CAM_TO_ARKIT_CAM — the pytorch3d→ARKit camera basis change,
+    diag(-1, 1, -1) per decision 0065's sign-verified correction — and the
+    frame's world-from-camera pose."""
     R_layout = quat_to_rotmat(tuple(layout["rotation_xyzw"]))
     R_wc = quat_to_rotmat(pose_quat(camera_pose))
     return R_wc @ _SAM3D_CAM_TO_ARKIT_CAM @ R_layout
@@ -208,16 +208,12 @@ _PLY_NP_TYPES = {
 }
 
 
-def parse_ply_vertices(ply_bytes: bytes) -> np.ndarray:
-    """Read the x/y/z vertex positions out of a 3DGS PLY.
+def _parse_ply_header(ply_bytes: bytes) -> tuple[str, list[tuple[str, str]], int, int]:
+    """Parse a 3DGS PLY header down to (fmt, props, count, data_start).
 
-    Supports the layouts SAM 3D emits: a single leading `vertex` element
-    with fixed-size scalar properties (x, y, z, f_dc_*, opacity, scale_*,
-    rot_* ...), binary little-endian or ascii. Raises ValueError on
-    anything else (list properties, vertex not first, missing x/y/z) —
-    callers treat a parse failure as an unplaced object, not a crash.
-
-    Returns (N, 3) float64 positions in the splat's local frame.
+    props is [(type, name), ...] for the FIRST ('vertex') element only.
+    Raises ValueError on anything parse_ply_vertices/parse_ply_properties
+    don't support (list properties, vertex not first, unsupported format).
     """
     end = ply_bytes.find(b"end_header")
     if end < 0:
@@ -244,22 +240,39 @@ def parse_ply_vertices(ply_bytes: bytes) -> np.ndarray:
         raise ValueError("ply: first element is not 'vertex'")
     if fmt not in ("binary_little_endian", "ascii"):
         raise ValueError(f"ply: unsupported format {fmt!r}")
-    names = [n for _, n in props]
-    for req in ("x", "y", "z"):
-        if req not in names:
+    return fmt, props, elements[0][1], data_start
+
+
+def parse_ply_properties(ply_bytes: bytes, names: tuple[str, ...]) -> dict[str, np.ndarray]:
+    """Read named vertex properties out of a 3DGS PLY.
+
+    Supports the layouts SAM 3D emits: a single leading `vertex` element
+    with fixed-size scalar properties (x, y, z, f_dc_*, opacity, scale_*,
+    rot_* ...), binary little-endian or ascii. Raises ValueError on
+    anything else (list properties, vertex not first, missing property) —
+    callers treat a parse failure as an unplaced object, not a crash.
+
+    Returns {name: (N,) float64 array} for every name in `names`.
+    """
+    fmt, props, count, data_start = _parse_ply_header(ply_bytes)
+    prop_names = [n for _, n in props]
+    for req in names:
+        if req not in prop_names:
             raise ValueError(f"ply: vertex element missing property {req!r}")
-    count = elements[0][1]
 
     if fmt == "ascii":
-        rows = []
+        idxs = {n: prop_names.index(n) for n in names}
+        cols: dict[str, list[float]] = {n: [] for n in names}
         text = ply_bytes[data_start:].decode("ascii", errors="replace").splitlines()
-        ix, iy, iz = names.index("x"), names.index("y"), names.index("z")
         for line in text[:count]:
             vals = line.split()
-            rows.append((float(vals[ix]), float(vals[iy]), float(vals[iz])))
-        if len(rows) != count:
-            raise ValueError(f"ply: expected {count} ascii vertices, got {len(rows)}")
-        return np.array(rows, dtype=np.float64)
+            for n in names:
+                cols[n].append(float(vals[idxs[n]]))
+        if len(cols[names[0]]) != count:
+            raise ValueError(
+                f"ply: expected {count} ascii vertices, got {len(cols[names[0]])}"
+            )
+        return {n: np.array(v, dtype=np.float64) for n, v in cols.items()}
 
     dtype = np.dtype([(n, "<" + _PLY_NP_TYPES[t]) for t, n in props])
     needed = count * dtype.itemsize
@@ -269,11 +282,17 @@ def parse_ply_vertices(ply_bytes: bytes) -> np.ndarray:
             f"ply: truncated vertex data ({len(buf)} bytes, need {needed})"
         )
     verts = np.frombuffer(buf, dtype=dtype, count=count)
-    return np.column_stack([
-        verts["x"].astype(np.float64),
-        verts["y"].astype(np.float64),
-        verts["z"].astype(np.float64),
-    ])
+    return {n: verts[n].astype(np.float64) for n in names}
+
+
+def parse_ply_vertices(ply_bytes: bytes) -> np.ndarray:
+    """Read the x/y/z vertex positions out of a 3DGS PLY.
+
+    Returns (N, 3) float64 positions in the splat's local frame. See
+    parse_ply_properties for format support and error semantics.
+    """
+    cols = parse_ply_properties(ply_bytes, ("x", "y", "z"))
+    return np.column_stack([cols["x"], cols["y"], cols["z"]])
 
 
 # ---------------------------------------------------------------------------

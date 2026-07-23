@@ -200,6 +200,7 @@ COPY services/perception-obj/receiver_repo.py /app/receiver_repo.py
 COPY services/perception-obj/fcm.py /app/fcm.py
 COPY services/perception-obj/placement.py /app/placement.py
 COPY services/perception-obj/fusion.py /app/fusion.py
+COPY services/perception-obj/reproject.py /app/reproject.py
 COPY services/perception-obj/sampling.py /app/sampling.py
 COPY services/perception-obj/budget.py /app/budget.py
 COPY services/perception-obj/shell_geometry.py /app/shell_geometry.py
@@ -215,7 +216,7 @@ COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 # (Light imports only — numpy + roomstudio_schemas; no torch, no model
 # weights.) The second line asserts the baked LaMa weights are visible to
 # shell_inpaint — the shell's inpainting must never degrade in production.
-RUN python -c "import placement, fusion, sampling, budget, \
+RUN python -c "import placement, fusion, reproject, sampling, budget, \
 shell_geometry, shell_texture, shell_inpaint, shell_receiver, shell_enqueue"
 RUN python -c "\
 import shell_inpaint; \

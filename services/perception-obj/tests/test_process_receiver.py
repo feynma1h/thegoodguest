@@ -472,27 +472,31 @@ class TestConcurrentClaimRaceViaHandler:
             }
             fake_req = _Req(scope)
             loop = asyncio.new_event_loop()
-            with patch("process_receiver.run_perception", return_value=_RESULT_URI):
-                resp = loop.run_until_complete(handle_process(
-                    fake_req,
-                    ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI),
-                    oidc_verifier=None,
-                    receiver_repo=repo,
-                    fcm_notifier=_null_fcm(),
-                    outputs_bucket=_OUTPUTS_BUCKET,
-                    sam3_model=_fake_sam3,
-                    sam3d_model=_fake_sam3d,
-                    object_prompt="chair",
-                ))
+            resp = loop.run_until_complete(handle_process(
+                fake_req,
+                ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI),
+                oidc_verifier=None,
+                receiver_repo=repo,
+                fcm_notifier=_null_fcm(),
+                outputs_bucket=_OUTPUTS_BUCKET,
+                sam3_model=_fake_sam3,
+                sam3d_model=_fake_sam3d,
+                object_prompt="chair",
+            ))
             loop.close()
             with lock:
                 results.append(resp.status_code)
 
         threads = [threading.Thread(target=_worker) for _ in range(2)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        # Patch ONCE around all workers: mock.patch mutates the module
+        # attribute, so entering/exiting the same patch from two threads
+        # races — the loser's __exit__ can permanently install the mock
+        # (observed leaking into later test files before this was hoisted).
+        with patch("process_receiver.run_perception", return_value=_RESULT_URI):
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
         # Both return 200 (one "ready", one "noop/already_owned").
         assert all(c == 200 for c in results)
@@ -657,28 +661,30 @@ class TestConcurrentStaleReclaimViaHandler:
             }
             fake_req = _Req(scope)
             loop = asyncio.new_event_loop()
-            with patch("process_receiver.run_perception", return_value=_RESULT_URI):
-                resp = loop.run_until_complete(handle_process(
-                    fake_req,
-                    ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI),
-                    oidc_verifier=None,
-                    receiver_repo=repo,
-                    fcm_notifier=_null_fcm(),
-                    outputs_bucket=_OUTPUTS_BUCKET,
-                    sam3_model=_fake_sam3,
-                    sam3d_model=_fake_sam3d,
-                    object_prompt="chair",
-                ))
+            resp = loop.run_until_complete(handle_process(
+                fake_req,
+                ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI),
+                oidc_verifier=None,
+                receiver_repo=repo,
+                fcm_notifier=_null_fcm(),
+                outputs_bucket=_OUTPUTS_BUCKET,
+                sam3_model=_fake_sam3,
+                sam3d_model=_fake_sam3d,
+                object_prompt="chair",
+            ))
             loop.close()
             import json as _json
             with lock:
                 results.append(_json.loads(resp.body))
 
         threads = [threading.Thread(target=_worker) for _ in range(2)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        # Patch ONCE around all workers — same thread-safety rationale as
+        # TestConcurrentClaimRaceViaHandler above.
+        with patch("process_receiver.run_perception", return_value=_RESULT_URI):
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
         statuses = {r["status"] for r in results}
         assert "ready" in statuses, f"Expected one ready, got: {results}"
