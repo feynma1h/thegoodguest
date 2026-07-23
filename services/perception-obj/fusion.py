@@ -82,6 +82,13 @@ is not "0", fusion additionally:
   8. Emits `reprojection_score`, `position_source`, `constraints_applied`,
      `in_plane_resolved`, `sign_flag`, `extent_m_sorted` on every refined
      PLACED object, and `deduped_observations` on every object.
+  9. Places single-view objects that can't triangulate against MEASURED
+     room planes (decision 0067 chunk D). An unplaced single-member ray
+     cluster of a floor/wall-mapped class (contact_priors) gets a contact-
+     prior transform — bottom-on-the-detected-floor or ray-onto-a-detected-
+     wall — which ships only if it reprojects onto the object's own mask
+     (the evidence gate). No planes in the bundle → inert; the object stays
+     `insufficient_observations` and the rest of refinement is unchanged.
 
 Refinement is CPU-only, bounded (fixed iteration budgets, no RNG —
 identical inputs always produce identical manifests) and budget-aware
@@ -102,6 +109,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import contact_priors
 import numpy as np
 import reproject
 from placement import min_axis_to_vertical_deg
@@ -130,6 +138,14 @@ _FOOTPRINT_MIN = float(os.environ.get("PLACEMENT_FOOTPRINT_MIN", "0.5"))
 _INPLANE_MARGIN = float(os.environ.get("PLACEMENT_INPLANE_MARGIN", "0.03"))
 _SIGNFLAG_MARGIN = float(os.environ.get("PLACEMENT_SIGNFLAG_MARGIN", "0.03"))
 _REFINE_MIN_REMAINING_S = float(os.environ.get("PLACEMENT_REFINE_MIN_REMAINING_S", "20"))
+# A single-view contact-prior placement (decision 0067 chunk D) ships only
+# if the proposed transform reprojects onto the object's OWN mask at least
+# this well (tier-1 soft-IoU). The prior closes an under-determined DOF
+# against a measured surface; this gate keeps it from ever emitting a
+# transform the pixels don't support ("a guessed transform is never
+# emitted", carried through priors). One-capture-calibrated placeholder like
+# the other PLACEMENT_* knobs.
+_SINGLE_VIEW_MIN_TIER1 = float(os.environ.get("PLACEMENT_SINGLE_VIEW_MIN_TIER1", "0.1"))
 
 
 def _refinement_enabled() -> bool:
@@ -155,6 +171,11 @@ class RefinementContext:
     get_rgb(frame_index) -> (H, W, 3) RGB at mask resolution | None —
         optional, same degrade. uint8 or float both work (tier 2's NCC is
         intensity-scale-invariant), so callers can cache the small form.
+    get_room_planes() -> contact_priors.RoomPlanes | None — optional; the
+        measured floor + walls (parsed once via room_planes), used for
+        single-view contact-prior placement (decision 0067 chunk D). Absent
+        or empty (no plane anchors in the bundle) → priors inert, single-
+        view objects stay insufficient_observations (the degrade lock).
     budget: object exposing .remaining() -> float (seconds), or None for
         no limit (e.g. tests). Refinement is skipped scene-wide if
         remaining() < min_remaining_s when fusion starts, and stops
@@ -167,6 +188,7 @@ class RefinementContext:
     get_splat: Callable[[str], Optional[np.ndarray]]
     get_appearance: Optional[Callable[[str], Optional[reproject.SplatAppearance]]] = None
     get_rgb: Optional[Callable[[int], Optional[np.ndarray]]] = None
+    get_room_planes: Optional[Callable[[], Any]] = None
     budget: Optional[Any] = None
     min_remaining_s: float = _REFINE_MIN_REMAINING_S
     _evidence_cache: dict = field(default_factory=dict, repr=False)
@@ -798,40 +820,28 @@ def _reselect_best_placed_member(obj: dict, cluster: list[dict], wt: dict, ctx: 
     obj["source"] = {"frame_index": best_member["frame_index"], "mask_index": best_member["mask_index"]}
 
 
-def _refine_fused_object(obj: dict, cluster: list[dict], ctx: RefinementContext) -> dict:
-    """Apply instrument-scored best-member selection, silhouette fit,
-    in-plane resolution, and sign-flagging to one already-fused
-    (placed=True) object, in place on a copy. Every step degrades to a
-    no-op (recorded, never a crash) when evidence for it is missing."""
-    obj = dict(obj)
-    quality = dict(obj.get("quality", {}))
-    wt = dict(obj["world_transform"])
-    if obj["method"] == "depth_fit":
-        _reselect_best_placed_member(obj, cluster, wt, ctx)
-    local_points = ctx.get_splat(obj["splat_gcs_uri"])
-    appearance = ctx.get_appearance(obj["splat_gcs_uri"]) if ctx.get_appearance is not None else None
-    position_source = "triangulated" if obj["method"] == "layout_triangulated" else "depth_fit"
-    constraints_applied: list[str] = []
+def _finalize_placed_object(
+    obj: dict,
+    cluster: list[dict],
+    wt: dict,
+    quality: dict,
+    local_points,
+    appearance,
+    ctx: RefinementContext,
+    position_source: str,
+    constraints_applied: list[str],
+) -> dict:
+    """Shared refinement tail for any placed object (multi-view refined OR
+    single-view contact-placed): in-plane resolution for planar splats, the
+    sign-flag diagnostic, the final reprojection score, and physical
+    extents — then stamp the additive manifest fields. Every step is a
+    recorded no-op when its evidence is missing; never raises. `wt` may be
+    mutated (in-plane resolution rewrites the rotation)."""
     in_plane_resolved = False
     sign_flag = False
-
     frame_specs = [(m["frame_index"], m.get("mask_index")) for m in cluster]
 
     if local_points is not None:
-        # --- Silhouette fit (>=2-view ray clusters only). ---
-        if obj["method"] == "layout_triangulated" and len(cluster) >= 2:
-            observations = _member_observations(cluster, ctx)
-            if len(observations) >= 2:
-                fit = reproject.fit_silhouette(
-                    local_points, wt["rotation_xyzw"], wt["scale"], wt["position"], observations
-                )
-                if fit["improved"]:
-                    wt["position"] = fit["translation"]
-                    wt["scale"] = fit["scale"]
-                    position_source = "silhouette_fit"
-                    quality["silhouette_fit_tier1_mean"] = fit["tier1_mean"]
-                    quality["silhouette_fit_init_tier1_mean"] = fit["init_tier1_mean"]
-
         # --- In-plane resolution (planar splats only). ---
         if reproject.is_planar(local_points):
             candidates = reproject.in_plane_candidates(wt["rotation_xyzw"], local_points)
@@ -888,6 +898,113 @@ def _refine_fused_object(obj: dict, cluster: list[dict], ctx: RefinementContext)
     obj["sign_flag"] = sign_flag
     obj["quality"] = quality
     return obj
+
+
+def _refine_fused_object(obj: dict, cluster: list[dict], ctx: RefinementContext) -> dict:
+    """Apply instrument-scored best-member selection, silhouette fit,
+    in-plane resolution, and sign-flagging to one already-fused
+    (placed=True) object, in place on a copy. Every step degrades to a
+    no-op (recorded, never a crash) when evidence for it is missing."""
+    obj = dict(obj)
+    quality = dict(obj.get("quality", {}))
+    wt = dict(obj["world_transform"])
+    if obj["method"] == "depth_fit":
+        _reselect_best_placed_member(obj, cluster, wt, ctx)
+    local_points = ctx.get_splat(obj["splat_gcs_uri"])
+    appearance = ctx.get_appearance(obj["splat_gcs_uri"]) if ctx.get_appearance is not None else None
+    position_source = "triangulated" if obj["method"] == "layout_triangulated" else "depth_fit"
+    constraints_applied: list[str] = []
+
+    if local_points is not None:
+        # --- Silhouette fit (>=2-view ray clusters only). ---
+        if obj["method"] == "layout_triangulated" and len(cluster) >= 2:
+            observations = _member_observations(cluster, ctx)
+            if len(observations) >= 2:
+                fit = reproject.fit_silhouette(
+                    local_points, wt["rotation_xyzw"], wt["scale"], wt["position"], observations
+                )
+                if fit["improved"]:
+                    wt["position"] = fit["translation"]
+                    wt["scale"] = fit["scale"]
+                    position_source = "silhouette_fit"
+                    quality["silhouette_fit_tier1_mean"] = fit["tier1_mean"]
+                    quality["silhouette_fit_init_tier1_mean"] = fit["init_tier1_mean"]
+
+    return _finalize_placed_object(
+        obj, cluster, wt, quality, local_points, appearance, ctx,
+        position_source, constraints_applied,
+    )
+
+
+def _try_single_view_prior(
+    obj: dict, cluster: list[dict], ctx: RefinementContext
+) -> Optional[dict]:
+    """Attempt a measured-plane contact placement for an unplaced single-
+    view object (decision 0067 chunk D). Returns a fully-placed object dict
+    on success, or None to leave it `insufficient_observations`.
+
+    The prior proposes a transform (contact_priors.solve_placement); this
+    function enforces the evidence rule — the transform must reproject onto
+    the object's OWN SAM mask at tier-1 >= PLACEMENT_SINGLE_VIEW_MIN_TIER1 —
+    before anything ships. No planes, no mapped class, no wall/floor on the
+    ray, missing splat/rotation/mask, or a below-threshold reprojection all
+    return None (honestly unplaced, never a guessed transform)."""
+    if ctx.get_room_planes is None:
+        return None
+    planes = ctx.get_room_planes()
+    if planes is None or not planes.has_geometry:
+        return None
+    member = cluster[0]
+    klass = contact_priors.prior_class(member.get("label"))
+    if klass is None:
+        return None
+    ray = member.get("view_ray")
+    world_rot = member["placement"].get("world_rotation_xyzw")
+    if not ray or not world_rot:
+        return None
+    splat = ctx.get_splat(member["splat_gcs_uri"])
+    if splat is None:
+        return None
+    result = contact_priors.solve_placement(klass, splat, world_rot, ray, planes)
+    if result is None:
+        return None
+
+    # Evidence gate: the proposed transform must reproject onto this frame's
+    # own mask. A prior may close a DOF; it may never override pixels.
+    cam = ctx.get_camera(member["frame_index"])
+    evidence = ctx.evidence_for(member["frame_index"], member.get("mask_index"))
+    if cam is None or evidence is None:
+        return None
+    pose, intrinsics = cam
+    world_pts = reproject.transform_points(
+        splat, result["rotation_xyzw"], result["position"], result["scale"]
+    )
+    tier1 = reproject.score_tier1(world_pts, evidence, intrinsics, pose)
+    if tier1 < _SINGLE_VIEW_MIN_TIER1:
+        return None
+
+    placed = dict(obj)
+    placed.pop("reason", None)
+    placed["placed"] = True
+    placed["method"] = result["method"]
+    placed["rotation_source"] = "sam3d_layout"
+    quality = dict(placed.get("quality", {}))
+    quality["single_view_tier1"] = float(tier1)
+    quality["min_axis_to_vertical_deg"] = min_axis_to_vertical_deg(
+        quat_to_rotmat(tuple(result["rotation_xyzw"]))
+    )
+    wt = {
+        "position": result["position"],
+        "rotation_xyzw": result["rotation_xyzw"],
+        "scale": result["scale"],
+    }
+    appearance = (
+        ctx.get_appearance(member["splat_gcs_uri"]) if ctx.get_appearance is not None else None
+    )
+    return _finalize_placed_object(
+        placed, cluster, wt, quality, splat, appearance, ctx,
+        result["position_source"], list(result["constraints_applied"]),
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -965,6 +1082,17 @@ def fuse_scene_objects_with_meta(
             if obj["placed"]:
                 if _budget_allows(ctx):
                     obj = _refine_fused_object(obj, cluster, ctx)
+                else:
+                    refinement_skipped = True
+            elif obj.get("reason") == "insufficient_observations":
+                # Single-view object: a measured-plane contact prior may
+                # place it (decision 0067 chunk D). Budget-gated like the
+                # refine path — an object is fully placed-and-finalized or
+                # left legacy-unplaced, never half-done.
+                if _budget_allows(ctx):
+                    placed = _try_single_view_prior(obj, cluster, ctx)
+                    if placed is not None:
+                        obj = placed
                 else:
                     refinement_skipped = True
             n_dedup = sum(dedup_counts.get((m["frame_index"], m.get("mask_index")), 0) for m in cluster)

@@ -686,6 +686,7 @@ def _build_refinement_context(
     that frame's scoring to tier-1-only inside reproject, recorded in
     tiers_used, exactly like any other cache miss.
     """
+    import contact_priors as contact_priors_mod
     import fusion as fusion_mod
     import placement as placement_mod
     import reproject as reproject_mod
@@ -696,6 +697,20 @@ def _build_refinement_context(
     splat_pts_cache: dict[str, Optional[Any]] = {}
     appearance_cache: dict[str, Optional[Any]] = {}
     rgb_cache: dict[int, Optional[Any]] = {}
+
+    # Measured room planes, parsed once (via room_planes — the same reading
+    # the shell renders) and reused for every single-view contact-prior
+    # placement. A bundle with no plane anchors yields empty planes, so
+    # priors are inert and single-view objects stay unplaced (0067 chunk D
+    # degrade lock). Cached because fusion may call it per unplaced object.
+    room_planes_holder: list = []
+
+    def get_room_planes():
+        if not room_planes_holder:
+            room_planes_holder.append(
+                contact_priors_mod.extract_room_planes(bundle.plane_anchors)
+            )
+        return room_planes_holder[0]
 
     def get_camera(frame_index):
         frame = frames_by_idx.get(frame_index)
@@ -776,6 +791,7 @@ def _build_refinement_context(
         get_splat=get_splat,
         get_appearance=get_appearance,
         get_rgb=get_rgb,
+        get_room_planes=get_room_planes,
         budget=budget,
     )
 
