@@ -25,6 +25,7 @@ from roomstudio_schemas.placement_math import (
     fit_similarity,
     footprint_bbox,
     mask_containment,
+    minimal_rotation,
     prepare_mask,
     project_points,
     rasterize_mask_density,
@@ -35,6 +36,8 @@ from roomstudio_schemas.placement_math import (
     rotation_about_axis,
     soft_containment,
     soft_iou,
+    solve_floor_contact,
+    solve_wall_contact,
     triangulate_rays,
     union_bbox,
     unproject_depth,
@@ -791,3 +794,151 @@ def test_union_bbox_matches_footprint_bbox():
     valid = np.array([True, True])
     ev = prepare_mask(mask)
     assert union_bbox(mask.shape, ev.bounds, uv, valid) == footprint_bbox(mask, uv, valid)
+
+
+# -----------------------------------------------------------------------------
+# Single-view contact solves (decision 0067 chunk D)
+# -----------------------------------------------------------------------------
+
+def _box_points(half, n=5):
+    """(N, 3) filled-grid box, half-extents `half`. Enough points to clear
+    MIN_CLOUD_POINTS and the robust-stats percentile clip; principal extents
+    are 2*half along each axis."""
+    hx, hy, hz = half
+    g = np.linspace(-1.0, 1.0, n)
+    xx, yy, zz = np.meshgrid(g * hx, g * hy, g * hz, indexing="ij")
+    return np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()])
+
+
+def test_minimal_rotation_maps_a_onto_b():
+    a = np.array([0.0, 0.0, 1.0])
+    for b in [np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]),
+              np.array([1.0, 2.0, 3.0]), np.array([0.0, 0.0, -1.0])]:
+        R = minimal_rotation(a, b)
+        assert np.allclose(np.linalg.det(R), 1.0, atol=1e-9)
+        assert np.allclose(R @ a, b / np.linalg.norm(b), atol=1e-9)
+
+
+def test_minimal_rotation_identity_when_parallel():
+    a = np.array([0.3, -0.4, 0.86602540378])
+    assert np.allclose(minimal_rotation(a, a), np.eye(3), atol=1e-12)
+
+
+def test_solve_floor_contact_recovers_known_transform():
+    """A box resting on a floor, seen from one camera, is recovered exactly
+    when the mask's angular extent is the object's true angular size."""
+    splat = _box_points((0.5, 0.3, 0.2))
+    stats = robust_cloud_stats(splat)
+    splat_max, c_local = float(stats.extents[0]), stats.center
+
+    R_gt = _rotmat([0, 1, 0], 35.0)  # yaw
+    s_gt = 0.8
+    t_gt = np.array([1.2, -0.4, 2.0])
+    world = s_gt * splat @ R_gt.T + t_gt
+    floor_y = float(world[:, 1].min())  # object rests on the floor by construction
+
+    o = np.array([0.5, 0.1, -1.0])  # camera
+    centroid_world = s_gt * (R_gt @ c_local) + t_gt
+    distance = float(np.linalg.norm(centroid_world - o))
+    d = (centroid_world - o) / distance
+    angular = s_gt * splat_max / distance
+
+    s, t = solve_floor_contact(splat, R_gt, o, d, angular, floor_y)
+    assert abs(s - s_gt) < 1e-7
+    assert np.allclose(t, t_gt, atol=1e-6)
+    # Reconstructed object bottom sits on the floor.
+    recon = s * splat @ R_gt.T + t
+    assert abs(float(recon[:, 1].min()) - floor_y) < 1e-6
+
+
+def test_solve_floor_contact_bottom_touches_floor_generic():
+    """Even with a mismatched angular extent (a real mask is never exact),
+    the invariant the solve guarantees — bottom ON the floor, centroid ON
+    the ray — must hold for the shipped (s, t)."""
+    splat = _box_points((0.4, 0.25, 0.25))
+    R = _rotmat([0.3, 1.0, 0.2], 20.0)
+    o = np.array([0.0, 0.2, 0.0])
+    d = np.array([0.2, -0.3, 1.0])
+    d = d / np.linalg.norm(d)
+    floor_y = -1.5
+    s, t = solve_floor_contact(splat, R, o, d, 0.5, floor_y)
+    recon = s * splat @ R.T + t
+    assert abs(float(recon[:, 1].min()) - floor_y) < 1e-6
+    stats = robust_cloud_stats(splat)
+    centroid_world = s * (R @ stats.center) + t
+    # centroid lies on the ray o + lambda d
+    lam = float(np.dot(centroid_world - o, d))
+    assert np.allclose(centroid_world, o + lam * d, atol=1e-6)
+    assert lam > 0.0
+
+
+def test_solve_floor_contact_ray_away_from_floor_raises():
+    """A ray that rises while the object can only shrink toward the floor
+    can't fix a positive depth — honestly unplaced, never guessed."""
+    splat = _box_points((0.4, 0.25, 0.25))
+    R = np.eye(3)
+    o = np.array([0.0, 0.0, 0.0])
+    d = np.array([0.0, 1.0, 0.1])
+    d = d / np.linalg.norm(d)  # ray points UP
+    with pytest.raises(DegenerateGeometryError):
+        solve_floor_contact(splat, R, o, d, 0.5, floor_y=-1.5)
+
+
+def test_solve_wall_contact_perpendicular_view_recovers_position():
+    """Thin object hung on a wall, viewed straight on: position recovered to
+    ~cm, normal snapped to the measured wall, scale to ~1% (the wall-vs-
+    centroid depth gap of a genuinely thin object)."""
+    splat = _box_points((0.4, 0.5, 0.01))  # thin along local z
+    stats = robust_cloud_stats(splat)
+    thin = float(stats.extents[2])
+    thin_axis_local = stats.axes[:, 2]
+
+    n_wall = np.array([0.0, 0.0, -1.0])  # room-facing normal (toward camera at -z... )
+    n_wall = n_wall / np.linalg.norm(n_wall)
+    R_gt = minimal_rotation(thin_axis_local, n_wall)
+    s_gt = 1.0
+    center_gt = np.array([0.3, 0.1, 3.0])
+    half_thin = 0.5 * s_gt * thin
+    p_wall = center_gt - half_thin * n_wall  # wall sits behind the object
+
+    o = center_gt + np.array([0.0, 0.0, -3.0])  # straight-on, in front
+    d = center_gt - o
+    d = d / np.linalg.norm(d)
+    dist_center = float(np.linalg.norm(center_gt - o))
+    angular = s_gt * float(stats.extents[0]) / dist_center
+
+    s, t, R_aligned, aligned = solve_wall_contact(
+        splat, R_gt, o, d, angular, p_wall, n_wall
+    )
+    assert aligned is True
+    recon_normal = R_aligned @ thin_axis_local
+    assert float(np.dot(recon_normal, n_wall)) > 0.999
+    centroid_world = s * (R_aligned @ stats.center) + t
+    assert np.allclose(centroid_world, center_gt, atol=0.01)
+    assert abs(s - s_gt) < 0.01 * s_gt + 1e-3
+
+
+def test_solve_wall_contact_keeps_layout_rotation_when_badly_oriented():
+    """A > align_max_deg mismatch must NOT flip the object onto the wall
+    (overriding pixels); position still comes from the wall, aligned False."""
+    splat = _box_points((0.4, 0.5, 0.02))
+    R_gt = _rotmat([0, 1, 0], 85.0)  # object normal ~85 deg off the wall normal
+    n_wall = np.array([0.0, 0.0, -1.0])
+    p_wall = np.array([0.0, 0.0, 3.0])
+    o = np.array([0.0, 0.0, 0.0])
+    d = np.array([0.0, 0.0, 1.0])
+    s, t, R_aligned, aligned = solve_wall_contact(
+        splat, R_gt, o, d, 0.4, p_wall, n_wall, align_max_deg=60.0
+    )
+    assert aligned is False
+    assert np.allclose(R_aligned, R_gt, atol=1e-12)
+
+
+def test_solve_wall_contact_ray_misses_wall_raises():
+    splat = _box_points((0.4, 0.5, 0.02))
+    n_wall = np.array([0.0, 0.0, -1.0])
+    p_wall = np.array([0.0, 0.0, 3.0])
+    o = np.array([0.0, 0.0, 0.0])
+    d = np.array([0.0, 0.0, -1.0])  # points away from the wall
+    with pytest.raises(DegenerateGeometryError):
+        solve_wall_contact(splat, np.eye(3), o, d, 0.4, p_wall, n_wall)

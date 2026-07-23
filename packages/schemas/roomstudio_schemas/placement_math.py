@@ -835,3 +835,206 @@ def triangulate_rays(
     perp = rel - along[:, None] * d
     rms = float(np.sqrt((perp ** 2).sum(axis=1).mean()))
     return p, rms
+
+
+# -----------------------------------------------------------------------------
+# Single-view contact solves (decision 0067 chunk D)
+# -----------------------------------------------------------------------------
+#
+# A single view cannot triangulate a depth (one ray, no baseline), so most
+# single-frame objects are honestly unplaced. But if the class of object is
+# known to touch a MEASURED surface — a chair on the detected floor, a door
+# on a detected wall — that surface closes the missing depth DOF
+# deterministically. These are the pure geometry of that closure; the class
+# policy and the pixel-evidence gate that decides whether to trust the
+# result live in services/perception-obj (contact_priors.py / fusion.py),
+# never here.
+#
+# Shared scale model (matches the ARKIT_ONLY ray-cluster recipe in
+# fusion.py): an object's metric size along its largest visible dimension is
+# angular_extent × distance, so under a splat whose largest local extent is
+# splat_max_extent, the world scale at depth λ is
+#     s(λ) = (angular_extent / splat_max_extent) · λ.
+# Scale is therefore slaved to depth; the surface contact fixes depth.
+
+
+def minimal_rotation(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Shortest-arc rotation matrix taking unit vector `a` onto unit vector
+    `b` (both are normalized defensively).
+
+    Used to align a placed object's measured axis (e.g. a wall-mounted
+    object's plane normal) onto a measured surface normal without choosing
+    an in-plane spin — the residual spin about `b` is left to whatever set
+    the input rotation (the layout prior; in-plane resolution refines it
+    downstream). For the antiparallel case (a ≈ -b) any perpendicular axis
+    gives a valid 180° rotation; one is chosen deterministically.
+    """
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    if na < 1e-9 or nb < 1e-9:
+        raise ValueError("minimal_rotation: zero-length input vector")
+    a = a / na
+    b = b / nb
+    c = float(np.dot(a, b))
+    if c > 1.0 - 1e-12:
+        return np.eye(3)
+    if c < -1.0 + 1e-12:
+        # 180°: pick any axis perpendicular to a, deterministically.
+        seed = np.array([1.0, 0.0, 0.0]) if abs(a[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        axis = np.cross(a, seed)
+        axis /= np.linalg.norm(axis)
+        return rotation_about_axis(axis, math.pi)
+    v = np.cross(a, b)
+    K = np.array([
+        [0.0, -v[2], v[1]],
+        [v[2], 0.0, -v[0]],
+        [-v[1], v[0], 0.0],
+    ])
+    return np.eye(3) + K + K @ K / (1.0 + c)
+
+
+def solve_floor_contact(
+    splat_points: np.ndarray,
+    R_world: np.ndarray,
+    ray_origin: np.ndarray,
+    ray_dir: np.ndarray,
+    angular_extent_rad: float,
+    floor_y: float,
+) -> Tuple[float, np.ndarray]:
+    """Place a floor-standing object from ONE view against a measured floor.
+
+    Two coupled unknowns — depth λ along the view ray and world scale s —
+    are closed by two measurements: the silhouette (s = k·λ, k =
+    angular_extent / splat_max_extent) and the floor (the object's lowest
+    point sits at floor_y). Because scale acts uniformly about the object
+    centroid, the bottom height is *linear* in λ:
+
+        bottom(λ) = o_y + λ·d_y + k·λ·m,   m = min_v [R_world (p_v − c)]_y
+
+    (c the robust centroid, m the rotated drop from centroid to the lowest
+    vertex, per unit scale). Setting bottom(λ) = floor_y gives the closed
+    form λ = (floor_y − o_y) / (d_y + k·m) — a deterministic 1-D solve, no
+    iteration, no RNG.
+
+    splat_points: (N, 3) local-frame splat vertices.
+    R_world: world-from-object rotation (the layout prior, held fixed —
+        0065: the object's orientation is not this solve's to invent).
+    ray_origin / ray_dir: the observing camera centre and a unit world-frame
+        direction through the object (the mask-centroid ray).
+    angular_extent_rad: the object's largest angular size in the mask.
+    floor_y: world height of the measured floor plane (horizontal, +Y up).
+
+    Returns (s, t) for p_world = s·R_world·p_local + t. Raises
+    DegenerateGeometryError when the geometry can't fix a positive depth
+    (ray parallel to the linear relation, or a solution behind the camera) —
+    the caller records the object unplaced, never a guessed transform.
+    """
+    stats = robust_cloud_stats(splat_points)
+    splat_max = float(stats.extents[0])
+    if splat_max <= 1e-9 or angular_extent_rad <= 0.0:
+        raise DegenerateGeometryError("solve_floor_contact: no usable extent/angle")
+    c_local = stats.center
+    o = np.asarray(ray_origin, dtype=np.float64)
+    d = np.asarray(ray_dir, dtype=np.float64)
+    dn = np.linalg.norm(d)
+    if dn < 1e-9:
+        raise ValueError("solve_floor_contact: zero ray direction")
+    d = d / dn
+    R = np.asarray(R_world, dtype=np.float64)
+
+    k = float(angular_extent_rad) / splat_max
+    q = (np.asarray(splat_points, dtype=np.float64) - c_local) @ R.T
+    m = float(q[:, 1].min())  # lowest vertex offset below centroid (per unit scale)
+
+    denom = float(d[1] + k * m)
+    if abs(denom) < 1e-6:
+        raise DegenerateGeometryError(
+            "solve_floor_contact: view ray cannot fix depth against the floor"
+        )
+    lam = (float(floor_y) - float(o[1])) / denom
+    if lam <= 0.0:
+        raise DegenerateGeometryError(
+            f"solve_floor_contact: non-positive depth {lam:.3f}"
+        )
+    s = k * lam
+    centroid_world = o + lam * d
+    t = centroid_world - s * (R @ c_local)
+    return float(s), t
+
+
+def solve_wall_contact(
+    splat_points: np.ndarray,
+    R_world: np.ndarray,
+    ray_origin: np.ndarray,
+    ray_dir: np.ndarray,
+    angular_extent_rad: float,
+    wall_point: np.ndarray,
+    wall_normal: np.ndarray,
+    align_max_deg: float = 60.0,
+) -> Tuple[float, np.ndarray, np.ndarray, bool]:
+    """Place a wall-mounted object from ONE view against a measured wall.
+
+    Depth is fixed by the ray's intersection with the wall plane; scale
+    follows the shared silhouette model at that depth. The object hangs on
+    the wall, so its centre sits half its thin extent in FRONT of the wall
+    surface (along the wall normal, which points into the room toward the
+    observing camera per room_planes' winding contract).
+
+    Orientation: the object's measured plane normal (its thinnest principal
+    axis, lifted to world) is snapped onto the wall normal ONLY when it is
+    already within align_max_deg of it — a refinement of a roughly-correct
+    layout orientation toward the measured surface, never a flip of a badly
+    oriented object (which would override pixels; the caller's tier-1 gate
+    is the final arbiter regardless). Beyond the threshold the layout
+    rotation stands and `aligned` is False.
+
+    wall_point / wall_normal: any point on, and the room-facing unit normal
+    of, the measured wall plane.
+
+    Returns (s, t, R_aligned, aligned). Raises DegenerateGeometryError when
+    the ray does not meet the wall in front of the camera.
+    """
+    o = np.asarray(ray_origin, dtype=np.float64)
+    d = np.asarray(ray_dir, dtype=np.float64)
+    dn = np.linalg.norm(d)
+    if dn < 1e-9:
+        raise ValueError("solve_wall_contact: zero ray direction")
+    d = d / dn
+    p_wall = np.asarray(wall_point, dtype=np.float64)
+    n_wall = np.asarray(wall_normal, dtype=np.float64)
+    n_wall = n_wall / np.linalg.norm(n_wall)
+
+    denom = float(np.dot(d, n_wall))
+    if abs(denom) < 1e-9:
+        raise DegenerateGeometryError("solve_wall_contact: ray parallel to the wall")
+    t_hit = float(np.dot(p_wall - o, n_wall)) / denom
+    if t_hit <= 1e-6:
+        raise DegenerateGeometryError("solve_wall_contact: ray misses the wall")
+
+    stats = robust_cloud_stats(splat_points)
+    splat_max = float(stats.extents[0])
+    thin = float(stats.extents[2])
+    if splat_max <= 1e-9 or angular_extent_rad <= 0.0:
+        raise DegenerateGeometryError("solve_wall_contact: no usable extent/angle")
+    c_local = stats.center
+    R = np.asarray(R_world, dtype=np.float64)
+
+    s = (float(angular_extent_rad) / splat_max) * t_hit
+
+    obj_normal_world = R @ stats.axes[:, 2]
+    obj_normal_world /= np.linalg.norm(obj_normal_world)
+    cos = float(np.dot(obj_normal_world, n_wall))
+    n_signed = n_wall if cos >= 0.0 else -n_wall
+    angle_deg = math.degrees(math.acos(min(1.0, abs(cos))))
+    if angle_deg <= align_max_deg:
+        R_aligned = minimal_rotation(obj_normal_world, n_signed) @ R
+        aligned = True
+    else:
+        R_aligned = R
+        aligned = False
+
+    hit = o + t_hit * d
+    center = hit + 0.5 * s * thin * n_wall
+    t = center - s * (R_aligned @ c_local)
+    return float(s), t, R_aligned, bool(aligned)
