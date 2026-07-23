@@ -62,6 +62,28 @@ gcloud builds submit . \
     --config="${CLOUDBUILD_CONFIG}" \
     --substitutions="_IMAGE_URI=${IMAGE_URI}"
 
+# Secret grant must precede the deploy: --set-secrets validates at
+# revision creation, so an ungranted runtime SA fails the deploy itself
+# (observed live 2026-07-23 — the first 0069 deploy died here when this
+# grant sat in the post-deploy IAM block). The runtime SA comes from the
+# CURRENT service spec (empty = the Compute Engine default SA).
+if [[ "${WHICH}" == "obj" ]]; then
+    RUNTIME_SA=$(gcloud run services describe "${SERVICE}" \
+        --region="${REGION}" --project="${PROJECT_ID}" \
+        --format='value(spec.template.spec.serviceAccountName)' 2>/dev/null || true)
+    RUNTIME_SA="${RUNTIME_SA:-$(gcloud projects describe "${PROJECT_ID}" \
+        --format='value(projectNumber)')-compute@developer.gserviceaccount.com}"
+    echo "=== Pre-deploy: secretAccessor on anthropic-api-key for ${RUNTIME_SA} ==="
+    # Reads the Anthropic key for shell material inference (decision 0069).
+    # SECRET-scoped, not project-scoped — the api-public pattern. Idempotent.
+    gcloud secrets add-iam-policy-binding anthropic-api-key \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/secretmanager.secretAccessor" \
+        --project="${PROJECT_ID}" \
+        --quiet >/dev/null
+    echo "secretAccessor ensured"
+fi
+
 echo "=== 3/3: Deploy to Cloud Run with L4 GPU ==="
 gcloud run deploy "${SERVICE}" \
     --image="${IMAGE_URI}" \
@@ -113,17 +135,6 @@ if [[ "${WHICH}" == "obj" ]]; then
         --member="serviceAccount:${RUNTIME_SA}" \
         --role="roles/iam.serviceAccountUser" >/dev/null
     echo "shell-stage IAM ensured (cloudtasks.enqueuer + serviceAccountUser)"
-
-    # Runtime SA reads the Anthropic key for shell material inference
-    # (decision 0069). SECRET-scoped, not project-scoped — the api-public
-    # pattern. Idempotent; the deploy above already fails legibly if the
-    # secret is missing (--set-secrets validates at deploy time).
-    gcloud secrets add-iam-policy-binding anthropic-api-key \
-        --member="serviceAccount:${RUNTIME_SA}" \
-        --role="roles/secretmanager.secretAccessor" \
-        --project="${PROJECT_ID}" \
-        --quiet >/dev/null
-    echo "secretAccessor on anthropic-api-key ensured for ${RUNTIME_SA}"
 fi
 
 # gcloud run deploy creates the revision but does NOT move traffic when the
