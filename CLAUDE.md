@@ -274,6 +274,24 @@ sharpened — 0069 removed baked person pixels but a person can still
 contaminate a plane's measured albedo and reach the material-inference
 evidence crops (decision 0070; see the privacy bullet).
 
+**7 — STRATEGY (not a build item): room-boundary source — raw plane anchors
+vs. RoomPlan vs. reconstructed geometry** (decision 0071, OPEN). The operator's
+real-room walks keep surfacing shell-geometry failures (non-perpendicular
+walls, pentagon floor, one wall split into two-colour patches; the 2-of-4-walls
+is the intentional dollhouse cutaway, not a bug). Root finding (measured
+2026-07-24): we ship RAW `ARPlaneAnchor` data and hand-roll room reconstruction
+server-side (`room_planes.py` + `shell_geometry.py` closure) — a reimplementation
+of Apple's RoomPlan (`CapturedRoom`: merged, squared walls + floor polygon +
+openings, on-device). RoomPlan is scaffolded (`LIDAR_ROOMPLAN` tier) but never
+built, AND requires LiDAR — which the non-LiDAR test device (`iPhone17,5`, both
+real captures `ARKIT_ONLY`) lacks, so depth-free plane anchors are a hard
+fidelity ceiling, not just weak code. The fork (LiDAR-first premium shell via
+RoomPlan / delete most of the server geometry; vs. mass-market non-LiDAR needs a
+shell from reconstructed geometry; vs. hybrid) is a product/strategy call — park
+for a dedicated strategy session BEFORE more shell-geometry work, since it
+decides whether that code should exist. Placement work (gate + chunk D) is
+orthogonal and unaffected (it consumes floor/wall planes whoever produces them).
+
 ## Session-end housekeeping (Claude Code: do this before ending any session)
 
 Before the session ends — when the user indicates they're wrapping up, when tests are green and the task is done, or when the conversation is winding down — propose the following without being asked:
