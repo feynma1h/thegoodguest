@@ -545,27 +545,31 @@ def project_points(
     return np.column_stack([u, v]), depth, valid
 
 
-def footprint_bbox(
-    mask: np.ndarray,
+def union_bbox(
+    image_shape: Tuple[int, int],
+    mask_bounds: Optional[Tuple[float, float, float, float]],
     uv: Optional[np.ndarray] = None,
     valid: Optional[np.ndarray] = None,
     pad_frac: float = 0.15,
 ) -> Tuple[float, float, float, float]:
-    """Bounding box (u0, v0, u1, v1) covering a mask's true pixels and,
+    """Bounding box (u0, v0, u1, v1) covering precomputed mask bounds and,
     optionally, a set of projected points — padded, then CLIPPED to the
-    mask's own frame.
+    image frame.
 
     Crop-aware by construction: the box never extends past the observed
     image, so an object that is genuinely truncated at the frame edge is
     compared only on the portion both the mask and the projection could
     possibly show, rather than penalizing (or rewarding) a projection for
     pixels neither source could ever have.
+
+    image_shape is (H, W); mask_bounds is (u0, v0, u1, v1) of the mask's
+    true pixels (None for an empty mask) — precompute it once per mask
+    (MaskEvidence does) instead of paying an np.nonzero scan per call.
     """
-    h, w = mask.shape
-    vs, us = np.nonzero(np.asarray(mask, dtype=bool))
+    h, w = image_shape
     corners = []
-    if us.size:
-        corners.append((float(us.min()), float(vs.min()), float(us.max()), float(vs.max())))
+    if mask_bounds is not None:
+        corners.append(mask_bounds)
     if uv is not None:
         pts = np.asarray(uv, dtype=np.float64)
         if valid is not None:
@@ -590,37 +594,113 @@ def footprint_bbox(
     return (u0, v0, u1, v1)
 
 
-def rasterize_mask_density(
-    mask: np.ndarray, bbox: Tuple[float, float, float, float], grid_size: int = 32
-) -> np.ndarray:
-    """Box-filter downsample of a boolean mask into a grid_size x grid_size
-    occupancy-fraction grid over bbox=(u0, v0, u1, v1).
+def _mask_bounds(mask: np.ndarray) -> Optional[Tuple[float, float, float, float]]:
+    """(u0, v0, u1, v1) of a boolean mask's true pixels, None if empty."""
+    vs, us = np.nonzero(np.asarray(mask, dtype=bool))
+    if us.size == 0:
+        return None
+    return (float(us.min()), float(vs.min()), float(us.max()), float(vs.max()))
 
-    Each output cell holds the fraction of source pixels within its footprint
-    that are True — a soft, resolution-independent occupancy value in [0, 1],
-    not a hard nearest-neighbor resample.
+
+def footprint_bbox(
+    mask: np.ndarray,
+    uv: Optional[np.ndarray] = None,
+    valid: Optional[np.ndarray] = None,
+    pad_frac: float = 0.15,
+) -> Tuple[float, float, float, float]:
+    """union_bbox over a raw mask (bounds computed on the spot). Callers in
+    hot loops should precompute a MaskEvidence and use union_bbox with its
+    .bounds instead — this convenience form scans the full mask each call."""
+    return union_bbox(mask.shape, _mask_bounds(mask), uv, valid, pad_frac)
+
+
+@dataclass(frozen=True)
+class MaskEvidence:
+    """One segmentation mask, preprocessed for repeated density queries.
+
+    shape:    (H, W) of the source mask.
+    integral: (H+1, W+1) float64 summed-area table — integral[v, u] is the
+              number of True pixels in mask[:v, :u]. Bilinear interpolation
+              of this table at fractional coordinates yields the EXACT
+              integral of the piecewise-constant mask image over any
+              axis-aligned box, which is what makes rasterize_mask_density
+              O(grid²) per query instead of O(mask pixels).
+    bounds:   (u0, v0, u1, v1) of the true pixels, None if the mask is
+              empty — the precomputed input to union_bbox.
+    area:     total True-pixel count.
     """
-    mask = np.asarray(mask, dtype=bool)
-    h, w = mask.shape
+    shape: Tuple[int, int]
+    integral: np.ndarray
+    bounds: Optional[Tuple[float, float, float, float]]
+    area: int
+
+
+def prepare_mask(mask: np.ndarray) -> MaskEvidence:
+    """Build a MaskEvidence (summed-area table + bounds) from a boolean
+    mask. One O(H·W) pass; every subsequent density query is O(grid²)."""
+    m = np.asarray(mask, dtype=bool)
+    if m.ndim != 2:
+        raise ValueError(f"prepare_mask: expected (H, W) mask, got {m.shape}")
+    integral = np.zeros((m.shape[0] + 1, m.shape[1] + 1), dtype=np.float64)
+    np.cumsum(np.cumsum(m, axis=0, dtype=np.float64), axis=1, out=integral[1:, 1:])
+    return MaskEvidence(
+        shape=m.shape,
+        integral=integral,
+        bounds=_mask_bounds(m),
+        area=int(m.sum()),
+    )
+
+
+def _sample_integral(integral: np.ndarray, us: np.ndarray, vs: np.ndarray) -> np.ndarray:
+    """Bilinear sample of a summed-area table at continuous (u, v) grids.
+
+    Treating each pixel as a unit square of constant value, the continuous
+    integral function F(u, v) is piecewise-bilinear with the SAT values at
+    its knots — so bilinear interpolation here is exact, not approximate.
+    Coordinates are clamped to the image, which extends F by constancy
+    (integrating zero mass outside the frame).
+    """
+    h, w = integral.shape[0] - 1, integral.shape[1] - 1
+    u = np.clip(us, 0.0, float(w))
+    v = np.clip(vs, 0.0, float(h))
+    iu = np.minimum(u.astype(int), w - 1)
+    iv = np.minimum(v.astype(int), h - 1)
+    fu = u - iu
+    fv = v - iv
+    return (
+        integral[iv, iu] * (1 - fu) * (1 - fv)
+        + integral[iv, iu + 1] * fu * (1 - fv)
+        + integral[iv + 1, iu] * (1 - fu) * fv
+        + integral[iv + 1, iu + 1] * fu * fv
+    )
+
+
+def rasterize_mask_density(
+    mask_or_evidence,
+    bbox: Tuple[float, float, float, float],
+    grid_size: int = 32,
+) -> np.ndarray:
+    """Exact box-average downsample of a boolean mask into a grid_size x
+    grid_size occupancy-fraction grid over bbox=(u0, v0, u1, v1).
+
+    Each output cell holds the exact area fraction of its footprint covered
+    by True pixels (pixels treated as unit squares) — a soft, resolution-
+    independent occupancy value in [0, 1], not a hard nearest-neighbor
+    resample. Computed via the summed-area table, so passing a prepared
+    MaskEvidence makes each call O(grid²); passing a raw mask pays the
+    one-off O(H·W) table build here.
+    """
+    ev = mask_or_evidence if isinstance(mask_or_evidence, MaskEvidence) else prepare_mask(mask_or_evidence)
     u0, v0, u1, v1 = bbox
-    iu0, iv0 = max(int(np.floor(u0)), 0), max(int(np.floor(v0)), 0)
-    iu1, iv1 = min(int(np.ceil(u1)), w), min(int(np.ceil(v1)), h)
-    if iu1 <= iu0 or iv1 <= iv0 or u1 <= u0 or v1 <= v0:
+    if u1 <= u0 or v1 <= v0:
         return np.zeros((grid_size, grid_size), dtype=np.float64)
-    crop = mask[iv0:iv1, iu0:iu1]
-    vv, uu = np.meshgrid(
-        np.arange(iv0, iv1) + 0.5, np.arange(iu0, iu1) + 0.5, indexing="ij"
-    )
-    count_all, _, _ = np.histogram2d(
-        vv.ravel(), uu.ravel(), bins=grid_size, range=[[v0, v1], [u0, u1]]
-    )
-    count_true, _, _ = np.histogram2d(
-        vv.ravel(), uu.ravel(), bins=grid_size, range=[[v0, v1], [u0, u1]],
-        weights=crop.ravel().astype(np.float64),
-    )
-    return np.divide(
-        count_true, count_all, out=np.zeros_like(count_true), where=count_all > 0
-    )
+    us = np.linspace(u0, u1, grid_size + 1)
+    vs = np.linspace(v0, v1, grid_size + 1)
+    uu, vv = np.meshgrid(us, vs)
+    F = _sample_integral(ev.integral, uu, vv)
+    cell_mass = F[1:, 1:] - F[:-1, 1:] - F[1:, :-1] + F[:-1, :-1]
+    cell_area = (us[1] - us[0]) * (vs[1] - vs[0])
+    return np.clip(cell_mass / cell_area, 0.0, 1.0)
 
 
 def rasterize_point_density(
@@ -659,8 +739,8 @@ def soft_iou(density_a: np.ndarray, density_b: np.ndarray) -> float:
     b = np.asarray(density_b, dtype=np.float64)
     if a.shape != b.shape:
         raise ValueError(f"soft_iou: shape mismatch {a.shape} vs {b.shape}")
-    denom = float(np.minimum(a, b).sum()), float(np.maximum(a, b).sum())
-    inter, union = denom
+    inter = float(np.minimum(a, b).sum())
+    union = float(np.maximum(a, b).sum())
     if union <= 0.0:
         return 0.0
     return inter / union
