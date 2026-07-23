@@ -12,6 +12,10 @@ splat reconstruction). Endpoints:
   POST /process   — Cloud Tasks receiver. Accepts {scene_id, bundle_uri}, runs
                     the full pipeline, updates Firestore Scene state, fires FCM.
                     See process_receiver.py and docs/decisions/0004.
+  POST /shell     — Cloud Tasks receiver, second stage (decision 0066).
+                    Bakes the room shell from plane anchors + cached masks.
+                    Never loads the SAM models; never touches Firestore.
+                    See shell_receiver.py.
 
 Models are loaded lazily: the first /process call triggers construction.
 Startup cost (~195s) is paid by that first request, not at container boot.
@@ -46,6 +50,7 @@ logger = logging.getLogger(__name__)
 # instead of a body model, producing 422 on every Cloud Tasks delivery.
 # See docs/decisions/0010.
 from process_receiver import ProcessRequest  # noqa: E402
+from shell_receiver import ShellRequest  # noqa: E402  (same 0010 rule for /shell)
 
 # Model classes are NOT imported at module level. Importing models.sam3 or
 # models.sam3d would immediately run the SAM 3 / SAM 3D CUDA initialisation
@@ -80,6 +85,13 @@ PERCEPTION_OUTPUTS_BUCKET = os.environ.get(
 # set this env var to match.
 PROCESS_REQUEST_BUDGET_SECONDS = float(
     os.environ.get("PROCESS_REQUEST_BUDGET_SECONDS", "900")
+)
+
+# Same mirror for /shell (decision 0066): the shell bake shares the service's
+# Cloud Run request timeout; its handler stops with an environmental error
+# (Cloud Tasks retries) rather than computing past the platform cutoff.
+SHELL_REQUEST_BUDGET_SECONDS = float(
+    os.environ.get("SHELL_REQUEST_BUDGET_SECONDS", "900")
 )
 
 # -----------------------------------------------------------------------------
@@ -184,6 +196,7 @@ app = FastAPI(title="roomstudio-perception-obj")
 _receiver_repo = None
 _fcm_notifier = None
 _oidc_verifier = None
+_shell_oidc_verifier = None
 
 
 def _get_receiver_repo():
@@ -222,6 +235,21 @@ def _get_oidc_verifier():
         # If CLOUD_TASKS_INVOKER_SA is unset (local dev), verifier stays None
         # and the endpoint skips auth (see handle_process oidc_verifier=None path).
     return _oidc_verifier
+
+
+def _get_shell_oidc_verifier():
+    """Separate verifier for /shell: same invoker SA, but the OIDC audience
+    is RECEIVER_URL + "/shell" — a /process token must not replay here."""
+    global _shell_oidc_verifier
+    if _shell_oidc_verifier is None:
+        from oidc import OIDCVerifier
+        from process_receiver import CLOUD_TASKS_INVOKER_SA, RECEIVER_URL
+        if CLOUD_TASKS_INVOKER_SA:
+            _shell_oidc_verifier = OIDCVerifier(
+                audience=RECEIVER_URL + "/shell",
+                allowed_email=CLOUD_TASKS_INVOKER_SA,
+            )
+    return _shell_oidc_verifier
 
 
 @app.get("/")
@@ -337,6 +365,39 @@ async def process(
         sam3_model=sam3_model,
         sam3d_model=sam3d_model,
         object_prompt=DEFAULT_OBJECT_PROMPT,
+        deadline=deadline,
+    )
+
+
+@app.post(
+    "/shell",
+    summary="Cloud Tasks room-shell receiver (decision 0066)",
+    responses={
+        200: {"description": "Shell written, unavailable written, or noop (drained)"},
+        401: {"description": "OIDC token missing or invalid"},
+        422: {"description": "Malformed payload (natural poison drain)"},
+        500: {"description": "Environmental failure; Cloud Tasks will retry"},
+    },
+)
+async def shell(
+    request: Request,
+    req: ShellRequest,
+) -> JSONResponse:
+    """Room-shell second stage. Enqueued by /process's success path.
+
+    Deliberately NEVER touches the SAM accessors — no model load on this
+    path, so a cold /shell start costs seconds. No scene lease, no
+    Firestore writes; shell.json is a single idempotent blob PUT
+    (see shell_receiver.py).
+    """
+    from shell_receiver import handle_shell
+
+    deadline = time.monotonic() + SHELL_REQUEST_BUDGET_SECONDS
+    return await handle_shell(
+        request,
+        req,
+        oidc_verifier=_get_shell_oidc_verifier(),
+        outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
         deadline=deadline,
     )
 

@@ -264,3 +264,64 @@ class TestProcessRoute:
         assert all(loc[0] == "body" for loc in locs), (
             f"Query-param validation error indicates annotation not resolved: {locs}"
         )
+
+
+# ---------------------------------------------------------------------------
+# POST /shell — route registration (TestClient level; decision 0066)
+# ---------------------------------------------------------------------------
+
+class TestShellRoute:
+    """Same 0010 rule as TestProcessRoute, for the shell stage — plus the
+    0066 hard constraint that /shell never triggers a model load."""
+
+    def test_valid_body_reaches_handler_without_model_load(self):
+        from shell_receiver import ShellRequest
+
+        captured: dict = {}
+
+        async def _fake_handle(request, req, **kwargs):
+            captured["req"] = req
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"status": "mocked"})
+
+        def _model_access_forbidden(*a, **k):
+            raise AssertionError("/shell must never touch the SAM accessors")
+
+        with (
+            patch("shell_receiver.handle_shell", _fake_handle),
+            patch.object(server, "get_sam3", _model_access_forbidden),
+            patch.object(server, "get_sam3d", _model_access_forbidden),
+            patch.object(server, "_get_shell_oidc_verifier", return_value=None),
+        ):
+            resp = client.post(
+                "/shell",
+                json={"scene_id": "abc-123", "bundle_uri": "gs://b/bundle.pb"},
+            )
+
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        req = captured.get("req")
+        assert req is not None, "handle_shell was not called — body may not have been parsed"
+        assert isinstance(req, ShellRequest), f"Expected ShellRequest, got {type(req)}"
+        assert req.scene_id == "abc-123"
+        assert req.bundle_uri == "gs://b/bundle.pb"
+
+    def test_missing_body_is_body_error_not_query_error(self):
+        resp = client.post("/shell")
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        locs = [d["loc"] for d in detail]
+        assert all(loc[0] == "body" for loc in locs), (
+            f"Query-param validation error indicates annotation not resolved: {locs}"
+        )
+
+    def test_shell_oidc_audience_is_shell_path(self):
+        """The /shell verifier's audience must be RECEIVER_URL + '/shell' —
+        a /process token must not replay against this endpoint."""
+        import process_receiver
+
+        with patch.object(process_receiver, "CLOUD_TASKS_INVOKER_SA", "sa@x.iam"):
+            server._shell_oidc_verifier = None
+            verifier = server._get_shell_oidc_verifier()
+            server._shell_oidc_verifier = None  # don't leak into other tests
+        assert verifier is not None
+        assert verifier._audience.endswith("/shell")

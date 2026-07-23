@@ -12,7 +12,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from reenqueue_scene import decide, parse_env_file, task_name_for
+from reenqueue_scene import (
+    decide,
+    decide_shell,
+    parse_env_file,
+    shell_task_name_for,
+    shell_url_from_process_url,
+    task_name_for,
+)
 
 _NOW = datetime(2026, 7, 21, 15, 0, 0, tzinfo=UTC)
 
@@ -100,4 +107,40 @@ class TestTaskName:
         assert n1 != n2
         assert n1.startswith(sid + "-r")
         # Cloud Tasks task ids: letters, digits, hyphens, underscores.
+        assert all(c.isalnum() or c in "-_" for c in n1)
+
+
+class TestShellMode:
+    """--shell (decision 0066): no lease/status guards apply — /shell holds
+    no lease and never writes Firestore."""
+
+    def test_missing_doc_refused(self):
+        assert not decide_shell(None).proceed
+
+    def test_ready_proceeds(self):
+        d = decide_shell(_scene("ready"))
+        assert d.proceed and not d.forced
+
+    def test_non_ready_proceeds_with_caveat(self):
+        d = decide_shell(_scene("processing"))
+        assert d.proceed
+        assert "manifest_missing" in d.reason
+
+    def test_shell_url_derivation(self):
+        assert (
+            shell_url_from_process_url("https://x.a.run.app/process")
+            == "https://x.a.run.app/shell"
+        )
+        # Tolerates a bare service URL (no /process suffix) too.
+        assert (
+            shell_url_from_process_url("https://x.a.run.app")
+            == "https://x.a.run.app/shell"
+        )
+
+    def test_shell_task_name(self):
+        sid = "25a14caf-db19-487d-9a60-3bd4034cd4c4"
+        n1 = shell_task_name_for(sid, _NOW)
+        n2 = shell_task_name_for(sid, _NOW + timedelta(seconds=1))
+        assert n1 != n2
+        assert n1.startswith("shell-" + sid + "-r")
         assert all(c.isalnum() or c in "-_" for c in n1)
