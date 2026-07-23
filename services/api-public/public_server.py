@@ -909,14 +909,16 @@ def get_scene_assets(
        shell: <verbatim shell.json> | null,
        asset_urls: {<gs_uri>: <signed https url>}, expires_at: <ISO 8601>}
 
-    shell (decision 0066) is a SIBLING of the manifest, read from
+    shell (decisions 0066/0069) is a SIBLING of the manifest, read from
     scenes/{id}/shell.json beside the manifest: null means the shell
     stage hasn't landed yet (the room-shell task runs a beat after ready
     — clients keep a brief grace window); a present document with
-    status "unavailable" means it is never coming (keep the grid). Shell
-    texture gs:// URIs join asset_urls with the same TTL. A shell fetch
-    ERROR degrades to null with a log — the optional shell never 502s
-    the room.
+    status "unavailable" means it is never coming (keep the grid). The
+    shell is passed through VERBATIM and contributes nothing to
+    asset_urls — shell_version 2 carries parametric materials, no
+    fetchable blobs (0069 removed the texture bake from serving). A
+    shell fetch ERROR degrades to null with a log — the optional shell
+    never 502s the room.
 
     Errors:
       400 invalid_scene_id — scene_id is not a UUIDv4
@@ -974,16 +976,6 @@ def get_scene_assets(
         for obj in manifest.get("objects", [])
         if isinstance(obj, dict) and obj.get("splat_gcs_uri")
     }
-    # Shell texture URIs join the same signing walk (same TTL).
-    if isinstance(shell, dict):
-        floor = shell.get("floor")
-        shell_entries = [floor] if isinstance(floor, dict) else []
-        walls = shell.get("walls")
-        if isinstance(walls, list):
-            shell_entries += [w for w in walls if isinstance(w, dict)]
-        splat_uris |= {
-            e["texture_gcs_uri"] for e in shell_entries if e.get("texture_gcs_uri")
-        }
     signer = _get_url_signer()
     asset_urls = {}
     try:
