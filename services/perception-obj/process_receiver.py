@@ -966,6 +966,18 @@ async def handle_process(
 
     logger.info("process: scene %s ready result_uri=%s", scene_id, result_uri)
 
+    # Second stage: enqueue the room-shell bake (decision 0066).
+    # Fire-and-forget AFTER release_ready — an enqueue failure logs and the
+    # scene stays ready; the client's grace window absorbs a missing shell.
+    try:
+        from shell_enqueue import enqueue_shell_task  # deferred, like the GCS imports
+
+        enqueue_shell_task(scene_id=scene_id, bundle_uri=req.bundle_uri)
+    except Exception as exc:
+        logger.warning(
+            "shell enqueue failed (scene %s stays ready): %s", scene_id, exc
+        )
+
     if fcm_token:
         try:
             fcm_notifier.notify_ready(fcm_token=fcm_token, scene_id=scene_id)

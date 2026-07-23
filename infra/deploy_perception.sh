@@ -82,7 +82,32 @@ gcloud run deploy "${SERVICE}" \
     --no-cpu-throttling \
     --cpu-boost \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
-    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app
+    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app,CLOUD_TASKS_PROJECT=roomstudio,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch
+
+# Shell-stage IAM (decision 0066; folds in the runtime-SA audit item):
+# /process enqueues /shell tasks itself, so THIS service's runtime SA needs
+# enqueue rights on the queue and actAs on the Cloud Tasks invoker SA.
+# Idempotent (add-iam-policy-binding is a no-op when the binding exists).
+# The describe also surfaces the effective runtime SA — the audit record.
+if [[ "${WHICH}" == "obj" ]]; then
+    RUNTIME_SA=$(gcloud run services describe "${SERVICE}" \
+        --region="${REGION}" --project="${PROJECT_ID}" \
+        --format='value(spec.template.spec.serviceAccountName)')
+    # An empty value means the Compute Engine default SA.
+    RUNTIME_SA="${RUNTIME_SA:-$(gcloud projects describe "${PROJECT_ID}" \
+        --format='value(projectNumber)')-compute@developer.gserviceaccount.com}"
+    echo "=== Shell-stage IAM (runtime SA: ${RUNTIME_SA}) ==="
+    gcloud tasks queues add-iam-policy-binding perception-dispatch \
+        --location="${REGION}" --project="${PROJECT_ID}" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/cloudtasks.enqueuer" >/dev/null
+    gcloud iam service-accounts add-iam-policy-binding \
+        "tasks-invoker@${PROJECT_ID}.iam.gserviceaccount.com" \
+        --project="${PROJECT_ID}" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/iam.serviceAccountUser" >/dev/null
+    echo "shell-stage IAM ensured (cloudtasks.enqueuer + serviceAccountUser)"
+fi
 
 # gcloud run deploy creates the revision but does NOT move traffic when the
 # service's traffic spec is pinned to a revision NAME (perception-obj carried

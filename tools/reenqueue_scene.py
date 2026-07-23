@@ -159,6 +159,49 @@ def task_name_for(scene_id: str, now: datetime) -> str:
     return f"{scene_id}-r{now.strftime('%Y%m%d%H%M%S')}"
 
 
+# ---------------------------------------------------------------------------
+# --shell mode (decision 0066)
+# ---------------------------------------------------------------------------
+
+def decide_shell(scene: dict | None) -> Decision:
+    """Decide whether a /shell re-drive makes sense for this scene doc.
+
+    Pure function — pinned by tools/test_reenqueue_scene.py. /shell holds
+    no lease and never writes Firestore, so the /process guards don't
+    apply: any existing scene proceeds. A non-ready scene gets a caveat
+    (the handler noops with manifest_missing until /process finishes),
+    and a missing doc is refused — there is nothing to bake for.
+    """
+    if scene is None:
+        return Decision(False, "scene document not found")
+    status = scene.get("status")
+    if status == "ready":
+        return Decision(True, "shell re-drive of a ready scene")
+    return Decision(
+        True,
+        f"scene status is {status!r} (not ready) — /shell will noop with "
+        "manifest_missing unless the manifest already exists",
+    )
+
+
+def shell_url_from_process_url(process_url: str) -> str:
+    """Derive the /shell endpoint from PERCEPTION_OBJ_PROCESS_URL.
+
+    The env file carries the /process URL; both routes live on the same
+    service, so swap the path suffix rather than adding another env key.
+    """
+    base = process_url.rstrip("/")
+    if base.endswith("/process"):
+        base = base[: -len("/process")]
+    return base + "/shell"
+
+
+def shell_task_name_for(scene_id: str, now: datetime) -> str:
+    """shell-{scene_id}-r{ts}: same tombstone-proof timestamping as
+    task_name_for, in shell_enqueue.py's shell- namespace."""
+    return f"shell-{scene_id}-r{now.strftime('%Y%m%d%H%M%S')}"
+
+
 def _gcs_blob_exists(gcs_uri: str) -> bool:
     from google.cloud import storage
 
@@ -247,6 +290,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--invoker-sa", help="override CLOUD_TASKS_INVOKER_SA")
     ap.add_argument("--force", action="store_true",
                     help="override the live-lease and ready-scene guards")
+    ap.add_argument("--shell", action="store_true",
+                    help="enqueue a /shell task (decision 0066) instead of "
+                         "/process: no Firestore reset, no lease, no bundle "
+                         "existence gate (a swept bundle IS the "
+                         "capture_expired case the handler must record). "
+                         "NOTE: /shell noops if shell.json already exists — "
+                         "delete it from the outputs bucket first to re-bake.")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the decision and planned actions; change nothing")
     args = ap.parse_args(argv)
@@ -278,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"scene {args.scene_id}")
         print(f"  status={scene.get('status')!r} lease_expires_at="
               f"{scene.get('lease_expires_at')} bundle_uri={scene.get('bundle_uri')}")
-    decision = decide(scene, now, args.force)
+    decision = decide_shell(scene) if args.shell else decide(scene, now, args.force)
     print(f"decision: {'PROCEED' if decision.proceed else 'REFUSE'} — {decision.reason}")
     if not decision.proceed:
         return 3 if scene is None else 2
@@ -288,6 +338,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"misconfig: scene has no usable bundle_uri: {bundle_uri!r}",
               file=sys.stderr)
         return 3
+
+    if args.shell:
+        shell_url = shell_url_from_process_url(process_url)
+        name = shell_task_name_for(args.scene_id, now)
+        if args.dry_run:
+            print(f"dry-run: would create shell task {name} -> {shell_url} "
+                  "(no Firestore changes)")
+            return 0
+        full_name = _create_task(
+            project=project, location=location, queue=queue, task_name=name,
+            process_url=shell_url, invoker_sa=invoker_sa,
+            scene_id=args.scene_id, bundle_uri=bundle_uri,
+        )
+        print(f"shell task created: {full_name}")
+        print("watch: perception-obj logs for 'shell:' lines; the outputs "
+              "bucket for scenes/<id>/shell.json (already-present -> noop)")
+        return 0
     if not _gcs_blob_exists(bundle_uri):
         print(f"misconfig: bundle blob is gone: {bundle_uri}\n"
               "  (captures-bucket lifecycle sweeps after 1 day — re-upload the "

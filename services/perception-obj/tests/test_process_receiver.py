@@ -200,6 +200,36 @@ class TestHandleProcessOrchestration:
             self._run(ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI), repo=repo)
         assert repo.get_raw(_SCENE_ID)["result_uri"] == _RESULT_URI
 
+    # --- shell enqueue (decision 0066): success path, fire-and-forget ---
+
+    def test_success_enqueues_shell_task(self):
+        repo = _seeded_repo("queued")
+        with _mock_run_perception(), \
+                patch("shell_enqueue.enqueue_shell_task") as mock_enqueue:
+            self._run(ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI), repo=repo)
+        mock_enqueue.assert_called_once_with(
+            scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI
+        )
+
+    def test_shell_enqueue_failure_leaves_scene_ready(self):
+        """Fire-and-forget: an enqueue explosion must not un-ready the
+        scene or change the 200 response."""
+        repo = _seeded_repo("queued")
+        with _mock_run_perception(), \
+                patch("shell_enqueue.enqueue_shell_task",
+                      side_effect=RuntimeError("queue down")):
+            resp = self._run(ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI), repo=repo)
+        assert resp.status_code == 200
+        assert json.loads(resp.body)["status"] == "ready"
+        assert repo.get_raw(_SCENE_ID)["status"] == "ready"
+
+    def test_no_shell_enqueue_on_poison_failure(self):
+        repo = _seeded_repo("queued")
+        with _mock_run_perception_raises(PoisonError("bundle 404")), \
+                patch("shell_enqueue.enqueue_shell_task") as mock_enqueue:
+            self._run(ProcessRequest(scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI), repo=repo)
+        mock_enqueue.assert_not_called()
+
     # --- already owned ---
 
     def test_already_owned_returns_200_noop(self):
