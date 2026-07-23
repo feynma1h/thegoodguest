@@ -23,9 +23,17 @@ from roomstudio_schemas.placement_math import (
     camera_to_world,
     fit_scale_translation,
     fit_similarity,
+    footprint_bbox,
+    mask_containment,
+    project_points,
+    rasterize_mask_density,
+    rasterize_point_density,
     ray_through_pixel,
     resize_mask_to,
     robust_cloud_stats,
+    rotation_about_axis,
+    soft_containment,
+    soft_iou,
     triangulate_rays,
     unproject_depth,
 )
@@ -545,3 +553,195 @@ def test_triangulate_parallel_rays_raises():
 def test_triangulate_single_ray_raises():
     with pytest.raises(DegenerateGeometryError):
         triangulate_rays(np.zeros((1, 3)), np.array([[0.0, 0.0, -1.0]]))
+
+
+# -----------------------------------------------------------------------------
+# project_points (decision 0067)
+# -----------------------------------------------------------------------------
+
+def test_project_points_round_trips_through_unproject_and_camera_to_world():
+    intr = FakeIntrinsics(fx=500.0, fy=500.0, cx=320.0, cy=240.0)
+    pose = _pose_from(_rotmat([0, 1, 0], 20.0), [1.0, 2.0, 3.0])
+    depth = np.full((480, 640), np.nan)
+    depth[240, 320] = 2.0  # principal point
+    depth[100, 500] = 1.5
+    cam_pts = unproject_depth(depth, intr)
+    world_pts = camera_to_world(cam_pts, pose)
+    uv, d, valid = project_points(world_pts, intr, pose)
+    assert np.all(valid)
+    # unproject_depth walks nonzero() in row-major (v, u) order, so the
+    # (v=100, u=500) pixel comes back before (v=240, u=320).
+    assert np.allclose(uv, np.array([[500.0, 100.0], [320.0, 240.0]]), atol=1e-6)
+    assert np.allclose(d, [1.5, 2.0], atol=1e-6)
+
+
+def test_project_points_marks_behind_camera_invalid():
+    intr = FakeIntrinsics(fx=500.0, fy=500.0, cx=320.0, cy=240.0)
+    pose = FakePose()  # identity at origin, looks down -Z
+    pts = np.array([[0.0, 0.0, -2.0], [0.0, 0.0, 2.0]])  # in front, behind
+    uv, depth, valid = project_points(pts, intr, pose)
+    assert list(valid) == [True, False]
+    assert depth[0] == pytest.approx(2.0)
+    assert np.isfinite(uv).all()  # never NaN/inf, even for the invalid point
+
+
+# -----------------------------------------------------------------------------
+# rotation_about_axis (decision 0067)
+# -----------------------------------------------------------------------------
+
+def test_rotation_about_axis_zero_angle_is_identity():
+    R = rotation_about_axis([0.0, 1.0, 0.0], 0.0)
+    assert np.allclose(R, np.eye(3), atol=1e-12)
+
+
+def test_rotation_about_axis_is_proper_rotation():
+    R = rotation_about_axis([1.0, 2.0, -1.0], 1.1)
+    assert np.allclose(R @ R.T, np.eye(3), atol=1e-9)
+    assert np.linalg.det(R) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_rotation_about_axis_90_about_y_matches_hand_rotation():
+    R = rotation_about_axis([0.0, 1.0, 0.0], math.pi / 2)
+    assert np.allclose(R @ np.array([1.0, 0.0, 0.0]), [0.0, 0.0, -1.0], atol=1e-9)
+
+
+def test_rotation_about_axis_fixes_the_axis_direction():
+    axis = np.array([0.3, 0.7, -0.2])
+    R = rotation_about_axis(axis, 1.7)
+    axis_unit = axis / np.linalg.norm(axis)
+    assert np.allclose(R @ axis_unit, axis_unit, atol=1e-9)
+
+
+def test_rotation_about_axis_zero_length_raises():
+    with pytest.raises(ValueError):
+        rotation_about_axis([0.0, 0.0, 0.0], 1.0)
+
+
+# -----------------------------------------------------------------------------
+# mask_containment (decision 0067 — same-frame duplicate-detection test)
+# -----------------------------------------------------------------------------
+
+def test_mask_containment_full_nesting_is_one():
+    big = np.zeros((20, 20), dtype=bool)
+    big[2:18, 2:18] = True
+    small = np.zeros((20, 20), dtype=bool)
+    small[5:10, 5:10] = True  # fully inside big
+    assert mask_containment(big, small) == pytest.approx(1.0)
+    assert mask_containment(small, big) == pytest.approx(1.0)  # symmetric
+
+
+def test_mask_containment_disjoint_is_zero():
+    a = np.zeros((10, 10), dtype=bool)
+    a[0:4, 0:4] = True
+    b = np.zeros((10, 10), dtype=bool)
+    b[6:10, 6:10] = True
+    assert mask_containment(a, b) == 0.0
+
+
+def test_mask_containment_partial_overlap():
+    a = np.zeros((10, 10), dtype=bool)
+    a[0:6, 0:6] = True  # area 36
+    b = np.zeros((10, 10), dtype=bool)
+    b[3:9, 3:9] = True  # area 36, overlap [3:6,3:6] = 9
+    assert mask_containment(a, b) == pytest.approx(9.0 / 36.0)
+
+
+def test_mask_containment_empty_mask_is_zero():
+    a = np.zeros((5, 5), dtype=bool)
+    b = np.zeros((5, 5), dtype=bool)
+    b[1:3, 1:3] = True
+    assert mask_containment(a, b) == 0.0
+
+
+def test_mask_containment_shape_mismatch_raises():
+    with pytest.raises(ValueError):
+        mask_containment(np.zeros((5, 5), dtype=bool), np.zeros((4, 4), dtype=bool))
+
+
+# -----------------------------------------------------------------------------
+# footprint_bbox / rasterize_* / soft_iou / soft_containment
+# -----------------------------------------------------------------------------
+
+def test_footprint_bbox_covers_mask_and_clips_to_frame():
+    mask = np.zeros((100, 200), dtype=bool)
+    mask[10:20, 190:200] = True  # touches the right edge
+    u0, v0, u1, v1 = footprint_bbox(mask, pad_frac=0.0)
+    assert u1 == pytest.approx(200.0)  # clipped, not overshooting the frame
+    assert u0 <= 190.0 and v0 <= 10.0 and v1 >= 20.0
+
+
+def test_footprint_bbox_expands_to_include_points():
+    mask = np.zeros((100, 100), dtype=bool)
+    mask[40:60, 40:60] = True
+    uv = np.array([[5.0, 5.0], [90.0, 90.0]])
+    valid = np.array([True, True])
+    u0, v0, u1, v1 = footprint_bbox(mask, uv, valid, pad_frac=0.0)
+    assert u0 <= 5.0 and v0 <= 5.0 and u1 >= 90.0 and v1 >= 90.0
+
+
+def test_footprint_bbox_no_evidence_defaults_to_full_frame():
+    mask = np.zeros((50, 80), dtype=bool)
+    assert footprint_bbox(mask) == (0.0, 0.0, 80.0, 50.0)
+
+
+def test_rasterize_mask_density_matches_exact_fraction():
+    mask = np.zeros((10, 10), dtype=bool)
+    mask[:, 5:10] = True  # right half exactly True
+    grid = rasterize_mask_density(mask, (0.0, 0.0, 10.0, 10.0), grid_size=2)
+    # Left column of cells: 0% true; right column: 100% true.
+    assert np.allclose(grid[:, 0], 0.0, atol=1e-9)
+    assert np.allclose(grid[:, 1], 1.0, atol=1e-9)
+
+
+def test_rasterize_point_density_empty_outside_bbox():
+    uv = np.array([[500.0, 500.0]])
+    valid = np.array([True])
+    grid = rasterize_point_density(uv, valid, (0.0, 0.0, 10.0, 10.0), grid_size=4)
+    assert np.allclose(grid, 0.0)
+
+
+def test_rasterize_point_density_places_mass_in_correct_cell():
+    uv = np.array([[1.0, 1.0]] * 10)  # dense cluster near origin
+    valid = np.ones(10, dtype=bool)
+    grid = rasterize_point_density(uv, valid, (0.0, 0.0, 10.0, 10.0), grid_size=5)
+    assert grid[0, 0] > 0.0
+    assert np.allclose(grid[1:, :], 0.0)
+    assert np.allclose(grid[:, 1:], 0.0)
+
+
+def test_soft_iou_identical_grids_is_one():
+    g = np.array([[0.2, 0.8], [1.0, 0.0]])
+    assert soft_iou(g, g) == pytest.approx(1.0)
+
+
+def test_soft_iou_disjoint_grids_is_zero():
+    a = np.array([[1.0, 0.0], [0.0, 0.0]])
+    b = np.array([[0.0, 0.0], [0.0, 1.0]])
+    assert soft_iou(a, b) == 0.0
+
+
+def test_soft_iou_both_empty_is_zero_not_perfect():
+    z = np.zeros((3, 3))
+    assert soft_iou(z, z) == 0.0
+
+
+def test_soft_iou_shape_mismatch_raises():
+    with pytest.raises(ValueError):
+        soft_iou(np.zeros((2, 2)), np.zeros((3, 3)))
+
+
+def test_soft_containment_partial_view_scores_high():
+    # A cluster's full footprint (large) vs. a candidate frame that only
+    # sees a subset of it (still real evidence, not a mismatch).
+    full = np.ones((4, 4))
+    partial = np.zeros((4, 4))
+    partial[0:2, :] = 1.0  # exactly half of `full`, fully contained
+    assert soft_containment(full, partial) == pytest.approx(1.0)
+    # soft_iou would NOT be 1.0 here -- containment is the more tolerant test.
+    assert soft_iou(full, partial) == pytest.approx(0.5)
+
+
+def test_soft_containment_empty_is_zero():
+    a = np.zeros((3, 3))
+    b = np.ones((3, 3))
+    assert soft_containment(a, b) == 0.0

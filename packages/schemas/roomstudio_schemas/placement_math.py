@@ -30,6 +30,7 @@ orchestrator) and the schemas test suite.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -487,6 +488,221 @@ def ray_through_pixel(
     dir_cam /= np.linalg.norm(dir_cam)
     R = quat_to_rotmat(pose_quat(pose))
     return pose_position(pose), R @ dir_cam
+
+
+def rotation_about_axis(axis: np.ndarray, angle_rad: float) -> np.ndarray:
+    """Rodrigues rotation matrix for a right-handed rotation by angle_rad
+    about a world-frame axis (need not be unit; normalized internally).
+
+    Used to spin a placed object about a fixed world-frame direction
+    without disturbing that direction — the shared primitive behind both
+    in-plane candidate generation (90-degree steps about a planar object's
+    normal) and the sign-flip diagnostic (180 degrees about a camera's
+    viewing axis).
+    """
+    a = np.asarray(axis, dtype=np.float64)
+    norm = np.linalg.norm(a)
+    if norm < 1e-9:
+        raise ValueError("rotation_about_axis: zero-length axis")
+    a = a / norm
+    K = np.array([
+        [0.0, -a[2], a[1]],
+        [a[2], 0.0, -a[0]],
+        [-a[1], a[0], 0.0],
+    ])
+    return np.eye(3) + math.sin(angle_rad) * K + (1.0 - math.cos(angle_rad)) * (K @ K)
+
+
+def project_points(
+    points_world: np.ndarray, intrinsics, pose
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Project (N, 3) world points into a camera's pixel space.
+
+    The inverse of the unproject_depth / camera_to_world chain: rotate into
+    camera-local coordinates, then apply the pinhole projection implied by
+    the module header's sign conventions (image v grows down, camera Y
+    grows up, camera looks down -Z).
+
+    Returns (uv, depth, valid):
+      uv:    (N, 2) float64 pixel coordinates (u, v). Only meaningful where
+             valid is True — points behind the camera get an arbitrary
+             finite value, never NaN/inf, so callers can mask cheaply.
+      depth: (N,) float64 distance along the viewing axis (-z_cam); matches
+             unproject_depth's "d" for a point that round-trips.
+      valid: (N,) bool, True where depth > eps (the point is in front of
+             the camera and division by depth is well-conditioned).
+    """
+    pts = np.asarray(points_world, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        raise ValueError(f"project_points: expected (N, 3), got {pts.shape}")
+    R = quat_to_rotmat(pose_quat(pose))
+    cam = (pts - pose_position(pose)) @ R
+    depth = -cam[:, 2]
+    valid = depth > 1e-6
+    safe_depth = np.where(valid, depth, 1.0)
+    u = intrinsics.cx + cam[:, 0] * intrinsics.fx / safe_depth
+    v = intrinsics.cy - cam[:, 1] * intrinsics.fy / safe_depth
+    return np.column_stack([u, v]), depth, valid
+
+
+def footprint_bbox(
+    mask: np.ndarray,
+    uv: Optional[np.ndarray] = None,
+    valid: Optional[np.ndarray] = None,
+    pad_frac: float = 0.15,
+) -> Tuple[float, float, float, float]:
+    """Bounding box (u0, v0, u1, v1) covering a mask's true pixels and,
+    optionally, a set of projected points — padded, then CLIPPED to the
+    mask's own frame.
+
+    Crop-aware by construction: the box never extends past the observed
+    image, so an object that is genuinely truncated at the frame edge is
+    compared only on the portion both the mask and the projection could
+    possibly show, rather than penalizing (or rewarding) a projection for
+    pixels neither source could ever have.
+    """
+    h, w = mask.shape
+    vs, us = np.nonzero(np.asarray(mask, dtype=bool))
+    corners = []
+    if us.size:
+        corners.append((float(us.min()), float(vs.min()), float(us.max()), float(vs.max())))
+    if uv is not None:
+        pts = np.asarray(uv, dtype=np.float64)
+        if valid is not None:
+            pts = pts[np.asarray(valid, dtype=bool)]
+        if pts.shape[0]:
+            corners.append((
+                float(pts[:, 0].min()), float(pts[:, 1].min()),
+                float(pts[:, 0].max()), float(pts[:, 1].max()),
+            ))
+    if not corners:
+        return (0.0, 0.0, float(w), float(h))
+    u0 = min(c[0] for c in corners)
+    v0 = min(c[1] for c in corners)
+    u1 = max(c[2] for c in corners)
+    v1 = max(c[3] for c in corners)
+    pad_u = (u1 - u0) * pad_frac + 1.0
+    pad_v = (v1 - v0) * pad_frac + 1.0
+    u0 = max(u0 - pad_u, 0.0)
+    v0 = max(v0 - pad_v, 0.0)
+    u1 = min(u1 + pad_u, float(w))
+    v1 = min(v1 + pad_v, float(h))
+    return (u0, v0, u1, v1)
+
+
+def rasterize_mask_density(
+    mask: np.ndarray, bbox: Tuple[float, float, float, float], grid_size: int = 32
+) -> np.ndarray:
+    """Box-filter downsample of a boolean mask into a grid_size x grid_size
+    occupancy-fraction grid over bbox=(u0, v0, u1, v1).
+
+    Each output cell holds the fraction of source pixels within its footprint
+    that are True — a soft, resolution-independent occupancy value in [0, 1],
+    not a hard nearest-neighbor resample.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    h, w = mask.shape
+    u0, v0, u1, v1 = bbox
+    iu0, iv0 = max(int(np.floor(u0)), 0), max(int(np.floor(v0)), 0)
+    iu1, iv1 = min(int(np.ceil(u1)), w), min(int(np.ceil(v1)), h)
+    if iu1 <= iu0 or iv1 <= iv0 or u1 <= u0 or v1 <= v0:
+        return np.zeros((grid_size, grid_size), dtype=np.float64)
+    crop = mask[iv0:iv1, iu0:iu1]
+    vv, uu = np.meshgrid(
+        np.arange(iv0, iv1) + 0.5, np.arange(iu0, iu1) + 0.5, indexing="ij"
+    )
+    count_all, _, _ = np.histogram2d(
+        vv.ravel(), uu.ravel(), bins=grid_size, range=[[v0, v1], [u0, u1]]
+    )
+    count_true, _, _ = np.histogram2d(
+        vv.ravel(), uu.ravel(), bins=grid_size, range=[[v0, v1], [u0, u1]],
+        weights=crop.ravel().astype(np.float64),
+    )
+    return np.divide(
+        count_true, count_all, out=np.zeros_like(count_true), where=count_all > 0
+    )
+
+
+def rasterize_point_density(
+    uv: np.ndarray,
+    valid: np.ndarray,
+    bbox: Tuple[float, float, float, float],
+    grid_size: int = 32,
+    cap_percentile: float = 90.0,
+) -> np.ndarray:
+    """Soft occupancy grid from projected points within bbox=(u0, v0, u1, v1).
+
+    A plain 2D histogram, normalized by the cap_percentile of its own
+    populated bins (not the max) so a handful of dense bins don't saturate
+    the whole grid to a hard binary silhouette — the "soft" in soft IoU.
+    """
+    u0, v0, u1, v1 = bbox
+    if u1 <= u0 or v1 <= v0:
+        return np.zeros((grid_size, grid_size), dtype=np.float64)
+    pts = np.asarray(uv, dtype=np.float64)[np.asarray(valid, dtype=bool)]
+    if pts.shape[0] == 0:
+        return np.zeros((grid_size, grid_size), dtype=np.float64)
+    counts, _, _ = np.histogram2d(
+        pts[:, 1], pts[:, 0], bins=grid_size, range=[[v0, v1], [u0, u1]]
+    )
+    nonzero = counts[counts > 0]
+    if nonzero.size == 0:
+        return counts
+    cap = max(float(np.percentile(nonzero, cap_percentile)), 1.0)
+    return np.clip(counts / cap, 0.0, 1.0)
+
+
+def soft_iou(density_a: np.ndarray, density_b: np.ndarray) -> float:
+    """sum(min) / sum(max) agreement between two same-shape non-negative
+    density grids. 0.0 when both are empty (avoids a 0/0 "perfect" score)."""
+    a = np.asarray(density_a, dtype=np.float64)
+    b = np.asarray(density_b, dtype=np.float64)
+    if a.shape != b.shape:
+        raise ValueError(f"soft_iou: shape mismatch {a.shape} vs {b.shape}")
+    denom = float(np.minimum(a, b).sum()), float(np.maximum(a, b).sum())
+    inter, union = denom
+    if union <= 0.0:
+        return 0.0
+    return inter / union
+
+
+def soft_containment(density_a: np.ndarray, density_b: np.ndarray) -> float:
+    """sum(min) / min(sum_a, sum_b): how much of the SMALLER footprint is
+    explained by the larger one.
+
+    Tolerant of partial-view framing in a way soft_iou is not — e.g. a
+    candidate frame that only sees the near half of a large object should
+    still register strong agreement with a cluster's full footprint. 0.0
+    if either density is entirely empty.
+    """
+    a = np.asarray(density_a, dtype=np.float64)
+    b = np.asarray(density_b, dtype=np.float64)
+    if a.shape != b.shape:
+        raise ValueError(f"soft_containment: shape mismatch {a.shape} vs {b.shape}")
+    sum_a, sum_b = float(a.sum()), float(b.sum())
+    if sum_a <= 0.0 or sum_b <= 0.0:
+        return 0.0
+    inter = float(np.minimum(a, b).sum())
+    return inter / min(sum_a, sum_b)
+
+
+def mask_containment(mask_a: np.ndarray, mask_b: np.ndarray) -> float:
+    """Exact intersection-over-smaller-area for two same-shape boolean
+    masks — the same-frame duplicate-detection test (decision 0067: a
+    nested pair of detections of one physical object measures 1.000 here).
+
+    0.0 if either mask is empty or the shapes mismatch in area (shape
+    mismatch itself is a caller error and raises).
+    """
+    a = np.asarray(mask_a, dtype=bool)
+    b = np.asarray(mask_b, dtype=bool)
+    if a.shape != b.shape:
+        raise ValueError(f"mask_containment: shape mismatch {a.shape} vs {b.shape}")
+    area_a, area_b = int(a.sum()), int(b.sum())
+    if area_a == 0 or area_b == 0:
+        return 0.0
+    inter = int(np.logical_and(a, b).sum())
+    return inter / min(area_a, area_b)
 
 
 def triangulate_rays(
