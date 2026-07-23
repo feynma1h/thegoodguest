@@ -181,10 +181,10 @@ def extract_layout(result: dict) -> Optional[dict]:
 
 def rotation_world_from_layout(layout: dict, camera_pose) -> np.ndarray:
     """World-from-object rotation: lift the layout's local→camera rotation
-    (already conjugated by extract_layout) through the frame's
-    world-from-camera pose. _SAM3D_CAM_TO_ARKIT_CAM is the identity today
-    (layout camera frame == ARKit camera frame, decision 0065) and stays
-    in the chain as the named seam."""
+    (already conjugated by extract_layout) through
+    _SAM3D_CAM_TO_ARKIT_CAM — the pytorch3d→ARKit camera basis change,
+    diag(-1, 1, -1) per decision 0065's sign-verified correction — and the
+    frame's world-from-camera pose."""
     R_layout = quat_to_rotmat(tuple(layout["rotation_xyzw"]))
     R_wc = quat_to_rotmat(pose_quat(camera_pose))
     return R_wc @ _SAM3D_CAM_TO_ARKIT_CAM @ R_layout
