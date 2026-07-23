@@ -52,6 +52,8 @@ service-account*.json
 # Build artifacts that live next to the proto
 *.pb
 !outputs/**/*.pb  # already covered by outputs/, listed for clarity
+# Committed test fixtures may be real .pb bundles (geometry metadata only)
+!services/perception-obj/tests/fixtures/**/*.pb
 
 # Python package build artifacts
 packages/*/build/

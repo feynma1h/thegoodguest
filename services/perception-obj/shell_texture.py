@@ -42,8 +42,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+from room_planes import ShellPlaneGeom
 from roomstudio_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
-from shell_geometry import ShellPlaneGeom
 
 # ---------------------------------------------------------------------------
 # Tunables (env-overridable)
