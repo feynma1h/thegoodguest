@@ -213,6 +213,8 @@ struct WaitingView: View {
                     .padding(.bottom, 14)
             }
         }
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil, transparent: true))
     }
 
     // MARK: Send failed (couldn't upload in the first place)

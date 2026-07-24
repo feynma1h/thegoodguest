@@ -518,6 +518,9 @@ actor BlobUploadManager {
             // in the same launch can re-count. crossLaunchRetryCount is reset to 0 by
             // markingBlobUploaded (via markBlobUploaded → markingBlobUploaded). Decision 0045.
             transientCountedThisLaunch.remove(bundleId)
+        // Progress means the pause is over — otherwise a deferral recorded by a
+        // previous process's late 308 outlives the bundle rehydration already resumed.
+        Task { await MainActor.run { UploadFailureMonitor.shared.clearDeferral(bundleId: bundleId) } }
 
             if record.allNonBundlePbBlobsUploaded {
                 // Phase-1 complete. Hand off to bundle.pb finalizer.

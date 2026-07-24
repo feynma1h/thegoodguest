@@ -43,6 +43,13 @@ final class UploadCoordinator: ObservableObject {
 
     @Published private(set) var sessionState: SessionState = .idle
 
+    /// Incremented per call. A call that has been superseded by a newer one drops
+    /// its state writes instead of clobbering the newer send's outcome — the 0038
+    /// retry ladder can hold a POST for ~a minute, long enough for the user to
+    /// leave, rescan and send again. Guarding at the CALLER could only ever protect
+    /// writes made after its await; every write below happens inside this call.
+    private var callSequence = 0
+
     // MARK: - Dependencies (injectable for testing)
 
     private let auth:   AuthManager
@@ -85,11 +92,19 @@ final class UploadCoordinator: ObservableObject {
     ///
     /// - Parameter capture: The CaptureManager after stopCapture() has set bundlePath.
     func beginUploadSession(for capture: CaptureManager) async {
+        callSequence &+= 1
+        let mine = callSequence
+        /// Publish only if this call is still the newest one.
+        func publish(_ state: SessionState) {
+            guard mine == callSequence else { return }
+            sessionState = state
+        }
+
         guard
             let outputDir = capture.bundleOutputDir,
             capture.bundlePath != nil
         else {
-            sessionState = .failed("No bundle on disk — call stopCapture() first.")
+            publish(.failed("No bundle on disk — call stopCapture() first."))
             return
         }
 
@@ -109,12 +124,12 @@ final class UploadCoordinator: ObservableObject {
             guard bgToken != .invalid else { return }
             UIApplication.shared.endBackgroundTask(bgToken)
         }
-        // Single defer covers every exit path from here through sessionState = .ready(_).
+        // Single defer covers every exit path from here through publish(.ready(_)).
         defer { handle.endIfNeeded() }
 
         // Fast path: session record already persisted (e.g. app relaunched mid-upload).
         if let existing = try? await store.load(bundleId: bundleId) {
-            sessionState = .ready(existing)
+            publish(.ready(existing))
             logger.info("[UploadCoordinator] → handing off to BlobUploadManager for bundle \(bundleId, privacy: .public)")
             if existing.allNonBundlePbBlobsUploaded {
                 // All non-bundle.pb blobs already uploaded; route to bundle.pb finalize.
@@ -131,24 +146,24 @@ final class UploadCoordinator: ObservableObject {
         }
 
         // 1. Ensure signed in.
-        sessionState = .authenticating
+        publish(.authenticating)
         do {
             try await auth.signInIfNeeded()
         } catch {
-            sessionState = .failed("Firebase sign-in failed: \(error.localizedDescription)")
+            publish(.failed("Firebase sign-in failed: \(error.localizedDescription)"))
             return
         }
         guard let uid = auth.currentUID else {
             // Terminal: sign-in reported success with no UID — retrying the same
             // call cannot resolve an invariant violation.
-            sessionState = .failed("No UID after sign-in — unexpected state.", terminal: true)
+            publish(.failed("No UID after sign-in — unexpected state.", terminal: true))
             return
         }
 
         // 2. Backstop: patch user_id in bundle.pb if it was empty at capture time.
         //    This only fires on a first-ever offline capture (rare path).
         if capture.assembledWithoutUserId {
-            sessionState = .patchingBundle
+            publish(.patchingBundle)
             let bundlePbURL = outputDir.appendingPathComponent("bundle.pb")
             do {
                 var bundleData = try Data(contentsOf: bundlePbURL)
@@ -160,23 +175,23 @@ final class UploadCoordinator: ObservableObject {
                     logger.info("[UploadCoordinator] backstop: patched user_id in bundle.pb")
                 }
             } catch {
-                sessionState = .failed("Bundle patch failed: \(error.localizedDescription)")
+                publish(.failed("Bundle patch failed: \(error.localizedDescription)"))
                 return
             }
         }
 
         // 3. Build manifest.
-        sessionState = .buildingManifest
+        publish(.buildingManifest)
         let manifest: [UploadManifestEntry]
         do {
             manifest = try ManifestBuilder.build(outputDir: outputDir)
         } catch {
-            sessionState = .failed("Manifest build failed: \(error.localizedDescription)")
+            publish(.failed("Manifest build failed: \(error.localizedDescription)"))
             return
         }
 
         // 4. Create upload session.
-        sessionState = .creatingSession
+        publish(.creatingSession)
         let entries: [UploadSessionEntry]
         do {
             entries = try await client.createUploadSession(
@@ -190,16 +205,16 @@ final class UploadCoordinator: ObservableObject {
         } catch UploadSessionError.forbidden(let msg) {
             // Terminal: a 403 (e.g. bundle_id ownership) will answer identically on
             // every retry, so the UI must offer an off-ramp, not "Try again".
-            sessionState = .failed("Forbidden: \(msg)", terminal: true)
+            publish(.failed("Forbidden: \(msg)", terminal: true))
             return
         } catch UploadSessionError.clientError(let code, let body) {
             // Client bug — log loudly; do not retry. Marked terminal so the UI
             // offers a real off-ramp instead of an unbounded retry that cannot work.
             logger.info("[UploadCoordinator] PROGRAMMING ERROR — \(code): \(body)")
-            sessionState = .failed("Client error \(code): \(body)", terminal: true)
+            publish(.failed("Client error \(code): \(body)", terminal: true))
             return
         } catch {
-            sessionState = .failed("Upload session failed: \(error.localizedDescription)")
+            publish(.failed("Upload session failed: \(error.localizedDescription)"))
             return
         }
 
@@ -220,7 +235,7 @@ final class UploadCoordinator: ObservableObject {
             logger.info("[UploadCoordinator] WARNING — persistence failed: \(error.localizedDescription)")
         }
 
-        sessionState = .ready(record)
+        publish(.ready(record))
         logger.info("[UploadCoordinator] → handing off to BlobUploadManager for bundle \(bundleId, privacy: .public)")
         do {
             try await BlobUploadManager.shared.enqueuePhasOneBlobs(record: record)

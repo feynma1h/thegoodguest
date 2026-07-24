@@ -34,12 +34,12 @@ import SwiftUI
 
 struct RootFlowView: View {
     @StateObject private var capture     = CaptureManager()
-    /// Replaced on every send. The generation guard could only protect writes made
-    /// AFTER the await; every sessionState write happens INSIDE beginUploadSession,
-    /// so a slow send (the 0038 retry ladder can hold a POST for a minute) could
-    /// land its outcome on the next capture's wait screen. A per-send instance makes
-    /// that structurally impossible.
-    @State private var coordinator = UploadCoordinator()
+    /// @StateObject, NOT @State: @State stores the reference and invalidates only on
+    /// assignment, so it does not subscribe to objectWillChange — a per-send @State
+    /// instance made every sessionState change invisible, and with it every send
+    /// failure. Cross-send clobbering is handled where the writes happen instead
+    /// (UploadCoordinator's callSequence).
+    @StateObject private var coordinator = UploadCoordinator()
     @ObservedObject private var poller   = ScenePoller.shared
     @ObservedObject private var failures = UploadFailureMonitor.shared
 
@@ -58,8 +58,9 @@ struct RootFlowView: View {
     /// keeping it here is what lets the poll-error screen show the elapsed clock and
     /// its "keeps its place in line" reassurance instead of silently hiding both.
     @State private var lastSceneCreatedAt: Date?
-    /// Incremented per send; an in-flight task whose generation is stale drops its
-    /// writes rather than overwriting a newer capture's state.
+    /// Incremented per send. Guards exactly one write — the post-await bookkeeping
+    /// below. Session-state staleness is handled inside UploadCoordinator, where
+    /// those writes actually happen.
     @State private var sendGeneration: Int = 0
 
     enum Stage: Equatable { case home, capturing, gotRoom, review, sent }
@@ -209,6 +210,11 @@ struct RootFlowView: View {
                 onProfile: { showProfile = true }
             )
         }
+        // The banner and re-entry rows live in this wrapper, OUTSIDE HomeView's own
+        // backdrop — without this they sat on bare white with a hard seam where the
+        // parchment began.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .rsParchmentScreen()
         // The kick from onFatalBlobError cannot outlive the process, so without this
         // independent store scan a failure from a previous launch (crash, dead
         // battery mid-upload) would never surface — exactly the case the banner
@@ -310,7 +316,11 @@ struct RootFlowView: View {
                         anchor: anchor,
                         pollingStopped: stopped,
                         onTryNow: {
-                            if stopped, let id = sentBundleId {
+                            // Fall back to the poller's own bundle: a loop started by
+                            // the completion kick can outlive/predate this view's
+                            // sentBundleId, and both branches being skipped left a
+                            // live-looking button doing nothing.
+                            if stopped, let id = sentBundleId ?? poller.currentBundleId {
                                 ScenePoller.shared.start(bundleId: id)
                             } else {
                                 ScenePoller.shared.checkNow()
@@ -320,7 +330,7 @@ struct RootFlowView: View {
 
         case .doorway:
             DoorwayView(onStepThrough: openWebDesk,
-                        onScanAnother: endFlight,
+                        onScanAnother: rescanFromScratch,
                         signedIntoWeb: auth.isAppleLinked,
                         canOpenWeb: webRoomURL != nil)
 
@@ -397,12 +407,16 @@ struct RootFlowView: View {
                                    // from the previous room's arrival.
         ScenePoller.shared.reset()
         UploadFailureMonitor.shared.clearDeferral()
-        coordinator = UploadCoordinator()   // M1: per-send instance
+        coordinator.reset()
         // Snapshot the id SYNCHRONOUSLY. Reading capture.bundleIdString after the
         // await let a "leave → scan again" in the gap mint a new bundleId, so this
         // capture's task would record the NEXT capture's id — poisoning the blob-
         // failure match, the deep link, and the poll restart.
         let bundleId = capture.bundleIdString
+        // Set NOW, not after the mint returns: the 0038 ladder can hold that POST for
+        // ~a minute, and leaving in that window previously left the capture invisible
+        // on every surface (no re-entry row, no banner, no record to scan).
+        sentBundleId = bundleId
         sendGeneration &+= 1
         let generation = sendGeneration
         Task {
