@@ -16,6 +16,10 @@ import SwiftUI
 
 struct WaitingView: View {
     enum Phase {
+        /// Still handing the room over: sign-in / manifest / POST /upload_session,
+        /// before a single byte has left the phone. NOT "analyzing" — the room has
+        /// not arrived anywhere, so no arrival claim, no ETA, no elapsed clock.
+        case sending
         case queued, analyzing, longRunning
         /// Lost contact WHILE CHECKING on an already-uploaded room — the room is up
         /// and holding its place; we just can't read its status this moment.
@@ -29,7 +33,15 @@ struct WaitingView: View {
     var phase: Phase = .analyzing
     /// Server-side scene start; the elapsed clock counts from here so it reads
     /// true even after the user leaves and returns.
-    var anchor: Date = .now
+    ///
+    /// OPTIONAL BY DESIGN: nil until the first 200 delivers `created_at`. Before
+    /// that there is no honest thing to count from (matching SceneStatusView's
+    /// server-anchored rule), so the clock is not rendered at all rather than
+    /// silently counting from a client-side moment.
+    var anchor: Date?
+    /// True when the poll loop has STOPPED (a fatal poll error). Swaps the
+    /// "I'll keep trying quietly" reassurance for the truth.
+    var pollingStopped: Bool = false
     var onTryNow: () -> Void = {}
     var onLeave: () -> Void = {}
 
@@ -46,7 +58,7 @@ struct WaitingView: View {
     @ViewBuilder
     private var content: some View {
         switch phase {
-        case .queued, .analyzing, .longRunning:
+        case .sending, .queued, .analyzing, .longRunning:
             analyzingBody
         case .connectionTrouble:
             connectionTroubleBody
@@ -88,8 +100,23 @@ struct WaitingView: View {
 
             Spacer()
 
-            elapsedFooter
-                .padding(.bottom, 10)
+            // The wait must never be a trap: without this there is no back gesture
+            // (the flow has no NavigationStack) and no control, so the user is held
+            // on this screen until a terminal poll state arrives. Polling continues
+            // in the background — leaving is free.
+            Button(action: onLeave) {
+                Text("Leave it with me")
+                    .font(RSFont.ui(.subheadline, weight: .medium))
+                    .foregroundStyle(Color.rsInkMuted)
+                    .padding(.horizontal, 18).padding(.vertical, 9)
+                    .background(Capsule().stroke(Color.rsHairline, lineWidth: 1.5))
+            }
+            .padding(.bottom, 18)
+
+            if anchor != nil {
+                elapsedFooter
+                    .padding(.bottom, 10)
+            }
         }
         .onAppear {
             withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) {
@@ -109,24 +136,25 @@ struct WaitingView: View {
         .background(Capsule().fill(Color.rsSurface).overlay(Capsule().stroke(Color.rsHairline, lineWidth: 1)))
     }
 
+    /// Elapsed only — deliberately NO estimate. "Usually about N minutes" had no
+    /// measured basis (GPU cold start alone is ~3.5 min and real captures have
+    /// needed more than one processing pass), so an ETA here would be invented.
+    /// The honest clock stands on its own.
+    @ViewBuilder
     private var elapsedFooter: some View {
-        HStack(spacing: 10) {
-            Eyebrow("Elapsed")
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text(Self.clock(context.date.timeIntervalSince(anchor)))
-                    .font(RSFont.mono(size: 15, weight: .medium))
-                    .foregroundStyle(Color.rsInk)
-                    .monospacedDigit()
+        if let anchor {
+            HStack(spacing: 10) {
+                Eyebrow("Elapsed")
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(Self.clock(context.date.timeIntervalSince(anchor)))
+                        .font(RSFont.mono(size: 15, weight: .medium))
+                        .foregroundStyle(Color.rsInk)
+                        .monospacedDigit()
+                }
             }
-            if phase == .analyzing {
-                Circle().fill(Color.rsInkFaint).frame(width: 4, height: 4)
-                Text("usually about 4 minutes")
-                    .font(RSFont.ui(.subheadline))
-                    .foregroundStyle(Color.rsInkMuted)
-            }
+            .padding(.top, 16)
+            .overlay(alignment: .top) { Divider().background(Color.rsHairline) }
         }
-        .padding(.top, 16)
-        .overlay(alignment: .top) { Divider().background(Color.rsHairline) }
     }
 
     // MARK: Connection trouble
@@ -143,7 +171,9 @@ struct WaitingView: View {
                         .font(RSFont.ui(.callout, weight: .semibold))
                         .foregroundStyle(Color.rsOnDark)
                 }
-                GuestLine("I've lost my line to the desk for a moment — your room is safe, I just can't check on it. I'll keep trying quietly.",
+                GuestLine(pollingStopped
+                          ? "I've lost my line to the desk — your room is safe up there, I just can't check on it, and I've stopped trying. Tell me when to look again."
+                          : "I've lost my line to the desk for a moment — your room is safe, I just can't check on it. I'll keep trying quietly.",
                           size: 14.5, onDark: true)
                     .padding(.top, 9)
                 HStack(spacing: 8) {
@@ -167,11 +197,15 @@ struct WaitingView: View {
             .padding(18)
             .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             Spacer()
-            Text("Your room keeps its place in line — the clock counts from when it arrived, not from now.")
-                .font(RSFont.ui(.footnote))
-                .foregroundStyle(Color.rsInkMuted)
-                .multilineTextAlignment(.center)
-                .padding(.bottom, 14)
+            // Only claim the arrival clock when a server anchor actually exists —
+            // before the first 200 there is no "when it arrived" to count from.
+            if anchor != nil {
+                Text("Your room keeps its place in line — the clock counts from when it arrived, not from now.")
+                    .font(RSFont.ui(.footnote))
+                    .foregroundStyle(Color.rsInkMuted)
+                    .multilineTextAlignment(.center)
+                    .padding(.bottom, 14)
+            }
         }
     }
 
@@ -220,6 +254,7 @@ struct WaitingView: View {
 
     private var title: String {
         switch phase {
+        case .sending:      return "Sending your room"
         case .queued:       return "Getting in line"
         case .analyzing:    return "Making sense of your room"
         case .longRunning:  return "Making sense of your room"
@@ -229,12 +264,17 @@ struct WaitingView: View {
 
     private var guestLine: String {
         switch phase {
+        case .sending:
+            // Nothing has arrived yet — no "it's here", no ETA.
+            return "On its way up to the desk. Keep the app open a moment while it travels."
         case .queued:
             return "In line — I'll start the moment there's room."
         case .analyzing:
             return "It's here — all of it. Give me a few minutes to understand how you live in it."
         case .longRunning:
-            return "Slower than I hoped — a couple more minutes. Your room has a lot going on, which is a compliment. You can leave; I'll knock."
+            // No "I'll knock": push (FCM) registration is not built on iOS yet, so
+            // promising a notification would be a promise nothing can keep.
+            return "Slower than I hoped — a couple more minutes. Your room has a lot going on, which is a compliment."
         case .connectionTrouble, .sendFailed:
             return ""
         }
@@ -250,6 +290,10 @@ struct WaitingView: View {
     }
 }
 
+#Preview("Sending (no anchor yet)") {
+    WaitingView(phase: .sending)
+}
+
 #Preview("Analyzing") {
     WaitingView(phase: .analyzing, anchor: Date().addingTimeInterval(-134))
 }
@@ -259,7 +303,11 @@ struct WaitingView: View {
 }
 
 #Preview("Connection trouble") {
-    WaitingView(phase: .connectionTrouble)
+    WaitingView(phase: .connectionTrouble, anchor: Date().addingTimeInterval(-92))
+}
+
+#Preview("Poll stopped") {
+    WaitingView(phase: .connectionTrouble, anchor: Date().addingTimeInterval(-92), pollingStopped: true)
 }
 
 #Preview("Send failed") {

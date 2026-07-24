@@ -184,7 +184,7 @@ struct ContentView: View {
             case .buildingManifest:  ("Building manifest…", .orange)
             case .creatingSession:   ("Creating session…", .orange)
             case .ready:             ("Upload authorized — uploading in background", .blue)
-            case .failed(let msg):   ("Session error: \(msg)", .red)
+            case .failed(let msg, _): ("Session error: \(msg)", .red)
             }
             if !label.isEmpty {
                 Text(label)

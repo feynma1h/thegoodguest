@@ -9,7 +9,7 @@ import SwiftUI
 // MARK: - Buttons
 
 /// The primary action: rust fill, cream label, full-width, soft rust shadow.
-/// The everyday CTA — "Scan a room", "Send it home", "Rescan just that corner".
+/// The everyday CTA — "Scan a room", "Send it home", "Scan the room again".
 struct RSPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -60,8 +60,7 @@ struct RSLightButtonStyle: ButtonStyle {
     }
 }
 
-/// A quiet secondary choice — text only, muted ink. "Add a little more",
-/// "Not now", "Use it as is", "Later".
+/// A quiet secondary choice — text only, muted ink. "Not now", "Later".
 struct RSQuietButtonStyle: ButtonStyle {
     var onDark = false
     func makeBody(configuration: Configuration) -> some View {

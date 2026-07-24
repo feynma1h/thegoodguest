@@ -14,10 +14,16 @@
 /// IBM Plex Mono) are not yet in the app bundle, so these fall back to the
 /// spec's specified system substitutes — New York (`.serif`), SF Pro
 /// (`.default`), and `.monospaced`. When the `.ttf`/`.otf` files are added and
-/// registered, change ONLY the three private helpers at the bottom of this file
-/// to `Font.custom(_:size:relativeTo:)`; every call site keeps working.
+/// registered, change ONLY the private face helpers at the bottom of this file
+/// to `Font.custom(_:size:relativeTo:)`; every call site keeps working (and the
+/// `relativeTo:` scaling below becomes Font.custom's own, so behaviour matches).
+///
+/// DYNAMIC TYPE: the fixed-size variants scale via UIFontMetrics — `Font.system(
+/// size:)` alone is inert, which would leave nearly every line in this app
+/// (guest voice, arrival titles, mono metrics) ignoring the user's text size.
 
 import SwiftUI
+import UIKit
 
 enum RSFont {
 
@@ -68,23 +74,53 @@ enum RSFont {
         .system(style, design: .serif)
     }
     private static func serif(size: CGFloat, relativeTo: Font.TextStyle) -> Font {
-        // System fixed sizes do NOT scale with Dynamic Type; `relativeTo` is
-        // retained so the call sites are ready for the Font.custom swap, where it
-        // becomes live. Prefer the text-style variants for scaling body copy.
-        .system(size: size, design: .serif)
+        .system(size: scaled(size, relativeTo: relativeTo), design: .serif)
     }
 
     private static func sans(_ style: Font.TextStyle) -> Font {
         .system(style, design: .default)
     }
     private static func sans(size: CGFloat, relativeTo: Font.TextStyle) -> Font {
-        .system(size: size, design: .default)
+        .system(size: scaled(size, relativeTo: relativeTo), design: .default)
     }
 
     private static func monospaced(_ style: Font.TextStyle) -> Font {
         .system(style, design: .monospaced)
     }
     private static func monospaced(size: CGFloat, relativeTo: Font.TextStyle) -> Font {
-        .system(size: size, design: .monospaced)
+        .system(size: scaled(size, relativeTo: relativeTo), design: .monospaced)
+    }
+
+    // MARK: - Dynamic Type
+
+    /// Scale a fixed point size against the user's text-size setting.
+    ///
+    /// `Font.system(size:)` is Dynamic Type–INERT, so every fixed-size call site
+    /// (the guest voice, arrival titles, mono metrics — the majority of this app's
+    /// text) would otherwise ignore the user's chosen size entirely. UIFontMetrics
+    /// reproduces what `Font.custom(_:size:relativeTo:)` will do for free once the
+    /// branded faces are bundled, so behaviour stays consistent across that swap.
+    ///
+    /// Read at body-evaluation time: SwiftUI re-evaluates on a size-category
+    /// change, so the value tracks the setting without an explicit environment read.
+    private static func scaled(_ size: CGFloat, relativeTo style: Font.TextStyle) -> CGFloat {
+        UIFontMetrics(forTextStyle: uiTextStyle(style)).scaledValue(for: size)
+    }
+
+    private static func uiTextStyle(_ style: Font.TextStyle) -> UIFont.TextStyle {
+        switch style {
+        case .largeTitle:  return .largeTitle
+        case .title:       return .title1
+        case .title2:      return .title2
+        case .title3:      return .title3
+        case .headline:    return .headline
+        case .subheadline: return .subheadline
+        case .body:        return .body
+        case .callout:     return .callout
+        case .footnote:    return .footnote
+        case .caption:     return .caption1
+        case .caption2:    return .caption2
+        @unknown default:  return .body
+        }
     }
 }

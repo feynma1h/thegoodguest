@@ -23,8 +23,8 @@
 /// BUILT BUT NOT YET REACHABLE from this flow (staged, not wired): the
 /// returning-home recent-rooms strip and RoomsListView / QRBridgeView (§9, need a
 /// GET /scenes fetch + trigger points), WhySignInSheet / AccountConflictView
-/// (§8 — the conflict sheet is presented by SignInSheet, but the standalone
-/// "why sign in" invitation has no trigger yet), and ColdStartView (§1 — the flow
+/// (§8 — BOTH are unreachable: SignInSheet handles the conflict with two stock
+/// `.alert`s and never presents AccountConflictView), and ColdStartView (§1 — the flow
 /// opens directly at .home; identity is minted lazily on first send, so the
 /// cold-start splash has no trigger). These have no entry point here and appear
 /// only in their own previews.
@@ -71,9 +71,11 @@ struct RootFlowView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            // ScenePoller's contract: pause polling when backgrounded. Only the
-            // post-send waiting flow drives the poller here.
-            guard stage == .sent else { return }
+            // ScenePoller's contract: pause polling when backgrounded. Driven off
+            // the POLLER's own state, not `stage`: the user can leave the wait
+            // (stage == .home) while a poll loop is still live, and a stage-gated
+            // guard would then never pause it.
+            guard poller.currentBundleId != nil else { return }
             switch phase {
             case .active:                ScenePoller.shared.resume()
             case .background, .inactive: ScenePoller.shared.pause()
@@ -114,11 +116,22 @@ struct RootFlowView: View {
                 // Neutral verdict: the app has no coverage signal (task #13), so it
                 // must not assert "clean / whole room". Once coverage lands, drive
                 // verdict + thinCoverage from it.
-                verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",
+                verdict: isEmptyCapture
+                    ? "I didn't catch anything on that pass — nothing to send yet. Let's walk the room again."
+                    : "Here's your capture. Send it, and I'll start making sense of it on your desk.",
+                // An empty capture cannot be sent: the backend would reject it as
+                // invalid and the user would be told "the scan didn't survive the
+                // trip" — blaming the trip for a capture that was empty before it
+                // left. Emptiness is checkable here, and needs no coverage signal.
+                canSend: !isEmptyCapture,
+                // HONEST LABEL: CaptureManager.startCapture() mints a new bundleId
+                // and clears frames/anchors/outputDir — this REPLACES the pass, it
+                // does not extend it. True append (preserving bundleId + frames) is
+                // the activation follow-up; until then the label must not promise
+                // additive behaviour it doesn't have.
+                addMoreLabel: "Scan again from scratch",
                 onSend: sendItHome,
                 onAddMore: {
-                    // CaptureManager.startCapture() currently resets progress;
-                    // true resume-with-progress is an activation follow-up.
                     stage = .capturing
                     beginCapture()
                 }
@@ -141,6 +154,11 @@ struct RootFlowView: View {
                 onProfile: { showProfile = true }
             )
         }
+        // The kick from onFatalBlobError cannot outlive the process, so without this
+        // independent store scan a failure from a previous launch (crash, dead
+        // battery mid-upload) would never surface — exactly the case the banner
+        // exists for. Mirrors what UploadFailureView does for the old ContentView.
+        .task { await UploadFailureMonitor.shared.refresh() }
         .sheet(isPresented: $showGuidance) {
             GuidanceSheet(
                 onStart: {
@@ -156,7 +174,7 @@ struct RootFlowView: View {
         .sheet(isPresented: $showProfile) {
             NavigationStack {
                 ProfileView(
-                    uid: auth.currentUID ?? "not signed in",
+                    uid: auth.currentUID,
                     isLinked: auth.isAppleLinked,
                     onClose: { showProfile = false }
                 )
@@ -168,26 +186,42 @@ struct RootFlowView: View {
 
     @ViewBuilder
     private var postSend: some View {
-        if case .failed = coordinator.sessionState {
-            // Session/upload SETUP failed (sign-in, manifest, server 4xx/5xx, or
-            // the bundle wasn't written yet — the send-before-bundle-ready race,
-            // which yields .failed("No bundle on disk") and self-heals on retry).
-            // Nothing was uploaded, so this uses the honest .sendFailed copy, NOT
-            // the .connectionTrouble copy (which claims the room is safely "in
-            // line" with an "arrival clock" — untrue when the send never happened).
-            // KNOWN GAP: a permanent client error (a 4xx that will never succeed)
-            // loops on "Try again" behind this copy with only "Not now" → home as an
-            // off-ramp; giving genuine 4xx a terminal state needs failure
-            // classification in UploadCoordinator (touches the live ContentView) and
-            // is deferred.
-            WaitingView(phase: .sendFailed,
-                        onTryNow: { sendItHome() },
-                        onLeave: { stage = .home })
+        if case .failed(_, let terminal) = coordinator.sessionState {
+            if terminal {
+                // A 4xx the server will never accept — retrying provably cannot
+                // work, so this is a terminal screen, not an invitation to retry.
+                FailureView(
+                    kind: .terminal,
+                    onPrimary: rescanFromScratch,
+                    onSecondary: { stage = .home }
+                )
+            } else {
+                // Session/upload SETUP failed (sign-in, network, or the bundle
+                // wasn't written yet — the send-before-bundle-ready race, which
+                // yields .failed("No bundle on disk") and self-heals on retry).
+                // Nothing was uploaded, so this uses the honest .sendFailed copy,
+                // NOT .connectionTrouble (which claims the room is safely "in line").
+                WaitingView(phase: .sendFailed,
+                            onTryNow: { sendItHome() },
+                            onLeave: { stage = .home })
+            }
+        } else if let failure = failures.latestFailure, failure.bundleId == sentBundleId {
+            // The blobs for THIS bundle failed terminally, so bundle.pb will never
+            // land, no Scene doc is ever created, and the poller would 404 → keep
+            // polling forever (it never hard-gives-up by design). Stop the poll and
+            // show a terminal screen — a banner floated over a live "getting in
+            // line" wait would leave the user waiting for a room that cannot arrive.
+            FailureView(
+                kind: .terminal,
+                onPrimary: rescanFromScratch,
+                onSecondary: { stage = .home }
+            )
+            .onAppear { ScenePoller.shared.reset() }
         } else {
             ZStack(alignment: .top) {
                 pollPostSend
-                // A terminal blob-level failure during .sent is otherwise invisible
-                // (the home banner isn't mounted here) — float it over the wait.
+                // A terminal blob failure for a DIFFERENT (earlier) bundle is
+                // otherwise invisible here — float it over the wait.
                 if failures.latestFailure != nil {
                     UploadFailedBanner(
                         onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
@@ -202,11 +236,14 @@ struct RootFlowView: View {
     private var pollPostSend: some View {
         switch poller.pollState {
         case .idle, .polling:
-            WaitingView(phase: waitingPhase, anchor: waitingAnchor)
+            WaitingView(phase: waitingPhase,
+                        anchor: waitingAnchor,
+                        onLeave: { stage = .home })
         case .succeeded:
             DoorwayView(onStepThrough: openWebDesk,
                         onScanAnother: returnHomeFromDoorway,
-                        signedIntoWeb: auth.isAppleLinked)
+                        signedIntoWeb: auth.isAppleLinked,
+                        canOpenWeb: webRoomURL != nil)
         case .failedTerminal:
             FailureView(
                 kind: .terminal,
@@ -227,15 +264,23 @@ struct RootFlowView: View {
             // uploaded (we got far enough to poll it), so .connectionTrouble ("lost
             // my line to the desk… your room is safe") is the honest copy here.
             // Offer a real retry that restarts polling, not a dead "Try now".
+            // pollingStopped swaps the "I'll keep trying quietly" reassurance —
+            // nothing is trying once the loop is fatal.
             WaitingView(phase: .connectionTrouble,
+                        anchor: waitingAnchor,
+                        pollingStopped: true,
                         onTryNow: { if let id = sentBundleId { ScenePoller.shared.start(bundleId: id) } },
                         onLeave: { stage = .home })
         }
     }
 
     private var waitingPhase: WaitingView.Phase {
+        // .idle is the pre-upload window: sendItHome resets the poller synchronously
+        // and only starts it after the awaited session setup returns .ready. Mapping
+        // that to .analyzing would tell the user "It's here — all of it" before a
+        // single byte has left the phone.
         guard case let .polling(latest, _, _, longRunning, connectionTrouble) = poller.pollState else {
-            return .analyzing
+            return .sending
         }
         if connectionTrouble { return .connectionTrouble }
         if longRunning       { return .longRunning }
@@ -243,9 +288,13 @@ struct RootFlowView: View {
         return .analyzing
     }
 
-    private var waitingAnchor: Date {
-        guard case let .polling(_, since, sceneCreatedAt, _, _) = poller.pollState else { return .now }
-        return sceneCreatedAt ?? since
+    /// The SERVER-side scene start, or nil when it isn't known yet. Never falls back
+    /// to a client-side moment: the elapsed clock is only honest counted from the
+    /// scene's real creation time (the rule SceneStatusView already follows), and
+    /// WaitingView renders no clock while this is nil.
+    private var waitingAnchor: Date? {
+        guard case let .polling(_, _, sceneCreatedAt, _, _) = poller.pollState else { return nil }
+        return sceneCreatedAt
     }
 
     // MARK: - Actions
@@ -290,19 +339,44 @@ struct RootFlowView: View {
         stage = .home
     }
 
+    /// The web URL for the room that was just sent, or nil when no web origin is
+    /// configured (see NetworkConfig.webBaseURL — nil today).
+    private var webRoomURL: URL? {
+        guard let id = sentBundleId else { return nil }
+        return NetworkConfig.webRoomURL(bundleId: id)
+    }
+
+    /// Open the room on the web. A plain `open(_:)` — no associated-domains
+    /// entitlement needed (that governs links this app CLAIMS). Inert only because
+    /// no durable web origin is configured yet, and the CTA hides in that case, so
+    /// this is never a dead button.
     private func openWebDesk() {
-        // Universal-link handoff is enrollment/entitlement-gated (associated-domains).
-        // Wire the real link on activation (decision 0072); no-op seam for now.
+        guard let url = webRoomURL else { return }
+        UIApplication.shared.open(url)
     }
 
     // MARK: - Derived display state
 
     private var hudState: CaptureHUDState {
+        // ARKit hands us a REASON; don't discard it and assert a cause.
+        // .notAvailable is the not-yet-tracking state every session reports right
+        // after run() — treating it as "lost" made a fully lit room's first message
+        // "It's gone dark". Only .insufficientFeatures is actually about light.
         let quality: TrackingQuality = switch capture.trackingState {
-        case .normal:       .good
-        case .limited:      .slowDown
-        case .notAvailable: .lost
-        @unknown default:   .lost
+        case .normal:
+            .good
+        case .limited(.excessiveMotion):
+            .slowDown
+        case .limited(.insufficientFeatures):
+            .tooDark
+        case .limited(.initializing), .limited(.relocalizing):
+            .finding
+        case .limited:
+            .finding
+        case .notAvailable:
+            .finding
+        @unknown default:
+            .finding
         }
         // Real coverage + steering are unwired until the RoomPlan coverage wiring
         // (task #13). Show neutral-empty, never fabricated "far wall" progress.
@@ -312,6 +386,10 @@ struct RootFlowView: View {
             floor: .empty, walls: .empty, corners: .empty
         )
     }
+
+    /// Nothing was captured. This is an EMPTINESS check, not a quality threshold —
+    /// it needs no coverage signal and no tuned judgement.
+    private var isEmptyCapture: Bool { capture.frameCount == 0 }
 
     private var reviewMetrics: String {
         "\(capture.frameCount) frames · \(tierLabel)"

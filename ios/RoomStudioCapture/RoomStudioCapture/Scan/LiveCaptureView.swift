@@ -19,10 +19,14 @@ import SwiftUI
 
 // MARK: - HUD state (what the AR layer feeds the overlay)
 
+/// Mirrors what ARKit actually reports, so the screen never asserts a cause the
+/// session didn't give. `.finding` covers not-yet-tracking / initializing /
+/// relocalizing (no cause claimed); `.tooDark` is ONLY `.insufficientFeatures`.
 enum TrackingQuality {
     case good       // mesh draws, pill green
-    case slowDown   // slow down / re-find surface, pill gold, mesh pauses
-    case lost       // too dark / lost tracking, mesh dims, a serif line
+    case slowDown   // moving too fast (.excessiveMotion), pill gold, mesh pauses
+    case finding    // not tracking yet / initializing / relocalizing — no cause
+    case tooDark    // .insufficientFeatures — the genuine light problem
 }
 
 /// A single surface's coverage, felt — never shown as a percentage number.
@@ -51,7 +55,7 @@ struct LiveCaptureView: View {
             captureBackdrop
 
             // The live mesh (placeholder now; RoomPlan on device — see seam).
-            LiveMeshHost(paused: state.tracking != .good, dimmed: state.tracking == .lost)
+            LiveMeshHost(paused: state.tracking != .good, dimmed: state.tracking == .tooDark)
 
             // Vignette to seat the mesh in the room's darkness.
             RadialGradient(
@@ -89,7 +93,7 @@ struct LiveCaptureView: View {
 
             Spacer()
 
-            if state.tracking == .lost {
+            if state.tracking == .tooDark {
                 GuestLine("It's gone dark — I can't see. A light, or a step back?",
                           size: 17, onDark: true, alignment: .center)
                     .padding(.horizontal, 28)
@@ -114,7 +118,8 @@ struct LiveCaptureView: View {
         let (dot, text): (Color, String) = switch state.tracking {
         case .good:     (.rsSensorGood, "Tracking is good")
         case .slowDown: (.rsSensorWarn, "Go a little slower")
-        case .lost:     (.rsSensorLost, "Finding the room again…")
+        case .finding:  (.rsSensorWarn, "Finding the room…")
+        case .tooDark:  (.rsSensorLost, "Too dark to see")
         }
         return HStack(spacing: 8) {
             Circle()
@@ -267,6 +272,10 @@ private struct InkMeshBackdrop: View {
     LiveCaptureView()
 }
 
-#Preview("Lost tracking") {
-    LiveCaptureView(state: CaptureHUDState(tracking: .lost))
+#Preview("Too dark") {
+    LiveCaptureView(state: CaptureHUDState(tracking: .tooDark))
+}
+
+#Preview("Finding the room") {
+    LiveCaptureView(state: CaptureHUDState(tracking: .finding))
 }

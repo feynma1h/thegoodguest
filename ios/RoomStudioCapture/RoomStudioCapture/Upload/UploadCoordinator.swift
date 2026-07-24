@@ -35,7 +35,10 @@ final class UploadCoordinator: ObservableObject {
         case buildingManifest
         case creatingSession
         case ready(UploadSessionRecord)
-        case failed(String)          // human-readable error
+        /// `terminal` marks a failure that retrying provably cannot fix (a 4xx
+        /// client error — the "do not retry" case below). UI must not offer an
+        /// endless "Try again" for these; transient/unknown failures stay false.
+        case failed(String, terminal: Bool = false)
     }
 
     @Published private(set) var sessionState: SessionState = .idle
@@ -186,9 +189,10 @@ final class UploadCoordinator: ObservableObject {
             sessionState = .failed("Forbidden: \(msg)")
             return
         } catch UploadSessionError.clientError(let code, let body) {
-            // Client bug — log loudly; do not retry.
+            // Client bug — log loudly; do not retry. Marked terminal so the UI
+            // offers a real off-ramp instead of an unbounded retry that cannot work.
             logger.info("[UploadCoordinator] PROGRAMMING ERROR — \(code): \(body)")
-            sessionState = .failed("Client error \(code): \(body)")
+            sessionState = .failed("Client error \(code): \(body)", terminal: true)
             return
         } catch {
             sessionState = .failed("Upload session failed: \(error.localizedDescription)")

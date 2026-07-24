@@ -17,8 +17,16 @@ struct ReviewView: View {
     var metrics: String = "42 m² · 3.9 M PTS · LiDAR"
     /// The guest's verdict on the capture.
     var verdict: String = "This is a clean one — I can see the whole room. Send it, and I'll start making sense of it on your desk."
-    /// When true, coverage is thin — "Add a little more" leads.
+    /// When true, coverage is thin — the rescan path leads.
     var thinCoverage: Bool = false
+    /// False when there is nothing worth sending (an empty capture). The send
+    /// action is withheld rather than letting the backend reject it and report the
+    /// failure as if the upload broke in transit.
+    var canSend: Bool = true
+    /// The secondary/rescan label. The caller owns the wording because whether it
+    /// EXTENDS or REPLACES the capture depends on the capture layer's behaviour
+    /// (today: replaces — see RootFlowView).
+    var addMoreLabel: String = "Add a little more"
     var onSend: () -> Void = {}
     var onAddMore: () -> Void = {}
 
@@ -72,11 +80,13 @@ struct ReviewView: View {
 
     private var actions: some View {
         VStack(spacing: 10) {
-            if thinCoverage {
-                Button { onAddMore() } label: {
-                    Text("Add a little more")
-                }
-                .buttonStyle(RSPrimaryButtonStyle())
+            if !canSend {
+                // Nothing to send — the rescan is the only path.
+                Button { onAddMore() } label: { Text(addMoreLabel) }
+                    .buttonStyle(RSPrimaryButtonStyle())
+            } else if thinCoverage {
+                Button { onAddMore() } label: { Text(addMoreLabel) }
+                    .buttonStyle(RSPrimaryButtonStyle())
                 Button { onSend() } label: { Text("Send it as is") }
                     .buttonStyle(RSQuietButtonStyle())
             } else {
@@ -84,7 +94,7 @@ struct ReviewView: View {
                     Label("Send it home", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(RSPrimaryButtonStyle())
-                Button { onAddMore() } label: { Text("Add a little more") }
+                Button { onAddMore() } label: { Text(addMoreLabel) }
                     .buttonStyle(RSQuietButtonStyle())
             }
         }
