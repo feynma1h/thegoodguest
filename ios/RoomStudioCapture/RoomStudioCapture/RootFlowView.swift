@@ -31,7 +31,10 @@
 /// `.alert`s and never presents AccountConflictView), and ColdStartView (§1 — the flow
 /// opens directly at .home, and identity is minted by the app-level launch task,
 /// so nothing ever waits on a splash). These have no entry point here and appear
-/// only in their own previews.
+/// only in their own previews. ReviewView's THIN-COVERAGE variant belongs to this
+/// list too: `thinCoverage` is never passed true below, because the app has no
+/// coverage signal at all (task #13), so the "I've got the bones, but a few gaps"
+/// treatment renders only in that file's preview.
 
 import ARKit
 import SwiftUI
