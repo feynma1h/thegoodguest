@@ -40,7 +40,7 @@ struct GotTheRoomView: View {
                 .scaleEffect(breathe ? 1.06 : 1.0)
 
                 Text("I've got the room.")
-                    .font(RSFont.display(size: 26))
+                    .rsFont(.display, size: 26)
                     .foregroundStyle(Color.rsOnDark)
                     .padding(.top, 26)
 

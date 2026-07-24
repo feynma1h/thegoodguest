@@ -58,7 +58,7 @@ struct FailureView: View {
                         .font(RSFont.ui(.callout, weight: .semibold))
                         .foregroundStyle(Color.rsInk)
                     Text("Some of your room's data didn't finish its trip to the desk, so I can't show you a partial version honestly. Nothing's wrong with the room itself — one more full pass and I'll have all of it.")
-                        .font(RSFont.guest(size: 14.5))
+                        .rsFont(.guest, size: 14.5)
                         .foregroundStyle(Color.rsInk)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -93,7 +93,7 @@ struct FailureView: View {
                 .foregroundStyle(Color.rsGoldLight)
 
             Text("The scan didn't survive the trip.")
-                .font(RSFont.display(size: 24))
+                .rsFont(.display, size: 24)
                 .foregroundStyle(Color.rsOnDark)
                 .padding(.top, 24)
 

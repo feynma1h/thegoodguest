@@ -14,7 +14,7 @@ struct ColdStartView: View {
 
             WordmarkGlyph(size: 44)
             Text(RSBrand.name)
-                .font(RSFont.display(size: 20).weight(.medium))
+                .rsFont(.display, size: 20, weight: .medium)
                 .foregroundStyle(Color.rsInk)
                 .padding(.top, 16)
 

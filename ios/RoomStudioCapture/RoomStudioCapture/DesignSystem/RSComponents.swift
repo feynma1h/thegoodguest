@@ -92,7 +92,7 @@ struct GuestLine: View {
 
     var body: some View {
         Text(text)
-            .font(RSFont.guest(size: size))
+            .rsFont(.guest, size: size)
             .foregroundStyle(onDark ? Color.rsOnDark.opacity(0.82) : Color.rsInkMuted)
             .multilineTextAlignment(textAlignment)
             .lineSpacing(2)
@@ -111,7 +111,7 @@ struct Eyebrow: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(RSFont.mono(size: 10, weight: .semibold))
+            .rsFont(.mono, size: 10, weight: .semibold)
             .tracking(1.4)
             .foregroundStyle(onDark ? Color.rsOnDark.opacity(0.5) : Color.rsInkFaint)
     }

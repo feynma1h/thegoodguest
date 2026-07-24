@@ -47,6 +47,11 @@ struct RootFlowView: View {
     /// The bundle id sent for processing — used to restart polling after a fatal
     /// poll error without depending on the current CaptureManager.
     @State private var sentBundleId: String?
+    /// Last server-side scene start seen while polling. `pollState` drops it on the
+    /// transition to `.pollError`, but the room really did arrive at that time — so
+    /// keeping it here is what lets the poll-error screen show the elapsed clock and
+    /// its "keeps its place in line" reassurance instead of silently hiding both.
+    @State private var lastSceneCreatedAt: Date?
 
     enum Stage: Equatable { case home, capturing, gotRoom, review, sent }
 
@@ -105,7 +110,9 @@ struct RootFlowView: View {
                 onFinish: {
                     RSHaptics.fire(.finish)
                     capture.stopCapture()
-                    stage = .gotRoom
+                    // Don't fire the peak joyful beat ("I've got the room") for a
+                    // capture that got nothing — review tells the truth instead.
+                    stage = capture.frameCount == 0 ? .review : .gotRoom
                 }
             )
         case .gotRoom:
@@ -116,14 +123,18 @@ struct RootFlowView: View {
                 // Neutral verdict: the app has no coverage signal (task #13), so it
                 // must not assert "clean / whole room". Once coverage lands, drive
                 // verdict + thinCoverage from it.
-                verdict: isEmptyCapture
-                    ? "I didn't catch anything on that pass — nothing to send yet. Let's walk the room again."
-                    : "Here's your capture. Send it, and I'll start making sense of it on your desk.",
+                verdict: reviewVerdict,
                 // An empty capture cannot be sent: the backend would reject it as
                 // invalid and the user would be told "the scan didn't survive the
                 // trip" — blaming the trip for a capture that was empty before it
                 // left. Emptiness is checkable here, and needs no coverage signal.
-                canSend: !isEmptyCapture,
+                //
+                // Also withheld while bundle.pb is still being written: stopCapture()
+                // assembles it asynchronously on jpegQueue, and for a large capture
+                // that can outlast the 1.8 s got-the-room hold. Sending early hits
+                // beginUploadSession's "No bundle on disk" guard and shows a send
+                // FAILURE for a capture that is perfectly fine and merely unfinished.
+                canSend: !isEmptyCapture && !isPreparingBundle,
                 // HONEST LABEL: CaptureManager.startCapture() mints a new bundleId
                 // and clears frames/anchors/outputDir — this REPLACES the pass, it
                 // does not extend it. True append (preserving bundleId + frames) is
@@ -134,7 +145,8 @@ struct RootFlowView: View {
                 onAddMore: {
                     stage = .capturing
                     beginCapture()
-                }
+                },
+                onLeave: { stage = .home }
             )
         case .sent:
             postSend
@@ -145,6 +157,7 @@ struct RootFlowView: View {
         VStack(spacing: 0) {
             if failures.latestFailure != nil {
                 UploadFailedBanner(
+                    reason: failures.latestFailure?.reason,
                     onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
                 )
                 .padding([.horizontal, .top], 20)
@@ -184,117 +197,146 @@ struct RootFlowView: View {
 
     // MARK: - Post-send (driven by ScenePoller)
 
+    /// The routing DECISION is a pure function (WaitFlowState) so it can be pinned
+    /// by tests and read as a table; this property only maps that decision to views.
+    private var waitScreen: WaitScreen {
+        WaitFlowState.screen(
+            session: sessionOutcome,
+            terminalBlobFailureForThisBundle: sentBundleId != nil
+                && failures.latestFailure?.bundleId == sentBundleId,
+            poll: pollSnapshot
+        )
+    }
+
+    private var sessionOutcome: WaitFlowState.SessionOutcome {
+        switch coordinator.sessionState {
+        case .failed(_, let terminal): return .failed(terminal: terminal)
+        case .ready:                   return .ready
+        default:                       return .pending
+        }
+    }
+
+    private var pollSnapshot: WaitFlowState.PollSnapshot {
+        switch poller.pollState {
+        case .idle:
+            return .idle
+        case .polling(let latest, _, let sceneCreatedAt, let longRunning, let connectionTrouble):
+            return .polling(queued: latest == .queued,
+                            longRunning: longRunning,
+                            connectionTrouble: connectionTrouble,
+                            anchor: sceneCreatedAt)
+        case .succeeded:      return .succeeded
+        case .failedTerminal: return .failedTerminal
+        case .recoverable:    return .recoverable
+        case .pollError:      return .pollError(anchor: lastSceneCreatedAt)
+        }
+    }
+
     @ViewBuilder
     private var postSend: some View {
-        if case .failed(_, let terminal) = coordinator.sessionState {
-            if terminal {
-                // A 4xx the server will never accept — retrying provably cannot
-                // work, so this is a terminal screen, not an invitation to retry.
-                FailureView(
-                    kind: .terminal,
-                    onPrimary: rescanFromScratch,
-                    onSecondary: { stage = .home }
+        ZStack(alignment: .top) {
+            postSendScreen
+                // The completion kick (BlobUploadManager.onBundleComplete →
+                // notifyBundleComplete) only starts polling when the poller believes
+                // a status surface is visible. Nothing else sets this at cold launch,
+                // so without it the kick no-ops and — now that sendItHome no longer
+                // polls eagerly — polling would never begin.
+                .onAppear { ScenePoller.shared.setVisible(true) }
+                .onDisappear { ScenePoller.shared.setVisible(false) }
+                .onChange(of: poller.pollState) { _, _ in retainAnchor() }
+            // A terminal blob failure for a DIFFERENT (earlier) bundle is otherwise
+            // invisible here — float it over whatever this capture is doing.
+            if let failure = failures.latestFailure, failure.bundleId != sentBundleId {
+                UploadFailedBanner(
+                    reason: failure.reason,
+                    onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
                 )
-            } else {
-                // Session/upload SETUP failed (sign-in, network, or the bundle
-                // wasn't written yet — the send-before-bundle-ready race, which
-                // yields .failed("No bundle on disk") and self-heals on retry).
-                // Nothing was uploaded, so this uses the honest .sendFailed copy,
-                // NOT .connectionTrouble (which claims the room is safely "in line").
-                WaitingView(phase: .sendFailed,
-                            onTryNow: { sendItHome() },
-                            onLeave: { stage = .home })
-            }
-        } else if let failure = failures.latestFailure, failure.bundleId == sentBundleId {
-            // The blobs for THIS bundle failed terminally, so bundle.pb will never
-            // land, no Scene doc is ever created, and the poller would 404 → keep
-            // polling forever (it never hard-gives-up by design). Stop the poll and
-            // show a terminal screen — a banner floated over a live "getting in
-            // line" wait would leave the user waiting for a room that cannot arrive.
-            FailureView(
-                kind: .terminal,
-                onPrimary: rescanFromScratch,
-                onSecondary: { stage = .home }
-            )
-            .onAppear { ScenePoller.shared.reset() }
-        } else {
-            ZStack(alignment: .top) {
-                pollPostSend
-                // A terminal blob failure for a DIFFERENT (earlier) bundle is
-                // otherwise invisible here — float it over the wait.
-                if failures.latestFailure != nil {
-                    UploadFailedBanner(
-                        onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
-                    )
-                    .padding([.horizontal, .top], 20)
-                }
+                .padding([.horizontal, .top], 20)
             }
         }
     }
 
     @ViewBuilder
-    private var pollPostSend: some View {
-        switch poller.pollState {
-        case .idle, .polling:
-            WaitingView(phase: waitingPhase,
-                        anchor: waitingAnchor,
+    private var postSendScreen: some View {
+        switch waitScreen {
+        case .sending:
+            // Covers both the session setup AND the blob upload: the poller is
+            // deliberately not started until the upload completes, so nothing here
+            // may claim the room has arrived.
+            WaitingView(phase: .sending, onLeave: { stage = .home })
+
+        case .waiting(let phase, let anchor):
+            WaitingView(phase: phase.waitingPhase,
+                        anchor: anchor,
+                        onTryNow: { ScenePoller.shared.checkNow() },
                         onLeave: { stage = .home })
-        case .succeeded:
+
+        case .checkFailed(let anchor, let stopped):
+            // The room WAS uploaded, so "your room is safe up there" is honest;
+            // `stopped` swaps the "I'll keep trying quietly" half, and drives whether
+            // Try now resumes the loop or just fires an immediate tick.
+            WaitingView(phase: .connectionTrouble,
+                        anchor: anchor,
+                        pollingStopped: stopped,
+                        onTryNow: {
+                            if stopped, let id = sentBundleId {
+                                ScenePoller.shared.start(bundleId: id)
+                            } else {
+                                ScenePoller.shared.checkNow()
+                            }
+                        },
+                        onLeave: { stage = .home })
+
+        case .doorway:
             DoorwayView(onStepThrough: openWebDesk,
                         onScanAnother: returnHomeFromDoorway,
                         signedIntoWeb: auth.isAppleLinked,
                         canOpenWeb: webRoomURL != nil)
-        case .failedTerminal:
-            FailureView(
-                kind: .terminal,
-                onPrimary: rescanFromScratch,
-                onSecondary: { stage = .home }
-            )
-        case .recoverable:
+
+        case .processingFailed:
+            FailureView(kind: .terminal,
+                        onPrimary: rescanFromScratch,
+                        onSecondary: { stage = .home })
+
+        case .incompleteUpload:
             // failed_incomplete: an incomplete upload, not a bad scan. No region is
             // named and no partial re-upload exists yet, so the one honest path is a
             // full rescan (FailureView.recoverable copy owns the honesty).
-            FailureView(
-                kind: .recoverable,
-                onPrimary: rescanFromScratch,
-                onSecondary: { stage = .home }
-            )
-        case .pollError:
-            // pollError is fatal — the poll loop has already stopped. The room WAS
-            // uploaded (we got far enough to poll it), so .connectionTrouble ("lost
-            // my line to the desk… your room is safe") is the honest copy here.
-            // Offer a real retry that restarts polling, not a dead "Try now".
-            // pollingStopped swaps the "I'll keep trying quietly" reassurance —
-            // nothing is trying once the loop is fatal.
-            WaitingView(phase: .connectionTrouble,
-                        anchor: waitingAnchor,
-                        pollingStopped: true,
-                        onTryNow: { if let id = sentBundleId { ScenePoller.shared.start(bundleId: id) } },
+            FailureView(kind: .recoverable,
+                        onPrimary: rescanFromScratch,
+                        onSecondary: { stage = .home })
+
+        case .uploadFailed:
+            // The blobs for THIS bundle failed terminally: bundle.pb never lands, no
+            // Scene doc is ever created, and the poller would 404 → keep polling
+            // forever (it never hard-gives-up by design). Stop it and say so.
+            FailureView(kind: .terminal,
+                        onPrimary: rescanFromScratch,
+                        onSecondary: { stage = .home })
+                .onAppear { ScenePoller.shared.reset() }
+
+        case .sendFailed(let terminal):
+            // Nothing was uploaded, so never the "didn't survive the trip" copy.
+            // terminal == a 4xx retrying cannot fix (our bug); the capture stays on
+            // disk for the relaunch rehydration path either way.
+            WaitingView(phase: terminal ? .sendFailedTerminal : .sendFailed,
+                        onTryNow: { if !terminal { sendItHome() } },
                         onLeave: { stage = .home })
         }
     }
 
-    private var waitingPhase: WaitingView.Phase {
-        // .idle is the pre-upload window: sendItHome resets the poller synchronously
-        // and only starts it after the awaited session setup returns .ready. Mapping
-        // that to .analyzing would tell the user "It's here — all of it" before a
-        // single byte has left the phone.
-        guard case let .polling(latest, _, _, longRunning, connectionTrouble) = poller.pollState else {
-            return .sending
-        }
-        if connectionTrouble { return .connectionTrouble }
-        if longRunning       { return .longRunning }
-        if latest == .queued { return .queued }
-        return .analyzing
-    }
-
-    /// The SERVER-side scene start, or nil when it isn't known yet. Never falls back
-    /// to a client-side moment: the elapsed clock is only honest counted from the
-    /// scene's real creation time (the rule SceneStatusView already follows), and
-    /// WaitingView renders no clock while this is nil.
+    /// The server anchor as currently published by the poller (nil unless polling).
     private var waitingAnchor: Date? {
         guard case let .polling(_, _, sceneCreatedAt, _, _) = poller.pollState else { return nil }
         return sceneCreatedAt
+    }
+
+    /// Mirror the server anchor into @State so it survives the transition to
+    /// .pollError (which carries no payload). See `lastSceneCreatedAt`.
+    private func retainAnchor() {
+        if let anchor = waitingAnchor, anchor != lastSceneCreatedAt {
+            lastSceneCreatedAt = anchor
+        }
     }
 
     // MARK: - Actions
@@ -312,12 +354,16 @@ struct RootFlowView: View {
         coordinator.reset()
         Task {
             await coordinator.beginUploadSession(for: capture)
-            // Only start polling if the session was actually created. On failure
-            // sessionState == .failed and postSend surfaces it — no phantom poll.
+            // Record the bundle, but do NOT start polling yet. The blobs are still
+            // uploading (bundle.pb goes last, decision 0041), so no Scene document
+            // can exist: every poll would 404 → .notCreated → latest stays .queued →
+            // the screen would say "Getting in line / I'll start the moment there's
+            // room" for the whole upload (~1 min on the real 126-frame capture),
+            // while nothing had reached the desk. Polling begins on the completion
+            // kick (BlobUploadManager.onBundleComplete → notifyBundleComplete),
+            // which is the architecture SceneStatusView already uses.
             if case .ready = coordinator.sessionState {
-                let bundleId = capture.bundleIdString
-                sentBundleId = bundleId
-                ScenePoller.shared.start(bundleId: bundleId)
+                sentBundleId = capture.bundleIdString
             }
         }
     }
@@ -390,6 +436,20 @@ struct RootFlowView: View {
     /// Nothing was captured. This is an EMPTINESS check, not a quality threshold —
     /// it needs no coverage signal and no tuned judgement.
     private var isEmptyCapture: Bool { capture.frameCount == 0 }
+
+    /// Frames exist but bundle.pb hasn't been published yet (stopCapture assembles
+    /// it off the main queue). Transient — the publish flips this.
+    private var isPreparingBundle: Bool { !isEmptyCapture && capture.bundlePath == nil }
+
+    private var reviewVerdict: String {
+        if isEmptyCapture {
+            return "I didn't catch anything on that pass — nothing to send yet. Let's walk the room again."
+        }
+        if isPreparingBundle {
+            return "Packing it up — one moment before it can travel."
+        }
+        return "Here's your capture. Send it, and I'll start making sense of it on your desk."
+    }
 
     private var reviewMetrics: String {
         "\(capture.frameCount) frames · \(tierLabel)"

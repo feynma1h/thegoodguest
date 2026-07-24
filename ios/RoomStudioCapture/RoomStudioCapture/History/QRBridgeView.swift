@@ -24,7 +24,7 @@ struct QRBridgeView: View {
                 .padding(.top, 22)
 
             Text("The desk needs one more corner")
-                .font(RSFont.display(size: 22))
+                .rsFont(.display, size: 22)
                 .foregroundStyle(Color.rsOnDark)
                 .multilineTextAlignment(.center)
                 .padding(.top, 26)

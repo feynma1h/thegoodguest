@@ -31,7 +31,7 @@ struct WordmarkGlyph: View {
             .frame(width: size, height: size)
             .overlay(
                 Text(RSBrand.mark)
-                    .font(RSFont.display(size: size * 0.52))
+                    .rsFont(.display, size: size * 0.52)
                     .foregroundStyle(filled ? Color.rsSurface : color)
             )
     }
@@ -48,7 +48,7 @@ struct Wordmark: View {
         HStack(spacing: 9) {
             WordmarkGlyph(size: glyphSize, color: color)
             Text(RSBrand.name)
-                .font(RSFont.display(size: nameSize).weight(.medium))
+                .rsFont(.display, size: nameSize, weight: .medium)
                 .foregroundStyle(color)
         }
     }

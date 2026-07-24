@@ -65,7 +65,7 @@ struct RoomsListView: View {
     private var header: some View {
         HStack {
             Text("Your rooms")
-                .font(RSFont.display(size: 22).weight(.medium))
+                .rsFont(.display, size: 22, weight: .medium)
                 .foregroundStyle(Color.rsInk)
             Spacer()
             Button(action: onProfile) {
@@ -92,7 +92,7 @@ struct RoomRow: View {
             thumbnail
             VStack(alignment: .leading, spacing: 2) {
                 Text(room.title)
-                    .font(RSFont.guest(size: 15.5))
+                    .rsFont(.guest, size: 15.5)
                     .foregroundStyle(Color.rsInk)
                 Text(room.statusLine)
                     .font(RSFont.ui(.footnote))
