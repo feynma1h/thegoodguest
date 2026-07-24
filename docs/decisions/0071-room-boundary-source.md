@@ -3,6 +3,9 @@
 **Date:** 2026-07-24
 **Status:** OPEN — needs a strategy decision (do NOT treat as decided). Captured
 here so the strategy session starts with the measured facts, not a blank page.
+**2026-07-24 update:** operator is leaning **Option A (Pro-only / LiDAR-first)**
+and has parked the non-LiDAR investment — see the Update section at the end.
+Still OPEN.
 
 ## Context
 
@@ -91,3 +94,48 @@ is parked for a strategy session rather than settled in a build session.
   de-risk option A before any deletion.
 - If Apple ever brings RoomPlan (or an equivalent parametric room API) to
   non-LiDAR devices, option B's ceiling lifts and the fork collapses toward A.
+
+## Update — 2026-07-24: operator pivot to Pro-only (leaning Option A)
+
+After the non-LiDAR reference room (`f3d70236`) still read poorly on real
+output, the operator chose to **pivot to a Pro-only / LiDAR-first pipeline for
+now** and park further investment in the mass-market non-LiDAR shell +
+placement. This points the fork at **Option A**, but is recorded as a *lean*,
+not a settled decision — the fork is still to be resolved in a dedicated
+strategy session, because A's headline simplification ("delete most of the
+server geometry") is partly a mirage: `room_planes.py` now ALSO feeds placement
+chunk D (`contact_priors.py`), so the anchor-interpretation module cannot be
+fully deleted even if RoomPlan supersedes it as the shell's geometry source.
+Only `shell_geometry.py`'s closure pass is a clean deletion candidate, and only
+on the LiDAR tier.
+
+The session that surfaced this also verified the enabling facts (chat history):
+RoomPlan requires LiDAR (Pro-only; the test device `iPhone17,5` is non-LiDAR);
+`RoomCaptureSession(arSession:)` co-runs with a custom
+`ARWorldTrackingConfiguration` (iOS 17+) and yields BOTH `CapturedRoom` and the
+RGB keyframes SAM needs — with a documented `sceneDepth`-strip caveat (workaround:
+re-run a depth-enabled config in the `didStart` callback) and a known
+ARFrame-retention memory issue. So Option A/C both need a **RoomPlan co-run
+spike** on real Pro hardware to de-risk — folded into board item 3 (shared
+blocker). No published figure was found for the LiDAR share of the installed
+base, but non-LiDAR is the clear majority (LiDAR is Pro-only and began only with
+the 12 Pro in late 2020); that directional fact is sufficient — the premium
+shell's tier reaches a minority of users.
+
+A higher-altitude question surfaced alongside and MUST be decided in the same
+session: **recognition-first vs assembly-first.** Polycam produces recognisable
+rooms on ANY phone (cloud photogrammetry / Gaussian splatting) by reconstructing
+the whole scene as one frozen, furniture-included, textured artifact — the
+opposite of this product's clean, decomposed, editable room. roomstudio
+deliberately declined whole-scene reconstruction (0066/0069: the 900 s budget,
+the empty-room-substrate need, decision 0001's razor, and the founding draft's
+exclusion of photorealistic image generation). The open question is whether
+recognisability should START from faithful capture (then decompose) or from
+semantic assembly (accepting it won't look photographic, and that
+recognisability is gated on object COVERAGE, not the shell). The pivot to
+Pro-only does not by itself answer this — a LiDAR mesh is faithful-capture-shaped,
+so the two questions are coupled.
+
+**Concrete resume step:** acquire a LiDAR Pro device, run the RoomPlan co-run
+spike (board item 3), then hold the strategy session to decide A-vs-C and
+recognition-first-vs-assembly-first together.
