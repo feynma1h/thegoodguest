@@ -1054,8 +1054,15 @@ actor BlobUploadManager {
     // MARK: - Terminal success handler
 
     /// Bundle upload fully complete (bundle.pb PUT returned 200/201).
-    /// Owns the completion side effects: surfacing to the user (polling / FCM)
-    /// and reclaiming the on-device session dir + UploadSessionRecord.
+    ///
+    /// Owns exactly ONE completion side effect today: surfacing to the user
+    /// (polling / FCM). It does NOT reclaim the session dir or the
+    /// UploadSessionRecord — that is the unbuilt terminal-state cleanup (see the
+    /// completed-capture disk-accumulation gap), so a `.complete` record persists
+    /// indefinitely. Anything that scans the store must assume completed records
+    /// accumulate and never disappear; a docstring here previously claimed the
+    /// reclaim happened, and a launch-restore scan built on that claim
+    /// re-advertised finished rooms forever.
     func onBundleComplete(bundleId: String) async {
         _bundleCompleteInvocations.append(bundleId)
         logger.info("[BlobUploadManager] ✓ onBundleComplete(\(bundleId, privacy: .public))")
