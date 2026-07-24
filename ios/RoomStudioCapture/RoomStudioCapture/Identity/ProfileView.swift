@@ -10,16 +10,18 @@
 /// AuthManager.linkAppleAccount (decision 0051/0064). Device SIWA stays
 /// enrollment-gated.
 
-import AuthenticationServices
 import SwiftUI
 
 struct ProfileView: View {
-    var uid: String = "rs_a4f9-2c7e-91d0"
+    /// Required — the caller supplies the real UID (RootFlowView passes
+    /// `AuthManager.currentUID`). No default, so a fabricated identity can never
+    /// be rendered by accident.
+    var uid: String
     var isLinked: Bool = false
     var onClose: () -> Void = {}
-    var onSignIn: () -> Void = {}
 
     @State private var copied = false
+    @State private var showSignIn = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,13 +50,17 @@ struct ProfileView: View {
                 .padding(.top, 22)
 
             if !isLinked {
-                SignInWithAppleButton(.signIn) { _ in
-                } onCompletion: { _ in
-                    onSignIn()
+                // Opens the real, conflict-aware sign-in flow (SignInSheet →
+                // AuthManager.linkAppleAccount). The native Apple button lives
+                // inside that sheet — we don't fake it here.
+                Button { showSignIn = true } label: {
+                    Text("Sign in to keep your rooms")
+                        .font(RSFont.ui(.headline, weight: .semibold))
+                        .foregroundStyle(Color.rsSurface)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                 }
-                .signInWithAppleButtonStyle(.black)
-                .frame(height: 50)
-                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 .padding(.top, 16)
             }
 
@@ -69,6 +75,7 @@ struct ProfileView: View {
         .padding(.horizontal, 26)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rsParchmentScreen()
+        .sheet(isPresented: $showSignIn) { SignInSheet() }
     }
 
     private var header: some View {
@@ -117,5 +124,5 @@ struct ProfileView: View {
 }
 
 #Preview {
-    ProfileView()
+    ProfileView(uid: "rs_a4f9-2c7e-91d0")
 }

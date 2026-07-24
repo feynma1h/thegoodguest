@@ -66,6 +66,10 @@ struct LiveCaptureView: View {
         }
         .statusBarHidden(false)
         .persistentSystemOverlays(.hidden)
+        // Spec §3: the screen stays awake throughout capture; auto-lock mid-scan
+        // would interrupt the ARSession.
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }
 
     private var captureBackdrop: some View {
@@ -184,8 +188,8 @@ struct LiveCaptureView: View {
 
             Spacer()
 
-            // Balance the cluster; a second re-center affordance (level).
-            circleButton(system: "gyroscope", action: onRecenter)
+            // Keep the shutter centered; no invented control on this side.
+            Color.clear.frame(width: 52, height: 52)
         }
     }
 
