@@ -222,3 +222,54 @@ final class WaitFlowStateTests: XCTestCase {
         XCTAssertEqual(WaitingView.clock(3661), "1:01:01")
     }
 }
+
+/// Pins ScenePoller's `isVisible` contract, which the completion kick trusts.
+///
+/// A review pass removed `isVisible = true` from `resume()` to stop a foreground
+/// transition asserting a status surface was on screen. That was right for the
+/// singleton — but `pause()` still clears the flag, and the shipping
+/// SceneStatusView's only restore is a `.task` that fires once per launch. The
+/// result was a launch-long dropped kick that all 266 tests were blind to.
+@MainActor
+final class ScenePollerVisibilityTests: XCTestCase {
+
+    private func makePoller() -> ScenePoller {
+        ScenePoller(now: { Date(timeIntervalSince1970: 0) },
+                    sleep: { _ in },
+                    performGET: { _, _ in .failure(URLError(.notConnectedToInternet)) },
+                    tokenProvider: { "token" })
+    }
+
+    /// resume() must NOT assert visibility — that is the caller's to own.
+    func testResumeDoesNotAssertVisibility() {
+        let poller = makePoller()
+        poller.setVisible(true)
+        poller.pause()
+        XCTAssertFalse(poller.isVisible, "pause() clears visibility")
+        poller.resume()
+        XCTAssertFalse(poller.isVisible,
+                       "resume() must leave visibility to the caller — a foreground trip is not a mounted status surface")
+    }
+
+    /// …which means every caller that IS a status surface must restore it itself.
+    /// Without this the completion kick is dropped for the rest of the launch.
+    func testSetVisibleRestoresTheKickAfterABackgroundTrip() {
+        let poller = makePoller()
+        poller.setVisible(true)
+        poller.pause()
+        poller.setVisible(true)          // what SceneStatusView/RootFlowView do on .active
+        XCTAssertTrue(poller.isVisible)
+
+        poller.notifyBundleComplete(bundleId: "b1")
+        XCTAssertEqual(poller.currentBundleId, "b1",
+                       "a visible surface must let the completion kick start polling")
+    }
+
+    /// The kick stays suppressed when nothing is on screen.
+    func testKickIsDroppedWhileNotVisible() {
+        let poller = makePoller()
+        poller.setVisible(false)
+        poller.notifyBundleComplete(bundleId: "b1")
+        XCTAssertNil(poller.currentBundleId)
+    }
+}

@@ -56,7 +56,14 @@ struct SceneStatusView: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
-                ScenePoller.shared.resume()  // resume() sets isVisible = true
+                // Visibility is owned by the caller: resume() deliberately does NOT
+                // set it (that made a foreground transition assert a status surface
+                // was on screen when none was). This view IS the status surface, and
+                // it is permanently mounted, so its `.task` fires once per launch —
+                // without this line isVisible stayed false after any background trip
+                // and the completion kick was dropped for the rest of the launch.
+                ScenePoller.shared.setVisible(true)
+                ScenePoller.shared.resume()
             case .background, .inactive:
                 ScenePoller.shared.pause()
             @unknown default:
