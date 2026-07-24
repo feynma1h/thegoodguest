@@ -52,9 +52,8 @@ struct GotTheRoomView: View {
         .onAppear {
             RSHaptics.fire(.gotTheRoom)
             RSSound.play(.enough)
-            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
-                breathe = true
-            }
+            // One gentle settle (spec §4: "one gentle breathe"), not an infinite pulse.
+            withAnimation(.easeOut(duration: 0.6)) { breathe = true }
             // Hold the moment, then move to review.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { onContinue() }
         }

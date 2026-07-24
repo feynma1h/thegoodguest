@@ -19,6 +19,13 @@
 /// resume-with-progress (CaptureManager.startCapture currently resets), and the
 /// real web-handoff universal link. Verified today via the temp-entry preview
 /// path on the simulator (dev-override), same as every screen.
+///
+/// BUILT BUT NOT YET REACHABLE from this flow (staged, not wired): the
+/// returning-home recent-rooms strip and RoomsListView / QRBridgeView (§9, need a
+/// GET /scenes fetch + trigger points), and WhySignInSheet / AccountConflictView
+/// (§8 — the conflict sheet is presented by SignInSheet, but the standalone
+/// "why sign in" invitation has no trigger yet). These have no entry point here
+/// and appear only in their own previews.
 
 import ARKit
 import SwiftUI
@@ -29,9 +36,15 @@ struct RootFlowView: View {
     @ObservedObject private var poller   = ScenePoller.shared
     @ObservedObject private var failures = UploadFailureMonitor.shared
 
+    @ObservedObject private var auth = AuthManager.shared
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var stage: Stage = .home
     @State private var showGuidance = false
     @State private var showProfile  = false
+    /// The bundle id sent for processing — used to restart polling after a fatal
+    /// poll error without depending on the current CaptureManager.
+    @State private var sentBundleId: String?
 
     enum Stage: Equatable { case home, capturing, gotRoom, review, sent }
 
@@ -55,6 +68,24 @@ struct RootFlowView: View {
                 flow
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            // ScenePoller's contract: pause polling when backgrounded. Only the
+            // post-send waiting flow drives the poller here.
+            guard stage == .sent else { return }
+            switch phase {
+            case .active:                ScenePoller.shared.resume()
+            case .background, .inactive: ScenePoller.shared.pause()
+            @unknown default:            break
+            }
+        }
+    }
+
+    /// Start (or restart) capture with its start cue (spec §3/§10 — haptic + tone
+    /// as the first ink strokes land).
+    private func beginCapture() {
+        RSHaptics.fire(.captureStart)
+        RSSound.play(.captureStart)
+        capture.startCapture()
     }
 
     // MARK: - Flow
@@ -84,7 +115,7 @@ struct RootFlowView: View {
                     // CaptureManager.startCapture() currently resets progress;
                     // true resume-with-progress is an activation follow-up.
                     stage = .capturing
-                    capture.startCapture()
+                    beginCapture()
                 }
             )
         case .sent:
@@ -110,7 +141,7 @@ struct RootFlowView: View {
             GuidanceSheet(
                 onStart: {
                     showGuidance = false
-                    capture.startCapture()
+                    beginCapture()
                     stage = .capturing
                 },
                 onDismiss: { showGuidance = false }
@@ -119,7 +150,13 @@ struct RootFlowView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showProfile) {
-            NavigationStack { ProfileView(onClose: { showProfile = false }) }
+            NavigationStack {
+                ProfileView(
+                    uid: auth.currentUID ?? "not signed in",
+                    isLinked: auth.isAppleLinked,
+                    onClose: { showProfile = false }
+                )
+            }
         }
     }
 
@@ -127,6 +164,33 @@ struct RootFlowView: View {
 
     @ViewBuilder
     private var postSend: some View {
+        if case .failed = coordinator.sessionState {
+            // Session/upload SETUP failed (sign-in, manifest, server 4xx/5xx, or
+            // the bundle wasn't ready yet). Without this the poller would 404
+            // forever and the user would sit on the analyzing spinner. Surface it
+            // with a working retry. (Covers the send-before-bundle-ready race too:
+            // that path yields .failed("No bundle on disk").)
+            WaitingView(phase: .connectionTrouble,
+                        onTryNow: { sendItHome() },
+                        onLeave: { stage = .home })
+        } else {
+            ZStack(alignment: .top) {
+                pollPostSend
+                // A terminal blob-level failure during .sent is otherwise invisible
+                // (the home banner isn't mounted here) — float it over the wait.
+                if failures.latestFailure != nil {
+                    UploadFailedBanner(
+                        onRetry: { retryFailedUpload() },
+                        onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
+                    )
+                    .padding([.horizontal, .top], 20)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pollPostSend: some View {
         switch poller.pollState {
         case .idle, .polling:
             WaitingView(phase: waitingPhase, anchor: waitingAnchor)
@@ -145,8 +209,11 @@ struct RootFlowView: View {
                 onSecondary: { stage = .home }
             )
         case .pollError:
+            // pollError is fatal — the poll loop has already stopped. Offer a real
+            // retry that restarts polling, not a dead "Try now". (A dedicated
+            // "lost the connection while checking" copy is a later refinement.)
             WaitingView(phase: .connectionTrouble,
-                        onTryNow: { ScenePoller.shared.checkNow() },
+                        onTryNow: { if let id = sentBundleId { ScenePoller.shared.start(bundleId: id) } },
                         onLeave: { stage = .home })
         }
     }
@@ -170,17 +237,27 @@ struct RootFlowView: View {
 
     private func sendItHome() {
         stage = .sent
-        let bundleId = capture.bundleIdString
         Task {
             await coordinator.beginUploadSession(for: capture)
-            ScenePoller.shared.start(bundleId: bundleId)
+            // Only start polling if the session was actually created. On failure
+            // sessionState == .failed and postSend surfaces it — no phantom poll.
+            if case .ready = coordinator.sessionState {
+                let bundleId = capture.bundleIdString
+                sentBundleId = bundleId
+                ScenePoller.shared.start(bundleId: bundleId)
+            }
         }
     }
 
     private func retryFailedUpload() {
-        // Re-drive the upload for the failed bundle; the coordinator's fast path
-        // reuses the persisted session record.
-        Task { await coordinator.beginUploadSession(for: capture) }
+        // Re-drive the SPECIFIC failed bundle named in the banner (a prior, often
+        // prior-launch, bundle) — not the current CaptureManager, which may be a
+        // different or not-yet-assembled bundle.
+        guard let bundleId = failures.latestFailure?.bundleId else { return }
+        Task {
+            guard let record = try? await UploadSessionStore.shared.load(bundleId: bundleId) else { return }
+            await BlobUploadManager.shared.rehydrateBundle(bundleId: bundleId, record: record)
+        }
     }
 
     private func rescanFromScratch() {
@@ -188,7 +265,7 @@ struct RootFlowView: View {
         // fresh poll with the new bundle id.
         ScenePoller.shared.pause()
         stage = .capturing
-        capture.startCapture()
+        beginCapture()
     }
 
     private func openWebDesk() {
@@ -205,8 +282,13 @@ struct RootFlowView: View {
         case .notAvailable: .lost
         @unknown default:   .lost
         }
-        // Coverage is placeholder until the RoomPlan coverage wiring (task #13).
-        return CaptureHUDState(tracking: quality)
+        // Real coverage + steering are unwired until the RoomPlan coverage wiring
+        // (task #13). Show neutral-empty, never fabricated "far wall" progress.
+        return CaptureHUDState(
+            tracking: quality,
+            guestLine: "Move slowly and I'll sketch the room as you go.",
+            floor: .empty, walls: .empty, corners: .empty
+        )
     }
 
     private var reviewMetrics: String {

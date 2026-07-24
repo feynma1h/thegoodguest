@@ -72,6 +72,7 @@ struct FailureView: View {
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rsParchmentScreen()
+        .onAppear { RSHaptics.fire(.failure) }
     }
 
     private var setAsideTag: some View {
@@ -118,6 +119,7 @@ struct FailureView: View {
         .padding(.bottom, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color.rsInk.ignoresSafeArea())
+        .onAppear { RSHaptics.fire(.failure) }
     }
 }
 

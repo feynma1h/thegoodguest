@@ -48,6 +48,7 @@ struct UploadFailedBanner: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onAppear { RSHaptics.fire(.failure) }
     }
 }
 
