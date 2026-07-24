@@ -1,14 +1,22 @@
 /// Review before send (design spec §4, beat two). A brief, confident review: the
 /// finished sketch shown whole with mono capture metrics (the one place raw
-/// numbers belong), the guest's plain verdict, and one honest chance to add more
-/// before it travels. Finishing is a decision made with confidence, not a gamble.
+/// numbers belong), the guest's plain verdict, and one honest chance to scan it
+/// again before it travels. Finishing is a decision made with confidence, not a
+/// gamble.
 ///
 /// NO PREVIEW OF THE REAL ROOM, on purpose: this shows the SKETCH, never a
 /// rendered 3D room — the real room belongs to the reveal, on the web. Showing a
 /// rough version here would spend the magic early.
 ///
-/// Thin-coverage variant: when the capture has gaps, the copy shifts and "Add a
-/// little more" becomes the primary path.
+/// Thin-coverage variant: when the capture has gaps the copy shifts and the
+/// rescan leads.
+///
+/// NOTE ON THE SECONDARY ACTION: it RESCANS, it does not extend. CaptureManager's
+/// startCapture() mints a new bundleId and clears frames/anchors/outputDir, so
+/// there is no append path today — hence `rescanLabel`/`onRescan` rather than the
+/// "add more" naming this screen started with. True resume-with-progress is an
+/// activation follow-up; until it exists nothing here may imply additive
+/// behaviour.
 
 import SwiftUI
 
@@ -26,12 +34,12 @@ struct ReviewView: View {
     /// True while bundle.pb is still being written — transient, unlike the other
     /// non-sendable states, so the action set must not reshuffle when it clears.
     var isPreparing: Bool = false
-    /// The secondary/rescan label. The caller owns the wording because whether it
-    /// EXTENDS or REPLACES the capture depends on the capture layer's behaviour
-    /// (today: replaces — see RootFlowView).
-    var addMoreLabel: String = "Add a little more"
+    /// The rescan label. REQUIRED, with no default: a default of "Add a little
+    /// more" would ship an additive promise the capture layer cannot keep the
+    /// moment any call site forgot to override it.
+    var rescanLabel: String
     var onSend: () -> Void = {}
-    var onAddMore: () -> Void = {}
+    var onRescan: () -> Void = {}
     /// Leave review without sending or rescanning. Required for the screen to have
     /// an exit at all — see `actions`.
     var onLeave: () -> Void = {}
@@ -106,10 +114,10 @@ struct ReviewView: View {
                 .opacity(0.55)
             } else if !canSend {
                 // Nothing to send — the rescan leads.
-                Button { onAddMore() } label: { Text(addMoreLabel) }
+                Button { onRescan() } label: { Text(rescanLabel) }
                     .buttonStyle(RSPrimaryButtonStyle())
             } else if thinCoverage {
-                Button { onAddMore() } label: { Text(addMoreLabel) }
+                Button { onRescan() } label: { Text(rescanLabel) }
                     .buttonStyle(RSPrimaryButtonStyle())
                 Button { onSend() } label: { Text("Send it as is") }
                     .buttonStyle(RSQuietButtonStyle())
@@ -118,7 +126,7 @@ struct ReviewView: View {
                     Label("Send it home", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(RSPrimaryButtonStyle())
-                Button { onAddMore() } label: { Text(addMoreLabel) }
+                Button { onRescan() } label: { Text(rescanLabel) }
                     .buttonStyle(RSQuietButtonStyle())
             }
 
@@ -166,9 +174,9 @@ struct RoomSketch: View {
 }
 
 #Preview("Clean capture") {
-    ReviewView()
+    ReviewView(rescanLabel: "Scan again from scratch")
 }
 
 #Preview("Thin coverage") {
-    ReviewView(thinCoverage: true)
+    ReviewView(thinCoverage: true, rescanLabel: "Scan again from scratch")
 }

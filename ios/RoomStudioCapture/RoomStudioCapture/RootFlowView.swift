@@ -177,14 +177,12 @@ struct RootFlowView: View {
                 // FAILURE for a capture that is perfectly fine and merely unfinished.
                 canSend: !isEmptyCapture && !isPreparingBundle && capture.assemblyFailure == nil,
                 isPreparing: isPreparingBundle,
-                // HONEST LABEL: CaptureManager.startCapture() mints a new bundleId
-                // and clears frames/anchors/outputDir — this REPLACES the pass, it
-                // does not extend it. True append (preserving bundleId + frames) is
-                // the activation follow-up; until then the label must not promise
-                // additive behaviour it doesn't have.
-                addMoreLabel: "Scan again from scratch",
+                // REPLACES, does not extend: startCapture() mints a new bundleId and
+                // clears frames/anchors/outputDir. True append is an activation
+                // follow-up; the label must not promise additive behaviour.
+                rescanLabel: "Scan again from scratch",
                 onSend: sendItHome,
-                onAddMore: {
+                onRescan: {
                     stage = .capturing
                     beginCapture()
                 },
