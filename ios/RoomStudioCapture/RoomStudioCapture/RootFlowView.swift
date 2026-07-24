@@ -10,15 +10,19 @@
 /// still assembles the bundle; RootFlowView holds it at review until the user
 /// sends.
 ///
-/// NOT THE APP ROOT YET. ContentView remains the live root. Swapping to
-/// RootFlowView is the ACTIVATION step, deliberately coupled to LiDAR-device
-/// verification (task #13 / board item 3): on a non-LiDAR device this gates
-/// straight to UnsupportedDeviceView, which would remove capture from the only
-/// current test device. Activation follow-ups: relaunch poll-resume (restart
-/// polling for a bundle still processing after a cold launch), add-more
-/// resume-with-progress (CaptureManager.startCapture currently resets), and the
-/// real web-handoff universal link. Verified today via the temp-entry preview
-/// path on the simulator (dev-override), same as every screen.
+/// THIS IS THE APP ROOT (activated 2026-07-25). The former gate — "a non-LiDAR
+/// device would see UnsupportedDeviceView" — stopped being a blocker when the
+/// product became Pro/LiDAR-only (decision 0071): that screen is now the CORRECT
+/// behaviour on unsupported hardware, not a regression. The simulator is treated
+/// as supported so development continues without a device.
+///
+/// ContentView is retained, unreferenced, as the rollback path.
+///
+/// Remaining activation follow-ups: add-more resume-with-progress
+/// (CaptureManager.startCapture currently mints a new bundle rather than
+/// extending), the real web-handoff universal link (NetworkConfig.webBaseURL is
+/// nil, so the doorway hides its CTA), the live RoomPlan mesh behind LiveMeshHost
+/// (task #13) and the Live Activity widget target (task #14).
 ///
 /// BUILT BUT NOT YET REACHABLE from this flow (staged, not wired): the
 /// returning-home recent-rooms strip and RoomsListView / QRBridgeView (§9, need a
@@ -220,6 +224,12 @@ struct RootFlowView: View {
         // battery mid-upload) would never surface — exactly the case the banner
         // exists for. Mirrors what UploadFailureView does for the old ContentView.
         .task { await UploadFailureMonitor.shared.refresh() }
+        // Relaunch recovery. ContentView's SceneStatusView did this for the old root
+        // (scanning for a bundle whose upload finished while the app was dead);
+        // activating RootFlowView without it would LOSE that. Restoring the id is
+        // enough — the home re-entry row renders from it, and entering the wait
+        // resumes polling from the persisted record.
+        .task { await restoreUnfinishedBundle() }
         .sheet(isPresented: $showGuidance) {
             GuidanceSheet(
                 onStart: {
@@ -441,6 +451,36 @@ struct RootFlowView: View {
     /// If the blobs for the sent bundle already finished while no status surface was
     /// mounted, start polling now. Safe to call repeatedly: ScenePoller.start is
     /// idempotent for the same bundle, and a record that isn't `.complete` is a no-op.
+    /// Re-adopt a bundle left behind by a previous launch, newest first.
+    ///
+    /// ContentView's SceneStatusView did this for the old root (finding a bundle
+    /// whose upload finished while the app was dead); activating RootFlowView
+    /// without it would LOSE that. Restoring the id is enough — the home re-entry
+    /// row renders from it, and entering the wait resumes polling from the
+    /// persisted record.
+    ///
+    /// Skips `.failed` (the banner owns those via UploadFailureMonitor) and never
+    /// overwrites a send started this launch. A `.complete` record whose room is
+    /// long since ready is harmless: entering the wait polls once, lands on the
+    /// doorway, and any terminal exit clears it.
+    private func restoreUnfinishedBundle() async {
+        guard sentBundleId == nil,
+              let ids = try? await UploadSessionStore.shared.allBundleIds()
+        else { return }
+        var newest: (id: String, minted: Date)?
+        for id in ids {
+            guard let record = try? await UploadSessionStore.shared.load(bundleId: id),
+                  record.uploadPhase != .failed
+            else { continue }
+            if newest == nil || record.clientMintTimestamp > newest!.minted {
+                newest = (id, record.clientMintTimestamp)
+            }
+        }
+        if let newest, sentBundleId == nil {
+            sentBundleId = newest.id
+        }
+    }
+
     private func resumePollIfUploadFinished() async {
         guard let bundleId = sentBundleId,
               case .idle = ScenePoller.shared.pollState,

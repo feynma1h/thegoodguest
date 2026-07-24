@@ -29,7 +29,7 @@ struct RoomStudioCaptureApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootFlowView()
                 .task {
                     // Attempt anonymous sign-in at launch so the UID is cached
                     // in Keychain before the user finishes their first capture.
