@@ -273,3 +273,61 @@ final class ScenePollerVisibilityTests: XCTestCase {
         XCTAssertNil(poller.currentBundleId)
     }
 }
+
+/// Pins the per-PATH scoping of the upload-deferral signal.
+///
+/// The signal was introduced bundle-scoped and cleared from `handleSuccess`, which
+/// runs per blob. A real capture uploads ~127 blobs concurrently, so any sibling's
+/// success erased a genuine deferral milliseconds after it was raised — the
+/// deferred blob never moved, the Phase-1 gate never opened, and the wait screen
+/// reverted to "sending" forever, which is exactly what the signal exists to
+/// prevent. Only total network loss made it work.
+@MainActor
+final class UploadDeferralScopingTests: XCTestCase {
+
+    private func makeMonitor() -> UploadFailureMonitor {
+        UploadFailureMonitor(store: UploadSessionStore.shared)
+    }
+
+    func testSiblingProgressDoesNotClearAnotherPathsDeferral() {
+        let m = makeMonitor()
+        m.notifyUploadDeferred(bundleId: "b1", relativePath: "frames/000042.jpg", reason: "timeout")
+        XCTAssertNotNil(m.latestDeferral)
+
+        // A different blob of the SAME bundle succeeds.
+        m.clearDeferral(bundleId: "b1", relativePath: "frames/000043.jpg")
+        XCTAssertNotNil(m.latestDeferral,
+                        "a sibling blob's success must not clear another path's deferral")
+    }
+
+    func testTheDeferredPathsOwnProgressClearsIt() {
+        let m = makeMonitor()
+        m.notifyUploadDeferred(bundleId: "b1", relativePath: "frames/000042.jpg", reason: "timeout")
+        m.clearDeferral(bundleId: "b1", relativePath: "frames/000042.jpg")
+        XCTAssertNil(m.latestDeferral)
+    }
+
+    func testBundleStaysPausedUntilEveryDeferredPathProgresses() {
+        let m = makeMonitor()
+        m.notifyUploadDeferred(bundleId: "b1", relativePath: "a.jpg", reason: "timeout")
+        m.notifyUploadDeferred(bundleId: "b1", relativePath: "b.jpg", reason: "timeout")
+
+        m.clearDeferral(bundleId: "b1", relativePath: "a.jpg")
+        XCTAssertNotNil(m.latestDeferral, "one path still deferred")
+
+        m.clearDeferral(bundleId: "b1", relativePath: "b.jpg")
+        XCTAssertNil(m.latestDeferral, "all paths progressed")
+    }
+
+    /// Completion and a new send clear wholesale.
+    func testBundleWideAndGlobalClears() {
+        let m = makeMonitor()
+        m.notifyUploadDeferred(bundleId: "b1", relativePath: "a.jpg", reason: "timeout")
+        m.clearDeferral(bundleId: "b1")
+        XCTAssertNil(m.latestDeferral)
+
+        m.notifyUploadDeferred(bundleId: "b2", relativePath: "a.jpg", reason: "timeout")
+        m.clearDeferral()
+        XCTAssertNil(m.latestDeferral)
+    }
+}

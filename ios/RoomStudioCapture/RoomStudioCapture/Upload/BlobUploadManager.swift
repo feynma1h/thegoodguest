@@ -518,9 +518,12 @@ actor BlobUploadManager {
             // in the same launch can re-count. crossLaunchRetryCount is reset to 0 by
             // markingBlobUploaded (via markBlobUploaded → markingBlobUploaded). Decision 0045.
             transientCountedThisLaunch.remove(bundleId)
-        // Progress means the pause is over — otherwise a deferral recorded by a
-        // previous process's late 308 outlives the bundle rehydration already resumed.
-        Task { await MainActor.run { UploadFailureMonitor.shared.clearDeferral(bundleId: bundleId) } }
+            // THIS path progressed, so its deferral is over. Scoped per path: a
+            // bundle-wide clear here would be fired by every one of ~127 sibling
+            // blobs, erasing a genuine deferral milliseconds after it was raised.
+            await MainActor.run {
+                UploadFailureMonitor.shared.clearDeferral(bundleId: bundleId, relativePath: relativePath)
+            }
 
             if record.allNonBundlePbBlobsUploaded {
                 // Phase-1 complete. Hand off to bundle.pb finalizer.
@@ -542,9 +545,10 @@ actor BlobUploadManager {
             logger.info("[BlobUploadManager] ↩ deferred (no-context): \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=308_no_context")
             // Observable: recovery is relaunch-only, so a UI still saying "sending"
             // would be instructing the user to wait for something that cannot happen.
-            Task { await MainActor.run {
-                UploadFailureMonitor.shared.notifyUploadDeferred(bundleId: bundleId, reason: "308_no_context")
-            } }
+            await MainActor.run {
+                UploadFailureMonitor.shared.notifyUploadDeferred(
+                    bundleId: bundleId, relativePath: relativePath, reason: "308_no_context")
+            }
             return
         }
         if ctx.reputtedPaths.contains(relativePath) {
@@ -1237,9 +1241,10 @@ actor BlobUploadManager {
         if transientCountedThisLaunch.contains(bundleId) {
             logger.info("[BlobUploadManager] ↩ deferred (transient, already counted this launch): \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
             // No counter bump. Blob stays .pending. Relaunch path re-enqueues from stored record.
-            Task { await MainActor.run {
-                UploadFailureMonitor.shared.notifyUploadDeferred(bundleId: bundleId, reason: reason)
-            } }
+            await MainActor.run {
+                UploadFailureMonitor.shared.notifyUploadDeferred(
+                    bundleId: bundleId, relativePath: relativePath, reason: reason)
+            }
             return
         }
         let newCount = record.crossLaunchRetryCount + 1
@@ -1253,7 +1258,8 @@ actor BlobUploadManager {
         transientCountedThisLaunch.insert(bundleId)
         logger.info("[BlobUploadManager] ↩ deferred (transient, attempt \(newCount)/\(Self.maxCrossLaunchRetries)): \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason)")
         await MainActor.run {
-            UploadFailureMonitor.shared.notifyUploadDeferred(bundleId: bundleId, reason: reason)
+            UploadFailureMonitor.shared.notifyUploadDeferred(
+                bundleId: bundleId, relativePath: relativePath, reason: reason)
         }
         // Blob stays .pending in blobStatuses. On relaunch, rehydrateBundle re-enqueues
         // pending blobs via enqueuePhasOneBlobs; a pending bundle.pb is re-enqueued via

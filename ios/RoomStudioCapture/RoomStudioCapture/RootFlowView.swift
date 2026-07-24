@@ -105,6 +105,14 @@ struct RootFlowView: View {
             case .active:
                 ScenePoller.shared.setVisible(onWaitScreen)
                 if poller.currentBundleId != nil { ScenePoller.shared.resume() }
+                // The completion kick is DROPPED while backgrounded (by design — the
+                // persisted record is the seam), resume() early-returns on a nil
+                // currentBundleId, and postSend.onAppear does not re-fire because the
+                // view never left the hierarchy. Without this re-scan, locking the
+                // phone during the ~1 min upload — which the copy explicitly invites —
+                // left "Sending your room" on screen forever for a room already
+                // uploaded. The .idle guard inside makes it safe to call every time.
+                if onWaitScreen { Task { await resumePollIfUploadFinished() } }
             case .background, .inactive:
                 ScenePoller.shared.setVisible(false)
                 if poller.currentBundleId != nil { ScenePoller.shared.pause() }
@@ -188,7 +196,9 @@ struct RootFlowView: View {
                 )
                 .padding([.horizontal, .top], 20)
             }
-            if sentBundleId != nil {
+            // Suppressed while THIS bundle's failure is showing: the banner and the
+            // row otherwise contradicted each other for the same capture.
+            if sentBundleId != nil, failures.latestFailure?.bundleId != sentBundleId {
                 // Re-entry. Without this, leaving the wait was one-way: the room
                 // keeps processing but no surface could ever show it again, so
                 // "leaving is free" was false.
@@ -262,8 +272,13 @@ struct RootFlowView: View {
     private var waitScreen: WaitScreen {
         WaitFlowState.screen(
             sessionFailure: WaitFlowState.sessionFailure(from: coordinator.sessionState),
+            // Persisted OR in-memory: dismissing the banner clears the kick for the
+            // rest of the launch, and routing that read only the kick then fell
+            // through to "Sending your room" forever for a bundle whose on-disk
+            // record is .failed and which will never move again.
             terminalBlobFailureForThisBundle: sentBundleId != nil
-                && failures.latestFailure?.bundleId == sentBundleId,
+                && (failures.latestFailure?.bundleId == sentBundleId
+                    || sentBundleFailedOnDisk),
             deferredForThisBundle: sentBundleId != nil
                 && failures.latestDeferral?.bundleId == sentBundleId,
             poll: WaitFlowState.snapshot(from: poller.pollState,
@@ -341,6 +356,7 @@ struct RootFlowView: View {
         case .doorway:
             DoorwayView(onStepThrough: openWebDesk,
                         onScanAnother: rescanFromScratch,
+                        onDone: endFlight,
                         signedIntoWeb: auth.isAppleLinked,
                         canOpenWeb: webRoomURL != nil)
 
@@ -412,6 +428,7 @@ struct RootFlowView: View {
         // window — and a stale "Try now" could re-poll the wrong bundle. reset()
         // (not pause()) is required: pause() deliberately preserves state.
         sentBundleId = nil
+        sentBundleFailedOnDisk = false
         lastSceneCreatedAt = nil   // per-send, not per-view: a retained anchor from a
                                    // previous capture would time THIS room's clock
                                    // from the previous room's arrival.
@@ -451,6 +468,11 @@ struct RootFlowView: View {
     /// If the blobs for the sent bundle already finished while no status surface was
     /// mounted, start polling now. Safe to call repeatedly: ScenePoller.start is
     /// idempotent for the same bundle, and a record that isn't `.complete` is a no-op.
+    /// True when the sent bundle's PERSISTED record is terminal. Read from disk by
+    /// `refreshSentBundlePhase`, because the in-memory failure kick is dismissable
+    /// and its absence must not be read as "still uploading".
+    @State private var sentBundleFailedOnDisk = false
+
     /// Re-adopt a bundle left behind by a previous launch, newest first.
     ///
     /// ContentView's SceneStatusView did this for the old root (finding a bundle
@@ -481,7 +503,20 @@ struct RootFlowView: View {
         }
     }
 
+    /// Refresh the persisted terminal state for the sent bundle (see
+    /// `sentBundleFailedOnDisk`). Cheap, and the only source of truth that survives
+    /// a dismissed banner.
+    private func refreshSentBundlePhase() async {
+        guard let bundleId = sentBundleId else {
+            sentBundleFailedOnDisk = false
+            return
+        }
+        let record = try? await UploadSessionStore.shared.load(bundleId: bundleId)
+        sentBundleFailedOnDisk = (record?.uploadPhase == .failed)
+    }
+
     private func resumePollIfUploadFinished() async {
+        await refreshSentBundlePhase()
         guard let bundleId = sentBundleId,
               case .idle = ScenePoller.shared.pollState,
               let record = try? await UploadSessionStore.shared.load(bundleId: bundleId),
@@ -507,6 +542,7 @@ struct RootFlowView: View {
         ScenePoller.shared.reset()
         UploadFailureMonitor.shared.clearDeferral()
         sentBundleId = nil
+        sentBundleFailedOnDisk = false
         lastSceneCreatedAt = nil
         stage = .home
     }
