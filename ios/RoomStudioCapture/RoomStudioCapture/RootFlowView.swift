@@ -66,6 +66,14 @@ struct RootFlowView: View {
     /// below. Session-state staleness is handled inside UploadCoordinator, where
     /// those writes actually happen.
     @State private var sendGeneration: Int = 0
+    /// True when the sent bundle's PERSISTED record is terminal. Read from disk by
+    /// `refreshSentBundlePhase`, because the in-memory failure kick is dismissable
+    /// and its absence must not be read as "still uploading".
+    @State private var sentBundleFailedOnDisk = false
+    /// Launch-scoped latch for `restoreUnfinishedBundle`. home's `.task` re-fires on
+    /// every return to `.home`, so without this the restore undid `endFlight()` the
+    /// instant it landed — re-adopting the bundle the user had just finished with.
+    @State private var didRestoreUnfinished = false
 
     enum Stage: Equatable { case home, capturing, gotRoom, review, sent }
 
@@ -197,8 +205,12 @@ struct RootFlowView: View {
                 .padding([.horizontal, .top], 20)
             }
             // Suppressed while THIS bundle's failure is showing: the banner and the
-            // row otherwise contradicted each other for the same capture.
-            if sentBundleId != nil, failures.latestFailure?.bundleId != sentBundleId {
+            // row otherwise contradicted each other for the same capture. Also
+            // suppressed on the PERSISTED failure, which dismissing the banner cannot
+            // erase — otherwise the row came back claiming a terminally failed bundle
+            // was still "on its way".
+            if sentBundleId != nil, failures.latestFailure?.bundleId != sentBundleId,
+               !sentBundleFailedOnDisk {
                 // Re-entry. Without this, leaving the wait was one-way: the room
                 // keeps processing but no surface could ever show it again, so
                 // "leaving is free" was false.
@@ -238,8 +250,16 @@ struct RootFlowView: View {
         // (scanning for a bundle whose upload finished while the app was dead);
         // activating RootFlowView without it would LOSE that. Restoring the id is
         // enough — the home re-entry row renders from it, and entering the wait
-        // resumes polling from the persisted record.
-        .task { await restoreUnfinishedBundle() }
+        // resumes polling from the persisted record. Latched to one run per launch
+        // inside; this .task re-fires on every return to home.
+        //
+        // The phase refresh, by contrast, SHOULD run on every return: it is what
+        // keeps the re-entry row from advertising a bundle that failed while the
+        // user was away.
+        .task {
+            await restoreUnfinishedBundle()
+            await refreshSentBundlePhase()
+        }
         .sheet(isPresented: $showGuidance) {
             GuidanceSheet(
                 onStart: {
@@ -465,14 +485,6 @@ struct RootFlowView: View {
         }
     }
 
-    /// If the blobs for the sent bundle already finished while no status surface was
-    /// mounted, start polling now. Safe to call repeatedly: ScenePoller.start is
-    /// idempotent for the same bundle, and a record that isn't `.complete` is a no-op.
-    /// True when the sent bundle's PERSISTED record is terminal. Read from disk by
-    /// `refreshSentBundlePhase`, because the in-memory failure kick is dismissable
-    /// and its absence must not be read as "still uploading".
-    @State private var sentBundleFailedOnDisk = false
-
     /// Re-adopt a bundle left behind by a previous launch, newest first.
     ///
     /// ContentView's SceneStatusView did this for the old root (finding a bundle
@@ -481,25 +493,32 @@ struct RootFlowView: View {
     /// row renders from it, and entering the wait resumes polling from the
     /// persisted record.
     ///
+    /// ONCE PER LAUNCH, and never for a bundle the user has finished with. home's
+    /// `.task` re-fires on every return to `.home`, and `.complete` records are never
+    /// deleted, so an unlatched restore that ignored acknowledgement undid every
+    /// terminal exit on arrival and re-advertised finished rooms forever. See
+    /// BundleRestore for the full reasoning; the choice itself is pinned there.
+    ///
     /// Skips `.failed` (the banner owns those via UploadFailureMonitor) and never
-    /// overwrites a send started this launch. A `.complete` record whose room is
-    /// long since ready is harmless: entering the wait polls once, lands on the
-    /// doorway, and any terminal exit clears it.
+    /// overwrites a send started this launch.
     private func restoreUnfinishedBundle() async {
+        guard !didRestoreUnfinished else { return }
+        didRestoreUnfinished = true
         guard sentBundleId == nil,
               let ids = try? await UploadSessionStore.shared.allBundleIds()
         else { return }
-        var newest: (id: String, minted: Date)?
+        var candidates: [BundleRestore.Candidate] = []
         for id in ids {
-            guard let record = try? await UploadSessionStore.shared.load(bundleId: id),
-                  record.uploadPhase != .failed
-            else { continue }
-            if newest == nil || record.clientMintTimestamp > newest!.minted {
-                newest = (id, record.clientMintTimestamp)
-            }
+            guard let record = try? await UploadSessionStore.shared.load(bundleId: id) else { continue }
+            candidates.append(.init(bundleId: id,
+                                    phase: record.uploadPhase,
+                                    minted: record.clientMintTimestamp))
         }
-        if let newest, sentBundleId == nil {
-            sentBundleId = newest.id
+        let pick = BundleRestore.pick(from: candidates, dismissed: DismissedBundles().set)
+        // Re-check: the scan awaited disk, and a send started in that window owns
+        // sentBundleId.
+        if let pick, sentBundleId == nil {
+            sentBundleId = pick
         }
     }
 
@@ -515,6 +534,9 @@ struct RootFlowView: View {
         sentBundleFailedOnDisk = (record?.uploadPhase == .failed)
     }
 
+    /// If the blobs for the sent bundle already finished while no status surface was
+    /// mounted, start polling now. Safe to call repeatedly: ScenePoller.start is
+    /// idempotent for the same bundle, and a record that isn't `.complete` is a no-op.
     private func resumePollIfUploadFinished() async {
         await refreshSentBundlePhase()
         guard let bundleId = sentBundleId,
@@ -541,6 +563,11 @@ struct RootFlowView: View {
     private func endFlight() {
         ScenePoller.shared.reset()
         UploadFailureMonitor.shared.clearDeferral()
+        // Acknowledge BEFORE clearing: this is the one place that knows the user is
+        // done with this bundle, and the record outlives the app (a `.complete`
+        // record is never deleted), so without a persisted note the launch restore
+        // re-adopts it forever.
+        if let sentBundleId { DismissedBundles().acknowledge(sentBundleId) }
         sentBundleId = nil
         sentBundleFailedOnDisk = false
         lastSceneCreatedAt = nil
