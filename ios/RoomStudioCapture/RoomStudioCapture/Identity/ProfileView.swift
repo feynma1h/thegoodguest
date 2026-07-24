@@ -13,10 +13,12 @@
 import SwiftUI
 
 struct ProfileView: View {
-    /// Required — the caller supplies the real UID (RootFlowView passes
-    /// `AuthManager.currentUID`). No default, so a fabricated identity can never
-    /// be rendered by accident.
-    var uid: String
+    /// The real UID, or nil when sign-in hasn't landed yet (offline first launch).
+    /// Required and OPTIONAL by design: no default, so a fabricated identity can
+    /// never be rendered by accident — and nil renders an honest "not ready" state
+    /// rather than a placeholder string masquerading as an ID (which would also be
+    /// copyable to the pasteboard).
+    var uid: String?
     var isLinked: Bool = false
     var onClose: () -> Void = {}
 
@@ -97,25 +99,34 @@ struct ProfileView: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Eyebrow("Your ID")
-                Text(uid)
-                    .font(RSFont.mono(size: 13.5, weight: .medium))
-                    .foregroundStyle(Color.rsInk)
+                if let uid {
+                    Text(uid)
+                        .font(RSFont.mono(size: 13.5, weight: .medium))
+                        .foregroundStyle(Color.rsInk)
+                } else {
+                    Text("Not ready yet — I'll have it once I reach the desk.")
+                        .font(RSFont.ui(.footnote))
+                        .foregroundStyle(Color.rsInkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer()
-            Button {
-                UIPasteboard.general.string = uid
-                withAnimation { copied = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    withAnimation { copied = false }
+            if let uid {
+                Button {
+                    UIPasteboard.general.string = uid
+                    withAnimation { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        withAnimation { copied = false }
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(copied ? Color.rsAffirm : Color.rsInk)
+                        .frame(width: 34, height: 34)
+                        .background(Color.rsInk.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
-            } label: {
-                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(copied ? Color.rsAffirm : Color.rsInk)
-                    .frame(width: 34, height: 34)
-                    .background(Color.rsInk.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .accessibilityLabel("Copy your ID")
             }
-            .accessibilityLabel("Copy your ID")
         }
         .padding(14)
         .background(Color.rsInk.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))

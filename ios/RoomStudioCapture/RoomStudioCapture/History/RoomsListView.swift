@@ -20,7 +20,9 @@ struct RoomSummary: Identifiable {
 }
 
 struct RoomsListView: View {
-    var rooms: [RoomSummary] = RoomSummary.samples
+    // Required — no sample default, so wiring this up can never silently ship
+    // fixture rooms as if they were the user's.
+    var rooms: [RoomSummary]
     var onOpen: (RoomSummary) -> Void = { _ in }
     var onScanAnother: () -> Void = {}
     var onProfile: () -> Void = {}
@@ -147,5 +149,5 @@ extension RoomSummary {
 }
 
 #Preview {
-    RoomsListView()
+    RoomsListView(rooms: RoomSummary.samples)
 }

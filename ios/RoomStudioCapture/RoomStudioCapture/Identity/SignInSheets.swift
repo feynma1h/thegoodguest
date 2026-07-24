@@ -82,8 +82,10 @@ struct WhySignInSheet: View {
 }
 
 struct AccountConflictView: View {
-    var existingRooms: Int = 4
-    var thisPhoneRooms: Int = 2
+    // Required — no sample defaults. Real counts must come from the caller; a
+    // default would ship an invented room count the moment this is wired.
+    var existingRooms: Int
+    var thisPhoneRooms: Int
     var onSwitch: () -> Void = {}
     var onKeep: () -> Void = {}
 
@@ -153,5 +155,5 @@ struct AccountConflictView: View {
 }
 
 #Preview("Account conflict") {
-    AccountConflictView()
+    AccountConflictView(existingRooms: 4, thisPhoneRooms: 2)
 }

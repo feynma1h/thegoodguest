@@ -27,6 +27,10 @@ struct DoorwayView: View {
     var onStepThrough: () -> Void = {}
     var onScanAnother: () -> Void = {}
     var signedIntoWeb: Bool = false
+    /// False when no web origin is configured yet — the CTA and its "opens your
+    /// desk in the browser" caption are then hidden rather than shown as a control
+    /// that does nothing. "Scan another room" remains, so the screen still has a way out.
+    var canOpenWeb: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var bloom = false
@@ -56,23 +60,31 @@ struct DoorwayView: View {
                     .padding(.horizontal, 30)
                     .padding(.top, 12)
 
-                Button(action: onStepThrough) {
-                    HStack(spacing: 9) {
-                        Text("Step into it on the web")
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 15, weight: .semibold))
+                if canOpenWeb {
+                    Button(action: onStepThrough) {
+                        HStack(spacing: 9) {
+                            Text("Step into it on the web")
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
                     }
-                }
-                .buttonStyle(RSGoldButtonStyle())
-                .padding(.top, 26)
+                    .buttonStyle(RSGoldButtonStyle())
+                    .padding(.top, 26)
 
-                Text(signedIntoWeb
-                     ? "Opens your desk in the browser · you're already signed in there"
-                     : "Opens your desk in the browser")
-                    .font(RSFont.ui(.footnote))
-                    .foregroundStyle(Color.rsOnDark.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 14)
+                    Text(signedIntoWeb
+                         ? "Opens your desk in the browser · you're already signed in there"
+                         : "Opens your desk in the browser")
+                        .font(RSFont.ui(.footnote))
+                        .foregroundStyle(Color.rsOnDark.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 14)
+                } else {
+                    Text("Open it on your computer — it's waiting there whenever you are.")
+                        .font(RSFont.ui(.footnote))
+                        .foregroundStyle(Color.rsOnDark.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 26)
+                }
 
                 Button(action: onScanAnother) {
                     Text("Scan another room")
