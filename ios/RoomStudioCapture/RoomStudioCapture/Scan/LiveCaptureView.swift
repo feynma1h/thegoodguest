@@ -37,11 +37,14 @@ enum SurfaceCoverage {
 }
 
 struct CaptureHUDState {
+    // Defaults assert NOTHING: a defaulted construction anywhere in production would
+    // otherwise ship invented coverage and a "far wall" instruction the app cannot
+    // know. RootFlowView overrides every field from real tracking state.
     var tracking: TrackingQuality = .good
-    var guestLine: String = "You've got most of it — one more pass along that far wall and I'll have the whole room."
-    var floor: SurfaceCoverage = .full
-    var walls: SurfaceCoverage = .full
-    var corners: SurfaceCoverage = .partial(0.6)
+    var guestLine: String = "Move slowly and I'll sketch the room as you go."
+    var floor: SurfaceCoverage = .empty
+    var walls: SurfaceCoverage = .empty
+    var corners: SurfaceCoverage = .empty
 }
 
 // MARK: - Live capture screen

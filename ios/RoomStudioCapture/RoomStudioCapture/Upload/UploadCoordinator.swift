@@ -82,6 +82,10 @@ final class UploadCoordinator: ObservableObject {
     /// Call synchronously before a new send so an observer never briefly renders the
     /// previous capture's session outcome during the next send's setup window.
     func reset() {
+        // Bump too: an older beginUploadSession suspended in the 0038 ladder would
+        // otherwise still satisfy `mine == callSequence` and could publish a
+        // terminal .failed over a send that just started.
+        callSequence &+= 1
         sessionState = .idle
     }
 

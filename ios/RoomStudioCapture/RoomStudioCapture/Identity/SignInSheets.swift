@@ -107,6 +107,7 @@ struct AccountConflictView: View {
                 .font(RSFont.ui(.title3, weight: .semibold))
                 .foregroundStyle(Color.rsInk)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
 
             GuestLine("You've used this Apple ID before — it has \(existingRooms) rooms of its own. Which life should this phone join?",
                       size: 15)
@@ -114,7 +115,11 @@ struct AccountConflictView: View {
 
             optionCard(
                 title: "Switch to my existing account",
-                subtitle: "Keep the \(existingRooms) rooms there · this phone's \(thisPhoneRooms) guest-rooms stay retrievable for 30 days",
+                // NO retention promise: AuthManager.switchToExistingAccount is explicit that
+                // rooms under the old anonymous UID stop being reachable from this
+                // install, there is no anon-credential recovery, and scenes have no TTL.
+                // This is the sentence the destructive choice leans on — it must be true.
+                subtitle: "Keep the \(existingRooms) rooms there · the \(thisPhoneRooms) scanned on this phone won't be reachable from this install afterward",
                 emphasized: true,
                 action: onSwitch
             )
@@ -132,8 +137,8 @@ struct AccountConflictView: View {
         }
         .padding(.horizontal, 26)
         .padding(.top, 30)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .rsParchmentScreen()
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .modifier(RSScrollableScreen(background: nil))
     }
 
     private func optionCard(title: String, subtitle: String, emphasized: Bool, action: @escaping () -> Void) -> some View {
@@ -141,6 +146,7 @@ struct AccountConflictView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(RSFont.ui(.callout, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(emphasized ? Color.rsAction : Color.rsInk)
                 Text(subtitle)
                     .font(RSFont.ui(.footnote))

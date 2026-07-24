@@ -50,8 +50,17 @@ final class UploadFailureMonitor: ObservableObject {
     /// INTERRUPTED). Recovery is real but only happens via
     /// rehydrateAllUnfinishedBundles at the NEXT launch, so a screen that keeps
     /// saying "sending…" is telling the user to wait for something that cannot
-    /// happen in this process. Cleared when the bundle progresses or a new send starts.
+    /// happen in this process.
+    ///
+    /// Non-nil while ANY blob of the bundle is deferred. Tracked PER PATH: a real
+    /// capture uploads ~127 blobs concurrently, so a bundle-scoped flag was wiped
+    /// by the next sibling blob's success milliseconds later — the deferred blob
+    /// never moved, the Phase-1 gate never opened, and the screen reverted to
+    /// "sending" forever, which is the exact state this signal exists to prevent.
     @Published private(set) var latestDeferral: UploadDeferral?
+
+    /// bundleId → the blob paths currently deferred for it.
+    private var deferredPaths: [String: Set<String>] = [:]
 
     /// BundleIds dismissed this launch. refresh() skips them and the kick ignores them.
     /// Deliberately not persisted — see the dismissal semantics in the header.
@@ -74,14 +83,33 @@ final class UploadFailureMonitor: ObservableObject {
     /// In-process kick from BlobUploadManager's deferral paths. In-memory only:
     /// the persisted record already carries the state, and the relaunch rehydration
     /// is the actual recovery mechanism.
-    func notifyUploadDeferred(bundleId: String, reason: String) {
+    func notifyUploadDeferred(bundleId: String, relativePath: String, reason: String) {
+        deferredPaths[bundleId, default: []].insert(relativePath)
         latestDeferral = UploadDeferral(bundleId: bundleId, reason: reason)
     }
 
-    /// Clear a deferral once the bundle moves again (a new send, or completion).
+    /// One blob progressed. Clears only THAT path — the bundle stays paused while
+    /// any sibling is still deferred.
+    func clearDeferral(bundleId: String, relativePath: String) {
+        guard var paths = deferredPaths[bundleId] else { return }
+        paths.remove(relativePath)
+        if paths.isEmpty {
+            deferredPaths[bundleId] = nil
+            if latestDeferral?.bundleId == bundleId { latestDeferral = nil }
+        } else {
+            deferredPaths[bundleId] = paths
+        }
+    }
+
+    /// Clear every deferral for a bundle (completion), or all of them (a new send).
     func clearDeferral(bundleId: String? = nil) {
-        if let bundleId, latestDeferral?.bundleId != bundleId { return }
-        latestDeferral = nil
+        if let bundleId {
+            deferredPaths[bundleId] = nil
+            if latestDeferral?.bundleId == bundleId { latestDeferral = nil }
+        } else {
+            deferredPaths.removeAll()
+            latestDeferral = nil
+        }
     }
 
     /// Independent scan path: surface the most recent undismissed .failed record.

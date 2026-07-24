@@ -26,6 +26,10 @@ import SwiftUI
 struct DoorwayView: View {
     var onStepThrough: () -> Void = {}
     var onScanAnother: () -> Void = {}
+    /// Plain way out. Without it the only control (once the web CTA is hidden) was
+    /// "Scan another room", which drops straight into live capture — the user who
+    /// just wants to put the phone down had to start a scan.
+    var onDone: () -> Void = {}
     var signedIntoWeb: Bool = false
     /// False when no web origin is configured yet — the CTA and its "opens your
     /// desk in the browser" caption are then hidden rather than shown as a control
@@ -97,6 +101,13 @@ struct DoorwayView: View {
                         .foregroundStyle(Color.rsOnDark.opacity(0.85))
                 }
                 .padding(.top, 22)
+
+                Button(action: onDone) {
+                    Text("Done")
+                        .font(RSFont.ui(.subheadline, weight: .medium))
+                        .foregroundStyle(Color.rsOnDark.opacity(0.6))
+                }
+                .padding(.top, 14)
             }
             .padding(.horizontal, 30)
             .padding(.bottom, 20)
