@@ -22,6 +22,11 @@ struct FailureView: View {
     enum Kind: Equatable {
         case recoverable
         case terminal
+        /// The upload itself failed terminally (http_4xx, 308_persistent,
+        /// empty_bundle_pb, blob_unreadable_at_remint_manifest…). NOT a capture
+        /// fault: "scan slower" fixes none of these, so it gets its own copy and
+        /// carries the persisted reason, which is the only diagnostic the user has.
+        case uploadFailed(reason: String?)
     }
 
     var kind: Kind = .recoverable
@@ -32,6 +37,7 @@ struct FailureView: View {
         switch kind {
         case .recoverable: recoverable
         case .terminal:    terminal
+        case .uploadFailed(let reason): uploadFailed(reason: reason)
         }
     }
 
@@ -77,8 +83,51 @@ struct FailureView: View {
             .padding(.bottom, 8)
         }
         .padding(.horizontal, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .rsParchmentScreen()
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil))
+        .onAppear { RSHaptics.fire(.failure) }
+    }
+
+    // MARK: Upload failed (the send broke, not the scan)
+
+    private func uploadFailed(reason: String?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+
+            Image(systemName: "arrow.up.circle")
+                .font(.system(size: 34, weight: .regular))
+                .foregroundStyle(Color.rsGoldLight)
+
+            Text("I couldn't get it up to the desk.")
+                .rsFont(.display, size: 24)
+                .foregroundStyle(Color.rsOnDark)
+                .padding(.top, 24)
+
+            GuestLine("The scan itself was fine — it's the sending that broke, and it won't recover on its own. Nothing about how you scanned caused this.",
+                      size: 15.5, onDark: true)
+                .padding(.top, 14)
+
+            if let reason {
+                Text(reason)
+                    .rsFont(.mono, size: 11, maxSize: 15)
+                    .foregroundStyle(Color.rsOnDark.opacity(0.45))
+                    .textSelection(.enabled)
+                    .padding(.top, 12)
+            }
+
+            Spacer()
+
+            VStack(spacing: 11) {
+                Button(action: onPrimary) { Text("Scan the room again") }
+                    .buttonStyle(RSLightButtonStyle())
+                Button(action: onSecondary) { Text("Later") }
+                    .buttonStyle(RSQuietButtonStyle(onDark: true))
+            }
+        }
+        .padding(.horizontal, 32)
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(RSScrollableScreen(background: Color.rsInk))
         .onAppear { RSHaptics.fire(.failure) }
     }
 
@@ -112,8 +161,8 @@ struct FailureView: View {
         }
         .padding(.horizontal, 32)
         .padding(.bottom, 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(Color.rsInk.ignoresSafeArea())
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(RSScrollableScreen(background: Color.rsInk))
         .onAppear { RSHaptics.fire(.failure) }
     }
 }
@@ -124,4 +173,8 @@ struct FailureView: View {
 
 #Preview("Terminal") {
     FailureView(kind: .terminal)
+}
+
+#Preview("Upload failed") {
+    FailureView(kind: .uploadFailed(reason: "http_403"))
 }

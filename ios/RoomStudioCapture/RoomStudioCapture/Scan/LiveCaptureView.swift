@@ -95,11 +95,13 @@ struct LiveCaptureView: View {
 
             if state.tracking == .tooDark {
                 GuestLine("It's gone dark — I can't see. A light, or a step back?",
-                          size: 17, onDark: true, alignment: .center)
+                          size: 17, onDark: true, alignment: .center, maxSize: 22)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 28)
                     .padding(.bottom, 16)
             } else {
-                GuestLine(state.guestLine, size: 17, onDark: true, alignment: .center)
+                GuestLine(state.guestLine, size: 17, onDark: true, alignment: .center, maxSize: 22)
+                    .fixedSize(horizontal: false, vertical: true)
                     .shadow(color: .black.opacity(0.6), radius: 12, y: 2)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)

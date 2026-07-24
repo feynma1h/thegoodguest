@@ -21,7 +21,11 @@ struct GuidanceSheet: View {
     @State private var permissionDenied = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Scrollable: at accessibility sizes this content exceeds even the .large
+        // detent, and without a scroll region the header, the close button and the
+        // rows overflow BOTH edges of the sheet — leaving no way to start a scan.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
             header
 
             proChip
@@ -46,16 +50,23 @@ struct GuidanceSheet: View {
             }
             .padding(.top, 24)
 
-            Spacer(minLength: 20)
-
             privacyLine
+                .padding(.top, 20)
                 .padding(.bottom, 12)
-
-            startButton
+            }
+            .padding(.horizontal, 26)
+            .padding(.top, 20)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(.horizontal, 26)
-        .padding(.top, 20)
-        .padding(.bottom, 12)
+        .safeAreaInset(edge: .bottom) {
+            // Pinned OUTSIDE the scroll region: the one action this sheet exists for
+            // must stay on screen at every text size.
+            startButton
+                .padding(.horizontal, 26)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .background(Color.rsCaptureRaised)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.rsCaptureRaised.ignoresSafeArea())
     }
@@ -167,6 +178,7 @@ private struct GuidanceRow: View {
                 Text(title)
                     .font(RSFont.ui(.callout, weight: .semibold))
                     .foregroundStyle(Color.rsOnDark)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(detail)
                     .font(RSFont.ui(.subheadline))
                     .foregroundStyle(Color.rsOnDark.opacity(0.6))

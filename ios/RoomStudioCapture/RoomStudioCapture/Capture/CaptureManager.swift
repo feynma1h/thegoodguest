@@ -62,6 +62,9 @@ final class CaptureManager: NSObject, ObservableObject {
     /// launch). UploadCoordinator patches user_id in-place before building the manifest.
     /// Reset to false at the start of each capture.
     @Published private(set) var assembledWithoutUserId: Bool = false
+    /// Non-nil when bundle.pb assembly FAILED. `bundlePath` then never publishes, so
+    /// this is the only signal distinguishing "still writing" from "will never write".
+    @Published private(set) var assemblyFailure: String?
 
     /// Root directory for this capture's output (temp, per-session UUID).
     /// Structure: <bundleOutputDir>/frames/NNNNNN.jpg
@@ -121,6 +124,7 @@ final class CaptureManager: NSObject, ObservableObject {
     func startCapture() {
         bundlePath = nil
         assembledWithoutUserId = false
+        assemblyFailure = nil
         capturedFrames  = []
         capturedPlaneAnchors = []
         accumulator.reset()
@@ -217,6 +221,12 @@ final class CaptureManager: NSObject, ObservableObject {
                 }
             } catch {
                 log.info("[CaptureManager] bundle assembly failed: \(error.localizedDescription)")
+                // Publish it. Without this bundlePath stays nil forever and any UI
+                // treating "no bundlePath yet" as transient (review's "packing it
+                // up…") waits on a publish that will never come.
+                DispatchQueue.main.async {
+                    self?.assemblyFailure = error.localizedDescription
+                }
             }
         }
     }

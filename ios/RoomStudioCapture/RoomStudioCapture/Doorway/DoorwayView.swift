@@ -79,7 +79,12 @@ struct DoorwayView: View {
                         .multilineTextAlignment(.center)
                         .padding(.top, 14)
                 } else {
-                    Text("Open it on your computer — it's waiting there whenever you are.")
+                    // Same rule as the CTA caption: an anonymous UID doesn't carry
+                    // across devices, so for an unlinked user there is no computer
+                    // where this room exists. Point at sign-in instead of promising.
+                    Text(signedIntoWeb
+                         ? "Open it on your computer — it's waiting there whenever you are."
+                         : "Sign in on this phone and it'll be waiting on your computer too.")
                         .font(RSFont.ui(.footnote))
                         .foregroundStyle(Color.rsOnDark.opacity(0.6))
                         .multilineTextAlignment(.center)

@@ -82,17 +82,22 @@ struct GuestLine: View {
     var size: CGFloat = 16
     var onDark = false
     var textAlignment: TextAlignment = .leading
+    /// Optional growth ceiling, for guest copy sitting between FIXED elements (the
+    /// capture overlay, where the mesh above and the shutter below don't move).
+    /// Body copy elsewhere scales uncapped.
+    var maxSize: CGFloat?
 
-    init(_ text: String, size: CGFloat = 16, onDark: Bool = false, alignment: TextAlignment = .leading) {
+    init(_ text: String, size: CGFloat = 16, onDark: Bool = false, alignment: TextAlignment = .leading, maxSize: CGFloat? = nil) {
         self.text = text
         self.size = size
         self.onDark = onDark
         self.textAlignment = alignment
+        self.maxSize = maxSize
     }
 
     var body: some View {
         Text(text)
-            .rsFont(.guest, size: size)
+            .rsFont(.guest, size: size, maxSize: maxSize)
             .foregroundStyle(onDark ? Color.rsOnDark.opacity(0.82) : Color.rsInkMuted)
             .multilineTextAlignment(textAlignment)
             .lineSpacing(2)

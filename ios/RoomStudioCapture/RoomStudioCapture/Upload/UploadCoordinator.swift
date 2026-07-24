@@ -139,7 +139,9 @@ final class UploadCoordinator: ObservableObject {
             return
         }
         guard let uid = auth.currentUID else {
-            sessionState = .failed("No UID after sign-in — unexpected state.")
+            // Terminal: sign-in reported success with no UID — retrying the same
+            // call cannot resolve an invariant violation.
+            sessionState = .failed("No UID after sign-in — unexpected state.", terminal: true)
             return
         }
 
@@ -186,7 +188,9 @@ final class UploadCoordinator: ObservableObject {
                 }
             )
         } catch UploadSessionError.forbidden(let msg) {
-            sessionState = .failed("Forbidden: \(msg)")
+            // Terminal: a 403 (e.g. bundle_id ownership) will answer identically on
+            // every retry, so the UI must offer an off-ramp, not "Try again".
+            sessionState = .failed("Forbidden: \(msg)", terminal: true)
             return
         } catch UploadSessionError.clientError(let code, let body) {
             // Client bug — log loudly; do not retry. Marked terminal so the UI
