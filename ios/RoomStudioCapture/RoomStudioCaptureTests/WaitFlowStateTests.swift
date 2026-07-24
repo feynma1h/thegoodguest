@@ -14,12 +14,12 @@ final class WaitFlowStateTests: XCTestCase {
     private let anchor = Date(timeIntervalSince1970: 1_700_000_000)
 
     private func screen(
-        session: WaitFlowState.SessionOutcome = .ready,
+        sessionFailure: WaitFlowState.SessionFailure? = nil,
         blobFailed: Bool = false,
         poll: WaitFlowState.PollSnapshot
     ) -> WaitScreen {
         WaitFlowState.screen(
-            session: session,
+            sessionFailure: sessionFailure,
             terminalBlobFailureForThisBundle: blobFailed,
             poll: poll
         )
@@ -46,18 +46,18 @@ final class WaitFlowStateTests: XCTestCase {
     /// A failed upload session outranks everything, including a stale poll state
     /// left over from a previous capture.
     func testFailedSessionOutranksEverything() {
-        XCTAssertEqual(screen(session: .failed(terminal: false), poll: .succeeded),
+        XCTAssertEqual(screen(sessionFailure: .init(terminal: false), poll: .succeeded),
                        .sendFailed(terminal: false))
-        XCTAssertEqual(screen(session: .failed(terminal: true), blobFailed: true, poll: .succeeded),
+        XCTAssertEqual(screen(sessionFailure: .init(terminal: true), blobFailed: true, poll: .succeeded),
                        .sendFailed(terminal: true))
     }
 
     /// A permanent 4xx is distinguishable from a retryable failure, so the UI can
     /// stop offering a retry that provably cannot work.
     func testTerminalSendFailureIsDistinguishable() {
-        XCTAssertEqual(screen(session: .failed(terminal: true), poll: .idle),
+        XCTAssertEqual(screen(sessionFailure: .init(terminal: true), poll: .idle),
                        .sendFailed(terminal: true))
-        XCTAssertNotEqual(screen(session: .failed(terminal: true), poll: .idle),
+        XCTAssertNotEqual(screen(sessionFailure: .init(terminal: true), poll: .idle),
                           .sendFailed(terminal: false))
     }
 
@@ -115,6 +115,67 @@ final class WaitFlowStateTests: XCTestCase {
         XCTAssertEqual(
             screen(poll: .polling(queued: false, longRunning: false, connectionTrouble: false, anchor: nil)),
             .waiting(phase: .analyzing, anchor: nil)
+        )
+    }
+
+    // MARK: - Adapters (a correct table fed a wrong snapshot is still a wrong screen)
+
+    @MainActor
+    func testSessionFailureAdapterCarriesTerminality() {
+        XCTAssertNil(WaitFlowState.sessionFailure(from: .idle))
+        XCTAssertNil(WaitFlowState.sessionFailure(from: .creatingSession))
+        XCTAssertEqual(WaitFlowState.sessionFailure(from: .failed("net")),
+                       .init(terminal: false))
+        XCTAssertEqual(WaitFlowState.sessionFailure(from: .failed("403", terminal: true)),
+                       .init(terminal: true))
+    }
+
+    func testPollSnapshotAdapterMapsEveryState() {
+        XCTAssertEqual(WaitFlowState.snapshot(from: .idle, fallbackAnchor: nil), .idle)
+        XCTAssertEqual(WaitFlowState.snapshot(from: .failedTerminal(.failed), fallbackAnchor: nil),
+                       .failedTerminal)
+        XCTAssertEqual(WaitFlowState.snapshot(from: .recoverable(missingPaths: ["a"]), fallbackAnchor: nil),
+                       .recoverable)
+    }
+
+    /// The server anchor is the payload .pollError does not carry; the adapter must
+    /// substitute the retained one so the elapsed clock survives the transition.
+    func testPollErrorAdapterUsesTheFallbackAnchor() {
+        XCTAssertEqual(WaitFlowState.snapshot(from: .pollError("boom"), fallbackAnchor: anchor),
+                       .pollError(anchor: anchor))
+        XCTAssertEqual(WaitFlowState.snapshot(from: .pollError("boom"), fallbackAnchor: nil),
+                       .pollError(anchor: nil))
+    }
+
+    /// `queued` is derived from the payload's status, not from a separate flag.
+    func testPollingAdapterDerivesQueuedFromStatus() {
+        let queued = WaitFlowState.snapshot(
+            from: .polling(latest: .queued, since: anchor, sceneCreatedAt: anchor,
+                           longRunning: false, connectionTrouble: false),
+            fallbackAnchor: nil)
+        XCTAssertEqual(queued, .polling(queued: true, longRunning: false,
+                                        connectionTrouble: false, anchor: anchor))
+
+        let processing = WaitFlowState.snapshot(
+            from: .polling(latest: .processing, since: anchor, sceneCreatedAt: nil,
+                           longRunning: true, connectionTrouble: true),
+            fallbackAnchor: anchor)
+        XCTAssertEqual(processing, .polling(queued: false, longRunning: true,
+                                            connectionTrouble: true, anchor: nil),
+                       "a polling anchor must come from the payload, never the fallback")
+    }
+
+    /// End-to-end through the adapters: the defect that started this — polling not
+    /// yet begun during an upload must never render as 'analyzing'.
+    @MainActor
+    func testAdaptersEndToEndIdleIsSending() {
+        XCTAssertEqual(
+            WaitFlowState.screen(
+                sessionFailure: WaitFlowState.sessionFailure(from: .creatingSession),
+                terminalBlobFailureForThisBundle: false,
+                poll: WaitFlowState.snapshot(from: .idle, fallbackAnchor: nil)
+            ),
+            .sending
         )
     }
 

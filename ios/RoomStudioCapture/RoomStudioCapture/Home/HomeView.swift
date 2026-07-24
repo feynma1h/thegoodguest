@@ -21,14 +21,17 @@ struct HomeView<RoomsStrip: View>: View {
             header
                 .padding(.top, 8)
 
-            if hasRooms {
-                roomsStrip()
-                    .padding(.top, 20)
-                Spacer(minLength: 20)
-            } else {
-                Spacer()
-                hero
-                Spacer()
+            // Scrollable: at accessibility sizes the hero claim + support line
+            // exceed the space between the header and the CTA, and with fixed
+            // Spacers the clipped text was unrecoverable.
+            ScrollView {
+                if hasRooms {
+                    roomsStrip()
+                        .padding(.top, 20)
+                } else {
+                    hero
+                        .padding(.top, 28)
+                }
             }
 
             scanAction

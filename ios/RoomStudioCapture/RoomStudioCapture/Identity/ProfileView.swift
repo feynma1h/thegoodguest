@@ -29,50 +29,56 @@ struct ProfileView: View {
         VStack(spacing: 0) {
             header
 
-            VStack(spacing: 0) {
-                WordmarkGlyph(size: 76, color: .rsInk, filled: true)
-                    .padding(.top, 6)
+            // Scrollable: at accessibility sizes the intro copy alone fills the
+            // screen, pushing the ID card and the sign-in action off the bottom.
+            ScrollView {
+                VStack(spacing: 0) {
+                    WordmarkGlyph(size: 76, color: .rsInk, filled: true)
+                        .padding(.top, 6)
 
-                Text(isLinked ? "Signed in" : "A guest, so far")
-                    .rsFont(.guest, size: 18)
-                    .foregroundStyle(Color.rsInk)
-                    .padding(.top, 14)
+                    Text(isLinked ? "Signed in" : "A guest, so far")
+                        .rsFont(.guest, size: 18)
+                        .foregroundStyle(Color.rsInk)
+                        .padding(.top, 14)
 
-                Text("This device is already someone — your rooms are tied to the ID below. Sign in to keep them safe across devices.")
-                    .font(RSFont.ui(.subheadline))
-                    .foregroundStyle(Color.rsInkMuted)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 6)
-                    .padding(.horizontal, 20)
-            }
-            .padding(.top, 16)
+                    Text("This device is already someone — your rooms are tied to the ID below. Sign in to keep them safe across devices.")
+                        .font(RSFont.ui(.subheadline))
+                        .foregroundStyle(Color.rsInkMuted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                        .padding(.horizontal, 20)
 
-            idCard
-                .padding(.top, 22)
+                    idCard
+                        .padding(.top, 22)
 
-            if !isLinked {
-                // Opens the real, conflict-aware sign-in flow (SignInSheet →
-                // AuthManager.linkAppleAccount). The native Apple button lives
-                // inside that sheet — we don't fake it here.
-                Button { showSignIn = true } label: {
-                    Text("Sign in to keep your rooms")
-                        .font(RSFont.ui(.headline, weight: .semibold))
-                        .foregroundStyle(Color.rsSurface)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
-                        .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    if !isLinked {
+                        // Opens the real, conflict-aware sign-in flow (SignInSheet →
+                        // AuthManager.linkAppleAccount). The native Apple button lives
+                        // inside that sheet — we don't fake it here.
+                        Button { showSignIn = true } label: {
+                            Text("Sign in to keep your rooms")
+                                .font(RSFont.ui(.headline, weight: .semibold))
+                                .foregroundStyle(Color.rsSurface)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 15)
+                                .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        }
+                        .padding(.top, 16)
+                    }
+
+                    Text("Signing out lives on the web — this app only ever remembers you")
+                        .font(RSFont.ui(.footnote))
+                        .foregroundStyle(Color.rsInkFaint)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 28)
+                        .padding(.bottom, 14)
                 }
                 .padding(.top, 16)
             }
-
-            Spacer()
-
-            Text("Signing out lives on the web — this app only ever remembers you")
-                .font(RSFont.ui(.footnote))
-                .foregroundStyle(Color.rsInkFaint)
-                .multilineTextAlignment(.center)
-                .padding(.bottom, 14)
         }
         .padding(.horizontal, 26)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -101,7 +107,10 @@ struct ProfileView: View {
                 Eyebrow("Your ID")
                 if let uid {
                     Text(uid)
-                        .rsFont(.mono, size: 13.5, weight: .medium)
+                        // Wraps rather than truncates: a partial ID can't serve as
+                        // proof of identity continuity, which is this card's job.
+                        .rsFont(.mono, size: 13.5, weight: .medium, maxSize: 20)
+                        .fixedSize(horizontal: false, vertical: true)
                         .foregroundStyle(Color.rsInk)
                 } else {
                     Text("Not ready yet — I'll have it once I reach the desk.")

@@ -27,3 +27,28 @@ extension View {
         }
     }
 }
+
+
+/// Makes a fixed-layout screen scrollable so accessibility text sizes can never
+/// push content (or its only action) off-screen unrecoverably. `background` nil
+/// uses the parchment treatment.
+struct RSScrollableScreen: ViewModifier {
+    var background: Color?
+
+    func body(content: Content) -> some View {
+        ScrollView {
+            content
+                // Fill the screen when content is short, so Spacer()-based vertical
+                // centring still reads as designed at normal text sizes.
+                .frame(minHeight: UIScreen.main.bounds.height - 120)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            if let background {
+                background.ignoresSafeArea()
+            } else {
+                ParchmentBackground().ignoresSafeArea()
+            }
+        }
+    }
+}

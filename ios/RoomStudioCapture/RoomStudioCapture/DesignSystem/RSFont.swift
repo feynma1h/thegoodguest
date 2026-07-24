@@ -29,8 +29,10 @@
 ///   • it honours in-app `.dynamicTypeSize(...)` overrides, which never touch
 ///     `UITraitCollection.current` at all.
 ///
-/// Every fixed-size variant is capped (`maxSize`) so accessibility sizes enlarge
-/// text without destroying fixed-geometry controls.
+/// Fixed-size text scales UNCAPPED by default; pass `maxSize` only for text inside
+/// a fixed frame (the capture shutter, coverage ticks, a metric strip). A blanket
+/// cap inverts the type hierarchy, because the text-style variants scale without
+/// one.
 ///
 /// There are deliberately NO fixed-size `Font`-returning helpers: a `Font` cannot
 /// read the environment, so offering one would be offering a silently inert path.
@@ -169,11 +171,12 @@ private struct RSScaledFont: ViewModifier {
 extension View {
     /// Apply a fixed-size Good Guest font.
     ///
-    /// - Parameter maxSize: ceiling in points. Defaults to 1.6× the base size,
-    ///   which lets accessibility settings enlarge text meaningfully without
-    ///   bursting the fixed-geometry controls this design uses (the capture
-    ///   shutter, coverage ticks, metric strips). Pass a tighter cap for text
-    ///   inside a fixed frame, or nil to scale without limit.
+    /// - Parameter maxSize: optional ceiling in points, for text inside a FIXED
+    ///   frame (the capture shutter, coverage ticks, a metric strip) where
+    ///   unbounded growth would burst the control. Defaults to nil — body copy must
+    ///   scale freely, and a blanket cap here inverted the type hierarchy at
+    ///   accessibility sizes (capped serif hero rendering smaller than uncapped
+    ///   sans support text, since the text-style variants scale without limit).
     func rsFont(
         _ role: RSFontRole,
         size: CGFloat,
@@ -183,7 +186,7 @@ extension View {
     ) -> some View {
         modifier(RSScaledFont(
             role: role, size: size, weight: weight,
-            relativeTo: relativeTo, maxSize: maxSize ?? size * 1.6
+            relativeTo: relativeTo, maxSize: maxSize
         ))
     }
 }

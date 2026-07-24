@@ -109,8 +109,9 @@ struct WaitingView: View {
 
             // The wait must never be a trap: without this there is no back gesture
             // (the flow has no NavigationStack) and no control, so the user is held
-            // on this screen until a terminal poll state arrives. Polling continues
-            // in the background — leaving is free.
+            // here until a terminal poll state arrives. Leaving is reversible — home
+            // shows a re-entry row while a room is in flight, and re-entering resumes
+            // polling from the persisted upload record (RootFlowView).
             Button(action: onLeave) {
                 Text("Leave it with me")
                     .font(RSFont.ui(.subheadline, weight: .medium))

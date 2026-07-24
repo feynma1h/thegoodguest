@@ -177,8 +177,12 @@ final class ScenePoller: ObservableObject {
 
     /// Resume after a pause. Polls immediately (no initial cadence wait).
     /// No-op if already in a hard terminal or recoverable state.
+    ///
+    /// Does NOT touch `isVisible`: that flag means "a status surface is on screen"
+    /// and is owned by setVisible(). Setting it here made a background→foreground
+    /// transition assert visibility even when no status surface was mounted, which
+    /// the completion kick's guard then trusted.
     func resume() {
-        isVisible = true
         guard let bundleId = currentBundleId else { return }
         switch pollState {
         case .succeeded, .failedTerminal, .recoverable, .pollError: return

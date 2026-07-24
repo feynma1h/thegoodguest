@@ -52,11 +52,11 @@ enum WaitFlowState {
     /// 3. Otherwise the poll state decides, and `.idle` means "not polling yet",
     ///    which during a send means still uploading — never "analyzing".
     static func screen(
-        session: SessionOutcome,
+        sessionFailure: SessionFailure?,
         terminalBlobFailureForThisBundle: Bool,
         poll: PollSnapshot
     ) -> WaitScreen {
-        if case .failed(let terminal) = session { return .sendFailed(terminal: terminal) }
+        if let sessionFailure { return .sendFailed(terminal: sessionFailure.terminal) }
         if terminalBlobFailureForThisBundle { return .uploadFailed }
 
         switch poll {
@@ -77,11 +77,39 @@ enum WaitFlowState {
         }
     }
 
-    /// The upload-session half of the input, reduced to what routing needs.
-    enum SessionOutcome: Equatable {
-        case pending
-        case ready
-        case failed(terminal: Bool)
+    /// The upload-session half of the input, reduced to WHAT ROUTING ACTUALLY USES:
+    /// only failure changes the screen. Modelling .pending/.ready as distinct cases
+    /// implied a routing input that did not exist — it read as coverage in a table
+    /// test without being any.
+    struct SessionFailure: Equatable {
+        /// Retrying provably cannot fix it (a 4xx, a 403, a broken invariant).
+        let terminal: Bool
+    }
+
+    /// Adapt the real coordinator state. Lives here, beside the table it feeds, so
+    /// the adapter is testable too: a correct table fed a wrong snapshot is still
+    /// the wrong screen.
+    static func sessionFailure(from state: UploadCoordinator.SessionState) -> SessionFailure? {
+        if case .failed(_, let terminal) = state { return SessionFailure(terminal: terminal) }
+        return nil
+    }
+
+    /// Adapt the real poll state. `fallbackAnchor` supplies the server anchor for
+    /// `.pollError`, which carries no payload of its own.
+    static func snapshot(from state: ScenePollState, fallbackAnchor: Date?) -> PollSnapshot {
+        switch state {
+        case .idle:
+            return .idle
+        case .polling(let latest, _, let sceneCreatedAt, let longRunning, let connectionTrouble):
+            return .polling(queued: latest == .queued,
+                            longRunning: longRunning,
+                            connectionTrouble: connectionTrouble,
+                            anchor: sceneCreatedAt)
+        case .succeeded:      return .succeeded
+        case .failedTerminal: return .failedTerminal
+        case .recoverable:    return .recoverable
+        case .pollError:      return .pollError(anchor: fallbackAnchor)
+        }
     }
 
     /// The poll half, reduced likewise. `anchor` is always the server-side scene

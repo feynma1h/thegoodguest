@@ -25,8 +25,8 @@
 /// GET /scenes fetch + trigger points), WhySignInSheet / AccountConflictView
 /// (§8 — BOTH are unreachable: SignInSheet handles the conflict with two stock
 /// `.alert`s and never presents AccountConflictView), and ColdStartView (§1 — the flow
-/// opens directly at .home; identity is minted lazily on first send, so the
-/// cold-start splash has no trigger). These have no entry point here and appear
+/// opens directly at .home, and identity is minted by the app-level launch task,
+/// so nothing ever waits on a splash). These have no entry point here and appear
 /// only in their own previews.
 
 import ARKit
@@ -40,6 +40,7 @@ struct RootFlowView: View {
 
     @ObservedObject private var auth = AuthManager.shared
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     @State private var stage: Stage = .home
     @State private var showGuidance = false
@@ -52,6 +53,9 @@ struct RootFlowView: View {
     /// keeping it here is what lets the poll-error screen show the elapsed clock and
     /// its "keeps its place in line" reassurance instead of silently hiding both.
     @State private var lastSceneCreatedAt: Date?
+    /// Incremented per send; an in-flight task whose generation is stale drops its
+    /// writes rather than overwriting a newer capture's state.
+    @State private var sendGeneration: Int = 0
 
     enum Stage: Equatable { case home, capturing, gotRoom, review, sent }
 
@@ -134,7 +138,7 @@ struct RootFlowView: View {
                 // that can outlast the 1.8 s got-the-room hold. Sending early hits
                 // beginUploadSession's "No bundle on disk" guard and shows a send
                 // FAILURE for a capture that is perfectly fine and merely unfinished.
-                canSend: !isEmptyCapture && !isPreparingBundle,
+                canSend: !isEmptyCapture && !isPreparingBundle && capture.assemblyFailure == nil,
                 // HONEST LABEL: CaptureManager.startCapture() mints a new bundleId
                 // and clears frames/anchors/outputDir — this REPLACES the pass, it
                 // does not extend it. True append (preserving bundleId + frames) is
@@ -162,6 +166,27 @@ struct RootFlowView: View {
                 )
                 .padding([.horizontal, .top], 20)
             }
+            if sentBundleId != nil {
+                // Re-entry. Without this, leaving the wait was one-way: the room
+                // keeps processing but no surface could ever show it again, so
+                // "leaving is free" was false.
+                Button { stage = .sent } label: {
+                    HStack(spacing: 9) {
+                        Circle().fill(Color.rsGold).frame(width: 7, height: 7)
+                        Text("One room is on its way — check on it")
+                            .font(RSFont.ui(.subheadline, weight: .medium))
+                            .foregroundStyle(Color.rsInk)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.rsInk.opacity(0.4))
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 11)
+                    .background(Color.rsSurface.opacity(0.9), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.rsHairline, lineWidth: 1))
+                }
+                .padding([.horizontal, .top], 20)
+            }
             HomeView(
                 onScan: { showGuidance = true },
                 onProfile: { showProfile = true }
@@ -181,7 +206,9 @@ struct RootFlowView: View {
                 },
                 onDismiss: { showGuidance = false }
             )
-            .presentationDetents([.medium, .large])
+            // At accessibility sizes the .medium detent leaves almost no room for
+            // content once the pinned CTA is placed — open large instead.
+            .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showProfile) {
@@ -201,35 +228,12 @@ struct RootFlowView: View {
     /// by tests and read as a table; this property only maps that decision to views.
     private var waitScreen: WaitScreen {
         WaitFlowState.screen(
-            session: sessionOutcome,
+            sessionFailure: WaitFlowState.sessionFailure(from: coordinator.sessionState),
             terminalBlobFailureForThisBundle: sentBundleId != nil
                 && failures.latestFailure?.bundleId == sentBundleId,
-            poll: pollSnapshot
+            poll: WaitFlowState.snapshot(from: poller.pollState,
+                                         fallbackAnchor: lastSceneCreatedAt)
         )
-    }
-
-    private var sessionOutcome: WaitFlowState.SessionOutcome {
-        switch coordinator.sessionState {
-        case .failed(_, let terminal): return .failed(terminal: terminal)
-        case .ready:                   return .ready
-        default:                       return .pending
-        }
-    }
-
-    private var pollSnapshot: WaitFlowState.PollSnapshot {
-        switch poller.pollState {
-        case .idle:
-            return .idle
-        case .polling(let latest, _, let sceneCreatedAt, let longRunning, let connectionTrouble):
-            return .polling(queued: latest == .queued,
-                            longRunning: longRunning,
-                            connectionTrouble: connectionTrouble,
-                            anchor: sceneCreatedAt)
-        case .succeeded:      return .succeeded
-        case .failedTerminal: return .failedTerminal
-        case .recoverable:    return .recoverable
-        case .pollError:      return .pollError(anchor: lastSceneCreatedAt)
-        }
     }
 
     @ViewBuilder
@@ -241,7 +245,15 @@ struct RootFlowView: View {
                 // a status surface is visible. Nothing else sets this at cold launch,
                 // so without it the kick no-ops and — now that sendItHome no longer
                 // polls eagerly — polling would never begin.
-                .onAppear { ScenePoller.shared.setVisible(true) }
+                .onAppear {
+                    ScenePoller.shared.setVisible(true)
+                    // INDEPENDENT of the completion kick. The kick (onBundleComplete →
+                    // notifyBundleComplete) is dropped when no status surface is
+                    // visible, so a user who leaves the wait mid-upload would never
+                    // get polling started again. Reading the persisted `.complete`
+                    // record is the same seam SceneStatusView uses.
+                    Task { await resumePollIfUploadFinished() }
+                }
                 .onDisappear { ScenePoller.shared.setVisible(false) }
                 .onChange(of: poller.pollState) { _, _ in retainAnchor() }
             // A terminal blob failure for a DIFFERENT (earlier) bundle is otherwise
@@ -309,8 +321,9 @@ struct RootFlowView: View {
         case .uploadFailed:
             // The blobs for THIS bundle failed terminally: bundle.pb never lands, no
             // Scene doc is ever created, and the poller would 404 → keep polling
-            // forever (it never hard-gives-up by design). Stop it and say so.
-            FailureView(kind: .terminal,
+            // forever (it never hard-gives-up by design). Stop it and say so — with
+            // upload-honest copy and the reason, since the banner is suppressed here.
+            FailureView(kind: .uploadFailed(reason: failures.latestFailure?.reason),
                         onPrimary: rescanFromScratch,
                         onSecondary: { stage = .home })
                 .onAppear { ScenePoller.shared.reset() }
@@ -350,10 +363,23 @@ struct RootFlowView: View {
         // window — and a stale "Try now" could re-poll the wrong bundle. reset()
         // (not pause()) is required: pause() deliberately preserves state.
         sentBundleId = nil
+        lastSceneCreatedAt = nil   // per-send, not per-view: a retained anchor from a
+                                   // previous capture would time THIS room's clock
+                                   // from the previous room's arrival.
         ScenePoller.shared.reset()
         coordinator.reset()
+        // Snapshot the id SYNCHRONOUSLY. Reading capture.bundleIdString after the
+        // await let a "leave → scan again" in the gap mint a new bundleId, so this
+        // capture's task would record the NEXT capture's id — poisoning the blob-
+        // failure match, the deep link, and the poll restart.
+        let bundleId = capture.bundleIdString
+        sendGeneration &+= 1
+        let generation = sendGeneration
         Task {
             await coordinator.beginUploadSession(for: capture)
+            // A newer send superseded this one while it was in flight; its writes
+            // must not clobber the current capture's state.
+            guard generation == sendGeneration else { return }
             // Record the bundle, but do NOT start polling yet. The blobs are still
             // uploading (bundle.pb goes last, decision 0041), so no Scene document
             // can exist: every poll would 404 → .notCreated → latest stays .queued →
@@ -363,9 +389,21 @@ struct RootFlowView: View {
             // kick (BlobUploadManager.onBundleComplete → notifyBundleComplete),
             // which is the architecture SceneStatusView already uses.
             if case .ready = coordinator.sessionState {
-                sentBundleId = capture.bundleIdString
+                sentBundleId = bundleId
             }
         }
+    }
+
+    /// If the blobs for the sent bundle already finished while no status surface was
+    /// mounted, start polling now. Safe to call repeatedly: ScenePoller.start is
+    /// idempotent for the same bundle, and a record that isn't `.complete` is a no-op.
+    private func resumePollIfUploadFinished() async {
+        guard let bundleId = sentBundleId,
+              case .idle = ScenePoller.shared.pollState,
+              let record = try? await UploadSessionStore.shared.load(bundleId: bundleId),
+              record.uploadPhase == .complete
+        else { return }
+        ScenePoller.shared.start(bundleId: bundleId)
     }
 
     private func rescanFromScratch() {
@@ -438,12 +476,19 @@ struct RootFlowView: View {
     private var isEmptyCapture: Bool { capture.frameCount == 0 }
 
     /// Frames exist but bundle.pb hasn't been published yet (stopCapture assembles
-    /// it off the main queue). Transient — the publish flips this.
-    private var isPreparingBundle: Bool { !isEmptyCapture && capture.bundlePath == nil }
+    /// it off the main queue). Transient — the publish flips it, UNLESS assembly
+    /// failed, which is terminal and reported separately.
+    private var isPreparingBundle: Bool {
+        !isEmptyCapture && capture.bundlePath == nil && capture.assemblyFailure == nil
+    }
 
     private var reviewVerdict: String {
         if isEmptyCapture {
             return "I didn't catch anything on that pass — nothing to send yet. Let's walk the room again."
+        }
+        if let failure = capture.assemblyFailure {
+            // Terminal: the publish will never come, so this must not read as a wait.
+            return "I couldn't pack this one up to send — \(failure). Let's walk the room again."
         }
         if isPreparingBundle {
             return "Packing it up — one moment before it can travel."
