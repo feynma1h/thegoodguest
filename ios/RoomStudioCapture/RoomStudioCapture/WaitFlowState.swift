@@ -32,6 +32,10 @@ enum WaitScreen: Equatable {
     case incompleteUpload
     /// Could not send it up. `terminal` = retrying provably cannot help.
     case sendFailed(terminal: Bool)
+    /// The upload PAUSED (retries exhausted this launch, or the process lost its
+    /// context). It resumes on the next launch — not in this one — so the screen
+    /// must stop implying that waiting here will do anything.
+    case sendPaused
     /// The blobs for THIS capture failed terminally — no Scene will ever exist.
     case uploadFailed
     /// Lost contact while checking on an uploaded room; `stopped` = loop is dead.
@@ -54,6 +58,7 @@ enum WaitFlowState {
     static func screen(
         sessionFailure: SessionFailure?,
         terminalBlobFailureForThisBundle: Bool,
+        deferredForThisBundle: Bool = false,
         poll: PollSnapshot
     ) -> WaitScreen {
         if let sessionFailure { return .sendFailed(terminal: sessionFailure.terminal) }
@@ -61,7 +66,9 @@ enum WaitFlowState {
 
         switch poll {
         case .idle:
-            return .sending
+            // Only meaningful pre-poll: once polling starts the bytes are up, so a
+            // stale deferral must never override a live wait.
+            return deferredForThisBundle ? .sendPaused : .sending
         case .polling(let queued, let longRunning, let connectionTrouble, let anchor):
             if connectionTrouble { return .checkFailed(anchor: anchor, stopped: false) }
             let phase: WaitPhase = longRunning ? .longRunning : (queued ? .queued : .analyzing)

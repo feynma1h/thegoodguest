@@ -73,8 +73,8 @@ struct WhySignInSheet: View {
         .padding(.horizontal, 26)
         .padding(.top, 26)
         .padding(.bottom, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.rsSurface.ignoresSafeArea())
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .modifier(RSScrollableScreen(background: Color.rsSurface))
     }
 
     private var roomWord: String {

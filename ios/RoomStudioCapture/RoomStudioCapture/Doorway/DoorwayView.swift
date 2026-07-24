@@ -100,6 +100,8 @@ struct DoorwayView: View {
             }
             .padding(.horizontal, 30)
             .padding(.bottom, 20)
+            .frame(maxWidth: .infinity)
+            .modifier(RSScrollableScreen(background: nil, transparent: true))
         }
         .onAppear {
             RSHaptics.fire(.roomReady)

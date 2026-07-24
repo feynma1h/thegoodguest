@@ -37,8 +37,21 @@ final class UploadFailureMonitor: ObservableObject {
         let reason: String
     }
 
+    struct UploadDeferral: Equatable {
+        let bundleId: String
+        let reason: String
+    }
+
     /// The failure currently surfaced to the UI; nil renders nothing.
     @Published private(set) var latestFailure: UploadFailure?
+
+    /// An upload that PAUSED rather than failed: retries are exhausted for this
+    /// launch (DEFERRED-TRANSIENT) or the process lost its context (DEFERRED-
+    /// INTERRUPTED). Recovery is real but only happens via
+    /// rehydrateAllUnfinishedBundles at the NEXT launch, so a screen that keeps
+    /// saying "sending…" is telling the user to wait for something that cannot
+    /// happen in this process. Cleared when the bundle progresses or a new send starts.
+    @Published private(set) var latestDeferral: UploadDeferral?
 
     /// BundleIds dismissed this launch. refresh() skips them and the kick ignores them.
     /// Deliberately not persisted — see the dismissal semantics in the header.
@@ -56,6 +69,19 @@ final class UploadFailureMonitor: ObservableObject {
     func notifyUploadFailed(bundleId: String, reason: String) {
         guard !dismissedThisLaunch.contains(bundleId) else { return }
         latestFailure = UploadFailure(bundleId: bundleId, reason: reason)
+    }
+
+    /// In-process kick from BlobUploadManager's deferral paths. In-memory only:
+    /// the persisted record already carries the state, and the relaunch rehydration
+    /// is the actual recovery mechanism.
+    func notifyUploadDeferred(bundleId: String, reason: String) {
+        latestDeferral = UploadDeferral(bundleId: bundleId, reason: reason)
+    }
+
+    /// Clear a deferral once the bundle moves again (a new send, or completion).
+    func clearDeferral(bundleId: String? = nil) {
+        if let bundleId, latestDeferral?.bundleId != bundleId { return }
+        latestDeferral = nil
     }
 
     /// Independent scan path: surface the most recent undismissed .failed record.
