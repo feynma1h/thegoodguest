@@ -4,8 +4,9 @@
 ///
 ///   • recoverable — part of the room made it; the bad region is set aside (never
 ///     rendered broken), with a targeted rescan of just that spot.
-///   • terminal — nothing survived; the deepest ink surface, a forgivable cause
-///     offered as shared context, one path: try again.
+///   • terminal — nothing survived; the deepest ink surface, one path: try again.
+///     No specific cause is named — the pipeline surfaces no honest per-object
+///     reason, so the copy stays general rather than inventing one.
 ///
 /// The upload-failed relaunch banner is `UploadFailedBanner` (separate file), so
 /// a failure is never silently lost.
@@ -15,7 +16,7 @@ import SwiftUI
 struct FailureView: View {
     enum Kind: Equatable {
         case recoverable(region: String)
-        case terminal(cause: String)
+        case terminal
     }
 
     var kind: Kind = .recoverable(region: "The corner by the door")
@@ -25,7 +26,7 @@ struct FailureView: View {
     var body: some View {
         switch kind {
         case .recoverable(let region): recoverable(region: region)
-        case .terminal(let cause):     terminal(cause: cause)
+        case .terminal:                terminal
         }
     }
 
@@ -89,7 +90,7 @@ struct FailureView: View {
 
     // MARK: Terminal
 
-    private func terminal(cause: String) -> some View {
+    private var terminal: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
 
@@ -102,7 +103,7 @@ struct FailureView: View {
                 .foregroundStyle(Color.rsOnDark)
                 .padding(.top, 24)
 
-            GuestLine("There's nothing here I could honestly show you — and it's not something you did. When you're near the room again, let's try one more pass. Slower is better, and I'll be less confused by \(cause) this time.",
+            GuestLine("There's nothing here I could honestly show you — and it's not something you did. When you're near the room again, let's try one more pass. Slower is better this time.",
                       size: 15.5, onDark: true)
                 .padding(.top, 14)
 
@@ -128,5 +129,5 @@ struct FailureView: View {
 }
 
 #Preview("Terminal") {
-    FailureView(kind: .terminal(cause: "the mirror"))
+    FailureView(kind: .terminal)
 }
