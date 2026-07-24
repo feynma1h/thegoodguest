@@ -198,6 +198,19 @@ final class ScenePoller: ObservableObject {
         logger.info("[ScenePoller] resumed \(bundleId, privacy: .public)")
     }
 
+    /// Hard reset to the pre-send baseline. Unlike pause() — which deliberately
+    /// PRESERVES pollState/currentBundleId so resume() can render instantly — reset()
+    /// drops the loop AND returns to .idle with no bundle. Call this synchronously
+    /// before starting a new bundle so a fresh send never renders the previous
+    /// capture's terminal outcome (a prior .succeeded/.failedTerminal/.pollError)
+    /// during the setup window, and so a stale "Try now" can't re-poll the old bundle.
+    func reset() {
+        cancelLoop()
+        currentBundleId = nil
+        pollState = .idle
+        logger.info("[ScenePoller] reset")
+    }
+
     /// Fire an immediate poll tick by cancelling the current cadence sleep.
     /// Safe to call at any time; no-op if no sleep is in progress.
     func checkNow() {

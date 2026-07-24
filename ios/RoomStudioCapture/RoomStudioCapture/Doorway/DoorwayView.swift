@@ -11,11 +11,22 @@
 /// Handoff transport (universal link to the web, same signed-in identity) is
 /// enrollment/entitlement-gated (associated-domains) — `onStepThrough` is the
 /// seam; wire the real link when the gate clears (decision 0072).
+///
+/// `onScanAnother` is NOT transport-gated and must exist now: without a way back,
+/// a successful capture is a dead end (the poller sits on .succeeded, so nothing
+/// re-enables capture) and the only escape is force-quitting the app.
+///
+/// `signedIntoWeb` gates the "you're already signed in there" line: it is only
+/// true once the user has linked Sign in with Apple (decision 0051). An
+/// anonymous-only user is NOT signed in on the web (anon UIDs don't carry across
+/// devices), so the claim must not ship for them.
 
 import SwiftUI
 
 struct DoorwayView: View {
     var onStepThrough: () -> Void = {}
+    var onScanAnother: () -> Void = {}
+    var signedIntoWeb: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var bloom = false
@@ -55,11 +66,20 @@ struct DoorwayView: View {
                 .buttonStyle(RSGoldButtonStyle())
                 .padding(.top, 26)
 
-                Text("Opens your desk in the browser · you're already signed in there")
+                Text(signedIntoWeb
+                     ? "Opens your desk in the browser · you're already signed in there"
+                     : "Opens your desk in the browser")
                     .font(RSFont.ui(.footnote))
                     .foregroundStyle(Color.rsOnDark.opacity(0.6))
                     .multilineTextAlignment(.center)
                     .padding(.top, 14)
+
+                Button(action: onScanAnother) {
+                    Text("Scan another room")
+                        .font(RSFont.ui(.subheadline, weight: .medium))
+                        .foregroundStyle(Color.rsOnDark.opacity(0.85))
+                }
+                .padding(.top, 22)
             }
             .padding(.horizontal, 30)
             .padding(.bottom, 20)

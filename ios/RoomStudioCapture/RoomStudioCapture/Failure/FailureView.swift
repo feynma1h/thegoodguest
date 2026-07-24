@@ -2,8 +2,13 @@
 /// the guest owns what it couldn't do, never blames the user, and always offers
 /// exactly one concrete path. Two kinds:
 ///
-///   • recoverable — part of the room made it; the bad region is set aside (never
-///     rendered broken), with a targeted rescan of just that spot.
+///   • recoverable — the backend's `failed_incomplete`: not all of the room's
+///     data reached the desk (an incomplete upload). There is no partial room to
+///     show honestly and — today — no re-upload of just the missing blobs (see the
+///     CLAUDE.md "no automatic re-upload for .recoverable" gap), so the one honest
+///     path is a full rescan. NO specific bad region is named: the missing items
+///     are upload blobs, not a known corner of the room. When the re-upload
+///     coordinator lands, this becomes "send the rest" against `missingPaths`.
 ///   • terminal — nothing survived; the deepest ink surface, one path: try again.
 ///     No specific cause is named — the pipeline surfaces no honest per-object
 ///     reason, so the copy stays general rather than inventing one.
@@ -15,43 +20,44 @@ import SwiftUI
 
 struct FailureView: View {
     enum Kind: Equatable {
-        case recoverable(region: String)
+        case recoverable
         case terminal
     }
 
-    var kind: Kind = .recoverable(region: "The corner by the door")
+    var kind: Kind = .recoverable
     var onPrimary: () -> Void = {}
     var onSecondary: () -> Void = {}
 
     var body: some View {
         switch kind {
-        case .recoverable(let region): recoverable(region: region)
-        case .terminal:                terminal
+        case .recoverable: recoverable
+        case .terminal:    terminal
         }
     }
 
-    // MARK: Recoverable
+    // MARK: Recoverable (incomplete upload → full rescan)
 
-    private func recoverable(region: String) -> some View {
+    private var recoverable: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 12)
 
-            // The capture, with the bad region set aside — never rendered broken.
-            ZStack(alignment: .topTrailing) {
+            // The drawn sketch as ambient brand art — NOT a claim that a partial
+            // room was captured; failed_incomplete is an upload gap, not a coverage
+            // one, and there is no honest partial to render.
+            ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(Color.rsCaptureRaised)
-                RoomSketch().padding(20)
-                setAsideTag.padding(14)
+                RoomSketch().padding(20).opacity(0.5)
             }
             .frame(height: 200)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             RSCard {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("Most of the room made it")
+                    Text("The room didn't all make it up")
                         .font(RSFont.ui(.callout, weight: .semibold))
                         .foregroundStyle(Color.rsInk)
-                    Text("\(region) arrived scrambled, so I've set it aside rather than show you something false. We can work without it — or send that one corner again. Thirty seconds of phone time.")
+                    Text("Some of your room's data didn't finish its trip to the desk, so I can't show you a partial version honestly. Nothing's wrong with the room itself — one more full pass and I'll have all of it.")
                         .font(RSFont.guest(size: 14.5))
                         .foregroundStyle(Color.rsInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -63,9 +69,9 @@ struct FailureView: View {
             Spacer()
 
             VStack(spacing: 10) {
-                Button(action: onPrimary) { Text("Rescan just that corner") }
+                Button(action: onPrimary) { Text("Scan the room again") }
                     .buttonStyle(RSPrimaryButtonStyle())
-                Button(action: onSecondary) { Text("Use it as is") }
+                Button(action: onSecondary) { Text("Not now") }
                     .buttonStyle(RSQuietButtonStyle())
             }
             .padding(.bottom, 8)
@@ -74,18 +80,6 @@ struct FailureView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rsParchmentScreen()
         .onAppear { RSHaptics.fire(.failure) }
-    }
-
-    private var setAsideTag: some View {
-        Text("set aside")
-            .font(RSFont.guest(size: 11))
-            .foregroundStyle(Color.rsOnDark.opacity(0.6))
-            .frame(width: 80, height: 60)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                    .foregroundStyle(Color.rsOnDark.opacity(0.5))
-            )
     }
 
     // MARK: Terminal
@@ -125,7 +119,7 @@ struct FailureView: View {
 }
 
 #Preview("Recoverable") {
-    FailureView(kind: .recoverable(region: "The corner by the door"))
+    FailureView(kind: .recoverable)
 }
 
 #Preview("Terminal") {

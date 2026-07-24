@@ -45,7 +45,6 @@ struct CaptureHUDState {
 struct LiveCaptureView: View {
     var state: CaptureHUDState = CaptureHUDState()
     var onFinish: () -> Void = {}
-    var onRecenter: () -> Void = {}
 
     var body: some View {
         ZStack {
@@ -169,8 +168,10 @@ struct LiveCaptureView: View {
 
     private var controls: some View {
         HStack {
-            // Re-center / reset origin.
-            circleButton(system: "dot.viewfinder", action: onRecenter)
+            // Balance the shutter; no re-center control is shown because
+            // CaptureManager has no recenter capability — a visible button that did
+            // nothing would be a dead control.
+            Color.clear.frame(width: 52, height: 52)
 
             Spacer()
 
@@ -188,19 +189,7 @@ struct LiveCaptureView: View {
 
             Spacer()
 
-            // Keep the shutter centered; no invented control on this side.
             Color.clear.frame(width: 52, height: 52)
-        }
-    }
-
-    private func circleButton(system: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: system)
-                .font(.system(size: 20, weight: .regular))
-                .foregroundStyle(Color.rsOnDark)
-                .frame(width: 52, height: 52)
-                .background(Color.rsBlack.opacity(0.5), in: Circle())
-                .overlay(Circle().stroke(Color.rsOnDark.opacity(0.25), lineWidth: 1))
         }
     }
 }

@@ -1,5 +1,6 @@
-/// "I've got the room" — the peak moment (design spec §4, beat one). Fires the
-/// instant coverage is sufficient (or on Finish): a gold bloom, the checkmark
+/// "I've got the room" — the peak moment (design spec §4, beat one). Fires on
+/// Finish (once a coverage signal exists — task #13 — it can fire the instant
+/// coverage is sufficient): a gold bloom, the checkmark
 /// breathing once, the success haptic + the resolving chord. The single
 /// unambiguously joyful beat in the app — earned, not decorative. Holds briefly,
 /// then the review screen (§4, beat two) takes over.
@@ -43,7 +44,10 @@ struct GotTheRoomView: View {
                     .foregroundStyle(Color.rsOnDark)
                     .padding(.top, 26)
 
-                GuestLine("Walls, floor, corners, and everything on them. That's a good capture — let's send it home.",
+                // No coverage claim: the app has no coverage signal yet (task #13),
+                // so the copy celebrates finishing the pass without asserting what
+                // was or wasn't captured.
+                GuestLine("That's the pass done — let's send it home, and I'll start making sense of it on your desk.",
                           size: 16, onDark: true, alignment: .center)
                     .padding(.horizontal, 34)
                     .padding(.top, 12)
