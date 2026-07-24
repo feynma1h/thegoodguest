@@ -15,7 +15,16 @@
 import SwiftUI
 
 struct WaitingView: View {
-    enum Phase { case queued, analyzing, longRunning, connectionTrouble }
+    enum Phase {
+        case queued, analyzing, longRunning
+        /// Lost contact WHILE CHECKING on an already-uploaded room — the room is up
+        /// and holding its place; we just can't read its status this moment.
+        case connectionTrouble
+        /// Could not SEND the room up in the first place (sign-in / manifest / server
+        /// rejection / bundle not written yet). Nothing was uploaded, so there is no
+        /// "place in line" and no arrival clock — the copy must not imply otherwise.
+        case sendFailed
+    }
 
     var phase: Phase = .analyzing
     /// Server-side scene start; the elapsed clock counts from here so it reads
@@ -41,6 +50,8 @@ struct WaitingView: View {
             analyzingBody
         case .connectionTrouble:
             connectionTroubleBody
+        case .sendFailed:
+            sendFailedBody
         }
     }
 
@@ -164,6 +175,47 @@ struct WaitingView: View {
         }
     }
 
+    // MARK: Send failed (couldn't upload in the first place)
+
+    private var sendFailedBody: some View {
+        VStack {
+            Spacer()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 9) {
+                    Image(systemName: "arrow.up.circle")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.rsGoldLight)
+                    Text("Couldn't send it up")
+                        .font(RSFont.ui(.callout, weight: .semibold))
+                        .foregroundStyle(Color.rsOnDark)
+                }
+                GuestLine("I couldn't get the room up to the desk just now — so it hasn't started yet. Nothing's lost; it's still here on your phone. Shall I try again?",
+                          size: 14.5, onDark: true)
+                    .padding(.top, 9)
+                HStack(spacing: 8) {
+                    Button(action: onTryNow) {
+                        Text("Try again")
+                            .font(RSFont.ui(.subheadline, weight: .semibold))
+                            .foregroundStyle(Color.rsInk)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(Capsule().fill(Color.rsSurface))
+                    }
+                    Button(action: onLeave) {
+                        Text("Not now")
+                            .font(RSFont.ui(.subheadline, weight: .medium))
+                            .foregroundStyle(Color.rsOnDark.opacity(0.85))
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(Capsule().stroke(Color.rsOnDark.opacity(0.35), lineWidth: 1.5))
+                    }
+                }
+                .padding(.top, 14)
+            }
+            .padding(18)
+            .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Spacer()
+        }
+    }
+
     // MARK: Copy
 
     private var title: String {
@@ -171,7 +223,7 @@ struct WaitingView: View {
         case .queued:       return "Getting in line"
         case .analyzing:    return "Making sense of your room"
         case .longRunning:  return "Making sense of your room"
-        case .connectionTrouble: return ""
+        case .connectionTrouble, .sendFailed: return ""
         }
     }
 
@@ -183,7 +235,7 @@ struct WaitingView: View {
             return "It's here — all of it. Give me a few minutes to understand how you live in it."
         case .longRunning:
             return "Slower than I hoped — a couple more minutes. Your room has a lot going on, which is a compliment. You can leave; I'll knock."
-        case .connectionTrouble:
+        case .connectionTrouble, .sendFailed:
             return ""
         }
     }
@@ -208,4 +260,8 @@ struct WaitingView: View {
 
 #Preview("Connection trouble") {
     WaitingView(phase: .connectionTrouble)
+}
+
+#Preview("Send failed") {
+    WaitingView(phase: .sendFailed)
 }

@@ -84,7 +84,7 @@ struct HomeView<RoomsStrip: View>: View {
             }
             .buttonStyle(RSPrimaryButtonStyle())
 
-            Text("Takes about two minutes · works best on LiDAR")
+            Text("Takes about two minutes")
                 .font(RSFont.ui(.footnote))
                 .foregroundStyle(Color.rsInkFaint)
         }

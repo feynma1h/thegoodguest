@@ -68,6 +68,13 @@ final class UploadCoordinator: ObservableObject {
 
     // MARK: - Public API
 
+    /// Clear any prior run's terminal session state (.ready/.failed) back to .idle.
+    /// Call synchronously before a new send so an observer never briefly renders the
+    /// previous capture's session outcome during the next send's setup window.
+    func reset() {
+        sessionState = .idle
+    }
+
     /// Begin upload session creation for a completed capture.
     ///
     /// Safe to call multiple times — if a session record already exists for

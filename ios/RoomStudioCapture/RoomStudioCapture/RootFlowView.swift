@@ -22,10 +22,12 @@
 ///
 /// BUILT BUT NOT YET REACHABLE from this flow (staged, not wired): the
 /// returning-home recent-rooms strip and RoomsListView / QRBridgeView (§9, need a
-/// GET /scenes fetch + trigger points), and WhySignInSheet / AccountConflictView
+/// GET /scenes fetch + trigger points), WhySignInSheet / AccountConflictView
 /// (§8 — the conflict sheet is presented by SignInSheet, but the standalone
-/// "why sign in" invitation has no trigger yet). These have no entry point here
-/// and appear only in their own previews.
+/// "why sign in" invitation has no trigger yet), and ColdStartView (§1 — the flow
+/// opens directly at .home; identity is minted lazily on first send, so the
+/// cold-start splash has no trigger). These have no entry point here and appear
+/// only in their own previews.
 
 import ARKit
 import SwiftUI
@@ -102,14 +104,17 @@ struct RootFlowView: View {
                     RSHaptics.fire(.finish)
                     capture.stopCapture()
                     stage = .gotRoom
-                },
-                onRecenter: {}
+                }
             )
         case .gotRoom:
             GotTheRoomView(onContinue: { stage = .review })
         case .review:
             ReviewView(
                 metrics: reviewMetrics,
+                // Neutral verdict: the app has no coverage signal (task #13), so it
+                // must not assert "clean / whole room". Once coverage lands, drive
+                // verdict + thinCoverage from it.
+                verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",
                 onSend: sendItHome,
                 onAddMore: {
                     // CaptureManager.startCapture() currently resets progress;
@@ -165,11 +170,17 @@ struct RootFlowView: View {
     private var postSend: some View {
         if case .failed = coordinator.sessionState {
             // Session/upload SETUP failed (sign-in, manifest, server 4xx/5xx, or
-            // the bundle wasn't ready yet). Without this the poller would 404
-            // forever and the user would sit on the analyzing spinner. Surface it
-            // with a working retry. (Covers the send-before-bundle-ready race too:
-            // that path yields .failed("No bundle on disk").)
-            WaitingView(phase: .connectionTrouble,
+            // the bundle wasn't written yet — the send-before-bundle-ready race,
+            // which yields .failed("No bundle on disk") and self-heals on retry).
+            // Nothing was uploaded, so this uses the honest .sendFailed copy, NOT
+            // the .connectionTrouble copy (which claims the room is safely "in
+            // line" with an "arrival clock" — untrue when the send never happened).
+            // KNOWN GAP: a permanent client error (a 4xx that will never succeed)
+            // loops on "Try again" behind this copy with only "Not now" → home as an
+            // off-ramp; giving genuine 4xx a terminal state needs failure
+            // classification in UploadCoordinator (touches the live ContentView) and
+            // is deferred.
+            WaitingView(phase: .sendFailed,
                         onTryNow: { sendItHome() },
                         onLeave: { stage = .home })
         } else {
@@ -193,23 +204,29 @@ struct RootFlowView: View {
         case .idle, .polling:
             WaitingView(phase: waitingPhase, anchor: waitingAnchor)
         case .succeeded:
-            DoorwayView(onStepThrough: openWebDesk)
+            DoorwayView(onStepThrough: openWebDesk,
+                        onScanAnother: returnHomeFromDoorway,
+                        signedIntoWeb: auth.isAppleLinked)
         case .failedTerminal:
             FailureView(
                 kind: .terminal,
                 onPrimary: rescanFromScratch,
                 onSecondary: { stage = .home }
             )
-        case .recoverable(let missing):
+        case .recoverable:
+            // failed_incomplete: an incomplete upload, not a bad scan. No region is
+            // named and no partial re-upload exists yet, so the one honest path is a
+            // full rescan (FailureView.recoverable copy owns the honesty).
             FailureView(
-                kind: .recoverable(region: recoverableRegion(missing)),
+                kind: .recoverable,
                 onPrimary: rescanFromScratch,
                 onSecondary: { stage = .home }
             )
         case .pollError:
-            // pollError is fatal — the poll loop has already stopped. Offer a real
-            // retry that restarts polling, not a dead "Try now". (A dedicated
-            // "lost the connection while checking" copy is a later refinement.)
+            // pollError is fatal — the poll loop has already stopped. The room WAS
+            // uploaded (we got far enough to poll it), so .connectionTrouble ("lost
+            // my line to the desk… your room is safe") is the honest copy here.
+            // Offer a real retry that restarts polling, not a dead "Try now".
             WaitingView(phase: .connectionTrouble,
                         onTryNow: { if let id = sentBundleId { ScenePoller.shared.start(bundleId: id) } },
                         onLeave: { stage = .home })
@@ -235,6 +252,15 @@ struct RootFlowView: View {
 
     private func sendItHome() {
         stage = .sent
+        // Drop the previous capture's poll + session state SYNCHRONOUSLY, before the
+        // Task. beginUploadSession only writes pollState at its very end (after
+        // sign-in + manifest + POST), so without this reset postSend would render
+        // the prior room's .succeeded/.failedTerminal/.pollError for the whole setup
+        // window — and a stale "Try now" could re-poll the wrong bundle. reset()
+        // (not pause()) is required: pause() deliberately preserves state.
+        sentBundleId = nil
+        ScenePoller.shared.reset()
+        coordinator.reset()
         Task {
             await coordinator.beginUploadSession(for: capture)
             // Only start polling if the session was actually created. On failure
@@ -248,11 +274,20 @@ struct RootFlowView: View {
     }
 
     private func rescanFromScratch() {
-        // No poller reset API; pause the current loop. The next send starts a
-        // fresh poll with the new bundle id.
-        ScenePoller.shared.pause()
+        // Reset the poll loop (not just pause) so the failed capture's terminal
+        // state can't linger; the next send starts a fresh poll with the new id.
+        ScenePoller.shared.reset()
         stage = .capturing
         beginCapture()
+    }
+
+    /// Return to home from the doorway (a successful capture). Resets the poller
+    /// so the next capture can send cleanly — resume() early-returns on .succeeded,
+    /// so without this a second capture would be impossible without a force-quit.
+    private func returnHomeFromDoorway() {
+        ScenePoller.shared.reset()
+        sentBundleId = nil
+        stage = .home
     }
 
     private func openWebDesk() {
@@ -288,10 +323,6 @@ struct RootFlowView: View {
         case .lidarArkit:    return "LiDAR"
         default:             return "Standard"
         }
-    }
-
-    private func recoverableRegion(_ missing: [String]) -> String {
-        missing.count <= 1 ? "One corner" : "\(missing.count) parts of the room"
     }
 }
 
