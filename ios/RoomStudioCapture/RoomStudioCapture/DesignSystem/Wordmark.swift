@@ -31,7 +31,7 @@ struct WordmarkGlyph: View {
             .frame(width: size, height: size)
             .overlay(
                 Text(RSBrand.mark)
-                    .rsFont(.display, size: size * 0.52)
+                    .rsFont(.display, size: size * 0.52, maxSize: size * 0.62)
                     .foregroundStyle(filled ? Color.rsSurface : color)
             )
     }

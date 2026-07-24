@@ -19,6 +19,7 @@ struct GuidanceSheet: View {
     var onDismiss: () -> Void = {}
 
     @State private var permissionDenied = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         // Scrollable: at accessibility sizes this content exceeds even the .large
@@ -69,6 +70,13 @@ struct GuidanceSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.rsCaptureRaised.ignoresSafeArea())
+        // Coming back from Settings with permission granted must clear the denied
+        // state; otherwise the sheet keeps offering "Open Settings" forever.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            permissionDenied = AVCaptureDevice.authorizationStatus(for: .video) == .denied
+                || AVCaptureDevice.authorizationStatus(for: .video) == .restricted
+        }
     }
 
     // MARK: - Pieces

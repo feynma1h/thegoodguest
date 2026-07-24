@@ -16,11 +16,13 @@ final class WaitFlowStateTests: XCTestCase {
     private func screen(
         sessionFailure: WaitFlowState.SessionFailure? = nil,
         blobFailed: Bool = false,
+        deferred: Bool = false,
         poll: WaitFlowState.PollSnapshot
     ) -> WaitScreen {
         WaitFlowState.screen(
             sessionFailure: sessionFailure,
             terminalBlobFailureForThisBundle: blobFailed,
+            deferredForThisBundle: deferred,
             poll: poll
         )
     }
@@ -75,6 +77,32 @@ final class WaitFlowStateTests: XCTestCase {
             screen(poll: .polling(queued: false, longRunning: false, connectionTrouble: true, anchor: anchor)),
             .checkFailed(anchor: anchor, stopped: false)
         )
+    }
+
+    /// A DEFERRED upload (retries exhausted this launch / lost context) resumes only
+    /// on the next launch. Rendering it as "sending" told the user to keep waiting
+    /// in the one process where recovery cannot happen.
+    func testDeferredUploadIsPausedNotSending() {
+        XCTAssertEqual(screen(deferred: true, poll: .idle), .sendPaused)
+        XCTAssertEqual(screen(deferred: false, poll: .idle), .sending)
+    }
+
+    /// A stale deferral must never override a live wait: once polling starts the
+    /// bytes are already up.
+    func testDeferralDoesNotOverrideLivePolling() {
+        XCTAssertEqual(
+            screen(deferred: true,
+                   poll: .polling(queued: false, longRunning: false, connectionTrouble: false, anchor: anchor)),
+            .waiting(phase: .analyzing, anchor: anchor)
+        )
+        XCTAssertEqual(screen(deferred: true, poll: .succeeded), .doorway)
+    }
+
+    /// A real terminal failure still outranks a deferral.
+    func testTerminalOutranksDeferral() {
+        XCTAssertEqual(screen(blobFailed: true, deferred: true, poll: .idle), .uploadFailed)
+        XCTAssertEqual(screen(sessionFailure: .init(terminal: false), deferred: true, poll: .idle),
+                       .sendFailed(terminal: false))
     }
 
     // MARK: - The routing table

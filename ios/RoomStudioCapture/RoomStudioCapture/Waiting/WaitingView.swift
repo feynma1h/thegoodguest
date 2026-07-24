@@ -33,6 +33,9 @@ struct WaitingView: View {
         /// ever left the phone and the capture is intact on disk, so this must not
         /// offer discarding it as the primary action.
         case sendFailedTerminal
+        /// The upload paused and only resumes on the next launch. Distinct from
+        /// sendFailed, which invites an immediate retry that would actually work.
+        case sendPaused
     }
 
     var phase: Phase = .analyzing
@@ -71,6 +74,8 @@ struct WaitingView: View {
             sendFailedBody(terminal: false)
         case .sendFailedTerminal:
             sendFailedBody(terminal: true)
+        case .sendPaused:
+            sendPausedBody
         }
     }
 
@@ -126,6 +131,8 @@ struct WaitingView: View {
                     .padding(.bottom, 10)
             }
         }
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil, transparent: true))
         .onAppear {
             withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) {
                 breathe = true
@@ -177,28 +184,18 @@ struct WaitingView: View {
                         .foregroundStyle(Color.rsGoldLight)
                     Text("Can't reach the studio")
                         .font(RSFont.ui(.callout, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
                         .foregroundStyle(Color.rsOnDark)
                 }
                 GuestLine(pollingStopped
                           ? "I've lost my line to the desk — your room is safe up there, I just can't check on it, and I've stopped trying. Tell me when to look again."
                           : "I've lost my line to the desk for a moment — your room is safe, I just can't check on it. I'll keep trying quietly.",
                           size: 14.5, onDark: true)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 9)
-                HStack(spacing: 8) {
-                    Button(action: onTryNow) {
-                        Text("Try now")
-                            .font(RSFont.ui(.subheadline, weight: .semibold))
-                            .foregroundStyle(Color.rsInk)
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                            .background(Capsule().fill(Color.rsSurface))
-                    }
-                    Button(action: onLeave) {
-                        Text("Leave it with me")
-                            .font(RSFont.ui(.subheadline, weight: .medium))
-                            .foregroundStyle(Color.rsOnDark.opacity(0.85))
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                            .background(Capsule().stroke(Color.rsOnDark.opacity(0.35), lineWidth: 1.5))
-                    }
+                ViewThatFits(in: .horizontal) {
+                  HStack(spacing: 8) { tryNowButton; leaveButton }
+                  VStack(alignment: .leading, spacing: 8) { tryNowButton; leaveButton }
                 }
                 .padding(.top, 14)
             }
@@ -212,6 +209,7 @@ struct WaitingView: View {
                     .font(RSFont.ui(.footnote))
                     .foregroundStyle(Color.rsInkMuted)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 14)
             }
         }
@@ -229,12 +227,14 @@ struct WaitingView: View {
                         .foregroundStyle(Color.rsGoldLight)
                     Text(terminal ? "I couldn't send it up" : "Couldn't send it up")
                         .font(RSFont.ui(.callout, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
                         .foregroundStyle(Color.rsOnDark)
                 }
                 GuestLine(terminal
                           ? "Something on my end refused the room — that's my fault, not yours, and trying again won't move it. Your scan is safe on your phone; I'll pick it up once I'm fixed."
                           : "I couldn't get the room up to the desk just now — so it hasn't started yet. Nothing's lost; it's still here on your phone. Shall I try again?",
                           size: 14.5, onDark: true)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 9)
                 HStack(spacing: 8) {
                     if !terminal {
@@ -260,6 +260,71 @@ struct WaitingView: View {
             .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             Spacer()
         }
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil, transparent: true))
+    }
+
+    // MARK: Shared controls
+
+    /// Extracted so ViewThatFits can lay them out side-by-side or stacked. At
+    /// accessibility sizes an HStack truncated both labels to "Try…" / "Leav…",
+    /// leaving the screen's only exit unreadable.
+    private var tryNowButton: some View {
+        Button(action: onTryNow) {
+            Text("Try now")
+                .font(RSFont.ui(.subheadline, weight: .semibold))
+                .foregroundStyle(Color.rsInk)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Capsule().fill(Color.rsSurface))
+        }
+    }
+
+    private var leaveButton: some View {
+        Button(action: onLeave) {
+            Text("Leave it with me")
+                .font(RSFont.ui(.subheadline, weight: .medium))
+                .foregroundStyle(Color.rsOnDark.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Capsule().stroke(Color.rsOnDark.opacity(0.35), lineWidth: 1.5))
+        }
+    }
+
+    // MARK: Send paused (resumes next launch, not now)
+
+    private var sendPausedBody: some View {
+        VStack {
+            Spacer()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 9) {
+                    Image(systemName: "pause.circle")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.rsGoldLight)
+                    Text("Paused on its way up")
+                        .font(RSFont.ui(.callout, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(Color.rsOnDark)
+                }
+                GuestLine("The connection gave out, so I've set this down rather than keep hammering at it. It's safe on your phone, and I'll pick it up the next time you open me — there's nothing to do now.",
+                          size: 14.5, onDark: true)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 9)
+                Button(action: onLeave) {
+                    Text("All right")
+                        .font(RSFont.ui(.subheadline, weight: .medium))
+                        .foregroundStyle(Color.rsOnDark.opacity(0.85))
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(Capsule().stroke(Color.rsOnDark.opacity(0.35), lineWidth: 1.5))
+                }
+                .padding(.top, 14)
+            }
+            .padding(18)
+            .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil, transparent: true))
     }
 
     // MARK: Copy
@@ -270,7 +335,7 @@ struct WaitingView: View {
         case .queued:       return "Getting in line"
         case .analyzing:    return "Making sense of your room"
         case .longRunning:  return "Making sense of your room"
-        case .connectionTrouble, .sendFailed, .sendFailedTerminal: return ""
+        case .connectionTrouble, .sendFailed, .sendFailedTerminal, .sendPaused: return ""
         }
     }
 
@@ -278,7 +343,10 @@ struct WaitingView: View {
         switch phase {
         case .sending:
             // Nothing has arrived yet — no "it's here", no ETA.
-            return "On its way up to the desk. Keep the app open a moment while it travels."
+            // No "keep the app open": the upload runs on a background URLSession,
+            // and if it defers, staying in the app is exactly what prevents recovery
+            // (rehydration happens at launch). Leaving is safe.
+            return "On its way up to the desk. You can put the phone down."
         case .queued:
             return "In line — I'll start the moment there's room."
         case .analyzing:
@@ -287,7 +355,7 @@ struct WaitingView: View {
             // No "I'll knock": push (FCM) registration is not built on iOS yet, so
             // promising a notification would be a promise nothing can keep.
             return "Slower than I hoped — a couple more minutes. Your room has a lot going on, which is a compliment."
-        case .connectionTrouble, .sendFailed, .sendFailedTerminal:
+        case .connectionTrouble, .sendFailed, .sendFailedTerminal, .sendPaused:
             return ""
         }
     }
@@ -328,4 +396,8 @@ struct WaitingView: View {
 
 #Preview("Send failed (terminal)") {
     WaitingView(phase: .sendFailedTerminal)
+}
+
+#Preview("Send paused") {
+    WaitingView(phase: .sendPaused)
 }

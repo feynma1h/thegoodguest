@@ -34,17 +34,27 @@ extension View {
 /// uses the parchment treatment.
 struct RSScrollableScreen: ViewModifier {
     var background: Color?
+    /// True when the caller already paints its own backdrop (the doorway's gradient).
+    var transparent: Bool = false
 
     func body(content: Content) -> some View {
-        ScrollView {
-            content
-                // Fill the screen when content is short, so Spacer()-based vertical
-                // centring still reads as designed at normal text sizes.
-                .frame(minHeight: UIScreen.main.bounds.height - 120)
+        // GeometryReader, not UIScreen.main: the container is the honest quantity.
+        // A device-screen constant is wrong by the safe-area/chrome inset on every
+        // device (measurably ~24pt here, ~100pt on an SE), is unrelated to the window
+        // in landscape or iPad Split View, and UIScreen.main is deprecated.
+        GeometryReader { geo in
+            ScrollView {
+                content
+                    // Fill the container when content is short, so Spacer()-based
+                    // vertical centring still reads as designed at normal text sizes.
+                    .frame(minHeight: geo.size.height)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
-            if let background {
+            if transparent {
+                Color.clear
+            } else if let background {
                 background.ignoresSafeArea()
             } else {
                 ParchmentBackground().ignoresSafeArea()

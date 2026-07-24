@@ -34,7 +34,12 @@ import SwiftUI
 
 struct RootFlowView: View {
     @StateObject private var capture     = CaptureManager()
-    @StateObject private var coordinator = UploadCoordinator()
+    /// Replaced on every send. The generation guard could only protect writes made
+    /// AFTER the await; every sessionState write happens INSIDE beginUploadSession,
+    /// so a slow send (the 0038 retry ladder can hold a POST for a minute) could
+    /// land its outcome on the next capture's wait screen. A per-send instance makes
+    /// that structurally impossible.
+    @State private var coordinator = UploadCoordinator()
     @ObservedObject private var poller   = ScenePoller.shared
     @ObservedObject private var failures = UploadFailureMonitor.shared
 
@@ -84,11 +89,22 @@ struct RootFlowView: View {
             // the POLLER's own state, not `stage`: the user can leave the wait
             // (stage == .home) while a poll loop is still live, and a stage-gated
             // guard would then never pause it.
-            guard poller.currentBundleId != nil else { return }
+            // Visibility tracks the scene phase as well as the view lifetime. Without
+            // this, pause() cleared isVisible with nothing restoring it, and — because
+            // currentBundleId is nil for the whole .sending window — a backgrounded app
+            // could still have isVisible true when the completion kick landed, starting
+            // the FOREGROUND-only poll loop while backgrounded (against ScenePoller's
+            // own contract).
+            let onWaitScreen = (stage == .sent)
             switch phase {
-            case .active:                ScenePoller.shared.resume()
-            case .background, .inactive: ScenePoller.shared.pause()
-            @unknown default:            break
+            case .active:
+                ScenePoller.shared.setVisible(onWaitScreen)
+                if poller.currentBundleId != nil { ScenePoller.shared.resume() }
+            case .background, .inactive:
+                ScenePoller.shared.setVisible(false)
+                if poller.currentBundleId != nil { ScenePoller.shared.pause() }
+            @unknown default:
+                break
             }
         }
     }
@@ -139,6 +155,7 @@ struct RootFlowView: View {
                 // beginUploadSession's "No bundle on disk" guard and shows a send
                 // FAILURE for a capture that is perfectly fine and merely unfinished.
                 canSend: !isEmptyCapture && !isPreparingBundle && capture.assemblyFailure == nil,
+                isPreparing: isPreparingBundle,
                 // HONEST LABEL: CaptureManager.startCapture() mints a new bundleId
                 // and clears frames/anchors/outputDir — this REPLACES the pass, it
                 // does not extend it. True append (preserving bundleId + frames) is
@@ -231,6 +248,8 @@ struct RootFlowView: View {
             sessionFailure: WaitFlowState.sessionFailure(from: coordinator.sessionState),
             terminalBlobFailureForThisBundle: sentBundleId != nil
                 && failures.latestFailure?.bundleId == sentBundleId,
+            deferredForThisBundle: sentBundleId != nil
+                && failures.latestDeferral?.bundleId == sentBundleId,
             poll: WaitFlowState.snapshot(from: poller.pollState,
                                          fallbackAnchor: lastSceneCreatedAt)
         )
@@ -255,7 +274,7 @@ struct RootFlowView: View {
                     Task { await resumePollIfUploadFinished() }
                 }
                 .onDisappear { ScenePoller.shared.setVisible(false) }
-                .onChange(of: poller.pollState) { _, _ in retainAnchor() }
+                .onChange(of: poller.pollState) { old, _ in retainAnchor(from: old) }
             // A terminal blob failure for a DIFFERENT (earlier) bundle is otherwise
             // invisible here — float it over whatever this capture is doing.
             if let failure = failures.latestFailure, failure.bundleId != sentBundleId {
@@ -301,14 +320,14 @@ struct RootFlowView: View {
 
         case .doorway:
             DoorwayView(onStepThrough: openWebDesk,
-                        onScanAnother: returnHomeFromDoorway,
+                        onScanAnother: endFlight,
                         signedIntoWeb: auth.isAppleLinked,
                         canOpenWeb: webRoomURL != nil)
 
         case .processingFailed:
             FailureView(kind: .terminal,
                         onPrimary: rescanFromScratch,
-                        onSecondary: { stage = .home })
+                        onSecondary: endFlight)
 
         case .incompleteUpload:
             // failed_incomplete: an incomplete upload, not a bad scan. No region is
@@ -316,7 +335,7 @@ struct RootFlowView: View {
             // full rescan (FailureView.recoverable copy owns the honesty).
             FailureView(kind: .recoverable,
                         onPrimary: rescanFromScratch,
-                        onSecondary: { stage = .home })
+                        onSecondary: endFlight)
 
         case .uploadFailed:
             // The blobs for THIS bundle failed terminally: bundle.pb never lands, no
@@ -325,7 +344,7 @@ struct RootFlowView: View {
             // upload-honest copy and the reason, since the banner is suppressed here.
             FailureView(kind: .uploadFailed(reason: failures.latestFailure?.reason),
                         onPrimary: rescanFromScratch,
-                        onSecondary: { stage = .home })
+                        onSecondary: endFlight)
                 .onAppear { ScenePoller.shared.reset() }
 
         case .sendFailed(let terminal):
@@ -334,7 +353,13 @@ struct RootFlowView: View {
             // disk for the relaunch rehydration path either way.
             WaitingView(phase: terminal ? .sendFailedTerminal : .sendFailed,
                         onTryNow: { if !terminal { sendItHome() } },
-                        onLeave: { stage = .home })
+                        onLeave: endFlight)
+
+        case .sendPaused:
+            // Paused until the next launch — ending the flight is honest here:
+            // rehydrateAllUnfinishedBundles picks the bundle up on relaunch, and
+            // nothing in THIS process will move it.
+            WaitingView(phase: .sendPaused, onLeave: endFlight)
         }
     }
 
@@ -346,9 +371,13 @@ struct RootFlowView: View {
 
     /// Mirror the server anchor into @State so it survives the transition to
     /// .pollError (which carries no payload). See `lastSceneCreatedAt`.
-    private func retainAnchor() {
-        if let anchor = waitingAnchor, anchor != lastSceneCreatedAt {
-            lastSceneCreatedAt = anchor
+    /// Reads the OUTGOING state: on the polling → pollError transition the new state
+    /// carries no anchor, so retaining from the old value is what makes the clock
+    /// survive that exact hop rather than relying on an earlier tick having done it.
+    private func retainAnchor(from previous: ScenePollState) {
+        if case let .polling(_, _, sceneCreatedAt, _, _) = previous,
+           let sceneCreatedAt, sceneCreatedAt != lastSceneCreatedAt {
+            lastSceneCreatedAt = sceneCreatedAt
         }
     }
 
@@ -367,7 +396,8 @@ struct RootFlowView: View {
                                    // previous capture would time THIS room's clock
                                    // from the previous room's arrival.
         ScenePoller.shared.reset()
-        coordinator.reset()
+        UploadFailureMonitor.shared.clearDeferral()
+        coordinator = UploadCoordinator()   // M1: per-send instance
         // Snapshot the id SYNCHRONOUSLY. Reading capture.bundleIdString after the
         // await let a "leave → scan again" in the gap mint a new bundleId, so this
         // capture's task would record the NEXT capture's id — poisoning the blob-
@@ -407,19 +437,23 @@ struct RootFlowView: View {
     }
 
     private func rescanFromScratch() {
-        // Reset the poll loop (not just pause) so the failed capture's terminal
-        // state can't linger; the next send starts a fresh poll with the new id.
-        ScenePoller.shared.reset()
+        // Ends the old flight (poller, sent id, anchor, deferral) before starting a
+        // new capture — otherwise home would keep advertising the abandoned bundle.
+        endFlight()
         stage = .capturing
         beginCapture()
     }
 
-    /// Return to home from the doorway (a successful capture). Resets the poller
-    /// so the next capture can send cleanly — resume() early-returns on .succeeded,
-    /// so without this a second capture would be impossible without a force-quit.
-    private func returnHomeFromDoorway() {
+    /// End the current flight and go home. EVERY terminal exit must use this: the
+    /// home re-entry row and the blob-failure match both key off `sentBundleId`, so
+    /// leaving it set after a failure left home advertising "One room is on its way"
+    /// for a bundle that will never arrive — and re-entering showed a permanent
+    /// "Sending your room" for it.
+    private func endFlight() {
         ScenePoller.shared.reset()
+        UploadFailureMonitor.shared.clearDeferral()
         sentBundleId = nil
+        lastSceneCreatedAt = nil
         stage = .home
     }
 

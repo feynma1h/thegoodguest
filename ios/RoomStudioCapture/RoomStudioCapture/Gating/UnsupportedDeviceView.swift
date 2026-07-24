@@ -33,8 +33,8 @@ struct UnsupportedDeviceView: View {
             Spacer()
         }
         .padding(.horizontal, 26)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .rsParchmentScreen()
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil))
     }
 }
 

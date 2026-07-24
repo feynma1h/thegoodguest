@@ -23,6 +23,9 @@ struct ReviewView: View {
     /// action is withheld rather than letting the backend reject it and report the
     /// failure as if the upload broke in transit.
     var canSend: Bool = true
+    /// True while bundle.pb is still being written — transient, unlike the other
+    /// non-sendable states, so the action set must not reshuffle when it clears.
+    var isPreparing: Bool = false
     /// The secondary/rescan label. The caller owns the wording because whether it
     /// EXTENDS or REPLACES the capture depends on the capture layer's behaviour
     /// (today: replaces — see RootFlowView).
@@ -75,7 +78,11 @@ struct ReviewView: View {
             RoomSketch()
                 .padding(20)
             Text(metrics)
-                .rsFont(.mono, size: 10, weight: .medium)
+                // Bottom-anchored inside a fixed 230pt card: uncapped it wraps up
+                // over the sketch ("126 frames · LiDAR + RoomPlan" at AX sizes).
+                .rsFont(.mono, size: 10, weight: .medium, maxSize: 14)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .tracking(0.6)
                 .foregroundStyle(Color.rsOnDark.opacity(0.6))
                 .padding(12)
@@ -87,7 +94,17 @@ struct ReviewView: View {
 
     private var actions: some View {
         VStack(spacing: 10) {
-            if !canSend {
+            if isPreparing {
+                // TRANSIENT: the send is moments away, so keep it in the primary slot
+                // (disabled) rather than promoting the destructive rescan into it and
+                // swapping the button under the user's finger when bundle.pb lands.
+                Button {} label: {
+                    Label("Send it home", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(RSPrimaryButtonStyle())
+                .disabled(true)
+                .opacity(0.55)
+            } else if !canSend {
                 // Nothing to send — the rescan leads.
                 Button { onAddMore() } label: { Text(addMoreLabel) }
                     .buttonStyle(RSPrimaryButtonStyle())

@@ -58,8 +58,8 @@ struct RoomsListView: View {
             .padding(.bottom, 10)
         }
         .padding(.horizontal, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .rsParchmentScreen()
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil))
     }
 
     private var header: some View {
