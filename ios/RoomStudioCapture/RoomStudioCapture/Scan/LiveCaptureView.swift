@@ -149,8 +149,10 @@ struct LiveCaptureView: View {
     private func coverageTick(_ label: String, _ coverage: SurfaceCoverage) -> some View {
         HStack(spacing: 6) {
             Text(label)
-                .font(RSFont.mono(size: 10, weight: .medium))
+                .rsFont(.mono, size: 10, weight: .medium, maxSize: 13)
                 .tracking(0.5)
+                .lineLimit(1)
+                .fixedSize()
                 .foregroundStyle(Color.rsOnDark.opacity(0.55))
             Capsule()
                 .fill(Color.rsOnDark.opacity(0.18))
@@ -183,7 +185,11 @@ struct LiveCaptureView: View {
             // Finish — the primary shutter (rust, cream ring).
             Button(action: onFinish) {
                 Text("Finish")
-                    .font(RSFont.ui(.subheadline, weight: .semibold))
+                    // Fixed-geometry control: the app's ONE capture action must stay
+                    // legible at every text size rather than truncate to "Fi…".
+                    .rsFont(.ui, size: 15, weight: .semibold, maxSize: 17)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .foregroundStyle(Color.rsSurface)
                     .frame(width: 78, height: 78)
                     .background(Color.rsAction, in: Circle())

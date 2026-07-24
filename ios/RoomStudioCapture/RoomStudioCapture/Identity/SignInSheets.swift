@@ -12,11 +12,13 @@
 /// explicit (decision 0051/0064 — `switchToExistingAccount` is the app's only
 /// deliberate UID-change path).
 
-import AuthenticationServices
 import SwiftUI
 
 struct WhySignInSheet: View {
-    var roomCount: Int = 2
+    // Required — no sample default. This count is asserted to the user ("You've got
+    // N rooms with me already"); a default would ship an invented number the moment
+    // this sheet is wired.
+    var roomCount: Int
     var onSignIn: () -> Void = {}
     var onNotNow: () -> Void = {}
 
@@ -29,7 +31,7 @@ struct WhySignInSheet: View {
                 .background(Color.rsGold.opacity(0.22), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
             Text("Keep your rooms, wherever you are.")
-                .font(RSFont.display(size: 23))
+                .rsFont(.display, size: 23)
                 .foregroundStyle(Color.rsInk)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 16)
@@ -48,11 +50,21 @@ struct WhySignInSheet: View {
             .background(Color.rsInk.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.top, 16)
 
-            SignInWithAppleButton(.signIn) { _ in } onCompletion: { _ in onSignIn() }
-                .signInWithAppleButtonStyle(.black)
-                .frame(height: 50)
-                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-                .padding(.top, 16)
+            // Deliberately NOT a SignInWithAppleButton here. A local one would need
+            // its own nonce/scopes and Result handling; the earlier stub set no
+            // nonce, discarded the Result, and called onSignIn() on cancel and
+            // failure alike. Identity has ONE real implementation — SignInSheet,
+            // which links via AuthManager and handles the account conflict — so this
+            // invitation hands off to it rather than growing a second, weaker path.
+            Button(action: onSignIn) {
+                Text("Sign in to keep your rooms")
+                    .font(RSFont.ui(.headline, weight: .semibold))
+                    .foregroundStyle(Color.rsSurface)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 15)
+                    .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
+            .padding(.top, 16)
 
             Button(action: onNotNow) { Text("Not now") }
                 .buttonStyle(RSQuietButtonStyle())
@@ -150,7 +162,7 @@ struct AccountConflictView: View {
 #Preview("Why sign in") {
     Color.rsBackground.ignoresSafeArea()
         .sheet(isPresented: .constant(true)) {
-            WhySignInSheet().presentationDetents([.medium, .large])
+            WhySignInSheet(roomCount: 2).presentationDetents([.medium, .large])
         }
 }
 

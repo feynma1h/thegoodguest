@@ -28,6 +28,11 @@ struct WaitingView: View {
         /// rejection / bundle not written yet). Nothing was uploaded, so there is no
         /// "place in line" and no arrival clock — the copy must not imply otherwise.
         case sendFailed
+        /// Send failed in a way retrying cannot fix (a 4xx — our bug, not the
+        /// network). Still NOT a "the scan didn't survive the trip" failure: nothing
+        /// ever left the phone and the capture is intact on disk, so this must not
+        /// offer discarding it as the primary action.
+        case sendFailedTerminal
     }
 
     var phase: Phase = .analyzing
@@ -63,7 +68,9 @@ struct WaitingView: View {
         case .connectionTrouble:
             connectionTroubleBody
         case .sendFailed:
-            sendFailedBody
+            sendFailedBody(terminal: false)
+        case .sendFailedTerminal:
+            sendFailedBody(terminal: true)
         }
     }
 
@@ -89,7 +96,7 @@ struct WaitingView: View {
             }
 
             Text(title)
-                .font(RSFont.display(size: 23))
+                .rsFont(.display, size: 23)
                 .foregroundStyle(Color.rsInk)
                 .multilineTextAlignment(.center)
                 .padding(.top, phase == .longRunning ? 14 : 30)
@@ -147,7 +154,7 @@ struct WaitingView: View {
                 Eyebrow("Elapsed")
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(Self.clock(context.date.timeIntervalSince(anchor)))
-                        .font(RSFont.mono(size: 15, weight: .medium))
+                        .rsFont(.mono, size: 15, weight: .medium)
                         .foregroundStyle(Color.rsInk)
                         .monospacedDigit()
                 }
@@ -211,7 +218,7 @@ struct WaitingView: View {
 
     // MARK: Send failed (couldn't upload in the first place)
 
-    private var sendFailedBody: some View {
+    private func sendFailedBody(terminal: Bool) -> some View {
         VStack {
             Spacer()
             VStack(alignment: .leading, spacing: 0) {
@@ -219,20 +226,24 @@ struct WaitingView: View {
                     Image(systemName: "arrow.up.circle")
                         .font(.system(size: 16))
                         .foregroundStyle(Color.rsGoldLight)
-                    Text("Couldn't send it up")
+                    Text(terminal ? "I couldn't send it up" : "Couldn't send it up")
                         .font(RSFont.ui(.callout, weight: .semibold))
                         .foregroundStyle(Color.rsOnDark)
                 }
-                GuestLine("I couldn't get the room up to the desk just now — so it hasn't started yet. Nothing's lost; it's still here on your phone. Shall I try again?",
+                GuestLine(terminal
+                          ? "Something on my end refused the room — that's my fault, not yours, and trying again won't move it. Your scan is safe on your phone; I'll pick it up once I'm fixed."
+                          : "I couldn't get the room up to the desk just now — so it hasn't started yet. Nothing's lost; it's still here on your phone. Shall I try again?",
                           size: 14.5, onDark: true)
                     .padding(.top, 9)
                 HStack(spacing: 8) {
+                    if !terminal {
                     Button(action: onTryNow) {
                         Text("Try again")
                             .font(RSFont.ui(.subheadline, weight: .semibold))
                             .foregroundStyle(Color.rsInk)
                             .padding(.horizontal, 16).padding(.vertical, 8)
                             .background(Capsule().fill(Color.rsSurface))
+                    }
                     }
                     Button(action: onLeave) {
                         Text("Not now")
@@ -258,7 +269,7 @@ struct WaitingView: View {
         case .queued:       return "Getting in line"
         case .analyzing:    return "Making sense of your room"
         case .longRunning:  return "Making sense of your room"
-        case .connectionTrouble, .sendFailed: return ""
+        case .connectionTrouble, .sendFailed, .sendFailedTerminal: return ""
         }
     }
 
@@ -275,7 +286,7 @@ struct WaitingView: View {
             // No "I'll knock": push (FCM) registration is not built on iOS yet, so
             // promising a notification would be a promise nothing can keep.
             return "Slower than I hoped — a couple more minutes. Your room has a lot going on, which is a compliment."
-        case .connectionTrouble, .sendFailed:
+        case .connectionTrouble, .sendFailed, .sendFailedTerminal:
             return ""
         }
     }
@@ -312,4 +323,8 @@ struct WaitingView: View {
 
 #Preview("Send failed") {
     WaitingView(phase: .sendFailed)
+}
+
+#Preview("Send failed (terminal)") {
+    WaitingView(phase: .sendFailedTerminal)
 }

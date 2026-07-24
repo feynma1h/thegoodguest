@@ -29,32 +29,39 @@ struct ReviewView: View {
     var addMoreLabel: String = "Add a little more"
     var onSend: () -> Void = {}
     var onAddMore: () -> Void = {}
+    /// Leave review without sending or rescanning. Required for the screen to have
+    /// an exit at all — see `actions`.
+    var onLeave: () -> Void = {}
 
     var body: some View {
-        VStack(spacing: 0) {
-            Eyebrow("Your capture")
-                .padding(.top, 8)
+        // Scrollable: at accessibility text sizes the sketch card + verdict + three
+        // actions exceed the screen, and without this nothing is reachable.
+        ScrollView {
+            VStack(spacing: 0) {
+                Eyebrow("Your capture")
+                    .padding(.top, 8)
 
-            sketchCard
+                sketchCard
+                    .padding(.top, 16)
+
+                RSCard {
+                    Text(thinCoverage
+                         ? "I've got the bones, but a few gaps. Worth another minute to fill them in?"
+                         : verdict)
+                        .rsFont(.guest, size: 15.5)
+                        .foregroundStyle(Color.rsInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 .padding(.top, 16)
 
-            RSCard {
-                Text(thinCoverage
-                     ? "I've got the bones, but a few gaps. Worth another minute to fill them in?"
-                     : verdict)
-                    .font(RSFont.guest(size: 15.5))
-                    .foregroundStyle(Color.rsInk)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                actions
+                    .padding(.top, 24)
+                    .padding(.bottom, 8)
             }
-            .padding(.top, 16)
-
-            Spacer()
-
-            actions
-                .padding(.bottom, 8)
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, minHeight: 0)
         }
-        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rsParchmentScreen()
     }
@@ -68,7 +75,7 @@ struct ReviewView: View {
             RoomSketch()
                 .padding(20)
             Text(metrics)
-                .font(RSFont.mono(size: 10, weight: .medium))
+                .rsFont(.mono, size: 10, weight: .medium)
                 .tracking(0.6)
                 .foregroundStyle(Color.rsOnDark.opacity(0.6))
                 .padding(12)
@@ -81,7 +88,7 @@ struct ReviewView: View {
     private var actions: some View {
         VStack(spacing: 10) {
             if !canSend {
-                // Nothing to send — the rescan is the only path.
+                // Nothing to send — the rescan leads.
                 Button { onAddMore() } label: { Text(addMoreLabel) }
                     .buttonStyle(RSPrimaryButtonStyle())
             } else if thinCoverage {
@@ -97,7 +104,16 @@ struct ReviewView: View {
                 Button { onAddMore() } label: { Text(addMoreLabel) }
                     .buttonStyle(RSQuietButtonStyle())
             }
+
+            // ALWAYS present. Without it the empty-capture branch renders a single
+            // rescan button and the flow has no NavigationStack — capture → review →
+            // capture forever, with force-quit as the only exit. The other branches
+            // only escape by sending, which is not a choice the user has to make now.
+            Button { onLeave() } label: { Text("Not now") }
+                .buttonStyle(RSQuietButtonStyle())
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
     }
 }
 

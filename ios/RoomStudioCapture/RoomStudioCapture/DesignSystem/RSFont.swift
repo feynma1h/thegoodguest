@@ -18,12 +18,30 @@
 /// to `Font.custom(_:size:relativeTo:)`; every call site keeps working (and the
 /// `relativeTo:` scaling below becomes Font.custom's own, so behaviour matches).
 ///
-/// DYNAMIC TYPE: the fixed-size variants scale via UIFontMetrics — `Font.system(
-/// size:)` alone is inert, which would leave nearly every line in this app
-/// (guest voice, arrival titles, mono metrics) ignoring the user's text size.
+/// DYNAMIC TYPE: `Font.system(size:)` is inert, so fixed point sizes are applied
+/// through the `.rsFont(...)` VIEW MODIFIER (bottom of this file), never through a
+/// bare `Font`. The modifier reads `@Environment(\.dynamicTypeSize)`, which is what
+/// makes scaling actually work:
+///
+///   • it gives SwiftUI a dependency to invalidate on, so text re-lays-out when the
+///     size changes WHILE RUNNING (a global `UITraitCollection.current` read is
+///     captured once and then frozen — the trap this replaced), and
+///   • it honours in-app `.dynamicTypeSize(...)` overrides, which never touch
+///     `UITraitCollection.current` at all.
+///
+/// Every fixed-size variant is capped (`maxSize`) so accessibility sizes enlarge
+/// text without destroying fixed-geometry controls.
+///
+/// There are deliberately NO fixed-size `Font`-returning helpers: a `Font` cannot
+/// read the environment, so offering one would be offering a silently inert path.
+/// The text-style variants (`guest(_:)`, `ui(_:)`, …) return `Font` and scale
+/// natively — use those wherever a semantic style fits.
 
 import SwiftUI
 import UIKit
+
+/// Which of the three Good Guest type roles a fixed-size line belongs to.
+enum RSFontRole { case guest, display, ui, mono }
 
 enum RSFont {
 
@@ -33,9 +51,30 @@ enum RSFont {
         serif(style).italic()
     }
 
-    /// Fixed-size guest line (scales with Dynamic Type relative to `relativeTo`).
-    static func guest(size: CGFloat, relativeTo: Font.TextStyle = .body) -> Font {
-        serif(size: size, relativeTo: relativeTo).italic()
+    /// Resolve a fixed point size for an ALREADY-KNOWN type size. Internal to the
+    /// `.rsFont` modifier — call sites use the modifier so the environment (and
+    /// therefore SwiftUI invalidation) is never bypassed.
+    static func resolved(
+        role: RSFontRole,
+        size: CGFloat,
+        weight: Font.Weight?,
+        relativeTo: Font.TextStyle,
+        maxSize: CGFloat?,
+        typeSize: DynamicTypeSize
+    ) -> Font {
+        let traits = UITraitCollection(preferredContentSizeCategory: contentSizeCategory(typeSize))
+        var points = UIFontMetrics(forTextStyle: uiTextStyle(relativeTo))
+            .scaledValue(for: size, compatibleWith: traits)
+        if let maxSize { points = min(points, maxSize) }
+
+        let base: Font = switch role {
+        case .guest:   .system(size: points, design: .serif)
+        case .display: .system(size: points, design: .serif)
+        case .ui:      .system(size: points, design: .default)
+        case .mono:    .system(size: points, design: .monospaced)
+        }
+        let weighted = weight.map { base.weight($0) } ?? base
+        return role == .guest ? weighted.italic() : weighted
     }
 
     // MARK: Display — serif upright (arrival titles)
@@ -44,18 +83,10 @@ enum RSFont {
         serif(style)
     }
 
-    static func display(size: CGFloat, relativeTo: Font.TextStyle = .largeTitle) -> Font {
-        serif(size: size, relativeTo: relativeTo)
-    }
-
     // MARK: UI sans — buttons, labels, controls
 
     static func ui(_ style: Font.TextStyle = .body, weight: Font.Weight = .regular) -> Font {
         sans(style).weight(weight)
-    }
-
-    static func ui(size: CGFloat, weight: Font.Weight = .regular, relativeTo: Font.TextStyle = .body) -> Font {
-        sans(size: size, relativeTo: relativeTo).weight(weight)
     }
 
     // MARK: Mono — machine data only
@@ -64,48 +95,18 @@ enum RSFont {
         monospaced(style).weight(weight)
     }
 
-    static func mono(size: CGFloat, weight: Font.Weight = .medium, relativeTo: Font.TextStyle = .caption) -> Font {
-        monospaced(size: size, relativeTo: relativeTo).weight(weight)
-    }
-
     // MARK: - Face helpers (the bundling seam — change these three, nothing else)
 
     private static func serif(_ style: Font.TextStyle) -> Font {
         .system(style, design: .serif)
     }
-    private static func serif(size: CGFloat, relativeTo: Font.TextStyle) -> Font {
-        .system(size: scaled(size, relativeTo: relativeTo), design: .serif)
-    }
-
     private static func sans(_ style: Font.TextStyle) -> Font {
         .system(style, design: .default)
     }
-    private static func sans(size: CGFloat, relativeTo: Font.TextStyle) -> Font {
-        .system(size: scaled(size, relativeTo: relativeTo), design: .default)
-    }
-
     private static func monospaced(_ style: Font.TextStyle) -> Font {
         .system(style, design: .monospaced)
     }
-    private static func monospaced(size: CGFloat, relativeTo: Font.TextStyle) -> Font {
-        .system(size: scaled(size, relativeTo: relativeTo), design: .monospaced)
-    }
-
     // MARK: - Dynamic Type
-
-    /// Scale a fixed point size against the user's text-size setting.
-    ///
-    /// `Font.system(size:)` is Dynamic Type–INERT, so every fixed-size call site
-    /// (the guest voice, arrival titles, mono metrics — the majority of this app's
-    /// text) would otherwise ignore the user's chosen size entirely. UIFontMetrics
-    /// reproduces what `Font.custom(_:size:relativeTo:)` will do for free once the
-    /// branded faces are bundled, so behaviour stays consistent across that swap.
-    ///
-    /// Read at body-evaluation time: SwiftUI re-evaluates on a size-category
-    /// change, so the value tracks the setting without an explicit environment read.
-    private static func scaled(_ size: CGFloat, relativeTo style: Font.TextStyle) -> CGFloat {
-        UIFontMetrics(forTextStyle: uiTextStyle(style)).scaledValue(for: size)
-    }
 
     private static func uiTextStyle(_ style: Font.TextStyle) -> UIFont.TextStyle {
         switch style {
@@ -122,5 +123,67 @@ enum RSFont {
         case .caption2:    return .caption2
         @unknown default:  return .body
         }
+    }
+
+    private static func contentSizeCategory(_ size: DynamicTypeSize) -> UIContentSizeCategory {
+        switch size {
+        case .xSmall:            return .extraSmall
+        case .small:             return .small
+        case .medium:            return .medium
+        case .large:             return .large
+        case .xLarge:            return .extraLarge
+        case .xxLarge:           return .extraExtraLarge
+        case .xxxLarge:          return .extraExtraExtraLarge
+        case .accessibility1:    return .accessibilityMedium
+        case .accessibility2:    return .accessibilityLarge
+        case .accessibility3:    return .accessibilityExtraLarge
+        case .accessibility4:    return .accessibilityExtraExtraLarge
+        case .accessibility5:    return .accessibilityExtraExtraExtraLarge
+        @unknown default:        return .large
+        }
+    }
+}
+
+// MARK: - The fixed-size application point
+
+/// Applies a fixed-size Good Guest font that ACTUALLY scales, by resolving the
+/// point size against `@Environment(\.dynamicTypeSize)`. See the Dynamic Type note
+/// at the top of this file for why a plain `Font` cannot do this.
+private struct RSScaledFont: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    let role: RSFontRole
+    let size: CGFloat
+    let weight: Font.Weight?
+    let relativeTo: Font.TextStyle
+    let maxSize: CGFloat?
+
+    func body(content: Content) -> some View {
+        content.font(RSFont.resolved(
+            role: role, size: size, weight: weight,
+            relativeTo: relativeTo, maxSize: maxSize, typeSize: typeSize
+        ))
+    }
+}
+
+extension View {
+    /// Apply a fixed-size Good Guest font.
+    ///
+    /// - Parameter maxSize: ceiling in points. Defaults to 1.6× the base size,
+    ///   which lets accessibility settings enlarge text meaningfully without
+    ///   bursting the fixed-geometry controls this design uses (the capture
+    ///   shutter, coverage ticks, metric strips). Pass a tighter cap for text
+    ///   inside a fixed frame, or nil to scale without limit.
+    func rsFont(
+        _ role: RSFontRole,
+        size: CGFloat,
+        weight: Font.Weight? = nil,
+        relativeTo: Font.TextStyle = .body,
+        maxSize: CGFloat? = nil
+    ) -> some View {
+        modifier(RSScaledFont(
+            role: role, size: size, weight: weight,
+            relativeTo: relativeTo, maxSize: maxSize ?? size * 1.6
+        ))
     }
 }

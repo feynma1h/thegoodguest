@@ -23,6 +23,10 @@
 import SwiftUI
 
 struct UploadFailedBanner: View {
+    /// The persisted `failureReason`. Shown verbatim in mono — it is the diagnostic
+    /// value of this whole surface, and the banner it replaces displayed it. Without
+    /// it the user can say only "a scan stalled", with nothing to report.
+    var reason: String?
     var onDismiss: () -> Void = {}
 
     var body: some View {
@@ -37,6 +41,14 @@ struct UploadFailedBanner: View {
             }
             GuestLine("A scan stalled on its way to the desk. It's still here on your phone, safe.",
                       size: 13, onDark: true)
+
+            if let reason {
+                Text(reason)
+                    .rsFont(.mono, size: 10, maxSize: 13)
+                    .foregroundStyle(Color.rsOnDark.opacity(0.5))
+                    .textSelection(.enabled)
+                    .padding(.top, 2)
+            }
 
             HStack(spacing: 8) {
                 Button(action: onDismiss) {
@@ -57,7 +69,7 @@ struct UploadFailedBanner: View {
 
 #Preview {
     VStack {
-        UploadFailedBanner()
+        UploadFailedBanner(reason: "blob_unreadable_at_remint_manifest")
             .padding()
         Spacer()
     }

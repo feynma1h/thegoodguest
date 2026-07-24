@@ -34,7 +34,7 @@ struct ProfileView: View {
                     .padding(.top, 6)
 
                 Text(isLinked ? "Signed in" : "A guest, so far")
-                    .font(RSFont.guest(size: 18))
+                    .rsFont(.guest, size: 18)
                     .foregroundStyle(Color.rsInk)
                     .padding(.top, 14)
 
@@ -88,7 +88,7 @@ struct ProfileView: View {
                     .foregroundStyle(Color.rsInkMuted)
             }
             Text("You")
-                .font(RSFont.display(size: 17).weight(.medium))
+                .rsFont(.display, size: 17, weight: .medium)
                 .foregroundStyle(Color.rsInk)
             Spacer()
         }
@@ -101,7 +101,7 @@ struct ProfileView: View {
                 Eyebrow("Your ID")
                 if let uid {
                     Text(uid)
-                        .font(RSFont.mono(size: 13.5, weight: .medium))
+                        .rsFont(.mono, size: 13.5, weight: .medium)
                         .foregroundStyle(Color.rsInk)
                 } else {
                     Text("Not ready yet — I'll have it once I reach the desk.")

@@ -18,7 +18,7 @@ struct UnsupportedDeviceView: View {
                 .padding(.top, 40)
 
             Text("This one needs a depth camera.")
-                .font(RSFont.display(size: 24))
+                .rsFont(.display, size: 24)
                 .foregroundStyle(Color.rsInk)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)

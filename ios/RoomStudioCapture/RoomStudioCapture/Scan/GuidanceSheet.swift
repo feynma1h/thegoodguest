@@ -65,7 +65,7 @@ struct GuidanceSheet: View {
     private var header: some View {
         HStack {
             Text("Before you start")
-                .font(RSFont.display(size: 15).weight(.medium))
+                .rsFont(.display, size: 15, weight: .medium)
                 .foregroundStyle(Color.rsOnDark.opacity(0.8))
             Spacer()
             Button(action: onDismiss) {
@@ -83,7 +83,7 @@ struct GuidanceSheet: View {
         HStack(spacing: 7) {
             Circle().fill(Color.rsGold).frame(width: 7, height: 7)
             Text("LiDAR READY · PRO CAPTURE")
-                .font(RSFont.mono(size: 11, weight: .medium))
+                .rsFont(.mono, size: 11, weight: .medium)
                 .tracking(0.8)
                 .foregroundStyle(Color.rsGoldLight)
         }

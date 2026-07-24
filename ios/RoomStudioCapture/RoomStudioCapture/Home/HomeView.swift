@@ -58,7 +58,7 @@ struct HomeView<RoomsStrip: View>: View {
     private var hero: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Every home holds a version of itself you've never seen.")
-                .font(RSFont.guest(size: 25))
+                .rsFont(.guest, size: 25)
                 .foregroundStyle(Color.rsInk)
                 .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
