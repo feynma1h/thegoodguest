@@ -43,6 +43,23 @@ struct RSGoldButtonStyle: ButtonStyle {
     }
 }
 
+/// A light primary for DARK surfaces — cream fill, ink label. The primary action
+/// on the ink-dark screens (terminal failure's "Scan the room again"), where a
+/// rust fill would recede into the warmth.
+struct RSLightButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(RSFont.ui(.headline, weight: .semibold))
+            .foregroundStyle(Color.rsInk)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 /// A quiet secondary choice — text only, muted ink. "Add a little more",
 /// "Not now", "Use it as is", "Later".
 struct RSQuietButtonStyle: ButtonStyle {
