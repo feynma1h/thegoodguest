@@ -127,7 +127,6 @@ struct RootFlowView: View {
         VStack(spacing: 0) {
             if failures.latestFailure != nil {
                 UploadFailedBanner(
-                    onRetry: { retryFailedUpload() },
                     onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
                 )
                 .padding([.horizontal, .top], 20)
@@ -180,7 +179,6 @@ struct RootFlowView: View {
                 // (the home banner isn't mounted here) — float it over the wait.
                 if failures.latestFailure != nil {
                     UploadFailedBanner(
-                        onRetry: { retryFailedUpload() },
                         onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
                     )
                     .padding([.horizontal, .top], 20)
@@ -198,7 +196,7 @@ struct RootFlowView: View {
             DoorwayView(onStepThrough: openWebDesk)
         case .failedTerminal:
             FailureView(
-                kind: .terminal(cause: "the mirror"),
+                kind: .terminal,
                 onPrimary: rescanFromScratch,
                 onSecondary: { stage = .home }
             )
@@ -246,17 +244,6 @@ struct RootFlowView: View {
                 sentBundleId = bundleId
                 ScenePoller.shared.start(bundleId: bundleId)
             }
-        }
-    }
-
-    private func retryFailedUpload() {
-        // Re-drive the SPECIFIC failed bundle named in the banner (a prior, often
-        // prior-launch, bundle) — not the current CaptureManager, which may be a
-        // different or not-yet-assembled bundle.
-        guard let bundleId = failures.latestFailure?.bundleId else { return }
-        Task {
-            guard let record = try? await UploadSessionStore.shared.load(bundleId: bundleId) else { return }
-            await BlobUploadManager.shared.rehydrateBundle(bundleId: bundleId, record: record)
         }
     }
 
