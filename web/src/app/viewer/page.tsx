@@ -7,6 +7,9 @@
  *
  *   /viewer?scene=<scene_id> — the room page's embedded flow, standalone.
  *   /viewer?url=<splat url>  — render a single splat file at origin.
+ *   /viewer?fixture=<dir>    — a staged assets response from
+ *                              /dev-fixtures/<dir>/assets.json (real-scene
+ *                              adjudication fixtures).
  *   drag & drop a .ply/.spz/.splat/.ksplat file — same, from disk.
  *
  * With no source it tries /dev-fixtures/manifest.json (the synthetic room
@@ -51,8 +54,14 @@ function singleSplat(key: string, url: string, label: string): Result {
   };
 }
 
-function DevViewerContent({ directUrl }: { directUrl: string | null }) {
-  const key = directUrl ?? "";
+function DevViewerContent({
+  directUrl,
+  fixture,
+}: {
+  directUrl: string | null;
+  fixture: string | null;
+}) {
+  const key = directUrl ?? (fixture ? `fixture:${fixture}` : "");
   const [result, setResult] = useState<Result | null>(null);
   const state: Result | { phase: "loading" } =
     result && result.key === key ? result : { phase: "loading" };
@@ -65,9 +74,13 @@ function DevViewerContent({ directUrl }: { directUrl: string | null }) {
         setResult(singleSplat(key, directUrl, "splat"));
         return;
       }
-      // No source: try the local dev fixture manifest.
+      // Staged fixture dir, else the local dev fixture manifest.
       try {
-        const resp = await fetch("/dev-fixtures/manifest.json");
+        const resp = await fetch(
+          fixture
+            ? `/dev-fixtures/${encodeURIComponent(fixture)}/assets.json`
+            : "/dev-fixtures/manifest.json",
+        );
         if (!resp.ok) throw new Error("no fixture");
         const assets = (await resp.json()) as SceneAssets;
         if (cancelled) return;
@@ -86,7 +99,7 @@ function DevViewerContent({ directUrl }: { directUrl: string | null }) {
     return () => {
       cancelled = true;
     };
-  }, [key, directUrl]);
+  }, [key, directUrl, fixture]);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -139,6 +152,7 @@ function ViewerContent() {
   const params = useSearchParams();
   const sceneId = params.get("scene");
   const directUrl = params.get("url");
+  const fixture = params.get("fixture");
 
   return (
     <div>
@@ -151,7 +165,7 @@ function ViewerContent() {
           <RoomViewerPanel sceneId={sceneId} className="h-[62vh]" />
         </div>
       ) : (
-        <DevViewerContent directUrl={directUrl} />
+        <DevViewerContent directUrl={directUrl} fixture={fixture} />
       )}
     </div>
   );
