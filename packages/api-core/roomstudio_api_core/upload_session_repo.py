@@ -29,11 +29,19 @@ Consumers: services/api-public (POST /captures/{bundle_id}/upload_session),
 from __future__ import annotations
 
 import logging
+import os
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on concurrent mint_uri_fn calls in _mint_all. Each mint is one
+# small HTTP POST to GCS; the bound keeps a large manifest from monopolising
+# the service's worker threads. Read per call so tests can override the env.
+_MINT_CONCURRENCY_ENV = "UPLOAD_SESSION_MINT_CONCURRENCY"
+_MINT_CONCURRENCY_DEFAULT = 16
 
 # Each manifest entry from the client.
 ManifestEntry = dict  # {"relative_path": str, "expected_size_bytes": int}
@@ -63,6 +71,69 @@ def validate_manifest_path(path: str) -> str | None:
     if ".." in parts:
         return f"path must not contain '..': {path!r}"
     return None
+
+
+# ---------------------------------------------------------------------------
+# Minting
+# ---------------------------------------------------------------------------
+
+def _mint_concurrency() -> int:
+    """Current mint concurrency bound (>= 1)."""
+    try:
+        return max(1, int(os.environ.get(_MINT_CONCURRENCY_ENV,
+                                         _MINT_CONCURRENCY_DEFAULT)))
+    except ValueError:
+        return _MINT_CONCURRENCY_DEFAULT
+
+
+def _mint_all(
+    bundle_id: str,
+    manifest: list[ManifestEntry],
+    bucket: str,
+    mint_uri_fn: UriMintFn,
+) -> list[SessionEntry]:
+    """Mint one session URI per manifest entry, in manifest order.
+
+    Minting runs on a bounded thread pool: each mint is an independent HTTP
+    round trip to GCS, and a serial loop scales linearly with manifest size —
+    a real 878-path LiDAR manifest took ~80 s serial, past the iOS client's
+    60 s request timeout, so the client re-POSTed and the server ran the full
+    mint twice (2026-07-26). The pool keeps the largest realistic manifest
+    inside a few seconds.
+
+    Error semantics match the old serial loop: the first mint failure aborts
+    the call (remaining mints are cancelled where possible) and nothing is
+    stored by the caller. Already-minted resumable sessions are simply
+    abandoned — GCS expires them after 7 days; they grant nothing by
+    themselves.
+    """
+    if not manifest:
+        return []
+
+    def mint(entry: ManifestEntry) -> SessionEntry:
+        return {
+            "relative_path": entry["relative_path"],
+            "session_uri": mint_uri_fn(
+                bucket,
+                f"captures/{bundle_id}/{entry['relative_path']}",
+                entry.get("expected_size_bytes", 0),
+            ),
+        }
+
+    workers = min(_mint_concurrency(), len(manifest))
+    if workers == 1:
+        return [mint(entry) for entry in manifest]
+
+    executor = ThreadPoolExecutor(max_workers=workers)
+    try:
+        futures = [executor.submit(mint, entry) for entry in manifest]
+        try:
+            return [f.result() for f in futures]
+        except BaseException:
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+    finally:
+        executor.shutdown(wait=True)
 
 
 # ---------------------------------------------------------------------------
@@ -129,17 +200,7 @@ class InMemoryUploadSessionRepository(UploadSessionRepository):
             if existing_paths == new_paths:
                 return existing["session_entries"]
 
-        session_entries = [
-            {
-                "relative_path": entry["relative_path"],
-                "session_uri": mint_uri_fn(
-                    bucket,
-                    f"captures/{bundle_id}/{entry['relative_path']}",
-                    entry.get("expected_size_bytes", 0),
-                ),
-            }
-            for entry in manifest
-        ]
+        session_entries = _mint_all(bundle_id, manifest, bucket, mint_uri_fn)
         self._store[bundle_id] = {
             "user_id": user_id,
             "fcm_token": fcm_token,
@@ -210,17 +271,7 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
             if stored_paths == new_paths:
                 return data["session_entries"]
 
-        session_entries = [
-            {
-                "relative_path": entry["relative_path"],
-                "session_uri": mint_uri_fn(
-                    bucket,
-                    f"captures/{bundle_id}/{entry['relative_path']}",
-                    entry.get("expected_size_bytes", 0),
-                ),
-            }
-            for entry in manifest
-        ]
+        session_entries = _mint_all(bundle_id, manifest, bucket, mint_uri_fn)
         ref.set({
             "user_id": user_id,
             "fcm_token": fcm_token,

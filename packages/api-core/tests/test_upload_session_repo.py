@@ -16,11 +16,18 @@ Covers:
     - create_or_get idempotency: same manifest paths → same entries
     - create_or_get replacement: different paths → new entries
     - get_fcm_token: None for unknown, stored token after create_or_get
+    - parallel minting: manifest order preserved, real overlap, first error
+      aborts without storing, UPLOAD_SESSION_MINT_CONCURRENCY=1 serial path
 
 Run from repo root:
   pytest packages/api-core/tests/ -v
 """
 from __future__ import annotations
+
+import threading
+import time
+
+import pytest
 
 from roomstudio_api_core.upload_session_repo import (
     InMemoryUploadSessionRepository,
@@ -147,3 +154,112 @@ class TestInMemoryUploadSessionRepository:
         )
         assert "my-bundle-id" in entries[0]["session_uri"]
         assert "frames/000000.jpg" in entries[0]["session_uri"]
+
+
+# ---------------------------------------------------------------------------
+# Parallel minting (invariants of create_or_get, through the public interface)
+# ---------------------------------------------------------------------------
+
+def _sized_manifest(n: int) -> list[dict]:
+    return [
+        {"relative_path": f"frames/{i:06d}.jpg", "expected_size_bytes": i}
+        for i in range(n)
+    ]
+
+
+class TestParallelMinting:
+    """Minting runs on a bounded pool since the 878-path serial mint took ~80 s
+    in production (2026-07-26) and blew the client's 60 s timeout. These pin
+    the contract, not the pool: order, real overlap, abort-without-store, and
+    the serial fallback all must survive any reimplementation.
+    """
+
+    def test_entries_preserve_manifest_order(self) -> None:
+        # Per-path jitter makes later entries finish earlier; the returned
+        # list must still be in manifest order with each URI matching its own
+        # path.
+        def jittered_mint(bucket: str, blob_path: str, size_bytes: int) -> str:
+            time.sleep((hash(blob_path) % 5) / 1000)
+            return f"https://fake/{blob_path}"
+
+        repo = InMemoryUploadSessionRepository()
+        manifest = _sized_manifest(64)
+        entries = repo.create_or_get(
+            "b1", "u", manifest, None, mint_uri_fn=jittered_mint, bucket="bkt",
+        )
+        assert [e["relative_path"] for e in entries] == [
+            m["relative_path"] for m in manifest
+        ]
+        for e in entries:
+            assert e["session_uri"].endswith(f"captures/b1/{e['relative_path']}")
+
+    def test_minting_actually_overlaps(self) -> None:
+        lock = threading.Lock()
+        in_flight = 0
+        max_in_flight = 0
+
+        def counting_mint(bucket: str, blob_path: str, size_bytes: int) -> str:
+            nonlocal in_flight, max_in_flight
+            with lock:
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+            time.sleep(0.02)
+            with lock:
+                in_flight -= 1
+            return f"https://fake/{blob_path}"
+
+        repo = InMemoryUploadSessionRepository()
+        repo.create_or_get(
+            "b1", "u", _sized_manifest(8), None,
+            mint_uri_fn=counting_mint, bucket="bkt",
+        )
+        assert max_in_flight > 1
+
+    def test_first_error_aborts_and_stores_nothing(self) -> None:
+        def failing_mint(bucket: str, blob_path: str, size_bytes: int) -> str:
+            if blob_path.endswith("000003.jpg"):
+                raise RuntimeError("mint boom")
+            return f"https://fake/{blob_path}"
+
+        repo = InMemoryUploadSessionRepository()
+        with pytest.raises(RuntimeError, match="mint boom"):
+            repo.create_or_get(
+                "b1", "u", _sized_manifest(16), None,
+                mint_uri_fn=failing_mint, bucket="bkt",
+            )
+        # A failed mint must not leave a partial record: the retry must take
+        # the mint-everything path, not the idempotent short-circuit.
+        assert repo.get_user_id("b1") is None
+
+    def test_concurrency_one_is_serial_and_correct(self, monkeypatch) -> None:
+        monkeypatch.setenv("UPLOAD_SESSION_MINT_CONCURRENCY", "1")
+        lock = threading.Lock()
+        in_flight = 0
+        max_in_flight = 0
+
+        def counting_mint(bucket: str, blob_path: str, size_bytes: int) -> str:
+            nonlocal in_flight, max_in_flight
+            with lock:
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+            time.sleep(0.005)
+            with lock:
+                in_flight -= 1
+            return f"https://fake/{blob_path}"
+
+        repo = InMemoryUploadSessionRepository()
+        manifest = _sized_manifest(6)
+        entries = repo.create_or_get(
+            "b1", "u", manifest, None, mint_uri_fn=counting_mint, bucket="bkt",
+        )
+        assert max_in_flight == 1
+        assert [e["relative_path"] for e in entries] == [
+            m["relative_path"] for m in manifest
+        ]
+
+    def test_empty_manifest_returns_empty_list(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        entries = repo.create_or_get(
+            "b1", "u", [], None, mint_uri_fn=_fake_mint, bucket="bkt",
+        )
+        assert entries == []
