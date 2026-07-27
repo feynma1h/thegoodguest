@@ -303,6 +303,26 @@ itself: merged squared walls + floor polygon + openings from Apple's own
 LiDAR pipeline — the polished version of exactly this derivation, already
 chosen by Option A.
 
+**Operator-defined acceptance metric (post-walk, 2026-07-28)** — recorded as
+the design session's quality-bar seed: judge a room by **per-furniture
+extent, location, and rotation being correct, plus the envelope** — never by
+the plane inventory ("a plane that doesn't exist in reality" must not appear
+in the final view; furniture-face plane anchors are internal evidence at
+most, not renderable geometry). This bar directly indicts the current
+instrument family: yaw — the rotation component the operator judges first —
+is unscored by anything we ship today. Corollary the operator converged on
+independently: one-object-one-reconstruction (a furniture box as the object
+skeleton, best view(s) per box through SAM) makes duplicates impossible by
+construction for covered categories — with the architectural consequence
+that the BOX carries placement and SAM 3D carries only appearance, and the
+practical consequence that SAM passes drop from per-mask-per-frame (39 on
+capture #1 for ~12 physical objects) to per-object, relieving the budget
+starvation class entirely. Precision note for the session: the boxes are
+RoomPlan's (`CapturedRoom.objects`), not raw ARKit's — raw ARKit supplies
+only the classified plane anchors and mesh we consume today; RoomPlan's
+category list covers large furniture, so the small-item long tail (frames,
+mirrors, textiles) still needs SAM detection + label-agnostic dedup.
+
 Walk closed 2026-07-28: no defect classes raised beyond this doc's catalog;
 the 13bae607 warm re-drive adjudged moot for the design session; the
 reveal-pacing watch skipped under the fidelity verdict.
