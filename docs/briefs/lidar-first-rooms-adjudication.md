@@ -323,6 +323,25 @@ only the classified plane anchors and mesh we consume today; RoomPlan's
 category list covers large furniture, so the small-item long tail (frames,
 mirrors, textiles) still needs SAM detection + label-agnostic dedup.
 
+**Placement-responsibility map (post-walk operator Q&A, 2026-07-28)** — who
+places an object today on the depth_fit path, per component: position+scale
+= OUR fit of the splat to ARKit LiDAR depth inside the mask; rotation =
+**SAM 3D's own single-view layout output** (`rotation_source: sam3d_layout`),
+shipped uncorrected — no instrument scores yaw, in-plane unresolved 13/16.
+The walk's orientation failure is the direct cost of that dependency. Under
+the box-as-skeleton architecture, rotation splits: the RoomPlan box carries
+upright-by-construction (pitch/roll — kills the 0065 sign-twin class) plus
+the yaw AXIS (dominant horizontal orientation, typically wall-snapped); a
+box cannot carry FACING (180° flip for beds/sofas, 90° for near-square
+footprints — 0068's fork relocated to yaw), and mapping our splat into the
+box is a correspondence step where the 0065 duality-twin lesson applies. Net
+win: rotation collapses from continuous SO(3) — where line-metrics were
+fooled twice — to 4–8 discrete candidates, exactly the regime where the
+existing appearance instruments (tier-2 NCC, sign-flag) are strong. SAM 3D's
+layout rotation drops out of the chain entirely. Spike-verify before the
+design session leans on it: RoomPlan yaw fidelity on real furniture
+(board-3 co-run spike).
+
 Walk closed 2026-07-28: no defect classes raised beyond this doc's catalog;
 the 13bae607 warm re-drive adjudged moot for the design session; the
 reveal-pacing watch skipped under the fidelity verdict.
