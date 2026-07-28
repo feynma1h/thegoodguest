@@ -166,11 +166,25 @@ struct RootFlowView: View {
                     stage = capture.frameCount == 0 ? .review : .gotRoom
                 }
             )
+            // RoomPlan's 10 s tracking-failure self-abort (decision 0076) ends the
+            // capture from the MODEL side — route exactly as a user Finish would,
+            // minus the joy haptic (an abort is not a celebration). The user path
+            // has already moved `stage` by the time this change lands, so the
+            // stage guard makes it abort-only.
+            .onChange(of: capture.isRunning) { _, running in
+                if !running, stage == .capturing {
+                    stage = capture.frameCount == 0 ? .review : .gotRoom
+                }
+            }
         case .gotRoom:
             GotTheRoomView(onContinue: { stage = .review })
         case .review:
             ReviewView(
                 metrics: reviewMetrics,
+                // Non-nil exactly when a built room ships (tier LIDAR_ROOMPLAN);
+                // publishes when RoomBuilder lands, which the "Packing it up"
+                // hold already outlasts.
+                census: capture.builtCensus?.reviewLine,
                 // Neutral verdict: the app has no coverage signal (task #13), so it
                 // must not assert "clean / whole room". Once coverage lands, drive
                 // verdict + thinCoverage from it.

@@ -158,6 +158,7 @@ final class PlaneAnchorTests: XCTestCase {
             startedAtWallUs:   3_000,
             frames:            [],
             planeAnchors:      [anchor],
+            roomPlan:          nil,
             outputDir:         dir
         )
         let url = try assembler.write(userId: "test-user")
@@ -184,6 +185,7 @@ final class PlaneAnchorTests: XCTestCase {
             startedAtWallUs:   3_000,
             frames:            [],
             planeAnchors:      [],
+            roomPlan:          nil,
             outputDir:         dir
         )
         let url = try assembler.write(userId: "test-user")
