@@ -101,6 +101,13 @@ struct SceneStatusView: View {
         case .recoverable(let missingPaths):
             recoverableView(missingPaths: missingPaths)
 
+        case .notOwned:
+            // Terminal-not-ours (decision 0074). The shipping flow (RootFlowView)
+            // acknowledges the record and stands down before this can render; in
+            // this retained rollback surface, state the fact quietly instead of
+            // claiming connection trouble for a room this identity cannot reach.
+            notOwnedView
+
         case .pollError(let message):
             errorView(message: message)
         }
@@ -230,6 +237,25 @@ struct SceneStatusView: View {
             Text("Re-upload will be handled automatically.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+    }
+
+    // MARK: - Not owned (terminal-not-ours, decision 0074)
+
+    private var notOwnedView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "person.crop.circle.badge.questionmark")
+                .font(.system(size: 64))
+                .foregroundStyle(.secondary)
+
+            Text("This room isn't linked to this phone")
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+
+            Text("It was uploaded under a different identity, so this device can't check on it.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
     }
