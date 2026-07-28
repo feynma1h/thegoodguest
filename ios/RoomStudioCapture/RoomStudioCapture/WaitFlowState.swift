@@ -40,6 +40,12 @@ enum WaitScreen: Equatable {
     case uploadFailed
     /// Lost contact while checking on an uploaded room; `stopped` = loop is dead.
     case checkFailed(anchor: Date?, stopped: Bool)
+    /// The polled room belongs to a different identity (by-bundle 403 on a
+    /// verified token — decision 0074, e.g. records migrated by an iCloud backup
+    /// while the Firebase identity was minted fresh). The flow acknowledges the
+    /// record and stands down automatically (standsDownAutomatically below), so
+    /// this renders for at most a frame in passing.
+    case notOurs
 }
 
 /// The narrated sub-state of an in-flight room (mirrors WaitingView.Phase's
@@ -79,9 +85,30 @@ enum WaitFlowState {
             return .processingFailed
         case .recoverable:
             return .incompleteUpload
+        case .notOwned:
+            return .notOurs
         case .pollError(let anchor):
             return .checkFailed(anchor: anchor, stopped: true)
         }
+    }
+
+    /// Whether this poll state ends the flight WITHOUT user action: acknowledge the
+    /// record (the doorway-Done semantics) and return home. True exactly for
+    /// terminal-not-ours (decision 0074) — a 403 on a verified token means this
+    /// identity will never own that scene, so no user decision is being taken away
+    /// by not asking. Every other terminal state carries an outcome the user should
+    /// see (doorway, failure treatments), and every transient state must keep its
+    /// screen.
+    static func standsDownAutomatically(_ state: ScenePollState) -> Bool {
+        if case .notOwned = state { return true }
+        return false
+    }
+
+    /// Which record the stand-down acknowledges: the bundle the poller actually
+    /// asked about (that is the id the 403 answered), falling back to the flight's
+    /// id when the poller has already been reset. Both nil = nothing to acknowledge.
+    static func foreignBundleToAcknowledge(pollerBundleId: String?, sentBundleId: String?) -> String? {
+        pollerBundleId ?? sentBundleId
     }
 
     /// The upload-session half of the input, reduced to WHAT ROUTING ACTUALLY USES:
@@ -115,6 +142,7 @@ enum WaitFlowState {
         case .succeeded:      return .succeeded
         case .failedTerminal: return .failedTerminal
         case .recoverable:    return .recoverable
+        case .notOwned:       return .notOwned
         case .pollError:      return .pollError(anchor: fallbackAnchor)
         }
     }
@@ -127,6 +155,7 @@ enum WaitFlowState {
         case succeeded
         case failedTerminal
         case recoverable
+        case notOwned
         case pollError(anchor: Date?)
     }
 }

@@ -44,7 +44,8 @@ enum SceneFetchResult {
     case scene(SceneResponse)   // 200 decoded
     case notCreated             // 404 — Firestore doc not yet written; keep polling
     case transientFail          // 5xx exhausted / network down; keep polling
-    case fatal(String)          // 401-after-refresh, 403, 400/422; stop loop
+    case notOwned               // 403 — verified token, different owner; stop loop
+    case fatal(String)          // 401-after-refresh, 400/422; stop loop
 }
 
 /// Observable state published to the UI.
@@ -63,6 +64,13 @@ enum ScenePollState: Equatable {
     case succeeded(SceneResponse)             // status == ready
     case failedTerminal(SceneStatus)          // status == failed or failed_invalid
     case recoverable(missingPaths: [String])  // status == failed_incomplete
+    /// Terminal-not-ours (decision 0074): the server answered 403 to a VERIFIED
+    /// token — this identity does not own the polled scene, and no amount of
+    /// waiting, retrying, or token refreshing can change that. Distinct from
+    /// .pollError so the flow can acknowledge the record and stand down instead
+    /// of rendering connection trouble ("your room is safe up there" is false
+    /// for a foreign room).
+    case notOwned
     case pollError(String)                    // fatal request error
 }
 
@@ -185,7 +193,7 @@ final class ScenePoller: ObservableObject {
     func resume() {
         guard let bundleId = currentBundleId else { return }
         switch pollState {
-        case .succeeded, .failedTerminal, .recoverable, .pollError: return
+        case .succeeded, .failedTerminal, .recoverable, .notOwned, .pollError: return
         default: break
         }
         cancelLoop()
@@ -291,6 +299,11 @@ final class ScenePoller: ObservableObject {
                 // Never give up — flip to connectionTrouble sub-state but keep going.
                 pollState = .polling(latest: lastStatus, since: startDate, sceneCreatedAt: sceneCreatedAt, longRunning: longRunning, connectionTrouble: true)
 
+            case .notOwned:
+                pollState = .notOwned
+                logger.info("[ScenePoller] not owned \(bundleId, privacy: .public) — standing down")
+                return
+
             case .fatal(let msg):
                 pollState = .pollError(msg)
                 logger.info("[ScenePoller] fatal \(bundleId, privacy: .public): \(msg, privacy: .public)")
@@ -374,7 +387,13 @@ final class ScenePoller: ObservableObject {
             return await fetchWithRetry(bundleId: bundleId, idToken: fresh, attempt: attempt, didRefresh401: true)
 
         case 403:
-            return .fatal("403 Forbidden")
+            // Ownership, not auth staleness (decision 0074). api-public 403s only
+            // AFTER the token verifies (an invalid/expired token is a 401), and only
+            // for "owned by a different user" / "scene has no owner" — both
+            // definitive for this identity, however it arose (backup-migrated
+            // records, UID churn). A refresh would present the SAME uid, so unlike
+            // the 401 branch below there is nothing to retry.
+            return .notOwned
 
         case 400, 422:
             return .fatal("Client error \(statusCode)")

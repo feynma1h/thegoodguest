@@ -138,6 +138,64 @@ final class WaitFlowStateTests: XCTestCase {
         XCTAssertEqual(screen(poll: .recoverable), .incompleteUpload)
     }
 
+    // MARK: - Terminal-not-ours (decision 0074)
+
+    /// THE PHANTOM-ROOM REGRESSION: a by-bundle 403 routed to the connection-trouble
+    /// screen, whose copy ("your room is safe up there") is false for a foreign room
+    /// and whose onLeave deliberately preserves the flight — so the phantom recurred
+    /// on every cold launch forever. notOwned must route to its own screen, never to
+    /// checkFailed.
+    func testNotOwnedRoutesToNotOursNeverCheckFailed() {
+        XCTAssertEqual(screen(poll: .notOwned), .notOurs)
+        XCTAssertNotEqual(screen(poll: .notOwned), .checkFailed(anchor: nil, stopped: true))
+    }
+
+    /// Upload-side failures still outrank the poll: a terminal blob failure means
+    /// bundle.pb never landed, so its screen owns the story whatever the poll says.
+    func testUploadFailuresOutrankNotOwned() {
+        XCTAssertEqual(screen(sessionFailure: .init(terminal: true), poll: .notOwned),
+                       .sendFailed(terminal: true))
+        XCTAssertEqual(screen(blobFailed: true, poll: .notOwned), .uploadFailed)
+    }
+
+    /// The stand-down predicate, as a table: true for exactly the terminal-not-ours
+    /// state. Every other state either carries an outcome the user should see or
+    /// must keep its screen — auto-dismissing any of them would eat a real result.
+    func testStandsDownAutomaticallyTable() {
+        XCTAssertTrue(WaitFlowState.standsDownAutomatically(.notOwned))
+
+        XCTAssertFalse(WaitFlowState.standsDownAutomatically(.idle))
+        XCTAssertFalse(WaitFlowState.standsDownAutomatically(
+            .polling(latest: .queued, since: anchor, sceneCreatedAt: nil,
+                     longRunning: false, connectionTrouble: false)))
+        XCTAssertFalse(WaitFlowState.standsDownAutomatically(
+            .polling(latest: .processing, since: anchor, sceneCreatedAt: anchor,
+                     longRunning: true, connectionTrouble: true)))
+        XCTAssertFalse(WaitFlowState.standsDownAutomatically(.failedTerminal(.failed)))
+        XCTAssertFalse(WaitFlowState.standsDownAutomatically(.recoverable(missingPaths: ["a"])))
+        XCTAssertFalse(WaitFlowState.standsDownAutomatically(.pollError("boom")),
+                       "a plain poll error is connection trouble, not a stand-down")
+    }
+
+    /// succeeded is the one that would hurt most if auto-dismissed: the doorway is
+    /// the payoff moment.
+    func testSucceededNeverStandsDownAutomatically() {
+        let response = SceneResponse(
+            sceneId: "s1", bundleId: "b1", status: .ready,
+            resultUri: "gs://bucket/obj", missingPaths: nil,
+            createdAt: "2026-07-21T13:19:47+00:00", updatedAt: "2026-07-21T13:19:47+00:00")
+        XCTAssertFalse(WaitFlowState.standsDownAutomatically(.succeeded(response)))
+    }
+
+    /// Which record the stand-down acknowledges: the poller's target (the id the 403
+    /// actually answered), falling back to the flight's id.
+    func testForeignAcknowledgeTargetPrefersThePolledBundle() {
+        XCTAssertEqual(WaitFlowState.foreignBundleToAcknowledge(pollerBundleId: "p", sentBundleId: "s"), "p")
+        XCTAssertEqual(WaitFlowState.foreignBundleToAcknowledge(pollerBundleId: "p", sentBundleId: nil), "p")
+        XCTAssertEqual(WaitFlowState.foreignBundleToAcknowledge(pollerBundleId: nil, sentBundleId: "s"), "s")
+        XCTAssertNil(WaitFlowState.foreignBundleToAcknowledge(pollerBundleId: nil, sentBundleId: nil))
+    }
+
     /// A nil anchor must propagate rather than be substituted with a client time.
     func testNilAnchorPropagates() {
         XCTAssertEqual(
@@ -164,6 +222,8 @@ final class WaitFlowStateTests: XCTestCase {
                        .failedTerminal)
         XCTAssertEqual(WaitFlowState.snapshot(from: .recoverable(missingPaths: ["a"]), fallbackAnchor: nil),
                        .recoverable)
+        XCTAssertEqual(WaitFlowState.snapshot(from: .notOwned, fallbackAnchor: anchor), .notOwned,
+                       "notOwned carries no anchor — there is no honest clock for a foreign room")
     }
 
     /// The server anchor is the payload .pollError does not carry; the adapter must
