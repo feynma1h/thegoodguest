@@ -21,7 +21,11 @@
 ///
 /// Directories whose record still exists (upload in progress or stalled) are NEVER deleted.
 ///
-/// Decisions: 0043 (sweep design, race guard, 300s threshold)
+/// A third mechanism, sweepDeadRecords() (run first inside sweep()), reclaims the
+/// mirror-image orphan: a record FILE that fails the strict decode AND has no
+/// surviving capture directory — see the method doc and decision 0074.
+///
+/// Decisions: 0043 (sweep design, race guard, 300s threshold), 0074 (dead-record sweep)
 
 import Foundation
 
@@ -75,11 +79,18 @@ actor CaptureStorageSweeper {
 
     // MARK: - Sweep
 
-    /// Delete orphaned capture session directories.
+    /// Delete orphaned capture session directories, and dead record files.
     ///
     /// Safe to call concurrently with running uploads: the age threshold and the
     /// record-presence check ensure in-flight dirs are spared.
     func sweep() async {
+        // Record sweep FIRST: an undecodable record cannot protect its dir from the
+        // dir pass below (load() throws → hasRecord false), so running the record
+        // pass first means each pass judges the disk as it found it — an
+        // undecodable record whose dir still exists is KEPT this launch, and only
+        // reclaimed on a later launch once the dir is genuinely gone.
+        await sweepDeadRecords()
+
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: capturesRoot,
             includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey]
@@ -121,6 +132,48 @@ actor CaptureStorageSweeper {
 
         if deleted > 0 || skipped > 0 {
             print("[CaptureStorageSweeper] sweep complete — deleted: \(deleted), skipped (too recent): \(skipped)")
+        }
+    }
+
+    // MARK: - Dead-record sweep (decision 0074, cosmetic sibling)
+
+    /// Reclaim record FILES that are dead to every consumer.
+    ///
+    /// Deletion predicate — BOTH must hold:
+    ///   • The record fails the strict decode (pre-P5 legacy or corrupt): invisible
+    ///     to restore, rehydration, and the failure monitor alike, since all read
+    ///     through load(). A decodable record is live machinery and is never touched
+    ///     here, whatever its phase.
+    ///   • No capture directory survives for it — neither at the conventional
+    ///     location (capturesRoot/<bundle-id>) nor at the outputDir the record's
+    ///     JSON names, so there is nothing a future re-upload could use.
+    ///
+    /// Anything else is left in place. First real population: the 34 June-era
+    /// records an iCloud backup migrated to the 16 Pro (decision 0074) — records
+    /// migrate, blobs do not, so they arrive already dirless.
+    private func sweepDeadRecords() async {
+        let dead = await store.undecodableRecords()
+        guard !dead.isEmpty else { return }
+
+        var reclaimed = 0
+        for record in dead {
+            var candidatePaths = [capturesRoot.appendingPathComponent(record.bundleId).path]
+            if let raw = record.outputDirPath {
+                // Codable encodes URL as absoluteString ("file:///…"); accept a bare
+                // path too in case an older writer stored one.
+                if let url = URL(string: raw), url.isFileURL { candidatePaths.append(url.path) }
+                candidatePaths.append(raw)
+            }
+            guard !candidatePaths.contains(where: { FileManager.default.fileExists(atPath: $0) }) else {
+                continue
+            }
+            try? await store.delete(bundleId: record.bundleId)
+            reclaimed += 1
+            print("[CaptureStorageSweeper] reclaimed dead record (undecodable, no capture dir): \(record.bundleId)")
+        }
+
+        if reclaimed > 0 {
+            print("[CaptureStorageSweeper] dead-record sweep complete — reclaimed: \(reclaimed) of \(dead.count) undecodable")
         }
     }
 }

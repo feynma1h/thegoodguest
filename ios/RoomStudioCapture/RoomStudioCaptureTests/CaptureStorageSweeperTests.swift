@@ -198,4 +198,121 @@ final class CaptureStorageSweeperTests: XCTestCase {
         let contents = try FileManager.default.contentsOfDirectory(atPath: capturesRoot.path)
         XCTAssertTrue(contents.isEmpty, "Empty captures root must remain empty after sweep")
     }
+
+    // MARK: - Dead-record sweep (decision 0074, cosmetic sibling)
+
+    /// Write a record FILE that fails the strict decode (a pre-P5 shape: valid JSON,
+    /// no `uploadPhase`), naming `outputDir` if given. Mirrors the June-era records
+    /// an iCloud backup migrated dirless to the 16 Pro.
+    private func writeLegacyRecord(bundleId: String, outputDir: URL? = nil) throws -> URL {
+        var json: [String: Any] = [
+            "bundleId":            bundleId,
+            "tierRawValue":        1,
+            "clientMintTimestamp": "2026-06-01T00:00:00Z",
+            "sessionEntries":      [["relativePath": "bundle.pb", "sessionUri": "https://example.com/s"]],
+            "manifestPaths":       ["bundle.pb"],
+            "blobStatuses":        ["bundle.pb": "pending"],
+            // uploadPhase deliberately absent — this is what breaks the strict decode.
+        ]
+        if let outputDir { json["outputDir"] = outputDir.absoluteString }
+        let url = storeDir.appendingPathComponent("\(bundleId).json")
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+        return url
+    }
+
+    func test_recordSweep_reclaimsUndecodableRecord_noCaptureDir() async throws {
+        let bundleId = UUID().uuidString.lowercased()
+        let file = try writeLegacyRecord(bundleId: bundleId)
+        // Sanity: the strict decode really does fail (otherwise this test pins nothing).
+        await XCTAssertThrowsErrorAsync(try await store.load(bundleId: bundleId))
+
+        await sweeper.sweep()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path),
+                       "Undecodable record with no surviving capture dir must be reclaimed")
+    }
+
+    func test_recordSweep_keepsUndecodableRecord_conventionalDirPresent() async throws {
+        let bundleId = UUID().uuidString.lowercased()
+        // Fresh dir (age 0): phase 1's race guard spares it, so within this sweep the
+        // dir survives and the record must too.
+        try makeSessionDir(bundleId: bundleId, ageSeconds: 0)
+        let file = try writeLegacyRecord(bundleId: bundleId)
+
+        await sweeper.sweep()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path),
+                      "An undecodable record whose capture dir still exists must be kept")
+    }
+
+    func test_recordSweep_keepsUndecodableRecord_recordedOutputDirPresent() async throws {
+        let bundleId = UUID().uuidString.lowercased()
+        // A NON-conventional outputDir (e.g. a pre-0043 location) that still exists.
+        let elsewhere = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sweeper-test-elsewhere-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: elsewhere) }
+        let file = try writeLegacyRecord(bundleId: bundleId, outputDir: elsewhere)
+
+        await sweeper.sweep()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path),
+                      "The outputDir the record names still exists — the record must be kept")
+    }
+
+    func test_recordSweep_reclaimsNonJSONGarbage_noCaptureDir() async throws {
+        let bundleId = UUID().uuidString.lowercased()
+        let file = storeDir.appendingPathComponent("\(bundleId).json")
+        try Data("not json at all".utf8).write(to: file)
+
+        await sweeper.sweep()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path),
+                       "Unparseable record with no capture dir anywhere must be reclaimed")
+    }
+
+    func test_recordSweep_neverTouchesDecodableRecords() async throws {
+        let bundleId = UUID().uuidString.lowercased()
+        // A valid record whose capture dir is long gone — still live machinery
+        // (e.g. a .complete record awaiting acknowledgment); only DECODE death
+        // qualifies for the record sweep.
+        try await saveRecord(bundleId: bundleId)
+
+        await sweeper.sweep()
+
+        let loaded = try await store.load(bundleId: bundleId)
+        XCTAssertNotNil(loaded, "A decodable record must never be reclaimed, dir or no dir")
+    }
+
+    /// The 0074 migration shape end to end: dirless legacy records are reclaimed in
+    /// one pass while a decodable in-flight record and its dir survive.
+    func test_recordSweep_migratedStoreShape() async throws {
+        let legacy1 = UUID().uuidString.lowercased()
+        let legacy2 = UUID().uuidString.lowercased()
+        let liveId  = UUID().uuidString.lowercased()
+        let f1 = try writeLegacyRecord(bundleId: legacy1)
+        let f2 = try writeLegacyRecord(bundleId: legacy2)
+        let liveDir = try makeSessionDir(bundleId: liveId)
+        try await saveRecord(bundleId: liveId)
+
+        await sweeper.sweep()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f1.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f2.path))
+        let liveRecord = try await store.load(bundleId: liveId)
+        XCTAssertNotNil(liveRecord)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: liveDir.path))
+    }
+}
+
+/// XCTAssertThrowsError has no async overload; minimal shim.
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected the expression to throw", file: file, line: line)
+    } catch { }
 }
