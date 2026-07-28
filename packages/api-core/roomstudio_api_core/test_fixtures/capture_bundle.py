@@ -55,6 +55,17 @@ _CONFIDENCE_BYTES = b"\xff" * 16
 # USDZ: starts with PK (ZIP magic) so it's recognisable.
 _USDZ_BYTES = b"PK\x05\x06" + b"\x00" * 18
 
+# CapturedRoom Codable JSON (decision 0077): a minimal structurally valid
+# document — the top-level keys Apple's JSONEncoder writes, one wall, one
+# floor, version 2. Real geometry is irrelevant to the ingester (it checks
+# blob existence, not content); the server-side parser has its own fixtures.
+_ROOMPLAN_JSON_BYTES = (
+    b'{"version":2,"coreModel":"","story":0,"identifier":null,'
+    b'"referenceOriginTransform":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],'
+    b'"sections":[],"walls":[],"floors":[],"objects":[],'
+    b'"doors":[],"windows":[],"openings":[]}'
+)
+
 
 @dataclass
 class TestBundleArtifacts:
@@ -114,7 +125,9 @@ def build_capture_bundle(
         include_depth: include depth blobs (only meaningful for lidar tiers).
         include_confidence: include confidence blobs (only meaningful for
             lidar tiers).
-        include_roomplan: include USDZ blob (only meaningful for
+        include_roomplan: include the RoomPlan blob pair — the CapturedRoom
+            JSON (json_gcs_path, the geometry source of truth per decision
+            0077) and the USDZ debugging artifact (only meaningful for
             lidar-roomplan tier).
         use_hardware_id_fallback: leave device_id empty; set hardware_id
             instead. Tests the FALLBACK_HARDWARE_ID ingester path.
@@ -155,7 +168,7 @@ def build_capture_bundle(
     has_lidar = tier != TIER_ARKIT_ONLY
     add_depth = has_lidar and include_depth
     add_confidence = add_depth and include_confidence
-    add_usdz = (tier == TIER_LIDAR_ROOMPLAN) and include_roomplan
+    add_roomplan = (tier == TIER_LIDAR_ROOMPLAN) and include_roomplan
 
     for i in range(frame_count):
         rgb_path = f"frames/{i:06d}.jpg"
@@ -199,10 +212,17 @@ def build_capture_bundle(
 
     bundle.ended_at_device_us = now_us + frame_count * 500_000
 
-    if add_usdz:
+    if add_roomplan:
+        # The RoomPlan pair (decision 0077): the CapturedRoom JSON is the
+        # geometry source of truth (json_gcs_path); the USDZ is the optional
+        # debugging artifact. Both are ordinary manifest blobs.
+        json_path = "roomplan/room.json"
+        blobs[json_path] = _ROOMPLAN_JSON_BYTES
+        bundle.room_plan.json_gcs_path = json_path
         usdz_path = "roomplan/room.usdz"
         blobs[usdz_path] = _USDZ_BYTES
         bundle.room_plan.usdz_gcs_path = usdz_path
+        bundle.room_plan.roomplan_version = "test;CapturedRoom.v2;beautifyObjects"
 
     for j in range(plane_anchor_count):
         a = bundle.plane_anchors.add()

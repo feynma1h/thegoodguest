@@ -182,6 +182,13 @@ def _check_gcs_paths_relative(bundle) -> tuple[str, str] | None:
                 f"room_plan.usdz_gcs_path is an absolute GCS URI ({usdz!r}); "
                 "paths must be relative",
             )
+        room_json = bundle.room_plan.json_gcs_path
+        if room_json.startswith("gs://"):
+            return (
+                "absolute_gcs_path",
+                f"room_plan.json_gcs_path is an absolute GCS URI ({room_json!r}); "
+                "paths must be relative",
+            )
     return None
 
 

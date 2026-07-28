@@ -161,17 +161,21 @@ def main() -> None:
         print()
         print("=== RoomPlan ===")
         rp = b.room_plan
-        print(f"  usdz_gcs_path:   {rp.usdz_gcs_path}")
+        print(f"  json_gcs_path:    {rp.json_gcs_path or '(none)'}")
+        print(f"  usdz_gcs_path:    {rp.usdz_gcs_path or '(none)'}")
         print(f"  roomplan_version: {rp.roomplan_version}")
-        if rp.HasField("summary"):
-            s = rp.summary
-            print(f"  walls/doors/windows: {s.wall_count}/{s.door_count}/{s.window_count}")
-            print(f"  objects:")
-            for o in s.objects:
-                print(
-                    f"    {o.category:<14}  center=({o.center_x:+.2f},{o.center_y:+.2f},{o.center_z:+.2f})  "
-                    f"extent=({o.extent_x:.2f},{o.extent_y:.2f},{o.extent_z:.2f})  yaw={o.yaw_rad:+.2f}rad"
-                )
+        if b.tier != CaptureTier.Value("LIDAR_ROOMPLAN"):
+            print(
+                f"    WARN: room_plan present but tier is {_tier_name(b.tier)}; "
+                "the tier contract (decision 0077) sets LIDAR_ROOMPLAN iff a "
+                "built CapturedRoom shipped"
+            )
+        if not rp.json_gcs_path:
+            print(
+                "    WARN: no json_gcs_path — the CapturedRoom JSON is the "
+                "geometry source of truth; a room_plan without it degrades "
+                "to LIDAR_ARKIT semantics downstream"
+            )
 
 
 if __name__ == "__main__":

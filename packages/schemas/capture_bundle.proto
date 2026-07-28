@@ -91,8 +91,11 @@ message CaptureBundle {
   // the client selects keyframes by pose delta and discards redundant ones.
   repeated Frame frames = 8;
 
-  // RoomPlan output, if the device produced one. Only set when
-  // tier == LIDAR_ROOMPLAN.
+  // RoomPlan output, if the device produced one. Set iff a built
+  // CapturedRoom with at least one wall or floor shipped — which is also
+  // exactly when tier == LIDAR_ROOMPLAN (decision 0077). A RoomPlan hard
+  // failure (RoomBuilder throw, zero surfaces) ships LIDAR_ARKIT with no
+  // room_plan; the capture is still valid.
   optional RoomPlanModel room_plan = 9;
 
   // Free-form client annotation. Reserved for fields that don't deserve a
@@ -342,42 +345,39 @@ enum PlaneAlignment {
 // RoomPlan output (LiDAR-Pro tier only)
 // -----------------------------------------------------------------------------
 
+// The wire contract is Apple's CapturedRoom Codable JSON, VERBATIM, by
+// reference (decision 0077): the client serializes the RoomBuilder output
+// with JSONEncoder and ships it as an ordinary manifest blob. No proto
+// mirror of the model exists — a translation decided at capture time is a
+// lossy boundary (any unmapped field is gone forever for that capture),
+// violates the bundle convention that the iOS client emits values without
+// transforming, and creates two schemas to keep in sync.
 message RoomPlanModel {
-  // The exported `CapturedRoom` USDZ in GCS, e.g. "roomplan/room.usdz".
+  // The exported parametric `CapturedRoom` USDZ in GCS, e.g.
+  // "roomplan/room.usdz". Optional in practice — a debugging / future-viewer
+  // artifact (~56 KB); the JSON is the source of truth.
   string usdz_gcs_path = 1;
 
-  // RoomPlan API version at capture time, e.g. "iOS17.4-RoomPlan2".
-  // Carry it so we can re-parse correctly if Apple changes the schema.
+  // RoomPlan provenance at capture time: iOS version + the CapturedRoom
+  // Codable `version` field + RoomBuilder options, e.g.
+  // "ios26.5.2;CapturedRoom.v2;beautifyObjects". Carried so the server
+  // parser can pin schema drift — an Apple Codable change surfaces as a
+  // version string the parser doesn't recognize, not a silent misparse.
   string roomplan_version = 2;
 
-  // Optional flat summary, useful for the orchestrator to dispatch without
-  // having to crack open the USDZ. NOT a substitute for the USDZ itself —
-  // the USDZ is the source of truth.
-  optional RoomPlanSummary summary = 3;
-}
+  // Field 3 was `optional RoomPlanSummary summary` — a flat proto mirror of
+  // the JSON, deleted with zero wire history (no client ever emitted
+  // RoomPlanModel; decision 0077 rejected the mirror as duplicated schema +
+  // drift risk — the server opens the JSON anyway).
+  reserved 3;
+  reserved "summary";
 
-message RoomPlanSummary {
-  uint32 wall_count = 1;
-  uint32 door_count = 2;
-  uint32 window_count = 3;
-  // Furniture boxes as detected by RoomPlan. Categories are RoomPlan's
-  // fixed set (chair, sofa, bed, table, storage, fireplace, sink, toilet,
-  // dishwasher, oven, ...).
-  repeated RoomPlanObject objects = 4;
-}
-
-message RoomPlanObject {
-  // RoomPlan category string, verbatim.
-  string category = 1;
-  // Axis-aligned bbox center in world frame, meters.
-  float center_x = 2;
-  float center_y = 3;
-  float center_z = 4;
-  // Bbox extent (full width/height/depth, not half), meters.
-  float extent_x = 5;
-  float extent_y = 6;
-  float extent_z = 7;
-  // Yaw around +Y, radians. RoomPlan boxes are gravity-aligned, so only
-  // one rotation DoF is meaningful.
-  float yaw_rad = 8;
+  // Apple's CapturedRoom Codable JSON (JSONEncoder output), verbatim, in
+  // GCS: e.g. "roomplan/room.json" (~200 KB). THE geometry source of truth
+  // for the LIDAR_ROOMPLAN tier: walls/floor with polygon corners, objects
+  // with dimensions + transforms, doors/windows/openings with parenting,
+  // categories/confidence/attributes. Parsed server-side by
+  // services/perception-obj/roomplan_room.py; the embedded `coreModel`
+  // blob inside the JSON is carried opaque and never parsed.
+  string json_gcs_path = 4;
 }
