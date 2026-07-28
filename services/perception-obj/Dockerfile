@@ -187,6 +187,7 @@ COPY services/perception-obj/placement.py /app/placement.py
 COPY services/perception-obj/fusion.py /app/fusion.py
 COPY services/perception-obj/reproject.py /app/reproject.py
 COPY services/perception-obj/sampling.py /app/sampling.py
+COPY services/perception-obj/census_sampling.py /app/census_sampling.py
 COPY services/perception-obj/budget.py /app/budget.py
 COPY services/perception-obj/room_planes.py /app/room_planes.py
 COPY services/perception-obj/roomplan_room.py /app/roomplan_room.py
@@ -207,10 +208,10 @@ COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 # weights.) `anthropic` is on the line because shell_material defers it:
 # a missing pip install would not crash — the 0069 fallback rule would
 # silently null every family forever, which the build must catch instead.
-RUN python -c "import placement, fusion, reproject, sampling, budget, \
-room_planes, roomplan_room, contact_priors, box_placement, shell_geometry, \
-shell_envelope, shell_observation, shell_material, shell_receiver, \
-shell_enqueue, anthropic"
+RUN python -c "import placement, fusion, reproject, sampling, census_sampling, \
+budget, room_planes, roomplan_room, contact_priors, box_placement, \
+shell_geometry, shell_envelope, shell_observation, shell_material, \
+shell_receiver, shell_enqueue, anthropic"
 
 ENV PORT=8080
 EXPOSE 8080
