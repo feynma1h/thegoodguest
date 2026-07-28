@@ -361,6 +361,29 @@ def _opening_rect(surface: RoomPlanSurface, wall_origin: np.ndarray,
     )
 
 
+def roomplan_primary_floor(room: RoomPlanRoom) -> RoomPlanSurface | None:
+    """The floor surface the shell renders: largest by polygon area, ties by
+    array order — the SAME selection roomplan_floor_geom uses, exposed so
+    doc assembly (shell v3) and the query-surface adapter can never pick
+    different floors."""
+    if not room.floors:
+        return None
+    return max(room.floors, key=lambda f: _polygon_area(f.polygon_local))
+
+
+def roomplan_wall_pairs(
+    room: RoomPlanRoom,
+) -> list[tuple[RoomPlanSurface, ShellPlaneGeom]]:
+    """(surface, geom) pairs for every non-degenerate wall, in geom order.
+    The pairing key is the geom's wall_id index (roomplan_wall_geoms stamps
+    wall_id from the room.walls array index, so a skipped degenerate wall
+    never misaligns the zip). Shell v3 needs both halves: the surface for
+    the verbatim polygon + confidence, the geom for the oriented frame and
+    openings."""
+    geoms = roomplan_wall_geoms(room)
+    return [(room.walls[int(g.wall_id.rsplit("_", 1)[-1])], g) for g in geoms]
+
+
 def roomplan_wall_geoms(room: RoomPlanRoom) -> list[ShellPlaneGeom]:
     """Every CapturedRoom wall as a ShellPlaneGeom rect, in Apple's array
     order (wall_id = "wall_{index:02d}" — stable against the JSON, no
