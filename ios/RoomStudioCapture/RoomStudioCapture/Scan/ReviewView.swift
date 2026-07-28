@@ -37,6 +37,11 @@ struct ReviewView: View {
     /// default: a sample default ("42 m² · 3.9 M PTS") is invented capture data, and
     /// a call site that forgot to pass real numbers would ship it as measurement.
     var metrics: String
+    /// The RoomPlan census line, e.g. "9 objects · 13 walls · 2 doors" (decision
+    /// 0077, chunk RP-6). Nil hides it — a capture whose room did not ship must
+    /// not show a census (the line describes what the server will see, and the
+    /// composition is pinned in RoomCensus.reviewLine).
+    var census: String? = nil
     /// The guest's verdict on the capture. REQUIRED, with no default, for the same
     /// reason as `metrics` and `rescanLabel`: the old default asserted "I can see the
     /// whole room", which is a coverage claim the app cannot make (task #13).
@@ -124,15 +129,25 @@ struct ReviewView: View {
                 .fill(Color.rsCaptureRaised)
             RoomSketch()
                 .padding(20)
-            Text(metrics)
-                // Bottom-anchored inside a fixed 230pt card: uncapped it wraps up
+            VStack(alignment: .leading, spacing: 3) {
+                // Bottom-anchored inside a fixed 230pt card: uncapped they wrap up
                 // over the sketch ("126 frames · LiDAR + RoomPlan" at AX sizes).
-                .rsFont(.mono, size: 10, weight: .medium, maxSize: 14)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .tracking(0.6)
-                .foregroundStyle(Color.rsOnDark.opacity(0.6))
-                .padding(12)
+                if let census {
+                    Text(census)
+                        .rsFont(.mono, size: 10, weight: .medium, maxSize: 14)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .tracking(0.6)
+                        .foregroundStyle(Color.rsOnDark.opacity(0.75))
+                }
+                Text(metrics)
+                    .rsFont(.mono, size: 10, weight: .medium, maxSize: 14)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .tracking(0.6)
+                    .foregroundStyle(Color.rsOnDark.opacity(0.6))
+            }
+            .padding(12)
         }
         .frame(height: 230)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -214,6 +229,7 @@ struct RoomSketch: View {
 
 #Preview("Clean capture") {
     ReviewView(metrics: "126 frames · LiDAR + RoomPlan",
+               census: "9 objects · 13 walls · 2 doors",
                verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",
                rescanLabel: "Scan again from scratch")
 }
