@@ -189,6 +189,7 @@ COPY services/perception-obj/reproject.py /app/reproject.py
 COPY services/perception-obj/sampling.py /app/sampling.py
 COPY services/perception-obj/budget.py /app/budget.py
 COPY services/perception-obj/room_planes.py /app/room_planes.py
+COPY services/perception-obj/roomplan_room.py /app/roomplan_room.py
 COPY services/perception-obj/contact_priors.py /app/contact_priors.py
 COPY services/perception-obj/shell_geometry.py /app/shell_geometry.py
 COPY services/perception-obj/shell_observation.py /app/shell_observation.py
@@ -205,8 +206,8 @@ COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 # a missing pip install would not crash — the 0069 fallback rule would
 # silently null every family forever, which the build must catch instead.
 RUN python -c "import placement, fusion, reproject, sampling, budget, \
-room_planes, contact_priors, shell_geometry, shell_observation, shell_material, \
-shell_receiver, shell_enqueue, anthropic"
+room_planes, roomplan_room, contact_priors, shell_geometry, shell_observation, \
+shell_material, shell_receiver, shell_enqueue, anthropic"
 
 ENV PORT=8080
 EXPOSE 8080
