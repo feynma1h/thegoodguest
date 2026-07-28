@@ -131,6 +131,38 @@ actor UploadSessionStore {
         }
     }
 
+    /// One record file that exists on disk but fails the strict decode — dead to
+    /// every consumer (restore, rehydration, and the failure monitor all read
+    /// through `load()`, whose decode is strict by design; migration shims were
+    /// removed in the cleanup pass). Pre-P5 legacy records (no `uploadPhase`) and
+    /// corrupt files both land here.
+    struct UndecodableRecord: Sendable, Equatable {
+        let bundleId: String
+        /// The `outputDir` string loosely parsed out of the JSON, if the file is
+        /// parseable JSON at all. Lets the sweeper check the capture directory the
+        /// record actually named, not just the conventional location.
+        let outputDirPath: String?
+    }
+
+    /// Enumerate record files that fail the strict decode. Read-only — deletion
+    /// policy belongs to the caller (CaptureStorageSweeper), which pairs this with
+    /// a capture-directory-absence check before reclaiming anything.
+    func undecodableRecords() -> [UndecodableRecord] {
+        guard let ids = try? allBundleIds() else { return [] }
+        var found: [UndecodableRecord] = []
+        for id in ids {
+            guard let data = try? Data(contentsOf: fileURL(for: id)) else { continue }
+            if (try? decoder.decode(UploadSessionRecord.self, from: data)) != nil { continue }
+            // Loose parse: Codable encodes the outputDir URL as its absoluteString.
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            found.append(UndecodableRecord(
+                bundleId: id,
+                outputDirPath: json?["outputDir"] as? String
+            ))
+        }
+        return found
+    }
+
     // MARK: - Private
 
     private func fileURL(for bundleId: String) -> URL {
