@@ -669,8 +669,58 @@ def _gcs_blob_exists_and_get(bucket_name: str, blob_path: str) -> Optional[bytes
     return None
 
 
+def _load_scene_room_plan(
+    *, bundle: CaptureBundle, bundle_uri: str, scene_id: str, outputs_bucket: str
+):
+    """Load + parse the bundle's CapturedRoom JSON (decision 0077).
+
+    Returns (room, parse_reason, source): room is a
+    roomplan_room.RoomPlanRoom or None; parse_reason records WHY it is None
+    when the bundle claimed one (the roomplan_parse_failed manifest note);
+    source is "cached" | "bundle" when parsed.
+
+    The verbatim JSON is cached to the outputs bucket on first read
+    (scenes/{id}/roomplan/room.json) so the geometry survives the captures
+    bucket's 1-day sweep — the 0065 sidecar lesson; /shell and warm
+    re-drives read the cached copy. The cached copy is also preferred here,
+    so every attempt of a scene parses the same bytes. A missing/corrupt
+    room.json NEVER fails the scene — the caller degrades to LIDAR_ARKIT
+    semantics (structured log + manifest note).
+    """
+    from roomplan_room import try_parse_captured_room  # deferred, heavy-path only
+
+    if not (bundle.HasField("room_plan") and bundle.room_plan.json_gcs_path):
+        return None, None, None
+
+    cache_blob = f"scenes/{scene_id}/roomplan/room.json"
+    raw = _gcs_blob_exists_and_get(outputs_bucket, cache_blob)
+    source = "cached"
+    if raw is None:
+        source = "bundle"
+        try:
+            raw = _download_gcs_uri(
+                _bundle_prefix(bundle_uri) + bundle.room_plan.json_gcs_path
+            )
+        except PoisonError:
+            return None, "room_json_missing", None
+        # Cache write-through: an EnvironmentalError here propagates (the
+        # whole attempt retries cheaply pre-model-load), keeping the cache
+        # guarantee — a ready ROOMPLAN scene always has the cached copy.
+        _gcs_upload_for_scene(
+            f"gs://{outputs_bucket}/", cache_blob, raw, "application/json"
+        )
+
+    room, reason = try_parse_captured_room(raw)
+    if room is not None and not room.has_geometry:
+        room, reason = None, "no walls or floor in CapturedRoom"
+    if room is None:
+        return None, reason, None
+    return room, None, source
+
+
 def _build_refinement_context(
-    *, bundle: CaptureBundle, scene_id: str, bundle_uri: str, outputs_bucket: str, budget
+    *, bundle: CaptureBundle, scene_id: str, bundle_uri: str, outputs_bucket: str,
+    budget, room_plan=None,
 ):
     """Wire fusion.py's RefinementContext (decision 0067) to this
     service's actual GCS-backed evidence sources.
@@ -792,6 +842,7 @@ def _build_refinement_context(
         get_appearance=get_appearance,
         get_rgb=get_rgb,
         get_room_planes=get_room_planes,
+        get_roomplan=(lambda: room_plan),
         budget=budget,
     )
 
@@ -842,6 +893,25 @@ def run_perception(
 
     if not bundle.frames:
         raise PoisonError("Bundle has no frames")
+
+    # CapturedRoom (decision 0077): parsed once, cached to the outputs
+    # bucket, threaded into fusion's census pass. Missing/corrupt →
+    # LIDAR_ARKIT semantics with a structured log + manifest note — never
+    # a failed scene.
+    room_plan, roomplan_reason, roomplan_source = _load_scene_room_plan(
+        bundle=bundle, bundle_uri=bundle_uri, scene_id=scene_id,
+        outputs_bucket=outputs_bucket,
+    )
+    if roomplan_reason is not None:
+        logger.warning(
+            "roomplan_parse_failed scene_id=%s reason=%s; degrading to "
+            "LIDAR_ARKIT semantics", scene_id, roomplan_reason,
+        )
+    elif room_plan is not None:
+        logger.info(
+            "roomplan scene_id=%s source=%s walls=%d objects=%d",
+            scene_id, roomplan_source, len(room_plan.walls), len(room_plan.objects),
+        )
 
     frames_total = len(bundle.frames)
     effective_max = max_frames if max_frames is not None else sampling_mod.DEFAULT_MAX_FRAMES
@@ -912,9 +982,25 @@ def run_perception(
     import fusion as fusion_mod
     refine_ctx = _build_refinement_context(
         bundle=bundle, scene_id=scene_id, bundle_uri=bundle_uri,
-        outputs_bucket=outputs_bucket, budget=budget,
+        outputs_bucket=outputs_bucket, budget=budget, room_plan=room_plan,
     )
     scene_objects, fusion_meta = fusion_mod.fuse_scene_objects_with_meta(frame_results, refine_ctx)
+
+    # Scene-level roomplan note — emitted ONLY when the bundle claims a
+    # CapturedRoom, so a no-roomplan bundle's manifest stays byte-identical
+    # to the pre-0077 shape (the RP-4 degrade lock).
+    roomplan_note: Optional[dict] = None
+    if bundle.HasField("room_plan") and bundle.room_plan.json_gcs_path:
+        roomplan_note = {
+            "present": True,
+            "parse_ok": room_plan is not None,
+            "wall_count": len(room_plan.walls) if room_plan is not None else None,
+            "object_count": len(room_plan.objects) if room_plan is not None else None,
+        }
+        if roomplan_reason is not None:
+            roomplan_note["parse_failed"] = roomplan_reason
+        if roomplan_source is not None:
+            roomplan_note["source"] = roomplan_source
 
     manifest = {
         "scene_id": scene_id,
@@ -924,6 +1010,7 @@ def run_perception(
         "frame_count": frames_total,
         "frames_total": frames_total,
         "frames_sampled": len(selected),
+        **({"roomplan": roomplan_note} if roomplan_note is not None else {}),
         "sampling": {
             "policy": "pose_diverse_fps_v1",
             "max_frames": effective_max,

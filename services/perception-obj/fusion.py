@@ -122,6 +122,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import box_placement
 import contact_priors
 import numpy as np
 import reproject
@@ -131,6 +132,7 @@ from roomstudio_schemas.placement_math import (
     MaskEvidence,
     mask_containment,
     prepare_mask,
+    project_points,
     robust_cloud_stats,
     triangulate_rays,
 )
@@ -196,6 +198,35 @@ _CONTACT_POSITION_SOURCES = frozenset(
     ("single_view_floor_contact", "single_view_wall_contact")
 )
 
+# --- LIDAR_ROOMPLAN long-tail gates (decision 0077; measured on 247003de) ---
+# These three gates run ONLY when the scene carries a parsed CapturedRoom
+# (ctx.get_roomplan) — bundles without one reproduce today's behaviour
+# byte-for-byte (the RP-4 degrade lock).
+#
+# Cross-label containment dedup: two same-frame masks that are the SAME
+# region under different labels (the f242 artwork/painting/mirror triple,
+# pairwise IoS 0.999) collapse to the best-scoring one. The test is
+# intersection-over-LARGER (near-identity), NOT intersection-over-smaller:
+# a small mask nested inside a genuinely larger different-label mask must
+# never merge — the higher default reflects that crossing labels is a
+# bigger claim than the same-label rule's 0.8.
+_CROSS_LABEL_DEDUP_IDENTITY = float(
+    os.environ.get("PLACEMENT_CROSS_LABEL_DEDUP_IDENTITY", "0.9")
+)
+# Mirror depth-trust: a depth_fit whose NN polish RMS is out of family
+# (the real mirror measured 0.196 m vs this scene's 0.007 m typical —
+# LiDAR through mirror glass returns virtual depth) is demoted to the ray
+# path, where the wall-contact prior can still place it against a measured
+# wall. The threshold sits an order of magnitude above good fits and 4x
+# below the measured failure.
+_DEPTH_TRUST_RMS_M = float(os.environ.get("PLACEMENT_DEPTH_TRUST_RMS_M", "0.05"))
+# Textile silhouette-span: a placed splat whose projected extent covers
+# less than this fraction of its own mask's extent is a scale-collapse
+# suspect (the 262k px throw that shipped at 0.34 m — a small splat inside
+# a large depth cloud scores excellent one-directional NN RMS). Flag-only
+# in v1: scale_suspect + the measured ratio, never a mutation.
+_SPAN_MIN = float(os.environ.get("PLACEMENT_SPAN_MIN", "0.5"))
+
 
 def _refinement_enabled() -> bool:
     return os.environ.get("PLACEMENT_REFINE", "1") == "1"
@@ -225,6 +256,13 @@ class RefinementContext:
         single-view contact-prior placement (decision 0067 chunk D). Absent
         or empty (no plane anchors in the bundle) → priors inert, single-
         view objects stay insufficient_observations (the degrade lock).
+    get_roomplan() -> roomplan_room.RoomPlanRoom | None — optional; the
+        scene's parsed CapturedRoom (decision 0077). Present and non-None →
+        the census-aware pass runs: box association + box-anchored objects
+        for covered categories, plus the three LIDAR_ROOMPLAN long-tail
+        gates (cross-label dedup, mirror depth-trust, textile span). Absent
+        or None → fusion reproduces the pre-0077 behaviour byte-for-byte
+        (the RP-4 degrade lock, test-pinned).
     budget: object exposing .remaining() -> float (seconds), or None for
         no limit (e.g. tests). Refinement is skipped scene-wide if
         remaining() < min_remaining_s when fusion starts, and stops
@@ -238,6 +276,7 @@ class RefinementContext:
     get_appearance: Optional[Callable[[str], Optional[reproject.SplatAppearance]]] = None
     get_rgb: Optional[Callable[[int], Optional[np.ndarray]]] = None
     get_room_planes: Optional[Callable[[], Any]] = None
+    get_roomplan: Optional[Callable[[], Any]] = None
     budget: Optional[Any] = None
     min_remaining_s: float = _REFINE_MIN_REMAINING_S
     _evidence_cache: dict = field(default_factory=dict, repr=False)
@@ -576,6 +615,179 @@ def _dedup_same_frame(observations: list[dict], ctx: RefinementContext) -> tuple
             })
         keep.extend(group[k] for k in range(n) if not absorbed[k])
     return keep, records
+
+
+# -----------------------------------------------------------------------------
+# LIDAR_ROOMPLAN long-tail gates (decision 0077; active only with a parsed
+# CapturedRoom — see the knob block for the measured cases)
+# -----------------------------------------------------------------------------
+
+def _mask_near_identity(mask_a: np.ndarray, mask_b: np.ndarray) -> float:
+    """Intersection-over-LARGER: 1.0 only for near-identical regions. A
+    nested pair (small inside big) scores low here even though
+    intersection-over-smaller is 1.0 — the protection the cross-label
+    dedup needs against absorbing genuinely different nested objects."""
+    a = np.asarray(mask_a, dtype=bool)
+    b = np.asarray(mask_b, dtype=bool)
+    area_a, area_b = int(a.sum()), int(b.sum())
+    if area_a == 0 or area_b == 0:
+        return 0.0
+    inter = int(np.logical_and(a, b).sum())
+    return inter / max(area_a, area_b)
+
+
+def _dedup_cross_label(
+    observations: list[dict], ctx: RefinementContext
+) -> tuple[list[dict], list[dict]]:
+    """Collapse same-frame near-identical masks ACROSS labels (gate i —
+    the f242 triple: one ~20k px region shipped three times as artwork /
+    painting / mirror, pairwise IoS 0.999). Union-find over pairs whose
+    intersection-over-larger clears the identity bar; each group keeps its
+    best-scoring observation (label included) verbatim. Runs BEFORE the
+    label split, so a collapsed group never seeds objects under several
+    labels."""
+    by_frame: dict[Any, list[dict]] = {}
+    for o in observations:
+        by_frame.setdefault(o["frame_index"], []).append(o)
+
+    keep: list[dict] = []
+    records: list[dict] = []
+    for frame_index, group in by_frame.items():
+        if len(group) < 2:
+            keep.extend(group)
+            continue
+        masks = [ctx.mask_for(frame_index, o.get("mask_index")) for o in group]
+        if any(m is None for m in masks):
+            keep.extend(group)
+            continue
+        n = len(group)
+        parent = list(range(n))
+
+        def find(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                if _mask_near_identity(masks[i], masks[j]) >= _CROSS_LABEL_DEDUP_IDENTITY:
+                    parent[find(j)] = find(i)
+
+        groups: dict[int, list[int]] = {}
+        for i in range(n):
+            groups.setdefault(find(i), []).append(i)
+        for members in groups.values():
+            if len(members) == 1:
+                keep.append(group[members[0]])
+                continue
+            best = max(members, key=lambda k: (group[k]["score"], -k))
+            keep.append(group[best])
+            for k in members:
+                if k != best:
+                    records.append({
+                        "frame_index": frame_index,
+                        "kept_mask_index": group[best]["mask_index"],
+                        "absorbed_mask_index": group[k]["mask_index"],
+                        "absorbed_label": group[k].get("label"),
+                    })
+    return keep, records
+
+
+def _demote_untrusted_depth(
+    observations: list[dict], ctx: RefinementContext
+) -> tuple[list[dict], set]:
+    """Gate ii: strip the depth placement from observations whose NN-polish
+    RMS is out of family (specular surfaces — the real mirror's 0.196 m vs
+    0.007 m typical). The observation keeps its view ray and layout
+    rotation, so it flows down the ray path where triangulation or the
+    wall-contact prior (mirror IS a wall class) can still place it against
+    something measured — a bad depth fit is never rendered. Returns the
+    demoted (frame, mask) keys so fused objects can carry the flag."""
+    out: list[dict] = []
+    demoted: set = set()
+    for o in observations:
+        pl = o.get("placement") or {}
+        rms = (pl.get("quality") or {}).get("nn_rms_m")
+        if not (
+            pl.get("placed")
+            and rms is not None
+            and rms > _DEPTH_TRUST_RMS_M
+            and o.get("view_ray")
+        ):
+            out.append(o)
+            continue
+        new_pl: dict = {
+            "placed": False,
+            "reason": "depth_untrusted",
+            "depth_trust_demoted": True,
+            "layout_prior": pl.get("layout_prior"),
+            "quality": dict(pl.get("quality") or {}),
+        }
+        wt = pl.get("world_transform") or {}
+        if wt.get("rotation_xyzw") and pl.get("rotation_source") == "sam3d_layout":
+            new_pl["world_rotation_xyzw"] = wt["rotation_xyzw"]
+            new_pl["rotation_source"] = "sam3d_layout"
+        splat = ctx.get_splat(o["splat_gcs_uri"])
+        if splat is not None:
+            try:
+                new_pl["splat_max_extent"] = float(
+                    robust_cloud_stats(splat).extents[0]
+                )
+            except DegenerateGeometryError:
+                pass
+        logger.info(
+            "fusion: depth-trust demotion frame=%s mask=%s label=%s nn_rms=%.3f",
+            o["frame_index"], o.get("mask_index"), o.get("label"), rms,
+        )
+        out.append({**o, "placement": new_pl})
+        demoted.add((o["frame_index"], o.get("mask_index")))
+    return out, demoted
+
+
+def _apply_silhouette_span(obj: dict, ctx: RefinementContext) -> dict:
+    """Gate iii: flag a placed depth_fit object whose projected splat
+    covers a suspiciously small fraction of its own mask's extent (the
+    collapse-into-cloud degeneracy). Flag-only: scale_suspect + the
+    measured ratio; the transform is never mutated. A no-op (silent) when
+    any evidence is missing."""
+    if not obj.get("placed") or obj.get("method") != "depth_fit":
+        return obj
+    src = obj.get("source") or {}
+    frame_index, mask_index = src.get("frame_index"), src.get("mask_index")
+    evidence = ctx.evidence_for(frame_index, mask_index)
+    cam = ctx.get_camera(frame_index)
+    splat = ctx.get_splat(obj.get("splat_gcs_uri"))
+    wt = obj.get("world_transform") or {}
+    if evidence is None or cam is None or splat is None or not wt:
+        return obj
+    if evidence.bounds is None:
+        return obj
+    pose, intrinsics = cam
+    world = reproject.transform_points(
+        splat, wt["rotation_xyzw"], wt["position"], wt["scale"]
+    )
+    uv, _depth, valid = project_points(world, intrinsics, pose)
+    if int(valid.sum()) < 3:
+        return obj
+    uv = uv[valid]
+    proj_span = float(max(uv[:, 0].max() - uv[:, 0].min(), uv[:, 1].max() - uv[:, 1].min()))
+    u0, v0, u1, v1 = evidence.bounds
+    mask_span = float(max(u1 - u0, v1 - v0))
+    if mask_span <= 0.0:
+        return obj
+    ratio = proj_span / mask_span
+    obj = dict(obj)
+    quality = dict(obj.get("quality", {}))
+    quality["silhouette_span_ratio"] = round(ratio, 4)
+    obj["quality"] = quality
+    if ratio < _SPAN_MIN:
+        obj["scale_suspect"] = True
+        logger.info(
+            "fusion: silhouette-span flag %s (%s) ratio=%.3f",
+            obj.get("object_id"), obj.get("label"), ratio,
+        )
+    return obj
 
 
 # -----------------------------------------------------------------------------
@@ -1155,6 +1367,22 @@ def _demote_object(obj: dict, reason: str) -> dict:
     }
 
 
+def _suppress_as_box_duplicate(obj: dict, box_index: int) -> dict:
+    """Demote a placed non-box object that duplicates a matched RoomPlan
+    box (decision 0077): the entry stays in the manifest as honest
+    provenance, never rendered."""
+    out = _demote_object(obj, "box_duplicate")
+    out["box_duplicate_suppressed"] = True
+    out["suppressed_by_box"] = f"box_{box_index:02d}"
+    if "deduped_observations" in obj:
+        out["deduped_observations"] = obj["deduped_observations"]
+    logger.info(
+        "fusion: suppressing %s (%s) as duplicate of box_%02d",
+        obj.get("object_id"), obj.get("label"), box_index,
+    )
+    return out
+
+
 def _apply_room_sanity(obj: dict, ctx: Optional[RefinementContext]) -> dict:
     """Demote obj to unplaced if the room-sanity gate rejects it; otherwise
     return it unchanged. Only ever consulted for placed objects."""
@@ -1207,13 +1435,69 @@ def fuse_scene_objects_with_meta(
         }
 
     observations = _collect_observations(frame_results)
-    by_label: dict[str, list[dict]] = {}
-    for o in observations:
-        by_label.setdefault(o["label"] or "", []).append(o)
+
+    # --- LIDAR_ROOMPLAN census pass (decision 0077) -------------------------
+    # Active only when the scene carries a parsed CapturedRoom. Without one
+    # everything below this block is byte-identical to the pre-0077 pass
+    # (the RP-4 degrade lock, test-pinned).
+    room = None
+    if ctx.get_roomplan is not None:
+        try:
+            room = ctx.get_roomplan()
+        except Exception:
+            logger.warning(
+                "fusion: get_roomplan failed; census pass skipped", exc_info=True
+            )
+            room = None
+    boxes = list(room.objects) if room is not None else []
 
     fused: list[dict] = []
     dedup_counts: dict[tuple, int] = {}
     counter = 0
+    demoted_keys: set = set()
+    matched_box_indices: set[int] = set()
+
+    if room is not None:
+        observations, cross_records = _dedup_cross_label(observations, ctx)
+        for rec in cross_records:
+            key = (rec["frame_index"], rec["kept_mask_index"])
+            dedup_counts[key] = dedup_counts.get(key, 0) + 1
+        observations, demoted_keys = _demote_untrusted_depth(observations, ctx)
+
+    if boxes:
+        assoc_by_box = box_placement.associate_observations(boxes, observations, ctx)
+        matched_box_indices = set(assoc_by_box)
+        consumed: set = set()
+        for assocs in assoc_by_box.values():
+            for a in assocs:
+                consumed.add((a.frame_index, a.mask_index))
+        # One object per box, in Apple's array order (deterministic ids).
+        for bi, box in enumerate(boxes):
+            allow = _budget_allows(ctx)
+            if not allow:
+                refinement_skipped = True
+            obj = box_placement.build_box_object(
+                box=box, box_index=bi, object_id=f"obj_{counter:03d}",
+                associations=assoc_by_box.get(bi, []), ctx=ctx,
+                allow_scoring=allow,
+            )
+            obj["deduped_observations"] = sum(
+                dedup_counts.get((a.frame_index, a.mask_index), 0)
+                for a in assoc_by_box.get(bi, [])
+            )
+            fused.append(obj)
+            counter += 1
+        # Associated observations are CONSUMED by their box — one object
+        # per box by construction; the rest flow through unchanged.
+        observations = [
+            o for o in observations
+            if (o["frame_index"], o.get("mask_index")) not in consumed
+        ]
+
+    by_label: dict[str, list[dict]] = {}
+    for o in observations:
+        by_label.setdefault(o["label"] or "", []).append(o)
+
     for label in sorted(by_label):
         group = sorted(by_label[label], key=lambda o: -o["score"])
         placed = [o for o in group if o["placement"].get("placed")]
@@ -1262,7 +1546,31 @@ def fuse_scene_objects_with_meta(
             obj = _apply_room_sanity(obj, ctx)
             n_dedup = sum(dedup_counts.get((m["frame_index"], m.get("mask_index")), 0) for m in cluster)
             obj["deduped_observations"] = n_dedup
+            if demoted_keys and any(
+                (m["frame_index"], m.get("mask_index")) in demoted_keys
+                for m in cluster
+            ):
+                quality = dict(obj.get("quality") or {})
+                quality["depth_trust_demoted"] = True
+                obj["quality"] = quality
             fused.append(obj)
+
+    # --- census post-passes (decision 0077) ---------------------------------
+    if boxes:
+        # Box-duplicate suppression: a placed non-box object whose center
+        # lands inside a MATCHED box's volume with a compatible label is
+        # the same physical object the box already carries.
+        for i, obj in enumerate(fused):
+            if obj.get("roomplan_box"):
+                continue
+            bi = box_placement.find_suppressing_box(obj, boxes, matched_box_indices)
+            if bi is not None:
+                fused[i] = _suppress_as_box_duplicate(obj, bi)
+    if room is not None:
+        for i, obj in enumerate(fused):
+            if obj.get("roomplan_box"):
+                continue
+            fused[i] = _apply_silhouette_span(fused[i], ctx)
 
     placed_count = sum(1 for f in fused if f["placed"])
     logger.info(
