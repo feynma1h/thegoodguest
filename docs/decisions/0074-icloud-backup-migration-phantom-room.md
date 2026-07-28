@@ -1,7 +1,11 @@
 # 0074 — iCloud-backup migration: what carries over, and the phantom-room row
 
 **Date:** 2026-07-26
-**Status:** Decided (defect recorded; fix direction named, not yet built)
+**Status:** Decided; fix BUILT 2026-07-28 (branch `ios-0074-phantom-room`,
+commits `8b063bc` fix / `e75de4a` sweep — both preferred directions below,
+as recorded). Simulator-verified against production with the real `9fbe29b6`
+record and a live 403; hardware verification on the 16 Pro (which carries the
+live repro state) pending the next device session.
 
 ## Context
 
