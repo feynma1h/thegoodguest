@@ -42,6 +42,7 @@ from unittest.mock import MagicMock
 from roomstudio_schemas import (
     ARKIT_ONLY,
     LIDAR_ARKIT,
+    LIDAR_ROOMPLAN,
     SCHEMA_VERSION,
     CaptureBundle,
 )
@@ -461,6 +462,28 @@ def test_absolute_rgb_path_creates_failed_invalid_scene(client: TestClient) -> N
     scenes = list(repo._store.values())
     assert len(scenes) == 1
     assert scenes[0].status == SceneStatus.FAILED_INVALID
+
+
+def test_absolute_roomplan_json_path_rejected() -> None:
+    """room_plan.json_gcs_path joins check 6 (all GCS paths relative,
+    decision 0077): an absolute URI fails validation; the relative form
+    passes. Direct validate_bundle pin — the handler wiring is identical to
+    every other absolute_gcs_path case."""
+    b = CaptureBundle()
+    b.schema_version = SCHEMA_VERSION
+    b.user_id = "test-user"
+    b.device.device_id = str(uuid.uuid4())
+    b.tier = LIDAR_ROOMPLAN
+    b.room_plan.json_gcs_path = "gs://my-bucket/captures/abc/roomplan/room.json"
+
+    result = validate_bundle(b)
+    assert result is not None
+    code, detail = result
+    assert code == "absolute_gcs_path"
+    assert "json_gcs_path" in detail
+
+    b.room_plan.json_gcs_path = "roomplan/room.json"
+    assert validate_bundle(b) is None
 
 
 # ---------------------------------------------------------------------------

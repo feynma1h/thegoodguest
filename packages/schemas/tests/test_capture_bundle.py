@@ -21,6 +21,7 @@ from roomstudio_schemas import (
     SCHEMA_VERSION,
     CaptureBundle,
     CaptureTier,
+    RoomPlanModel,
 )
 
 
@@ -148,24 +149,34 @@ def test_lidar_tier_with_depth():
     assert not b2.frames[0].depth.HasField("confidence_gcs_path")
 
 
-def test_room_plan_with_summary():
+def test_room_plan_round_trips():
+    """RoomPlanModel carries the CapturedRoom JSON by reference (decision
+    0077): json_gcs_path is the geometry source of truth, usdz_gcs_path the
+    optional debugging artifact, roomplan_version the drift pin."""
     b = _minimal_bundle()
     b.tier = LIDAR_ROOMPLAN
     b.device.has_lidar = True
+    b.room_plan.json_gcs_path = "roomplan/room.json"
     b.room_plan.usdz_gcs_path = "roomplan/room.usdz"
-    b.room_plan.roomplan_version = "iOS17.4-RoomPlan2"
-    b.room_plan.summary.wall_count = 4
-    b.room_plan.summary.door_count = 1
-    b.room_plan.summary.window_count = 2
-    o = b.room_plan.summary.objects.add()
-    o.category = "sofa"
-    o.extent_x, o.extent_y, o.extent_z = 2.0, 0.8, 0.9
+    b.room_plan.roomplan_version = "ios26.5.2;CapturedRoom.v2;beautifyObjects"
 
     b2 = CaptureBundle()
     b2.ParseFromString(b.SerializeToString())
     assert b2.HasField("room_plan")
-    assert b2.room_plan.summary.wall_count == 4
-    assert b2.room_plan.summary.objects[0].category == "sofa"
+    assert b2.room_plan.json_gcs_path == "roomplan/room.json"
+    assert b2.room_plan.usdz_gcs_path == "roomplan/room.usdz"
+    assert b2.room_plan.roomplan_version == "ios26.5.2;CapturedRoom.v2;beautifyObjects"
+
+
+def test_room_plan_summary_field_is_reserved():
+    """Field 3 (the RoomPlanSummary proto mirror) was deleted with zero wire
+    history; the number and name must stay reserved so no future field can
+    collide with any bundle a pre-deletion build might ever have written."""
+    md = RoomPlanModel.DESCRIPTOR
+    assert "summary" not in md.fields_by_name
+    assert 3 not in md.fields_by_number
+    assert "json_gcs_path" in md.fields_by_name
+    assert md.fields_by_name["json_gcs_path"].number == 4
 
 
 def test_plane_alignment_enum_values_stable():

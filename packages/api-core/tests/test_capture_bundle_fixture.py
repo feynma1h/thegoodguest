@@ -93,18 +93,20 @@ class TestLidarArkitBlobs:
 
 
 class TestLidarRoomplanBlobs:
-    def test_has_all_four_kinds(self):
+    def test_has_all_blob_kinds(self):
         arts = build_capture_bundle(tier=TIER_LIDAR_ROOMPLAN, frame_count=1)
         assert "frames/000000.jpg" in arts.blobs
         assert "depth/000000.f32" in arts.blobs
         assert "confidence/000000.png" in arts.blobs
         assert "roomplan/room.usdz" in arts.blobs
+        assert "roomplan/room.json" in arts.blobs
 
-    def test_no_usdz_when_roomplan_disabled(self):
+    def test_no_roomplan_blobs_when_roomplan_disabled(self):
         arts = build_capture_bundle(
             tier=TIER_LIDAR_ROOMPLAN, frame_count=1, include_roomplan=False
         )
         assert "roomplan/room.usdz" not in arts.blobs
+        assert "roomplan/room.json" not in arts.blobs
 
     def test_frame_count_scales_all_per_frame_blobs(self):
         arts = build_capture_bundle(tier=TIER_LIDAR_ROOMPLAN, frame_count=4)
@@ -165,8 +167,11 @@ class TestBundlePbValidity:
                     referenced.append(frame.depth.depth_gcs_path)
                 if frame.depth.HasField("confidence_gcs_path"):
                     referenced.append(frame.depth.confidence_gcs_path)
-        if b.HasField("room_plan") and b.room_plan.usdz_gcs_path:
-            referenced.append(b.room_plan.usdz_gcs_path)
+        if b.HasField("room_plan"):
+            if b.room_plan.usdz_gcs_path:
+                referenced.append(b.room_plan.usdz_gcs_path)
+            if b.room_plan.json_gcs_path:
+                referenced.append(b.room_plan.json_gcs_path)
 
         for path in referenced:
             assert path in arts.blobs, f"Proto references {path!r} but it is not in blobs"
@@ -238,3 +243,46 @@ class TestPlaneAnchors:
             assert abs(norm - 1.0) < 1e-3
             assert a.extent_width > 0 and a.extent_height > 0
         assert validate_bundle(b) is None
+
+
+# ---------------------------------------------------------------------------
+# RoomPlanModel (decision 0077)
+# ---------------------------------------------------------------------------
+
+class TestRoomPlanModel:
+    def test_roomplan_bundle_carries_json_and_passes_validation(self):
+        """A RoomPlan-carrying bundle: json_gcs_path (the geometry source of
+        truth), usdz_gcs_path, and a non-empty roomplan_version — and the
+        ingest validator accepts it unchanged (the additive-field contract,
+        exercised through the real validate_bundle; the 0066 plane_anchors
+        precedent)."""
+        import json
+
+        from roomstudio_schemas import CaptureBundle
+
+        arts = build_capture_bundle(tier=TIER_LIDAR_ROOMPLAN, frame_count=1)
+        b = CaptureBundle()
+        b.ParseFromString(arts.blobs["bundle.pb"])
+        assert b.HasField("room_plan")
+        assert b.room_plan.json_gcs_path == "roomplan/room.json"
+        assert b.room_plan.usdz_gcs_path == "roomplan/room.usdz"
+        assert b.room_plan.roomplan_version
+        # The JSON blob is structurally a CapturedRoom Codable document.
+        doc = json.loads(arts.blobs["roomplan/room.json"])
+        assert doc["version"] == 2
+        for key in ("walls", "floors", "objects", "doors", "windows", "openings"):
+            assert key in doc
+        assert validate_bundle(b) is None
+
+    def test_non_roomplan_tiers_have_no_room_plan(self):
+        """Absence is clean on the other tiers: no room_plan field, and the
+        bundle still validates — the degrade contract starts from HasField
+        being False, never from a half-populated message."""
+        from roomstudio_schemas import CaptureBundle
+
+        for tier in (TIER_ARKIT_ONLY, TIER_LIDAR_ARKIT):
+            arts = build_capture_bundle(tier=tier, frame_count=1)
+            b = CaptureBundle()
+            b.ParseFromString(arts.blobs["bundle.pb"])
+            assert not b.HasField("room_plan")
+            assert validate_bundle(b) is None

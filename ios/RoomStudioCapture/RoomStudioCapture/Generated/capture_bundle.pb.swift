@@ -228,8 +228,11 @@ public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendab
     set {_uniqueStorage()._frames = newValue}
   }
 
-  /// RoomPlan output, if the device produced one. Only set when
-  /// tier == LIDAR_ROOMPLAN.
+  /// RoomPlan output, if the device produced one. Set iff a built
+  /// CapturedRoom with at least one wall or floor shipped — which is also
+  /// exactly when tier == LIDAR_ROOMPLAN (decision 0077). A RoomPlan hard
+  /// failure (RoomBuilder throw, zero surfaces) ships LIDAR_ARKIT with no
+  /// room_plan; the capture is still valid.
   public var roomPlan: Roomstudio_Capture_V1_RoomPlanModel {
     get {_storage._roomPlan ?? Roomstudio_Capture_V1_RoomPlanModel()}
     set {_uniqueStorage()._roomPlan = newValue}
@@ -595,83 +598,38 @@ public nonisolated struct Roomstudio_Capture_V1_PlaneAnchor: Sendable {
   fileprivate var _pose: Roomstudio_Capture_V1_Pose? = nil
 }
 
+/// The wire contract is Apple's CapturedRoom Codable JSON, VERBATIM, by
+/// reference (decision 0077): the client serializes the RoomBuilder output
+/// with JSONEncoder and ships it as an ordinary manifest blob. No proto
+/// mirror of the model exists — a translation decided at capture time is a
+/// lossy boundary (any unmapped field is gone forever for that capture),
+/// violates the bundle convention that the iOS client emits values without
+/// transforming, and creates two schemas to keep in sync.
 public nonisolated struct Roomstudio_Capture_V1_RoomPlanModel: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// The exported `CapturedRoom` USDZ in GCS, e.g. "roomplan/room.usdz".
+  /// The exported parametric `CapturedRoom` USDZ in GCS, e.g.
+  /// "roomplan/room.usdz". Optional in practice — a debugging / future-viewer
+  /// artifact (~56 KB); the JSON is the source of truth.
   public var usdzGcsPath: String = String()
 
-  /// RoomPlan API version at capture time, e.g. "iOS17.4-RoomPlan2".
-  /// Carry it so we can re-parse correctly if Apple changes the schema.
+  /// RoomPlan provenance at capture time: iOS version + the CapturedRoom
+  /// Codable `version` field + RoomBuilder options, e.g.
+  /// "ios26.5.2;CapturedRoom.v2;beautifyObjects". Carried so the server
+  /// parser can pin schema drift — an Apple Codable change surfaces as a
+  /// version string the parser doesn't recognize, not a silent misparse.
   public var roomplanVersion: String = String()
 
-  /// Optional flat summary, useful for the orchestrator to dispatch without
-  /// having to crack open the USDZ. NOT a substitute for the USDZ itself —
-  /// the USDZ is the source of truth.
-  public var summary: Roomstudio_Capture_V1_RoomPlanSummary {
-    get {_summary ?? Roomstudio_Capture_V1_RoomPlanSummary()}
-    set {_summary = newValue}
-  }
-  /// Returns true if `summary` has been explicitly set.
-  public var hasSummary: Bool {self._summary != nil}
-  /// Clears the value of `summary`. Subsequent reads from it will return its default value.
-  public mutating func clearSummary() {self._summary = nil}
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-
-  fileprivate var _summary: Roomstudio_Capture_V1_RoomPlanSummary? = nil
-}
-
-public nonisolated struct Roomstudio_Capture_V1_RoomPlanSummary: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var wallCount: UInt32 = 0
-
-  public var doorCount: UInt32 = 0
-
-  public var windowCount: UInt32 = 0
-
-  /// Furniture boxes as detected by RoomPlan. Categories are RoomPlan's
-  /// fixed set (chair, sofa, bed, table, storage, fireplace, sink, toilet,
-  /// dishwasher, oven, ...).
-  public var objects: [Roomstudio_Capture_V1_RoomPlanObject] = []
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Roomstudio_Capture_V1_RoomPlanObject: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  /// RoomPlan category string, verbatim.
-  public var category: String = String()
-
-  /// Axis-aligned bbox center in world frame, meters.
-  public var centerX: Float = 0
-
-  public var centerY: Float = 0
-
-  public var centerZ: Float = 0
-
-  /// Bbox extent (full width/height/depth, not half), meters.
-  public var extentX: Float = 0
-
-  public var extentY: Float = 0
-
-  public var extentZ: Float = 0
-
-  /// Yaw around +Y, radians. RoomPlan boxes are gravity-aligned, so only
-  /// one rotation DoF is meaningful.
-  public var yawRad: Float = 0
+  /// Apple's CapturedRoom Codable JSON (JSONEncoder output), verbatim, in
+  /// GCS: e.g. "roomplan/room.json" (~200 KB). THE geometry source of truth
+  /// for the LIDAR_ROOMPLAN tier: walls/floor with polygon corners, objects
+  /// with dimensions + transforms, doors/windows/openings with parenting,
+  /// categories/confidence/attributes. Parsed server-side by
+  /// services/perception-obj/roomplan_room.py; the embedded `coreModel`
+  /// blob inside the JSON is carried opaque and never parsed.
+  public var jsonGcsPath: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1289,7 +1247,7 @@ nonisolated extension Roomstudio_Capture_V1_PlaneAnchor: SwiftProtobuf.Message, 
 
 nonisolated extension Roomstudio_Capture_V1_RoomPlanModel: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".RoomPlanModel"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}usdz_gcs_path\0\u{3}roomplan_version\0\u{1}summary\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}usdz_gcs_path\0\u{3}roomplan_version\0\u{4}\u{2}json_gcs_path\0\u{b}summary\0\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1299,143 +1257,29 @@ nonisolated extension Roomstudio_Capture_V1_RoomPlanModel: SwiftProtobuf.Message
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.usdzGcsPath) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.roomplanVersion) }()
-      case 3: try { try decoder.decodeSingularMessageField(value: &self._summary) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.jsonGcsPath) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.usdzGcsPath.isEmpty {
       try visitor.visitSingularStringField(value: self.usdzGcsPath, fieldNumber: 1)
     }
     if !self.roomplanVersion.isEmpty {
       try visitor.visitSingularStringField(value: self.roomplanVersion, fieldNumber: 2)
     }
-    try { if let v = self._summary {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    } }()
+    if !self.jsonGcsPath.isEmpty {
+      try visitor.visitSingularStringField(value: self.jsonGcsPath, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Roomstudio_Capture_V1_RoomPlanModel, rhs: Roomstudio_Capture_V1_RoomPlanModel) -> Bool {
     if lhs.usdzGcsPath != rhs.usdzGcsPath {return false}
     if lhs.roomplanVersion != rhs.roomplanVersion {return false}
-    if lhs._summary != rhs._summary {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Roomstudio_Capture_V1_RoomPlanSummary: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".RoomPlanSummary"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}wall_count\0\u{3}door_count\0\u{3}window_count\0\u{1}objects\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt32Field(value: &self.wallCount) }()
-      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.doorCount) }()
-      case 3: try { try decoder.decodeSingularUInt32Field(value: &self.windowCount) }()
-      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.objects) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.wallCount != 0 {
-      try visitor.visitSingularUInt32Field(value: self.wallCount, fieldNumber: 1)
-    }
-    if self.doorCount != 0 {
-      try visitor.visitSingularUInt32Field(value: self.doorCount, fieldNumber: 2)
-    }
-    if self.windowCount != 0 {
-      try visitor.visitSingularUInt32Field(value: self.windowCount, fieldNumber: 3)
-    }
-    if !self.objects.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.objects, fieldNumber: 4)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Roomstudio_Capture_V1_RoomPlanSummary, rhs: Roomstudio_Capture_V1_RoomPlanSummary) -> Bool {
-    if lhs.wallCount != rhs.wallCount {return false}
-    if lhs.doorCount != rhs.doorCount {return false}
-    if lhs.windowCount != rhs.windowCount {return false}
-    if lhs.objects != rhs.objects {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Roomstudio_Capture_V1_RoomPlanObject: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".RoomPlanObject"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}category\0\u{3}center_x\0\u{3}center_y\0\u{3}center_z\0\u{3}extent_x\0\u{3}extent_y\0\u{3}extent_z\0\u{3}yaw_rad\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.category) }()
-      case 2: try { try decoder.decodeSingularFloatField(value: &self.centerX) }()
-      case 3: try { try decoder.decodeSingularFloatField(value: &self.centerY) }()
-      case 4: try { try decoder.decodeSingularFloatField(value: &self.centerZ) }()
-      case 5: try { try decoder.decodeSingularFloatField(value: &self.extentX) }()
-      case 6: try { try decoder.decodeSingularFloatField(value: &self.extentY) }()
-      case 7: try { try decoder.decodeSingularFloatField(value: &self.extentZ) }()
-      case 8: try { try decoder.decodeSingularFloatField(value: &self.yawRad) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.category.isEmpty {
-      try visitor.visitSingularStringField(value: self.category, fieldNumber: 1)
-    }
-    if self.centerX.bitPattern != 0 {
-      try visitor.visitSingularFloatField(value: self.centerX, fieldNumber: 2)
-    }
-    if self.centerY.bitPattern != 0 {
-      try visitor.visitSingularFloatField(value: self.centerY, fieldNumber: 3)
-    }
-    if self.centerZ.bitPattern != 0 {
-      try visitor.visitSingularFloatField(value: self.centerZ, fieldNumber: 4)
-    }
-    if self.extentX.bitPattern != 0 {
-      try visitor.visitSingularFloatField(value: self.extentX, fieldNumber: 5)
-    }
-    if self.extentY.bitPattern != 0 {
-      try visitor.visitSingularFloatField(value: self.extentY, fieldNumber: 6)
-    }
-    if self.extentZ.bitPattern != 0 {
-      try visitor.visitSingularFloatField(value: self.extentZ, fieldNumber: 7)
-    }
-    if self.yawRad.bitPattern != 0 {
-      try visitor.visitSingularFloatField(value: self.yawRad, fieldNumber: 8)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Roomstudio_Capture_V1_RoomPlanObject, rhs: Roomstudio_Capture_V1_RoomPlanObject) -> Bool {
-    if lhs.category != rhs.category {return false}
-    if lhs.centerX != rhs.centerX {return false}
-    if lhs.centerY != rhs.centerY {return false}
-    if lhs.centerZ != rhs.centerZ {return false}
-    if lhs.extentX != rhs.extentX {return false}
-    if lhs.extentY != rhs.extentY {return false}
-    if lhs.extentZ != rhs.extentZ {return false}
-    if lhs.yawRad != rhs.yawRad {return false}
+    if lhs.jsonGcsPath != rhs.jsonGcsPath {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

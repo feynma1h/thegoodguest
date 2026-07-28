@@ -33,8 +33,6 @@ from .capture_bundle_pb2 import (  # noqa: F401
     PlaneAnchor,
     Pose,
     RoomPlanModel,
-    RoomPlanObject,
-    RoomPlanSummary,
 )
 from . import pose_math  # noqa: F401
 
