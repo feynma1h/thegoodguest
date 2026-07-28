@@ -430,16 +430,82 @@ final class ScenePollTests: XCTestCase {
         _ = sub
     }
 
-    // MARK: - Fatal HTTP codes stop the loop
+    // MARK: - 403 is terminal-not-ours, not connection trouble (decision 0074)
 
-    func test_403_stopsFatal() async throws {
+    /// The phantom-room chain: a by-bundle 403 used to become .pollError, which the
+    /// flow rendered as connection trouble ("your room is safe up there" — false for
+    /// a foreign room) with no acknowledging exit. It must be the distinct .notOwned
+    /// terminal so the flow can acknowledge the record and stand down.
+    func test_403_setsNotOwned_neverPollError() async throws {
+        let p = poller([.success((403, Data()))])
+        var pollErrorObserved = false
+        let sub = p.$pollState.sink { state in
+            if case .pollError = state { pollErrorObserved = true }
+        }
+        p.start(bundleId: "b1")
+        await p._runTask?.value
+        XCTAssertEqual(p.pollState, .notOwned)
+        XCTAssertFalse(pollErrorObserved, "403 must never pass through .pollError")
+        _ = sub
+    }
+
+    /// notOwned is definitive for the identity: the loop stops on the first 403 —
+    /// no token refresh (a fresh token presents the same uid), no retry.
+    func test_403_stopsLoop_withoutRefreshOrRetry() async throws {
+        var tokenCalls = 0
+        var getCalls   = 0
+        let box = ResponseBox([
+            .success((403, Data())),
+            .success((200, try ready())),   // must never be reached
+        ])
+        let p = ScenePoller(
+            sleep: { _ in },
+            performGET: { _, _ in getCalls += 1; return await box.next() },
+            tokenProvider: { tokenCalls += 1; return "t\(tokenCalls)" }
+        )
+        p.start(bundleId: "b1")
+        await p._runTask?.value
+        XCTAssertEqual(p.pollState, .notOwned)
+        XCTAssertEqual(getCalls, 1, "The loop must stop on the first 403")
+        XCTAssertEqual(tokenCalls, 1, "403 must not trigger the 401 refresh path")
+    }
+
+    /// Boundary with 0038: a 401 still refreshes once, and a 403 answered to the
+    /// REFRESHED token still classifies as notOwned — the refresh machinery is
+    /// untouched, and ownership stays definitive on a provably fresh token.
+    func test_401ThenRefresh_then403_isNotOwned() async throws {
+        var tokenCalls = 0
+        var getCalls   = 0
+        let box = ResponseBox([
+            .success((401, Data())),   // stale token → refresh once (0038)
+            .success((403, Data())),   // fresh token, wrong owner → notOwned
+        ])
+        let p = ScenePoller(
+            sleep: { _ in },
+            performGET: { _, _ in getCalls += 1; return await box.next() },
+            tokenProvider: { tokenCalls += 1; return "t\(tokenCalls)" }
+        )
+        p.start(bundleId: "b1")
+        await p._runTask?.value
+        XCTAssertEqual(tokenCalls, 2, "Initial token + the one 0038 refresh")
+        XCTAssertEqual(getCalls, 2, "First GET (401) + retry with the fresh token")
+        XCTAssertEqual(p.pollState, .notOwned)
+    }
+
+    /// notOwned is a hard terminal: resume() (the background→foreground path) must
+    /// not restart the loop for a room this identity can never read.
+    func test_resume_afterNotOwned_isNoOp() async throws {
         let p = poller([.success((403, Data()))])
         p.start(bundleId: "b1")
         await p._runTask?.value
-        if case .pollError = p.pollState { } else {
-            XCTFail("Expected .pollError for 403")
-        }
+        XCTAssertEqual(p.pollState, .notOwned)
+        p.resume()
+        // resume() flips pollState to .polling synchronously when it restarts a
+        // loop, so an unchanged terminal state IS the no-op proof.
+        XCTAssertEqual(p.pollState, .notOwned, "resume() must not leave the terminal state")
     }
+
+    // MARK: - Fatal HTTP codes stop the loop
 
     func test_400_stopsFatal() async throws {
         let p = poller([.success((400, Data()))])

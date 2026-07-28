@@ -100,6 +100,13 @@ struct RootFlowView: View {
                 flow
             }
         }
+        // The 0074 stand-down lives on the ROOT view, not on postSend: the poll loop
+        // deliberately outlives the wait screen (the user can leave with a room in
+        // flight), so terminal-not-ours can land while any stage is showing. Home is
+        // where the phantom row renders, and it must clear there too.
+        .onChange(of: poller.pollState) { _, newState in
+            if WaitFlowState.standsDownAutomatically(newState) { standDownNotOurs() }
+        }
         .onChange(of: scenePhase) { _, phase in
             // ScenePoller's contract: pause polling when backgrounded. Driven off
             // the POLLER's own state, not `stage`: the user can leave the wait
@@ -417,6 +424,14 @@ struct RootFlowView: View {
             // rehydrateAllUnfinishedBundles picks the bundle up on relaunch, and
             // nothing in THIS process will move it.
             WaitingView(phase: .sendPaused, onLeave: endFlight)
+
+        case .notOurs:
+            // Terminal-not-ours (decision 0074): the root-level onChange runs
+            // standDownNotOurs() on the same publish that produced this screen, so
+            // this renders for at most a frame on the way home. Bare parchment — a
+            // transition blink, not a message: there is no honest copy to show for
+            // a room this identity never owned, and no action to offer.
+            ParchmentBackground()
         }
     }
 
@@ -562,17 +577,40 @@ struct RootFlowView: View {
     /// for a bundle that will never arrive — and re-entering showed a permanent
     /// "Sending your room" for it.
     private func endFlight() {
-        ScenePoller.shared.reset()
-        UploadFailureMonitor.shared.clearDeferral()
         // Acknowledge BEFORE clearing: this is the one place that knows the user is
         // done with this bundle, and the record outlives the app (a `.complete`
         // record is never deleted), so without a persisted note the launch restore
         // re-adopts it forever.
         if let sentBundleId { DismissedBundles().acknowledge(sentBundleId) }
+        clearFlight()
+        stage = .home
+    }
+
+    /// Clear the in-memory flight state (poller, ids, anchor, deferral) without
+    /// navigating. endFlight() adds the acknowledgment and the return home.
+    private func clearFlight() {
+        ScenePoller.shared.reset()
+        UploadFailureMonitor.shared.clearDeferral()
         sentBundleId = nil
         sentBundleFailedOnDisk = false
         lastSceneCreatedAt = nil
-        stage = .home
+    }
+
+    /// Decision-0074 stand-down: the polled room belongs to a different identity
+    /// (a by-bundle 403 on a verified token — e.g. UploadSessionStore records
+    /// migrated by an iCloud backup while the Firebase identity minted fresh).
+    /// Definitive, so acknowledge the record with the doorway-Done semantics and
+    /// clear the flight; without the acknowledgment, the launch restore re-adopts
+    /// the foreign room on every cold launch forever. Navigation is conditional:
+    /// the poll loop outlives the wait screen, so this can fire while the user is
+    /// mid-capture — clearing state must never yank them out of a live scan.
+    private func standDownNotOurs() {
+        if let foreignId = WaitFlowState.foreignBundleToAcknowledge(
+            pollerBundleId: poller.currentBundleId, sentBundleId: sentBundleId) {
+            DismissedBundles().acknowledge(foreignId)
+        }
+        clearFlight()
+        if stage == .sent { stage = .home }
     }
 
     /// The web URL for the room that was just sent, or nil when no web origin is
