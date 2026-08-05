@@ -263,3 +263,75 @@ class TestParallelMinting:
             "b1", "u", [], None, mint_uri_fn=_fake_mint, bucket="bkt",
         )
         assert entries == []
+
+
+# ---------------------------------------------------------------------------
+# gcs_mint_resumable_uri session caching
+# ---------------------------------------------------------------------------
+
+class TestMintSessionCache:
+    """The production minter reuses one AuthorizedSession per thread.
+
+    Pins the RP-8 fix: per-call google.auth.default() + AuthorizedSession
+    construction OOM-killed the 512 MiB api-public instance on a 2,170-path
+    manifest at mint concurrency 64. Credentials resolution and session
+    construction must happen at most once per thread, not once per path.
+    """
+
+    def _patch_auth(self, monkeypatch):
+        import google.auth
+        import google.auth.transport.requests as gatr
+
+        counts = {"default": 0, "session": 0}
+
+        class _FakeResponse:
+            headers = {"Location": "https://fake-session-uri"}
+
+            @staticmethod
+            def raise_for_status() -> None:
+                return None
+
+        class _FakeSession:
+            def __init__(self, credentials) -> None:
+                counts["session"] += 1
+
+            def post(self, url, headers=None, json=None):
+                return _FakeResponse()
+
+        def _fake_default(scopes=None):
+            counts["default"] += 1
+            return object(), "proj"
+
+        monkeypatch.setattr(google.auth, "default", _fake_default)
+        monkeypatch.setattr(gatr, "AuthorizedSession", _FakeSession)
+        return counts
+
+    def test_same_thread_constructs_one_session(self, monkeypatch) -> None:
+        from roomstudio_api_core import upload_session_repo as usr
+
+        counts = self._patch_auth(monkeypatch)
+        monkeypatch.setattr(usr, "_mint_thread_local", threading.local())
+
+        for i in range(5):
+            uri = usr.gcs_mint_resumable_uri("bkt", f"captures/b/{i}.jpg", 10)
+            assert uri == "https://fake-session-uri"
+        assert counts["default"] == 1
+        assert counts["session"] == 1
+
+    def test_distinct_threads_get_distinct_sessions(self, monkeypatch) -> None:
+        from roomstudio_api_core import upload_session_repo as usr
+
+        counts = self._patch_auth(monkeypatch)
+        monkeypatch.setattr(usr, "_mint_thread_local", threading.local())
+
+        def _mint_two() -> None:
+            usr.gcs_mint_resumable_uri("bkt", "captures/b/a.jpg", 10)
+            usr.gcs_mint_resumable_uri("bkt", "captures/b/b.jpg", 10)
+
+        threads = [threading.Thread(target=_mint_two) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # One construction per thread — not per call (6 calls total).
+        assert counts["session"] == 3

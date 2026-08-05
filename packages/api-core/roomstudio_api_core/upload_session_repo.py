@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -286,21 +287,44 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
 # GCS resumable session URI minter (production)
 # ---------------------------------------------------------------------------
 
+# Per-thread AuthorizedSession cache for gcs_mint_resumable_uri — the
+# services/api-internal/gcs_client.py idiom. Before this cache every mint
+# call resolved ADC credentials and built a fresh AuthorizedSession (a new
+# requests.Session + connection pool + token fetch): a 2,170-path LiDAR
+# manifest at UPLOAD_SESSION_MINT_CONCURRENCY=64 OOM-killed the 512 MiB
+# api-public instance mid-mint (measured live, RP-8 2026-08-06) and burned
+# most of its wall clock on per-call TLS + auth. Per-thread rather than one
+# shared session for the same reason as the ingest cache: cross-thread
+# safety of the underlying requests.Session is not documented. Bounded by
+# the mint pool size; sessions live for the process lifetime.
+_mint_thread_local = threading.local()
+
+
+def _mint_session():
+    """Return this thread's cached AuthorizedSession, constructing on first use."""
+    session = getattr(_mint_thread_local, "session", None)
+    if session is None:
+        import google.auth  # deferred
+        import google.auth.transport.requests  # deferred
+
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/devstorage.read_write"]
+        )
+        session = google.auth.transport.requests.AuthorizedSession(credentials)
+        _mint_thread_local.session = session
+    return session
+
+
 def gcs_mint_resumable_uri(bucket: str, blob_path: str, size_bytes: int) -> str:
     """Initiate a GCS resumable upload session and return the session URI.
 
     The URI is valid for 7 days per GCS docs. The iOS client uses it directly
     with URLSession background tasks (PUT requests with the resumable URI).
 
-    google.auth and google.auth.transport.requests are imported lazily.
+    google.auth and google.auth.transport.requests are imported lazily (in
+    _mint_session, once per worker thread).
     """
-    import google.auth  # deferred
-    import google.auth.transport.requests  # deferred
-
-    credentials, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/devstorage.read_write"]
-    )
-    authed_session = google.auth.transport.requests.AuthorizedSession(credentials)
+    authed_session = _mint_session()
 
     headers: dict[str, str] = {
         "Content-Type": "application/json",
