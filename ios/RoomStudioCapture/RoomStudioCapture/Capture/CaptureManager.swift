@@ -84,12 +84,31 @@ final class CaptureManager: NSObject, ObservableObject {
     /// LIDAR_ROOMPLAN) — the review line must describe data the server will
     /// actually see, so a room that failed the tier condition publishes nothing.
     @Published private(set) var builtCensus: RoomCensus?
+    /// Floor plan of the BUILT room, published under exactly the same rule as
+    /// builtCensus — review's "the room you got" must be what the server sees.
+    @Published private(set) var builtFloorPlan: FloorPlanSnapshot?
     /// Live census from RoomPlan's didUpdate stream (full-room counts, 0076 Q6).
-    /// Consumed by the live floor plan when it lands (task #13 / RP-7).
+    /// Equality-gated: didUpdate fires on every refinement, and RootFlowView
+    /// observes this manager. Feeds the §3 coverage ticks (RP-7).
     @Published private(set) var liveCensus: RoomCensus?
+    /// Wall-corner adjacencies measured on the live plan (FloorPlanMath), the
+    /// CORNERS tick's input. Updated in step with liveCensus.
+    @Published private(set) var liveCornerCount: Int = 0
     /// RoomPlan's latest guidance instruction (sparse — ~one per scan measured).
-    /// Relay only; Good Guest copy mapping is RP-7's.
+    /// Raw relay; the guest-voice mapping rides floorPlanFeed.guidance (RP-7).
     @Published private(set) var roomPlanInstruction: RoomCaptureSession.Instruction?
+
+    /// The live floor plan's publisher (RP-7). A separate ObservableObject on
+    /// purpose: camera poses publish at up to ~20 Hz, and @Published state on
+    /// this manager would re-render every observer (RootFlowView) at that
+    /// rate — only the floor-plan subtree observes the feed.
+    let floorPlanFeed = FloorPlanFeed()
+    /// Objects already announced as "new piece" moments (didAdd dedupe).
+    private var announcedPieceIds: Set<UUID> = []
+    /// Camera-pose publish throttle state (time + movement gates).
+    private var lastCameraPublishAt: TimeInterval = 0
+    private var lastCameraPosition: SIMD2<Float>?
+    private var lastCameraForward: SIMD2<Float>?
 
     /// Root directory for this capture's output (temp, per-session UUID).
     /// Structure: <bundleOutputDir>/frames/NNNNNN.jpg
@@ -193,11 +212,20 @@ final class CaptureManager: NSObject, ObservableObject {
         finalizeStarted     = false
         assemblyStarted     = false
         builtCensus         = nil
+        builtFloorPlan      = nil
         liveCensus          = nil
+        liveCornerCount     = 0
         roomPlanInstruction = nil
         depthEverSeen       = false
         depthReasserted     = false
         depthlessFrameCount = 0
+
+        // Live floor plan state (RP-7).
+        floorPlanFeed.reset()
+        announcedPieceIds   = []
+        lastCameraPublishAt = 0
+        lastCameraPosition  = nil
+        lastCameraForward   = nil
 
         // Tier dispatch: provisional until assembly — LIDAR_ROOMPLAN is decided
         // by whether a built room actually ships (RoomPlanWire.finalTier).
@@ -366,6 +394,7 @@ final class CaptureManager: NSObject, ObservableObject {
                             openings: room.openings.count,
                             floors: room.floors.count
                         )
+                        self.builtFloorPlan = FloorPlanSnapshot(room: room)
                     }
                 } else {
                     self.logger.info("[CaptureManager] built room has no wall/floor — shipping LIDAR_ARKIT")
@@ -680,10 +709,14 @@ extension CaptureManager: ARSessionDelegate {
         // sceneDepth: ARDepthData? — LiDAR rear sensor, nil on non-LiDAR devices.
         // capturedDepthData is the front TrueDepth camera; do NOT use it here.
         let depthData   = frame.sceneDepth
+        // Plain values for the floor plan's camera cone (RP-7). Only .normal
+        // frames reach here, so the pose is valid by construction.
+        let cameraTransform = camera.transform
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else { return }
             self.noteFrameDepth(depthData != nil)
+            self.publishCameraPlanPose(cameraTransform)
             if self.accumulator.shouldAccept(camera: camera) {
                 self.acceptFrame(
                     camera:      camera,
@@ -692,6 +725,25 @@ extension CaptureManager: ARSessionDelegate {
                     depthData:   depthData)
             }
         }
+    }
+
+    /// Feed the floor plan's camera cone, throttled twice over: a 20 Hz time
+    /// gate plus a movement gate, so holding still publishes nothing and the
+    /// canvas doesn't redraw for sub-millimeter jitter.
+    private func publishCameraPlanPose(_ transform: simd_float4x4) {
+        let now = CACurrentMediaTime()
+        guard now - lastCameraPublishAt >= 0.05 else { return }
+        guard let cam = FloorPlanMath.cameraPlanPose(
+            transform: transform, previousForward: lastCameraForward) else { return }
+        if let p = lastCameraPosition, let f = lastCameraForward,
+           simd_distance(p, cam.position) < 0.005,
+           simd_distance(f, cam.forward) < 0.005 {
+            return
+        }
+        lastCameraPublishAt = now
+        lastCameraPosition = cam.position
+        lastCameraForward = cam.forward
+        floorPlanFeed.publish(camera: cam)
     }
 
     /// Depth-loss guard (see RoomPlanWire.shouldReassertDepth for the found-live
@@ -745,10 +797,11 @@ extension CaptureManager: ARSessionDelegate {
 
 extension CaptureManager: RoomCaptureSessionDelegate {
 
-    /// Full-room census stream (didUpdate carries the FULL room; the deltas
-    /// didAdd/didChange/didRemove are not needed for counts — 0076 Q6).
-    /// Counts are extracted on the delivery thread; the CapturedRoom itself
-    /// never crosses (copy-out principle).
+    /// Full-room stream (didUpdate carries the FULL room — 0076 Q6): census
+    /// counts plus the floor-plan snapshot, both extracted as plain values on
+    /// the delivery thread; the CapturedRoom itself never crosses (copy-out
+    /// principle). Census publishes are equality-gated — refinements arrive
+    /// continuously and RootFlowView observes this manager.
     nonisolated func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
         let census = RoomCensus(
             objects: room.objects.count,
@@ -758,17 +811,54 @@ extension CaptureManager: RoomCaptureSessionDelegate {
             openings: room.openings.count,
             floors: room.floors.count
         )
+        let snapshot = FloorPlanSnapshot(room: room)
+        let corners = FloorPlanMath.cornerCount(walls: snapshot.walls)
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else { return }
-            self.liveCensus = census
+            if census != self.liveCensus {
+                self.liveCensus = census
+                self.floorPlanFeed.publish(census: census)
+            }
+            if corners != self.liveCornerCount {
+                self.liveCornerCount = corners
+            }
+            self.floorPlanFeed.publish(snapshot: snapshot)
+        }
+    }
+
+    /// Delta stream: didAdd carries only the changed entities (0076 Q6) — the
+    /// "new piece" signal. Objects become guest moments, deduped by identifier
+    /// (FloorPlanVoice.unannounced); walls land silently on the plan via
+    /// didUpdate. didChange/didRemove are deliberately unconsumed: refinement
+    /// and removal state both arrive with the next full-room didUpdate.
+    nonisolated func captureSession(_ session: RoomCaptureSession, didAdd room: CapturedRoom) {
+        let pieces = room.objects.map {
+            FloorPlanPiece(id: $0.identifier,
+                           categoryToken: String(describing: $0.category),
+                           confidence: FloorPlanConfidence($0.confidence))
+        }
+        guard !pieces.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRunning else { return }
+            let fresh = FloorPlanVoice.unannounced(pieces, seen: self.announcedPieceIds)
+            for piece in fresh {
+                self.announcedPieceIds.insert(piece.id)
+                self.floorPlanFeed.noteMoment(line: FloorPlanVoice.momentLine(
+                    categoryToken: piece.categoryToken, confidence: piece.confidence))
+            }
         }
     }
 
     nonisolated func captureSession(_ session: RoomCaptureSession,
                                     didProvide instruction: RoomCaptureSession.Instruction) {
+        // Token, not the enum, so the guest-voice table (FloorPlanVoice) never
+        // imports RoomPlan; unknown future cases degrade to standing down.
+        let token = String(describing: instruction)
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else { return }
             self.roomPlanInstruction = instruction
+            self.floorPlanFeed.noteGuidance(
+                line: FloorPlanVoice.guidanceLine(instructionToken: token))
         }
     }
 
