@@ -240,7 +240,13 @@ export interface PositionedSplat {
   label: string;
   position: [number, number, number];
   rotation_xyzw: [number, number, number, number];
-  scale: number;
+  /**
+   * Uniform splat-local -> world scale (the shipped v1 contract), or a
+   * per-axis [x, y, z] scale — the RP-8 uniform-vs-stretch A/B side, fed
+   * only by staged fixtures today. Decision 0077 defers the per-axis knob
+   * server-side; if it ever ships, this union is its landing shape.
+   */
+  scale: number | [number, number, number];
 }
 
 /**
