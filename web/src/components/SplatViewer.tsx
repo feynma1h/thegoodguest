@@ -368,11 +368,17 @@ export default function SplatViewer({
           return { mesh, plane: p, extras };
         });
 
+        // Uniform scale is the shipped contract; a per-axis triple is the
+        // staged-fixture A/B side (see PositionedSplat.scale). Size-ordering
+        // and camera-framing consumers reduce a triple to its largest axis.
+        const scaleMax = (v: number | [number, number, number]) =>
+          typeof v === "number" ? v : Math.max(...v);
         const meshes = splats.map((s) => {
           const mesh = new SplatMesh({ url: s.url });
           mesh.position.set(...s.position);
           mesh.quaternion.set(...s.rotation_xyzw);
-          mesh.scale.setScalar(s.scale);
+          if (typeof s.scale === "number") mesh.scale.setScalar(s.scale);
+          else mesh.scale.set(...s.scale);
           scene.add(mesh);
           return mesh;
         });
@@ -397,7 +403,8 @@ export default function SplatViewer({
           1.4,
           ...splats.map(
             (s) =>
-              centroid.distanceTo(new THREE.Vector3(...s.position)) + s.scale * 1.2,
+              centroid.distanceTo(new THREE.Vector3(...s.position)) +
+              scaleMax(s.scale) * 1.2,
           ),
           ...shellCorners.map((c) => centroid.distanceTo(c)),
         );
@@ -471,7 +478,7 @@ export default function SplatViewer({
               250
             : 0;
         const revealOrder = splats
-          .map((s, i) => ({ i, size: s.scale }))
+          .map((s, i) => ({ i, size: scaleMax(s.scale) }))
           .sort((a, b) => b.size - a.size)
           .map((entry, seq) => ({ ...entry, seq }));
         const revealStartAt = new Map<number, number>(); // mesh idx -> start ms
