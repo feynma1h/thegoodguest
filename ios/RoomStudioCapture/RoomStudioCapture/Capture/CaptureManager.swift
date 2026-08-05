@@ -150,6 +150,15 @@ final class CaptureManager: NSObject, ObservableObject {
     /// room (LIDAR_ARKIT semantics; the capture stays valid).
     private static let roomPlanEndTimeoutSec: TimeInterval = 15
 
+    // Depth-loss guard (found live at RP-6 Gate 1: the same-runloop co-run
+    // attach shipped a capture with sceneDepth nil on all 268 frames; the
+    // spike's attach always followed later and never saw it). State feeds
+    // RoomPlanWire.shouldReassertDepth; the cure is 0076's measured-survivable
+    // mid-scan config re-run.
+    private var depthEverSeen = false
+    private var depthReasserted = false
+    private var depthlessFrameCount = 0
+
     /// Dedicated queue for JPEG + depth encoding; avoids blocking the main thread.
     /// CIContext is thread-safe for concurrent rendering and is reused across frames.
     private let jpegQueue   = DispatchQueue(label: "com.roomstudio.capture.jpeg", qos: .utility)
@@ -186,6 +195,9 @@ final class CaptureManager: NSObject, ObservableObject {
         builtCensus         = nil
         liveCensus          = nil
         roomPlanInstruction = nil
+        depthEverSeen       = false
+        depthReasserted     = false
+        depthlessFrameCount = 0
 
         // Tier dispatch: provisional until assembly — LIDAR_ROOMPLAN is decided
         // by whether a built room actually ships (RoomPlanWire.finalTier).
@@ -221,6 +233,12 @@ final class CaptureManager: NSObject, ObservableObject {
             cs.delegate = self
             cs.run(configuration: RoomCaptureSession.Configuration())
             roomCaptureSession = cs
+            // Attach-time observability (the spike's config instrument, kept):
+            // the frame-semantics raw value says whether .sceneDepth (bit 8)
+            // survived the attach. The frame-level guard below is the actual
+            // protection; this line is for reading the story off a console.
+            let fs = arSession.configuration?.frameSemantics.rawValue ?? 0
+            logger.info("[CaptureManager] roomplan attached: installed fs=\(fs, privacy: .public)")
         }
         logger.info("[CaptureManager] capture started: bundleId=\(self.bundleIdString, privacy: .public) tier=\(String(describing: self.tier), privacy: .public) roomplan=\(self.roomCaptureSession != nil, privacy: .public)")
         isRunning = true
@@ -264,6 +282,11 @@ final class CaptureManager: NSObject, ObservableObject {
         let vert  = capturedPlaneAnchors.filter { $0.alignment == .vertical }.count
         let classified = capturedPlaneAnchors.filter { !$0.classification.isEmpty }.count
         logger.info("[CaptureManager] plane anchors at stop: total=\(self.capturedPlaneAnchors.count, privacy: .public) horizontal=\(horiz, privacy: .public) vertical=\(vert, privacy: .public) classified=\(classified, privacy: .public)")
+
+        // Depth observability at stop (the RP-6 Gate-1 depth loss was invisible
+        // until the bundle was parsed server-side — never again).
+        let withDepth = capturedFrames.filter { $0.depth != nil }.count
+        logger.info("[CaptureManager] keyframes with depth at stop: \(withDepth, privacy: .public)/\(self.capturedFrames.count, privacy: .public) reasserted=\(self.depthReasserted, privacy: .public)")
 
         // Write verification runs on jpegQueue — after all in-flight JPEG/depth
         // writes, independent of how long the room build takes.
@@ -660,6 +683,7 @@ extension CaptureManager: ARSessionDelegate {
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else { return }
+            self.noteFrameDepth(depthData != nil)
             if self.accumulator.shouldAccept(camera: camera) {
                 self.acceptFrame(
                     camera:      camera,
@@ -668,6 +692,42 @@ extension CaptureManager: ARSessionDelegate {
                     depthData:   depthData)
             }
         }
+    }
+
+    /// Depth-loss guard (see RoomPlanWire.shouldReassertDepth for the found-live
+    /// failure and the rule). Runs on every frame; almost always a no-op.
+    private func noteFrameDepth(_ hadDepth: Bool) {
+        if hadDepth {
+            depthEverSeen = true
+            return
+        }
+        depthlessFrameCount += 1
+        guard RoomPlanWire.shouldReassertDepth(hasLidar: sessionHasLidar,
+                                               depthEverSeen: depthEverSeen,
+                                               alreadyReasserted: depthReasserted,
+                                               depthlessFrames: depthlessFrameCount)
+        else { return }
+        depthReasserted = true
+        reassertSceneDepth()
+    }
+
+    /// 0076's measured-survivable cure: take the INSTALLED configuration
+    /// (RoomPlan's composite when co-running), re-insert .sceneDepth, and
+    /// re-run with no options — the scan continues through it and the room
+    /// still builds (spike Q1's re-assert probe, verbatim).
+    private func reassertSceneDepth() {
+        guard let cfg = arSession.configuration else {
+            logger.info("[CaptureManager] depth re-assert skipped: no installed configuration")
+            return
+        }
+        guard type(of: cfg).supportsFrameSemantics(.sceneDepth) else {
+            logger.info("[CaptureManager] depth re-assert skipped: config class lacks sceneDepth support")
+            return
+        }
+        let before = cfg.frameSemantics.rawValue
+        cfg.frameSemantics.insert(.sceneDepth)
+        arSession.run(cfg, options: [])
+        logger.info("[CaptureManager] sceneDepth re-asserted after \(self.depthlessFrameCount, privacy: .public) depthless frames (fs \(before, privacy: .public) → \(cfg.frameSemantics.rawValue, privacy: .public))")
     }
 
     nonisolated func session(

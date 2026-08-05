@@ -98,6 +98,17 @@ actor UploadSessionClient {
     private let baseDelaySec    = 1.0
     private let maxDelaySec     = 30.0
 
+    /// Per-request timeout for the mint POST. MUST exceed api-public's Cloud
+    /// Run request ceiling (120 s): a local timeout below the server's own
+    /// limit manufactures a failure for a mint the server may still complete.
+    /// Measured live (RP-6 Gate 3): a ~2,200-path long-walk mint died twice
+    /// over — client abandoned at URLSession's default 60 s, server 504'd at
+    /// its 120 s ceiling — and the mint stores nothing on abort, so a retry
+    /// restarts from zero. The client half of the fix is outliving the server
+    /// window; the server half (UPLOAD_SESSION_MINT_CONCURRENCY bump) is an
+    /// env-only revision recorded for RP-8.
+    static let mintTimeoutSec: TimeInterval = 180
+
     init(
         baseURL: URL = NetworkConfig.apiPublicBaseURL,
         urlSession: URLSession = .shared
@@ -193,6 +204,7 @@ actor UploadSessionClient {
 
         var request           = URLRequest(url: url)
         request.httpMethod    = "POST"
+        request.timeoutInterval = Self.mintTimeoutSec
         request.setValue("application/json",    forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(idToken)",   forHTTPHeaderField: "Authorization")
 
