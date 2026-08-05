@@ -57,9 +57,11 @@ function singleSplat(key: string, url: string, label: string): Result {
 function DevViewerContent({
   directUrl,
   fixture,
+  reveal,
 }: {
   directUrl: string | null;
   fixture: string | null;
+  reveal: boolean;
 }) {
   const key = directUrl ?? (fixture ? `fixture:${fixture}` : "");
   const [result, setResult] = useState<Result | null>(null);
@@ -132,6 +134,7 @@ function DevViewerContent({
           <SplatViewer
             splats={state.splats}
             shell={state.shell}
+            reveal={reveal}
             className="mt-8 h-[62vh]"
           />
           {state.unrenderable.length > 0 && (
@@ -153,6 +156,10 @@ function ViewerContent() {
   const sceneId = params.get("scene");
   const directUrl = params.get("url");
   const fixture = params.get("fixture");
+  // ?reveal=1 replays the §4 assembly over the loaded fixture — the RP-8
+  // real-speed reveal watch runs here (13-wall spike shell) rather than in
+  // the throttled preview pane or the hand-authored !v3 mock.
+  const reveal = params.get("reveal") === "1";
 
   return (
     <div>
@@ -165,7 +172,7 @@ function ViewerContent() {
           <RoomViewerPanel sceneId={sceneId} className="h-[62vh]" />
         </div>
       ) : (
-        <DevViewerContent directUrl={directUrl} fixture={fixture} />
+        <DevViewerContent directUrl={directUrl} fixture={fixture} reveal={reveal} />
       )}
     </div>
   );
