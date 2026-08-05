@@ -1,19 +1,19 @@
 /// Active capture — THE core screen (design spec §3). Live AR, quiet.
 ///
-/// The design: the LiDAR mesh renders as an ink-on-parchment sketch drawing
-/// itself onto the room — no camera photo-feed, no neon wireframe, no coverage
-/// percentage. Three things stay legible: tracking quality (the top pill), what
-/// you've covered (the sketch filling + the felt floor/walls/corners ticks), and
-/// whether it's enough (the guest's spoken confirmation). Warnings speak plainly
-/// and never blame.
+/// The design: the room draws itself in ink — no camera photo-feed, no neon
+/// wireframe, no coverage percentage. Three things stay legible: tracking
+/// quality (the top pill), what you've covered (the live floor plan filling +
+/// the felt floor/walls/corners ticks), and whether it's enough (the guest's
+/// spoken confirmation). Warnings speak plainly and never blame.
 ///
-/// LAYERING (decision 0072): this file is the SwiftUI OVERLAY plus an on-brand
-/// gold-ink mesh PLACEHOLDER (`InkMeshBackdrop`), both simulator-verifiable. The
-/// real live geometry — a RoomPlan / ARKit scene-reconstruction mesh painted as
-/// gold ink — replaces the placeholder at the `LiveMeshHost` seam below and can
-/// only be built/verified on a LiDAR device (board item 3). The overlay is driven
-/// by `CaptureHUDState`, which the AR layer will populate from real tracking +
-/// RoomPlan coverage when that lands.
+/// LAYERING (decisions 0072/0077, chunk RP-7): this file is the SwiftUI
+/// OVERLAY; the live geometry behind the `LiveMeshHost` seam is the Good Guest
+/// FLOOR PLAN (FloorPlanView.swift) — the 2D minimap decision 0077 chose over
+/// a 3D mesh render — fed by CaptureManager's RoomPlan delegate stream via
+/// `FloorPlanFeed`. With no feed (previews, non-LiDAR simulators) the seam
+/// renders empty and the overlay still verifies. The overlay itself is driven
+/// by `CaptureHUDState`, which RootFlowView populates from real tracking +
+/// the live census.
 
 import SwiftUI
 
@@ -30,7 +30,8 @@ enum TrackingQuality {
 }
 
 /// A single surface's coverage, felt — never shown as a percentage number.
-enum SurfaceCoverage {
+/// Equatable so the FloorPlanVoice.coverage mapping can be pinned as a table.
+nonisolated enum SurfaceCoverage: Equatable {
     case empty
     case partial(Double)   // 0…1, for the half-filled tick
     case full
@@ -51,14 +52,20 @@ struct CaptureHUDState {
 
 struct LiveCaptureView: View {
     var state: CaptureHUDState = CaptureHUDState()
+    /// The floor plan's data stream (CaptureManager.floorPlanFeed). Nil in
+    /// previews and on sessions with no RoomPlan co-run — the seam then
+    /// renders empty and the overlay carries the screen.
+    var feed: FloorPlanFeed? = nil
     var onFinish: () -> Void = {}
 
     var body: some View {
         ZStack {
             captureBackdrop
 
-            // The live mesh (placeholder now; RoomPlan on device — see seam).
-            LiveMeshHost(paused: state.tracking != .good, dimmed: state.tracking == .tooDark)
+            // The live floor plan (RP-7) — the room drawing itself.
+            LiveMeshHost(feed: feed,
+                         paused: state.tracking != .good,
+                         dimmed: state.tracking == .tooDark)
 
             // Vignette to seat the mesh in the room's darkness.
             RadialGradient(
@@ -97,10 +104,20 @@ struct LiveCaptureView: View {
             Spacer()
 
             if state.tracking == .tooDark {
+                // Tracking truth outranks everything the guest might say —
+                // this override sits ABOVE FloorPlanVoice's priority table.
                 GuestLine("It's gone dark — I can't see. A light, or a step back?",
                           size: 17, onDark: true, alignment: .center, maxSize: 22)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 28)
+                    .padding(.bottom, 16)
+            } else if let feed {
+                // The one spoken line: guidance / new-piece moments / the
+                // "enough" confirmation / the default, per FloorPlanVoice.
+                LiveGuestLineView(feed: feed, defaultLine: state.guestLine)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .shadow(color: .black.opacity(0.6), radius: 12, y: 2)
+                    .padding(.horizontal, 24)
                     .padding(.bottom, 16)
             } else {
                 GuestLine(state.guestLine, size: 17, onDark: true, alignment: .center, maxSize: 22)
@@ -210,77 +227,40 @@ struct LiveCaptureView: View {
     }
 }
 
-// MARK: - Live mesh seam
+// MARK: - Live floor plan seam
 
-/// Hosts the live geometry. TODAY: the on-brand SwiftUI ink placeholder, which
-/// conveys the aesthetic and is simulator-verifiable. ON A LiDAR DEVICE: replace
-/// the body with a RoomPlan / ARKit scene-reconstruction mesh rendered as gold
-/// ink (an `ARSCNView`/`RoomCaptureView` `UIViewRepresentable`) — that render is
-/// the hardware-gated piece (board item 3). Keeping the seam here means the
-/// overlay above never has to change when the real mesh lands.
+/// Hosts the live geometry: the Good Guest floor plan (RP-7), fed by
+/// CaptureManager's RoomPlan delegate stream. The inset keeps the plan's fit
+/// region clear of the overlay chrome (tracking pill above; guest line, ticks
+/// and shutter below) so the room draws in the screen's visual center band.
+/// With no feed (previews, sessions without a RoomPlan co-run) the seam is
+/// empty — an honest nothing, never an invented room.
 private struct LiveMeshHost: View {
+    var feed: FloorPlanFeed?
     var paused: Bool
     var dimmed: Bool
 
     var body: some View {
-        InkMeshBackdrop()
-            .opacity(dimmed ? 0.25 : (paused ? 0.6 : 0.85))
-            .animation(.easeInOut(duration: 0.4), value: dimmed)
-            .animation(.easeInOut(duration: 0.4), value: paused)
-    }
-}
-
-/// Gold-ink room sketch — a stand-in for the live mesh, in the brand's ink
-/// aesthetic. Vector, so it reads as "drawn," not rendered.
-private struct InkMeshBackdrop: View {
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            // Normalized room-ish wireframe (fractions of the frame).
-            let ink = Color.rsGoldLight
-            ZStack {
-                Path { p in
-                    // left wall
-                    p.move(to: pt(0.06, 0.36, w, h)); p.addLine(to: pt(0.48, 0.29, w, h))
-                    p.addLine(to: pt(0.48, 0.68, w, h)); p.addLine(to: pt(0.06, 0.78, w, h)); p.closeSubpath()
-                }.stroke(ink.opacity(0.9), lineWidth: 1)
-                Path { p in
-                    // right wall
-                    p.move(to: pt(0.48, 0.29, w, h)); p.addLine(to: pt(0.95, 0.36, w, h))
-                    p.addLine(to: pt(0.95, 0.78, w, h)); p.addLine(to: pt(0.48, 0.68, w, h)); p.closeSubpath()
-                }.stroke(ink.opacity(0.5), lineWidth: 1)
-                Path { p in
-                    // floor
-                    p.move(to: pt(0.06, 0.78, w, h)); p.addLine(to: pt(0.48, 0.68, w, h))
-                    p.addLine(to: pt(0.95, 0.78, w, h)); p.addLine(to: pt(0.48, 0.89, w, h)); p.closeSubpath()
-                }.stroke(ink.opacity(0.7), lineWidth: 1)
-                Path { p in
-                    // a piece of furniture
-                    p.move(to: pt(0.6, 0.69, w, h)); p.addLine(to: pt(0.79, 0.66, w, h))
-                    p.addLine(to: pt(0.79, 0.75, w, h)); p.addLine(to: pt(0.6, 0.78, w, h)); p.closeSubpath()
-                }.stroke(ink.opacity(0.8), lineWidth: 1)
-                // vertex dots
-                ForEach(Array(vertices.enumerated()), id: \.offset) { _, v in
-                    Circle().fill(Color.rsGold.opacity(0.55))
-                        .frame(width: 5, height: 5)
-                        .position(pt(v.0, v.1, w, h))
-                }
+        Group {
+            if let feed {
+                LiveFloorPlan(feed: feed, paused: paused, dimmed: dimmed)
+            } else {
+                Color.clear
             }
         }
-        .ignoresSafeArea()
-    }
-
-    private var vertices: [(Double, Double)] {
-        [(0.48, 0.29), (0.06, 0.36), (0.95, 0.36), (0.48, 0.68), (0.79, 0.66), (0.6, 0.69)]
-    }
-
-    private func pt(_ fx: Double, _ fy: Double, _ w: CGFloat, _ h: CGFloat) -> CGPoint {
-        CGPoint(x: CGFloat(fx) * w, y: CGFloat(fy) * h)
+        .padding(EdgeInsets(top: 78, leading: 26, bottom: 236, trailing: 26))
     }
 }
 
 #Preview("Good tracking") {
     LiveCaptureView()
+}
+
+#Preview("Mid-scan (seeded feed)") {
+    let feed = FloorPlanFeed()
+    feed.publish(snapshot: .previewRoom)
+    feed.publish(camera: .previewCamera)
+    return LiveCaptureView(feed: feed)
 }
 
 #Preview("Too dark") {

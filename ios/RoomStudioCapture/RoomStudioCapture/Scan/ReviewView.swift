@@ -9,10 +9,10 @@
 /// rough version here would spend the magic early.
 ///
 /// THIN-COVERAGE VARIANT: BUILT BUT NOT REACHABLE TODAY. `thinCoverage` is never
-/// set true — the app has no coverage signal at all (task #13, hardware-only), so
-/// nothing can currently distinguish a thin capture from a whole one. It is kept,
-/// like the other staged-but-unwired surfaces listed in RootFlowView's docstring,
-/// so the treatment exists when RoomPlan coverage lands. Until then its copy
+/// set true. A coverage SIGNAL now exists (RP-7's live census + floor plan), but
+/// wiring it into a "your capture is thin" verdict is a copy claim about capture
+/// quality that deserves an operator decision, not a threshold invented here —
+/// deliberately deferred (flagged in the RP-7 ready report). Until then its copy
 /// ("I've got the bones, but a few gaps") must be read as designed-but-dormant,
 /// NOT as something the screen can say today.
 ///
@@ -42,6 +42,11 @@ struct ReviewView: View {
     /// not show a census (the line describes what the server will see, and the
     /// composition is pinned in RoomCensus.reviewLine).
     var census: String? = nil
+    /// The BUILT room's floor plan (chunk RP-7) — "the room you got", the same
+    /// component that drew live during capture, now settled. Published under
+    /// the census's rule (only when the room ships), so like the census it
+    /// shows what the server will see. Nil falls back to the generic sketch.
+    var floorPlan: FloorPlanSnapshot? = nil
     /// The guest's verdict on the capture. REQUIRED, with no default, for the same
     /// reason as `metrics` and `rescanLabel`: the old default asserted "I can see the
     /// whole room", which is a coverage claim the app cannot make (task #13).
@@ -127,8 +132,16 @@ struct ReviewView: View {
         ZStack(alignment: .bottomLeading) {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.rsCaptureRaised)
-            RoomSketch()
-                .padding(20)
+            if let floorPlan, !floorPlan.isEmpty {
+                // The real room, drawn — still a sketch, never a 3D preview
+                // (the reveal belongs to the web; see the header).
+                FloorPlanCanvas(snapshot: floorPlan, animated: false,
+                                backdrop: Color.rsCaptureRaised, padding: 10)
+                    .padding(.init(top: 14, leading: 14, bottom: 40, trailing: 14))
+            } else {
+                RoomSketch()
+                    .padding(20)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 // Bottom-anchored inside a fixed 230pt card: uncapped they wrap up
                 // over the sketch ("126 frames · LiDAR + RoomPlan" at AX sizes).
@@ -230,6 +243,14 @@ struct RoomSketch: View {
 #Preview("Clean capture") {
     ReviewView(metrics: "126 frames · LiDAR + RoomPlan",
                census: "9 objects · 13 walls · 2 doors",
+               verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",
+               rescanLabel: "Scan again from scratch")
+}
+
+#Preview("Clean capture — with floor plan") {
+    ReviewView(metrics: "293 frames · LiDAR + RoomPlan",
+               census: "3 objects · 4 walls · 1 door",
+               floorPlan: .previewRoom,
                verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",
                rescanLabel: "Scan again from scratch")
 }
