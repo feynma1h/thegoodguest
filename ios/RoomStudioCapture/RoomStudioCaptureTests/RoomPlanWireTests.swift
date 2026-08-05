@@ -71,6 +71,28 @@ final class RoomPlanWireTests: XCTestCase {
         XCTAssertNil(RoomPlanWire.capturedRoomVersion(fromJSON: notJSON))
     }
 
+    // MARK: - Depth re-assert guard (found live at RP-6 Gate 1)
+
+    func test_shouldReassertDepth_table() {
+        let t = RoomPlanWire.depthReassertThreshold
+        // The live failure: LiDAR session, depth never seen, threshold reached.
+        XCTAssertTrue(RoomPlanWire.shouldReassertDepth(
+            hasLidar: true, depthEverSeen: false, alreadyReasserted: false, depthlessFrames: t))
+        // Below threshold: a boot edge must not trigger a config re-run.
+        XCTAssertFalse(RoomPlanWire.shouldReassertDepth(
+            hasLidar: true, depthEverSeen: false, alreadyReasserted: false, depthlessFrames: t - 1))
+        // Depth WAS seen: later depthless frames are the legal mid-walk dropout
+        // class (0033/0074-walk evidence) — never re-run for those.
+        XCTAssertFalse(RoomPlanWire.shouldReassertDepth(
+            hasLidar: true, depthEverSeen: true, alreadyReasserted: false, depthlessFrames: 1_000))
+        // One-shot: never a second re-run.
+        XCTAssertFalse(RoomPlanWire.shouldReassertDepth(
+            hasLidar: true, depthEverSeen: false, alreadyReasserted: true, depthlessFrames: 1_000))
+        // Non-LiDAR sessions have no depth to lose.
+        XCTAssertFalse(RoomPlanWire.shouldReassertDepth(
+            hasLidar: false, depthEverSeen: false, alreadyReasserted: false, depthlessFrames: 1_000))
+    }
+
     // MARK: - Census line
 
     func test_censusLine_table() {

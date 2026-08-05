@@ -85,4 +85,27 @@ enum RoomPlanWire {
         else { return nil }
         return dict["version"] as? Int
     }
+
+    /// How many depth-less frames a LiDAR session tolerates from t0 before the
+    /// one-shot .sceneDepth re-assert fires (~0.17 s at 60 fps — enough to rule
+    /// out a boot edge, fast enough to lose no meaningful coverage).
+    static let depthReassertThreshold = 10
+
+    /// Whether to re-assert .sceneDepth via a mid-scan config re-run (decision
+    /// 0076's measured-survivable probe — the scan continues and builds clean).
+    ///
+    /// Found live at RP-6 Gate 1: attaching the RoomPlan co-run in the SAME
+    /// runloop turn as the production run() shipped a 268-frame capture with
+    /// sceneDepth nil on EVERY frame — the spike never saw this because its
+    /// attach always followed seconds later. The guard observes reality
+    /// (frames, not configs) and fires only when depth has NEVER been seen:
+    /// legal mid-walk dropouts (which occur after first depth) must not
+    /// trigger a re-run, and it fires at most once per capture.
+    static func shouldReassertDepth(hasLidar: Bool,
+                                    depthEverSeen: Bool,
+                                    alreadyReasserted: Bool,
+                                    depthlessFrames: Int) -> Bool {
+        hasLidar && !depthEverSeen && !alreadyReasserted
+            && depthlessFrames >= depthReassertThreshold
+    }
 }
