@@ -1,4 +1,4 @@
-# 0078 — Same-turn RoomPlan co-run attach loses sceneDepth; frame-observed re-assert is the production guard
+# 0079 — Same-turn RoomPlan co-run attach loses sceneDepth; frame-observed re-assert is the production guard
 
 **Date:** 2026-08-05
 **Status:** Decided (conditions decision 0076's Q1 verdict; does not overturn it)
