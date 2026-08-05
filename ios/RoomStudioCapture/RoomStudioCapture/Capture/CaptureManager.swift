@@ -1,6 +1,19 @@
 /// Manages an ARWorldTracking session and accumulates keyframes to the session
 /// output directory: tier dispatch, depth capture (LiDAR devices), per-keyframe
-/// pose/intrinsics/gravity extraction, and bundle assembly.
+/// pose/intrinsics/gravity extraction, RoomPlan co-run, and bundle assembly.
+///
+/// RoomPlan co-run (decisions 0076/0077, chunk RP-6): the production config runs
+/// FIRST with .resetTracking (RoomPlan never resets tracking — the host owns
+/// hygiene), then a RoomCaptureSession attaches to the SAME ARSession and runs.
+/// The per-frame copy-out path is untouched; ARFrames are never retained
+/// (10 retained = pipeline death in ~1 s, measured in the spike). Stop order:
+/// stop(pauseARSession: false) → snapshot plane anchors → pause → await
+/// RoomBuilder (~1.7 s, ~905 MB transient, after pause) → serialize
+/// roomplan/room.json (+ optional room.usdz) → bundle assembly. RoomBuilder
+/// hard failure or a room with no wall/floor ships LIDAR_ARKIT with no
+/// room_plan — the capture is still valid. RoomPlan's 10 s tracking-failure
+/// self-abort (didEndWith worldTrackingFailure) ends the capture gracefully
+/// with the partial room; RootFlowView routes on the isRunning flip.
 ///
 /// Passes the Firebase anonymous UID into bundle assembly and publishes
 /// assembledWithoutUserId for UploadCoordinator's backstop re-serialize.
@@ -12,6 +25,7 @@ import ARKit
 import Combine
 import CoreImage
 import os
+import RoomPlan
 import UIKit
 
 // MARK: - CapturedKeyframe
@@ -66,6 +80,17 @@ final class CaptureManager: NSObject, ObservableObject {
     /// this is the only signal distinguishing "still writing" from "will never write".
     @Published private(set) var assemblyFailure: String?
 
+    /// Census of the BUILT room, set only when the room ships (tier
+    /// LIDAR_ROOMPLAN) — the review line must describe data the server will
+    /// actually see, so a room that failed the tier condition publishes nothing.
+    @Published private(set) var builtCensus: RoomCensus?
+    /// Live census from RoomPlan's didUpdate stream (full-room counts, 0076 Q6).
+    /// Consumed by the live floor plan when it lands (task #13 / RP-7).
+    @Published private(set) var liveCensus: RoomCensus?
+    /// RoomPlan's latest guidance instruction (sparse — ~one per scan measured).
+    /// Relay only; Good Guest copy mapping is RP-7's.
+    @Published private(set) var roomPlanInstruction: RoomCaptureSession.Instruction?
+
     /// Root directory for this capture's output (temp, per-session UUID).
     /// Structure: <bundleOutputDir>/frames/NNNNNN.jpg
     ///            <bundleOutputDir>/depth/NNNNNN.f32     (LiDAR tier only)
@@ -104,6 +129,36 @@ final class CaptureManager: NSObject, ObservableObject {
     private let arSession   = ARSession()
     private var accumulator = KeyframeAccumulator()
 
+    // RoomPlan co-run state (decisions 0076/0077). All MainActor-mutated.
+    private var roomCaptureSession: RoomCaptureSession?
+    /// True once didEndWith has delivered CapturedRoomData for this capture —
+    /// stopCapture must not call stop() again after the 10 s self-abort.
+    private var rpEndReceived = false
+    private var capturedRoomData: CapturedRoomData?
+    /// Whether this session runs with LiDAR (frozen at startCapture; `tier` is
+    /// provisional until assembly, so the final-tier computation needs the
+    /// hardware fact independently).
+    private var sessionHasLidar = false
+    /// One-shot latches for the stop pipeline. finalizeStarted guards the
+    /// didEndWith → build path; assemblyStarted guards bundle assembly (the
+    /// timeout path and the build path can only assemble once between them).
+    private var finalizeStarted = false
+    private var assemblyStarted = false
+    /// Belt-and-braces: didEndWith has always arrived promptly in measurement
+    /// (0076), but if it never comes the capture must not strand review at
+    /// "Packing it up" — after this many seconds post-stop, assemble without a
+    /// room (LIDAR_ARKIT semantics; the capture stays valid).
+    private static let roomPlanEndTimeoutSec: TimeInterval = 15
+
+    // Depth-loss guard (found live at RP-6 Gate 1: the same-runloop co-run
+    // attach shipped a capture with sceneDepth nil on all 268 frames; the
+    // spike's attach always followed later and never saw it). State feeds
+    // RoomPlanWire.shouldReassertDepth; the cure is 0076's measured-survivable
+    // mid-scan config re-run.
+    private var depthEverSeen = false
+    private var depthReasserted = false
+    private var depthlessFrameCount = 0
+
     /// Dedicated queue for JPEG + depth encoding; avoids blocking the main thread.
     /// CIContext is thread-safe for concurrent rendering and is reused across frames.
     private let jpegQueue   = DispatchQueue(label: "com.roomstudio.capture.jpeg", qos: .utility)
@@ -131,8 +186,23 @@ final class CaptureManager: NSObject, ObservableObject {
         frameCount      = 0
         bundleId        = UUID()
 
-        // Tier dispatch: LiDAR devices use LIDAR_ARKIT; LIDAR_ROOMPLAN is deferred.
+        // RoomPlan co-run state.
+        roomCaptureSession  = nil
+        rpEndReceived       = false
+        capturedRoomData    = nil
+        finalizeStarted     = false
+        assemblyStarted     = false
+        builtCensus         = nil
+        liveCensus          = nil
+        roomPlanInstruction = nil
+        depthEverSeen       = false
+        depthReasserted     = false
+        depthlessFrameCount = 0
+
+        // Tier dispatch: provisional until assembly — LIDAR_ROOMPLAN is decided
+        // by whether a built room actually ships (RoomPlanWire.finalTier).
         let hasLidar = ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification)
+        sessionHasLidar = hasLidar
         tier = hasLidar ? .lidarArkit : .arkitOnly
 
         startedAtDeviceUs = Int64(CACurrentMediaTime() * 1_000_000)
@@ -151,23 +221,60 @@ final class CaptureManager: NSObject, ObservableObject {
         if hasLidar, ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
             config.frameSemantics.insert(.sceneDepth)
         }
+        // Production config FIRST, with reset — RoomPlan never resets tracking,
+        // so this run is the session's tracking hygiene (0076 Q3).
         arSession.run(config, options: [.resetTracking, .removeExistingAnchors])
-        logger.info("[CaptureManager] capture started: bundleId=\(self.bundleIdString, privacy: .public) tier=\(String(describing: self.tier), privacy: .public)")
+
+        // Attach the RoomPlan co-run to the SAME session (0076: its native
+        // config is a superset of ours; depth and the keyframe path survive).
+        // Not supported (non-LiDAR, simulator) → plain LIDAR_ARKIT/ARKIT_ONLY.
+        if hasLidar, RoomCaptureSession.isSupported {
+            let cs = RoomCaptureSession(arSession: arSession)
+            cs.delegate = self
+            cs.run(configuration: RoomCaptureSession.Configuration())
+            roomCaptureSession = cs
+            // Attach-time observability (the spike's config instrument, kept):
+            // the frame-semantics raw value says whether .sceneDepth (bit 8)
+            // survived the attach. The frame-level guard below is the actual
+            // protection; this line is for reading the story off a console.
+            let fs = arSession.configuration?.frameSemantics.rawValue ?? 0
+            logger.info("[CaptureManager] roomplan attached: installed fs=\(fs, privacy: .public)")
+        }
+        logger.info("[CaptureManager] capture started: bundleId=\(self.bundleIdString, privacy: .public) tier=\(String(describing: self.tier), privacy: .public) roomplan=\(self.roomCaptureSession != nil, privacy: .public)")
         isRunning = true
     }
 
     /// Stop the session. Waits for in-flight writes, logs summary, assembles bundle.pb.
+    ///
+    /// Stop order per decisions 0076/0077: RoomPlan stops FIRST against the
+    /// still-running session (pauseARSession: false — it finalizes its
+    /// CapturedRoomData there), then the anchor snapshot, then the pause.
+    /// Assembly is deferred until didEndWith delivers the room data (or the
+    /// timeout fires); a capture with no RoomPlan co-run assembles immediately.
+    ///
+    /// Idempotent via the isRunning guard: the RoomPlan 10 s self-abort calls
+    /// this from didEndWith, and a user Finish racing it must not double-stop.
     func stopCapture() {
-        // Snapshot the FINAL plane-anchor set before pausing — the last
+        guard isRunning else { return }
+        isRunning = false
+        endedAtDeviceUs = Int64(CACurrentMediaTime() * 1_000_000)
+
+        // 1. RoomPlan first (no-op when it already ended via the self-abort).
+        let rpActive = roomCaptureSession != nil
+        if rpActive, !rpEndReceived {
+            roomCaptureSession?.stop(pauseARSession: false)
+        }
+
+        // 2. Snapshot the FINAL plane-anchor set before pausing — the last
         // frame's anchors are the session's best merged/refined planes
         // (decision 0066). Same world frame as every camera pose.
         let arAnchors = (arSession.currentFrame?.anchors ?? [])
             .compactMap { $0 as? ARPlaneAnchor }
         capturedPlaneAnchors = arAnchors.map { PlaneAnchorExtractor.from($0) }
 
+        // 3. Pause. RoomBuilder runs AFTER this (its ~905 MB transient must not
+        // overlap the live session, 0076 Q3).
         arSession.pause()
-        isRunning = false
-        endedAtDeviceUs = Int64(CACurrentMediaTime() * 1_000_000)
 
         // V3-walk observability: counts by alignment + classification tell
         // the on-device plane-quality story without any new UI.
@@ -176,29 +283,18 @@ final class CaptureManager: NSObject, ObservableObject {
         let classified = capturedPlaneAnchors.filter { !$0.classification.isEmpty }.count
         logger.info("[CaptureManager] plane anchors at stop: total=\(self.capturedPlaneAnchors.count, privacy: .public) horizontal=\(horiz, privacy: .public) vertical=\(vert, privacy: .public) classified=\(classified, privacy: .public)")
 
-        // Snapshot immutable session state before hopping off MainActor.
-        // userId: read from Keychain-backed Firebase cache — offline-safe.
-        // Empty string on a first-ever offline launch (backstop handled by UploadCoordinator).
-        let userId    = AuthManager.shared.currentUID ?? ""
-        let noUid     = userId.isEmpty
-        let frames    = capturedFrames
-        let outDir    = bundleOutputDir!
-        let assembler = BundleAssembler(
-            bundleId:          bundleId,
-            tier:              tier,
-            startedAtDeviceUs: startedAtDeviceUs,
-            endedAtDeviceUs:   endedAtDeviceUs,
-            startedAtWallUs:   startedAtWallUs,
-            frames:            frames,
-            planeAnchors:      capturedPlaneAnchors,
-            outputDir:         outDir
-        )
-        let stats     = writeStats
-        let accepted  = frameCount
+        // Depth observability at stop (the RP-6 Gate-1 depth loss was invisible
+        // until the bundle was parsed server-side — never again).
+        let withDepth = capturedFrames.filter { $0.depth != nil }.count
+        logger.info("[CaptureManager] keyframes with depth at stop: \(withDepth, privacy: .public)/\(self.capturedFrames.count, privacy: .public) reasserted=\(self.depthReasserted, privacy: .public)")
 
-        // Enqueue on jpegQueue — this block runs after all in-flight JPEG/depth writes.
-        let log = logger
-        jpegQueue.async { [weak self] in
+        // Write verification runs on jpegQueue — after all in-flight JPEG/depth
+        // writes, independent of how long the room build takes.
+        let outDir   = bundleOutputDir!
+        let stats    = writeStats
+        let accepted = frameCount
+        let log      = logger
+        jpegQueue.async {
             let framesDir = outDir.appendingPathComponent("frames")
             let onDisk = (try? FileManager.default.contentsOfDirectory(
                 at: framesDir, includingPropertiesForKeys: nil
@@ -211,10 +307,159 @@ final class CaptureManager: NSObject, ObservableObject {
               on-disk  : \(onDisk) .jpg files
               temp-dir : \(framesDir.path, privacy: .public)
             """)
+        }
 
+        // 4. Assembly gate. With a co-run, didEndWith owns the next step: on
+        // the self-abort path it already fired (rpEndReceived), so finalize
+        // now; otherwise it arrives momentarily and finalizes then.
+        if rpActive {
+            if rpEndReceived {
+                finalizeRoomPlanAndAssemble()
+            } else {
+                scheduleRoomPlanEndTimeout()
+            }
+        } else {
+            assembleBundle(roomPlan: nil)
+        }
+    }
+
+    // MARK: - RoomPlan finalize + assembly
+
+    /// Build the CapturedRoom from didEndWith's data, serialize it, and
+    /// assemble the bundle. One-shot; every failure inside degrades to
+    /// assembling WITHOUT a room (LIDAR_ARKIT semantics — never a lost capture).
+    private func finalizeRoomPlanAndAssemble() {
+        guard !finalizeStarted, !assemblyStarted else { return }
+        finalizeStarted = true
+        guard let data = capturedRoomData else {
+            assembleBundle(roomPlan: nil)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var built: CapturedRoom?
+            do {
+                built = try await RoomBuilder(options: [.beautifyObjects])
+                    .capturedRoom(from: data)
+            } catch {
+                self.logger.info("[CaptureManager] RoomBuilder failed — shipping without room plan: \(error.localizedDescription)")
+            }
+            // The timeout may have assembled while the builder ran; the bundle
+            // already shipped without a room, so writing roomplan/ blobs now
+            // would put unreferenced files into the manifest at send time.
+            guard !self.assemblyStarted else {
+                self.logger.info("[CaptureManager] room built after assembly timeout — dropped")
+                return
+            }
+            var model: RSRoomPlanModel?
+            if let room = built {
+                self.logger.info("[CaptureManager] room built: objects=\(room.objects.count, privacy: .public) walls=\(room.walls.count, privacy: .public) doors=\(room.doors.count, privacy: .public) windows=\(room.windows.count, privacy: .public) openings=\(room.openings.count, privacy: .public) floors=\(room.floors.count, privacy: .public)")
+                if RoomPlanWire.roomQualifies(wallCount: room.walls.count,
+                                              floorCount: room.floors.count) {
+                    model = self.serializeRoomPlan(room)
+                    if model != nil {
+                        self.builtCensus = RoomCensus(
+                            objects: room.objects.count,
+                            walls: room.walls.count,
+                            doors: room.doors.count,
+                            windows: room.windows.count,
+                            openings: room.openings.count,
+                            floors: room.floors.count
+                        )
+                    }
+                } else {
+                    self.logger.info("[CaptureManager] built room has no wall/floor — shipping LIDAR_ARKIT")
+                }
+            }
+            self.assembleBundle(roomPlan: model)
+        }
+    }
+
+    /// Write roomplan/room.json (+ optional room.usdz) into the session dir and
+    /// return the proto model, or nil if the JSON leg failed — json_gcs_path is
+    /// THE geometry source (decision 0077), so no json means no room_plan and
+    /// tier LIDAR_ARKIT. A USDZ export failure never blocks the tier.
+    private func serializeRoomPlan(_ room: CapturedRoom) -> RSRoomPlanModel? {
+        guard let outDir = bundleOutputDir else { return nil }
+        let rpDir = outDir.appendingPathComponent("roomplan")
+        // CAFUFA like every other blob dir: background URLSession must read
+        // these while the device is locked (decisions 0040/0042).
+        try? FileManager.default.createDirectory(
+            at: rpDir,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let jsonData: Data
+        do {
+            jsonData = try encoder.encode(room)
+        } catch {
+            logger.info("[CaptureManager] CapturedRoom encode failed — shipping LIDAR_ARKIT: \(error.localizedDescription)")
+            return nil
+        }
+        let jsonURL = rpDir.appendingPathComponent("room.json")
+        do {
+            try jsonData.write(to: jsonURL, options: .completeFileProtectionUntilFirstUserAuthentication)
+        } catch {
+            logger.info("[CaptureManager] room.json write failed — shipping LIDAR_ARKIT: \(error.localizedDescription)")
+            return nil
+        }
+
+        var model = RSRoomPlanModel()
+        model.jsonGcsPath = "roomplan/room.json"
+        model.roomplanVersion = RoomPlanWire.versionString(
+            osVersion: UIDevice.current.systemVersion,
+            capturedRoomVersion: RoomPlanWire.capturedRoomVersion(fromJSON: jsonData)
+        )
+
+        // USDZ: optional debugging / future-viewer artifact (~56 KB measured).
+        let usdzURL = rpDir.appendingPathComponent("room.usdz")
+        do {
+            try room.export(to: usdzURL, exportOptions: .parametric)
+            // export() writes without our protection class; align it after.
+            try? FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: usdzURL.path
+            )
+            model.usdzGcsPath = "roomplan/room.usdz"
+        } catch {
+            logger.info("[CaptureManager] USDZ export failed — shipping json only: \(error.localizedDescription)")
+        }
+        logger.info("[CaptureManager] roomplan serialized: json=\(jsonData.count, privacy: .public)B version=\(model.roomplanVersion, privacy: .public) usdz=\(model.usdzGcsPath.isEmpty ? "no" : "yes", privacy: .public)")
+        return model
+    }
+
+    /// Compute the final tier and assemble bundle.pb on jpegQueue (after all
+    /// blob writes). One-shot across the build and timeout paths.
+    private func assembleBundle(roomPlan: RSRoomPlanModel?) {
+        guard !assemblyStarted else { return }
+        assemblyStarted = true
+        tier = RoomPlanWire.finalTier(hasLidar: sessionHasLidar,
+                                      roomPlanShipped: roomPlan != nil)
+
+        // Snapshot immutable session state before hopping off MainActor.
+        // userId: read from Keychain-backed Firebase cache — offline-safe.
+        // Empty string on a first-ever offline launch (backstop handled by UploadCoordinator).
+        let userId    = AuthManager.shared.currentUID ?? ""
+        let noUid     = userId.isEmpty
+        let assembler = BundleAssembler(
+            bundleId:          bundleId,
+            tier:              tier,
+            startedAtDeviceUs: startedAtDeviceUs,
+            endedAtDeviceUs:   endedAtDeviceUs,
+            startedAtWallUs:   startedAtWallUs,
+            frames:            capturedFrames,
+            planeAnchors:      capturedPlaneAnchors,
+            roomPlan:          roomPlan,
+            outputDir:         bundleOutputDir!
+        )
+        let log = logger
+        jpegQueue.async { [weak self] in
             do {
                 let url = try assembler.write(userId: userId)
-                log.info("[CaptureManager] bundle.pb → \(url.path, privacy: .public) (user_id: \(userId.isEmpty ? "<none — backstop pending>" : userId))")
+                log.info("[CaptureManager] bundle.pb → \(url.path, privacy: .public) tier=\(String(describing: assembler.tier), privacy: .public) (user_id: \(userId.isEmpty ? "<none — backstop pending>" : userId))")
                 DispatchQueue.main.async {
                     self?.bundlePath = url
                     self?.assembledWithoutUserId = noUid
@@ -228,6 +473,24 @@ final class CaptureManager: NSObject, ObservableObject {
                     self?.assemblyFailure = error.localizedDescription
                 }
             }
+        }
+    }
+
+    /// If didEndWith never arrives (never observed — 0076 measured prompt
+    /// delivery on both the stop and self-abort paths), assemble without a
+    /// room after the deadline rather than stranding review at "Packing it up".
+    private func scheduleRoomPlanEndTimeout() {
+        let expected = bundleId
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.roomPlanEndTimeoutSec * 1_000_000_000))
+            guard let self,
+                  self.bundleId == expected,
+                  !self.isRunning,
+                  !self.finalizeStarted,
+                  !self.assemblyStarted
+            else { return }
+            self.logger.info("[CaptureManager] RoomPlan didEndWith missing after \(Self.roomPlanEndTimeoutSec, privacy: .public)s — assembling without room plan")
+            self.assembleBundle(roomPlan: nil)
         }
     }
 
@@ -420,6 +683,7 @@ extension CaptureManager: ARSessionDelegate {
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else { return }
+            self.noteFrameDepth(depthData != nil)
             if self.accumulator.shouldAccept(camera: camera) {
                 self.acceptFrame(
                     camera:      camera,
@@ -430,6 +694,42 @@ extension CaptureManager: ARSessionDelegate {
         }
     }
 
+    /// Depth-loss guard (see RoomPlanWire.shouldReassertDepth for the found-live
+    /// failure and the rule). Runs on every frame; almost always a no-op.
+    private func noteFrameDepth(_ hadDepth: Bool) {
+        if hadDepth {
+            depthEverSeen = true
+            return
+        }
+        depthlessFrameCount += 1
+        guard RoomPlanWire.shouldReassertDepth(hasLidar: sessionHasLidar,
+                                               depthEverSeen: depthEverSeen,
+                                               alreadyReasserted: depthReasserted,
+                                               depthlessFrames: depthlessFrameCount)
+        else { return }
+        depthReasserted = true
+        reassertSceneDepth()
+    }
+
+    /// 0076's measured-survivable cure: take the INSTALLED configuration
+    /// (RoomPlan's composite when co-running), re-insert .sceneDepth, and
+    /// re-run with no options — the scan continues through it and the room
+    /// still builds (spike Q1's re-assert probe, verbatim).
+    private func reassertSceneDepth() {
+        guard let cfg = arSession.configuration else {
+            logger.info("[CaptureManager] depth re-assert skipped: no installed configuration")
+            return
+        }
+        guard type(of: cfg).supportsFrameSemantics(.sceneDepth) else {
+            logger.info("[CaptureManager] depth re-assert skipped: config class lacks sceneDepth support")
+            return
+        }
+        let before = cfg.frameSemantics.rawValue
+        cfg.frameSemantics.insert(.sceneDepth)
+        arSession.run(cfg, options: [])
+        logger.info("[CaptureManager] sceneDepth re-asserted after \(self.depthlessFrameCount, privacy: .public) depthless frames (fs \(before, privacy: .public) → \(cfg.frameSemantics.rawValue, privacy: .public))")
+    }
+
     nonisolated func session(
         _ session: ARSession,
         cameraDidChangeTrackingState camera: ARCamera
@@ -437,6 +737,63 @@ extension CaptureManager: ARSessionDelegate {
         let state = camera.trackingState
         DispatchQueue.main.async { [weak self] in
             self?.trackingState = state
+        }
+    }
+}
+
+// MARK: - RoomCaptureSessionDelegate
+
+extension CaptureManager: RoomCaptureSessionDelegate {
+
+    /// Full-room census stream (didUpdate carries the FULL room; the deltas
+    /// didAdd/didChange/didRemove are not needed for counts — 0076 Q6).
+    /// Counts are extracted on the delivery thread; the CapturedRoom itself
+    /// never crosses (copy-out principle).
+    nonisolated func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
+        let census = RoomCensus(
+            objects: room.objects.count,
+            walls: room.walls.count,
+            doors: room.doors.count,
+            windows: room.windows.count,
+            openings: room.openings.count,
+            floors: room.floors.count
+        )
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.liveCensus = census
+        }
+    }
+
+    nonisolated func captureSession(_ session: RoomCaptureSession,
+                                    didProvide instruction: RoomCaptureSession.Instruction) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.roomPlanInstruction = instruction
+        }
+    }
+
+    /// End of the RoomPlan scan. Two ways here:
+    ///   - user stop: stopCapture() already ran (isRunning false) → finalize.
+    ///   - the 10 s tracking-failure self-abort (0076 Q3): RoomPlan ends ITSELF
+    ///     (error = worldTrackingFailure) while the capture is running → end
+    ///     the capture gracefully; the partial room in `data` still ships if
+    ///     it builds. stopCapture() sees rpEndReceived and finalizes.
+    nonisolated func captureSession(_ session: RoomCaptureSession,
+                                    didEndWith data: CapturedRoomData, error: (any Error)?) {
+        let errorDescription = error.map { String(describing: $0) }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.rpEndReceived = true
+            self.capturedRoomData = data
+            if let errorDescription {
+                self.logger.info("[CaptureManager] RoomPlan ended with error: \(errorDescription, privacy: .public)")
+            }
+            if self.isRunning {
+                self.logger.info("[CaptureManager] RoomPlan self-abort — ending capture with the partial room")
+                self.stopCapture()
+            } else {
+                self.finalizeRoomPlanAndAssemble()
+            }
         }
     }
 }

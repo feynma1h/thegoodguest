@@ -38,15 +38,20 @@ enum ManifestBuilder {
         let fm = FileManager.default
         var entries: [UploadManifestEntry] = []
 
-        // Per-frame subdirectories, in canonical order.
-        // depth/ and confidence/ are LiDAR-only; skipped silently if absent.
-        let frameDirs: [(subdir: String, ext: String)] = [
+        // Blob subdirectories, in canonical order.
+        // depth/ and confidence/ are LiDAR-only; roomplan/ exists only when a
+        // built CapturedRoom shipped (decision 0077). Skipped silently if absent
+        // — like every other blob, roomplan files are phase-1 uploads gated
+        // before bundle.pb by BlobUploadManager.
+        let blobDirs: [(subdir: String, ext: String)] = [
             ("frames",     "jpg"),
             ("depth",      "f32"),
             ("confidence", "png"),
+            ("roomplan",   "json"),
+            ("roomplan",   "usdz"),
         ]
 
-        for (subdir, ext) in frameDirs {
+        for (subdir, ext) in blobDirs {
             let dirURL = outputDir.appendingPathComponent(subdir)
             guard fm.fileExists(atPath: dirURL.path) else { continue }
 
