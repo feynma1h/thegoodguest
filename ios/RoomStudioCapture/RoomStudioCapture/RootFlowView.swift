@@ -21,8 +21,10 @@
 /// Remaining activation follow-ups: add-more resume-with-progress
 /// (CaptureManager.startCapture currently mints a new bundle rather than
 /// extending), the real web-handoff universal link (NetworkConfig.webBaseURL is
-/// nil, so the doorway hides its CTA), the live RoomPlan mesh behind LiveMeshHost
-/// (task #13) and the Live Activity widget target (task #14).
+/// nil, so the doorway hides its CTA), and the Live Activity widget target
+/// (task #14). Task #13 landed as chunk RP-7: the live floor plan behind
+/// LiveMeshHost, fed by capture.floorPlanFeed, with the coverage ticks driven
+/// from the live census below.
 ///
 /// BUILT BUT NOT YET REACHABLE from this flow (staged, not wired): the
 /// returning-home recent-rooms strip and RoomsListView / QRBridgeView (§9, need a
@@ -158,6 +160,7 @@ struct RootFlowView: View {
         case .capturing:
             LiveCaptureView(
                 state: hudState,
+                feed: capture.floorPlanFeed,
                 onFinish: {
                     RSHaptics.fire(.finish)
                     capture.stopCapture()
@@ -183,11 +186,14 @@ struct RootFlowView: View {
                 metrics: reviewMetrics,
                 // Non-nil exactly when a built room ships (tier LIDAR_ROOMPLAN);
                 // publishes when RoomBuilder lands, which the "Packing it up"
-                // hold already outlasts.
+                // hold already outlasts. The floor plan follows the same rule —
+                // "the room you got" is what the server will see.
                 census: capture.builtCensus?.reviewLine,
-                // Neutral verdict: the app has no coverage signal (task #13), so it
-                // must not assert "clean / whole room". Once coverage lands, drive
-                // verdict + thinCoverage from it.
+                floorPlan: capture.builtFloorPlan,
+                // Neutral verdict, still: a coverage signal now exists (RP-7's
+                // census + floor plan), but turning it into a quality VERDICT
+                // ("clean" / thinCoverage) is a copy claim that deserves an
+                // operator decision — deferred, flagged in the RP-7 report.
                 verdict: reviewVerdict,
                 // An empty capture cannot be sent: the backend would reject it as
                 // invalid and the user would be told "the scan didn't survive the
@@ -666,12 +672,16 @@ struct RootFlowView: View {
         @unknown default:
             .finding
         }
-        // Real coverage + steering are unwired until the RoomPlan coverage wiring
-        // (task #13). Show neutral-empty, never fabricated "far wall" progress.
+        // Coverage from the live census (RP-7 — the task-#13 wiring): the
+        // floor is binary, walls/corners fill toward a closed room's worth.
+        // Steering (guidance/moments) rides floorPlanFeed into LiveCaptureView;
+        // this guestLine is the DEFAULT the priority table falls back to.
+        let cover = FloorPlanVoice.coverage(census: capture.liveCensus,
+                                            cornerCount: capture.liveCornerCount)
         return CaptureHUDState(
             tracking: quality,
             guestLine: "Move slowly and I'll sketch the room as you go.",
-            floor: .empty, walls: .empty, corners: .empty
+            floor: cover.floor, walls: cover.walls, corners: cover.corners
         )
     }
 
