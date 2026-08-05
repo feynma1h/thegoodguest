@@ -78,8 +78,9 @@ export interface ShellMaterialEntry {
 }
 
 export interface ShellOpeningEntry {
-  classification: string; // "door" | "window"
-  /** [[u0,v0],[u1,v1]] normalized on the RENDERED quad (corner0 origin). */
+  classification: string; // "door" | "window" | "opening" (v3 adds through-openings)
+  /** [[u0,v0],[u1,v1]] normalized on the wall's rendered UV frame (v2: the
+   * quad from corner 0; v3: the polygon's bounding rect in-plane). */
   rect_uv: [[number, number], [number, number]];
 }
 
@@ -115,21 +116,68 @@ export interface ShellFloorEntry {
 }
 
 /**
+ * One wall entry (shell.json v3, decision 0077). Walls are POLYGONS —
+ * interior-wound, verbatim geometry: method "roomplan" ships CapturedRoom
+ * vertices (rect-from-dimensions 4-corner walls dominate; explicit
+ * outlines carry more), method "anchor_envelope" ships the derived
+ * envelope quads with the DETECTED extent beside them (measured_quad).
+ * Corner 0 is NOT guaranteed to be the UV origin — winding normalization
+ * may rotate the start; openings' rect_uv normalize on the polygon's
+ * bounding rect in-plane (lib/shell3d.ts mirrors the server frame).
+ */
+export interface ShellWallEntryV3 {
+  wall_id: string;
+  polygon: [number, number, number][]; // N>=3, interior-fronting winding
+  measured_quad?: [number, number, number][]; // anchor_envelope only
+  classification: string | null;
+  confidence: string | null; // "high" | "medium" | "low" (roomplan); null (envelope)
+  openings: ShellOpeningEntry[];
+  provenance: Record<string, unknown>; // {source: "roomplan" | "anchor_envelope" | "detected_extent", ...}
+  material: ShellMaterialEntry;
+}
+
+/** The floor entry (shell.json v3): rendered polygon verbatim; the
+ * envelope method carries the measured coverage polygon beside it. */
+export interface ShellFloorEntryV3 {
+  polygon: [number, number, number][]; // rendered, N>=3, CCW in XZ
+  measured_polygon?: [number, number, number][] | null; // anchor_envelope only
+  y: number;
+  confidence?: string; // roomplan only ("high" | "medium" | "low")
+  provenance: { source: string }; // "roomplan" | "envelope_intersection" | "detected_extent"
+  material: ShellMaterialEntry;
+}
+
+interface ShellDocBase {
+  scene_id: string;
+  status: "ready" | "unavailable";
+  reason: string | null; // "no_geometry_source" | "capture_expired" | null
+  quality?: Record<string, unknown>;
+}
+
+/** The v2 closure shell (decision 0069) — the ARKIT_ONLY legacy shape. */
+export interface ShellDocV2 extends ShellDocBase {
+  shell_version: 2;
+  method: "arkit_planes";
+  floor: ShellFloorEntry | null;
+  walls: ShellWallEntry[];
+}
+
+/** The v3 polygon-wall shell (decision 0077): CapturedRoom geometry
+ * verbatim ("roomplan") or the LiDAR degrade envelope ("anchor_envelope"). */
+export interface ShellDocV3 extends ShellDocBase {
+  shell_version: 3;
+  method: "roomplan" | "anchor_envelope";
+  floor: ShellFloorEntryV3 | null;
+  walls: ShellWallEntryV3[];
+}
+
+/**
  * The room shell document, verbatim from the assets response's sibling
  * `shell` field. The distinction the room page relies on: the FIELD being
  * null/absent = the shell stage hasn't landed yet (brief grace window);
  * a document with status "unavailable" = never coming (keep the grid).
  */
-export interface ShellDoc {
-  shell_version: number;
-  scene_id: string;
-  status: "ready" | "unavailable";
-  reason: string | null; // "no_geometry_source" | "capture_expired" | null
-  method: string; // "arkit_planes" today
-  floor: ShellFloorEntry | null;
-  walls: ShellWallEntry[];
-  quality?: Record<string, unknown>;
-}
+export type ShellDoc = ShellDocV2 | ShellDocV3;
 
 /** GET /scenes/{scene_id}/assets response. */
 export interface SceneAssets {
@@ -203,9 +251,10 @@ export interface PositionedSplat {
  */
 export interface ShellPlane {
   kind: "floor" | "wall";
-  /** Walls: the rendered quad's 4 corners (front face toward the room,
-   * corner 0 the plane origin, +U to 1, +V to 3). Floor: the rendered
-   * polygon (N>=3, CCW in the XZ plane). */
+  /** Walls: the rendered polygon, front face toward the room (v2 quads are
+   * 4 corners with corner 0 the plane origin; v3 polygons may carry any
+   * vertex count and any start corner — lib/shell3d.ts derives the frame).
+   * Floor: the rendered polygon (N>=3, CCW in the XZ plane). */
   corners: [number, number, number][];
   material: {
     /** Measured dominant color; null = unobserved -> neutral treatment,
@@ -216,9 +265,12 @@ export interface ShellPlane {
      * micro-treatment later. */
     family: string | null;
   };
-  /** Door/window sub-regions in the rendered quad's normalized UV
+  /** Door/window/opening sub-regions in the wall's normalized UV frame
    * (walls only; always [] for the floor). */
   openings: ShellOpeningEntry[];
+  /** Per-surface RoomPlan confidence ("high" | "medium" | "low"), carried
+   * for treatments; null where the source has none (v2, envelope walls). */
+  confidence: string | null;
 }
 
 export interface AssembledScene {
@@ -272,14 +324,21 @@ export function assembleScene(assets: SceneAssets): AssembledScene {
         corners: doc.floor.polygon,
         material: toMaterial(doc.floor.material),
         openings: [],
+        confidence:
+          "confidence" in doc.floor ? (doc.floor.confidence ?? null) : null,
       });
     }
     for (const wall of doc.walls ?? []) {
+      // v3 walls carry `polygon`; v2 walls carry `quad`. Both are
+      // interior-wound world corners — the renderer's one input.
+      const corners = "polygon" in wall ? wall.polygon : wall.quad;
+      if ((corners?.length ?? 0) < 3) continue; // degenerate: skip, never guess
       planes.push({
         kind: "wall",
-        corners: wall.quad,
+        corners,
         material: toMaterial(wall.material),
         openings: wall.openings ?? [],
+        confidence: "confidence" in wall ? (wall.confidence ?? null) : null,
       });
     }
     if (planes.length > 0) shell = planes;

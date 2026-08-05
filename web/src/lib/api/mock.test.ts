@@ -7,7 +7,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { MockApiClient, MOCK_READY_SCENE_ID } from "./mock";
+import {
+  MockApiClient,
+  MOCK_READY_SCENE_ID,
+  MOCK_V3_BUNDLE_TRIGGER,
+  MOCK_V3_SCENE_ID,
+} from "./mock";
 import { SceneNotReadyError } from "./client";
 import { assembleScene, SCENE_STATUSES } from "./types";
 
@@ -50,5 +55,28 @@ describe("MockApiClient", () => {
       const found = await client.getSceneByBundle(scene.bundle_id!);
       expect(found.scene_id).toBe(scene.scene_id);
     }
+  });
+
+  it("serves the off-list v3 scene through the !v3 bundle trigger", async () => {
+    const client = new MockApiClient();
+    const summary = await client.getSceneByBundle(MOCK_V3_BUNDLE_TRIGGER);
+    expect(summary.scene_id).toBe(MOCK_V3_SCENE_ID);
+    expect(summary.status).toBe("ready");
+    // Off the list: the one-scene-per-status contract above still holds.
+    expect(client.scenes.some((s) => s.scene_id === MOCK_V3_SCENE_ID)).toBe(false);
+  });
+
+  it("v3 scene assets assemble polygon walls with confidence", async () => {
+    const assets = await new MockApiClient().getSceneAssets(MOCK_V3_SCENE_ID);
+    expect(assets.shell?.shell_version).toBe(3);
+    const { shell, splats } = assembleScene(assets);
+    expect(splats.length).toBeGreaterThanOrEqual(3);
+    const walls = shell!.filter((p) => p.kind === "wall");
+    expect(walls).toHaveLength(5);
+    // The explicit-outline wall keeps its 6 corners.
+    expect(walls.some((w) => w.corners.length === 6)).toBe(true);
+    expect(new Set(walls.map((w) => w.confidence))).toEqual(
+      new Set(["high", "medium", "low"]),
+    );
   });
 });

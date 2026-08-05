@@ -27,21 +27,26 @@
  * objects assemble on the honest grid, as before. Reduced motion
  * collapses everything to an immediate full room.
  *
- * Shell rendering (decision 0069): single-sided PARAMETRIC surfaces —
- * MeshStandardMaterial built from each plane's measured albedo + family
- * roughness (no textures exist in the v2 contract; the bake left
- * serving). Walls are quads; the floor is a triangulated polygon
- * (rendered shape from closure); door/window openings render as inset
- * patches on their wall. A small warm light rig shades the standard
- * materials — Spark's splat shaders ignore three.js lights, so objects
- * are unaffected. Planes without a measured albedo render the flat warm
- * neutral (honestly unobserved; nothing fake). depthWrite:true meshes
- * composite correctly with Spark splats (the 0066 V1 depth probe).
+ * Shell rendering (decisions 0069/0077): single-sided PARAMETRIC
+ * surfaces — MeshStandardMaterial built from each plane's measured albedo
+ * + family roughness (no textures exist in the shell contract; the bake
+ * left serving). Walls arrive as interior-wound polygons: v2 quads take
+ * the fast path, v3 polygon walls (roomplan verbatim geometry, the
+ * anchor-envelope degrade) triangulate in their own plane via the
+ * lib/shell3d frame — which also places door/window/opening inset
+ * patches, since v3 corner 0 need not be the UV origin. The floor is a
+ * triangulated polygon (rendered shape verbatim). A small warm light rig
+ * shades the standard materials — Spark's splat shaders ignore three.js
+ * lights, so objects are unaffected. Planes without a measured albedo
+ * render the flat warm neutral (honestly unobserved; nothing fake).
+ * depthWrite:true meshes composite correctly with Spark splats (the 0066
+ * V1 depth probe).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PositionedSplat, ShellPlane } from "@/lib/api/types";
+import { openingRect, projectToWallPlane, wallFrame } from "@/lib/shell3d";
 
 interface SplatViewerProps {
   splats: PositionedSplat[];
@@ -262,12 +267,49 @@ export default function SplatViewer({
 
         const shellMeshes = shellPlanes.map((p) => {
           const geom = new THREE.BufferGeometry();
+          // Walls derive a UV frame from their polygon (lib/shell3d) —
+          // shared by the N-corner triangulation and the opening patches.
+          const frame = p.kind === "wall" ? wallFrame(p.corners) : null;
           if (p.kind === "wall" && p.corners.length === 4) {
             geom.setAttribute(
               "position",
               new THREE.Float32BufferAttribute(p.corners.flat(), 3),
             );
             geom.setIndex([0, 1, 2, 0, 2, 3]);
+          } else if (p.kind === "wall") {
+            // v3 polygon wall (decision 0077): triangulate in the wall's
+            // own plane (earcut handles concave outlines), front face
+            // along the winding's interior normal.
+            geom.setAttribute(
+              "position",
+              new THREE.Float32BufferAttribute(p.corners.flat(), 3),
+            );
+            if (frame) {
+              const uv = projectToWallPlane(p.corners, frame).map(
+                ([u, v]) => new THREE.Vector2(u, v),
+              );
+              const tris = THREE.ShapeUtils.triangulateShape(uv, []);
+              const indices = tris.flat();
+              if (indices.length >= 3) {
+                const [a, b, c] = indices;
+                const va = new THREE.Vector3(...p.corners[a]);
+                const vb = new THREE.Vector3(...p.corners[b]);
+                const vc = new THREE.Vector3(...p.corners[c]);
+                const n = vb.sub(va).cross(vc.sub(va));
+                const front = new THREE.Vector3(...frame.normal);
+                geom.setIndex(
+                  n.dot(front) >= 0
+                    ? indices
+                    : tris.map((t) => [t[2], t[1], t[0]]).flat(),
+                );
+              }
+            } else {
+              // Degenerate frame (never emitted by the server): fan the
+              // polygon rather than render nothing or crash.
+              const fan: number[] = [];
+              for (let i = 1; i + 1 < p.corners.length; i++) fan.push(0, i, i + 1);
+              geom.setIndex(fan);
+            }
           } else {
             // Floor polygon: triangulate in the XZ plane (handles concave
             // shapes), then orient front-face-up regardless of the source
@@ -298,32 +340,20 @@ export default function SplatViewer({
           const mesh = new THREE.Mesh(geom, makeShellMaterial(p));
           scene.add(mesh);
 
-          // Door/window openings (0069): inset patches slightly off the
-          // wall toward the room — a recessed panel in the wall's own
-          // darkened color, never a guessed appearance.
+          // Door/window/opening insets (0069, carried to v3): patches
+          // slightly off the wall toward the room — a recessed panel in
+          // the wall's own darkened color, never a guessed appearance.
+          // Placement uses the wall's UV frame (bounding rect in-plane),
+          // which reproduces the v2 corner-0 math exactly and stays
+          // correct when v3 winding rotates the start corner.
           const extras: InstanceType<typeof THREE.Mesh>[] = [];
-          if (p.kind === "wall" && p.corners.length === 4) {
-            const c0 = new THREE.Vector3(...p.corners[0]);
-            const u = new THREE.Vector3(...p.corners[1]).sub(c0);
-            const v = new THREE.Vector3(...p.corners[3]).sub(c0);
-            const normal = u.clone().cross(v).normalize();
+          if (p.kind === "wall" && frame) {
             for (const op of p.openings) {
-              const [[u0, v0], [u1, v1]] = op.rect_uv;
-              const at = (uu: number, vv: number) =>
-                c0
-                  .clone()
-                  .addScaledVector(u, uu)
-                  .addScaledVector(v, vv)
-                  .addScaledVector(normal, OPENING_OFFSET_M);
+              const rect = openingRect(frame, op.rect_uv, OPENING_OFFSET_M);
               const og = new THREE.BufferGeometry();
               og.setAttribute(
                 "position",
-                new THREE.Float32BufferAttribute(
-                  [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)].flatMap(
-                    (w) => [w.x, w.y, w.z],
-                  ),
-                  3,
-                ),
+                new THREE.Float32BufferAttribute(rect.flat(), 3),
               );
               og.setIndex([0, 1, 2, 0, 2, 3]);
               og.computeVertexNormals();

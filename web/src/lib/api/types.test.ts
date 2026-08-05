@@ -7,7 +7,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { assembleScene, type SceneAssets, type ShellDoc } from "./types";
+import {
+  assembleScene,
+  type SceneAssets,
+  type ShellDocV2,
+  type ShellDocV3,
+  type ShellWallEntryV3,
+} from "./types";
 
 const GS = "gs://outputs/scenes/s1/splats/00_chair.ply";
 
@@ -121,7 +127,7 @@ const FLOOR_POLYGON: [number, number, number][] = [
   [0, -1, -2],
 ];
 
-function shellDoc(overrides: Partial<ShellDoc> = {}): ShellDoc {
+function shellDoc(overrides: Partial<ShellDocV2> = {}): ShellDocV2 {
   return {
     shell_version: 2,
     scene_id: "s1",
@@ -271,5 +277,182 @@ describe("assembleScene shell mapping", () => {
     a.shell = doc;
     const { shell } = assembleScene(a);
     expect(shell!.map((p) => p.kind)).toEqual(["wall", "wall"]);
+  });
+
+  it("carries confidence null on every v2 plane (no source field)", () => {
+    const a = assets();
+    a.shell = shellDoc();
+    const { shell } = assembleScene(a);
+    expect(shell!.map((p) => p.confidence)).toEqual([null, null, null]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shell mapping, v3 polygon walls (decision 0077 — methods "roomplan" and
+// "anchor_envelope")
+// ---------------------------------------------------------------------------
+
+/** A notched explicit-outline wall (the spike's wall_00 class): 6 corners,
+ * interior-wound, facing +Z. */
+const NOTCHED_WALL: [number, number, number][] = [
+  [0, -1, 0],
+  [4, -1, 0],
+  [4, 1, 0],
+  [2.5, 1, 0],
+  [2.5, 0.4, 0],
+  [0, 0.4, 0],
+];
+
+function v3Wall(overrides: Partial<ShellWallEntryV3> = {}): ShellWallEntryV3 {
+  return {
+    wall_id: "wall_01",
+    polygon: [
+      [0, -1, -2],
+      [4, -1, -2],
+      [4, 1, -2],
+      [0, 1, -2],
+    ],
+    classification: "wall",
+    confidence: "high",
+    openings: [],
+    provenance: { source: "roomplan" },
+    material: material("painted", "#aab9c3"),
+    ...overrides,
+  };
+}
+
+function shellDocV3(overrides: Partial<ShellDocV3> = {}): ShellDocV3 {
+  return {
+    shell_version: 3,
+    scene_id: "s1",
+    status: "ready",
+    reason: null,
+    method: "roomplan",
+    floor: {
+      // 5-corner floor polygon — v3 floors ship verbatim CapturedRoom
+      // outlines, not rectangles.
+      polygon: [
+        [0, -1, 2],
+        [4, -1, 2],
+        [4, -1, -2],
+        [1, -1, -2],
+        [0, -1, -1],
+      ],
+      y: -1,
+      confidence: "high",
+      provenance: { source: "roomplan" },
+      material: material("stone", "#c8c1b7", 0.8),
+    },
+    walls: [
+      v3Wall(),
+      v3Wall({
+        wall_id: "wall_00",
+        polygon: NOTCHED_WALL,
+        confidence: "medium",
+        openings: [
+          { classification: "opening", rect_uv: [[0, 0], [1, 0.63]] },
+        ],
+      }),
+    ],
+    quality: {},
+    ...overrides,
+  };
+}
+
+describe("assembleScene shell mapping (v3)", () => {
+  it("maps a v3 roomplan shell: floor polygon first, then polygon walls verbatim", () => {
+    const a = assets();
+    const doc = shellDocV3();
+    a.shell = doc;
+    const { shell } = assembleScene(a);
+    expect(shell!.map((p) => p.kind)).toEqual(["floor", "wall", "wall"]);
+    expect(shell![0].corners).toEqual(doc.floor!.polygon);
+    expect(shell![1].corners).toEqual(doc.walls[0].polygon);
+    // The explicit-outline wall keeps all 6 corners — nothing is
+    // rectangle-ified client-side.
+    expect(shell![2].corners).toEqual(NOTCHED_WALL);
+    expect(shell![1].material.albedo_hex).toBe("#aab9c3");
+  });
+
+  it("carries per-surface confidence through for treatments", () => {
+    const a = assets();
+    a.shell = shellDocV3();
+    const { shell } = assembleScene(a);
+    expect(shell!.map((p) => p.confidence)).toEqual(["high", "high", "medium"]);
+  });
+
+  it("carries v3 openings through, including through-openings", () => {
+    const a = assets();
+    a.shell = shellDocV3();
+    const { shell } = assembleScene(a);
+    expect(shell![2].openings).toEqual([
+      { classification: "opening", rect_uv: [[0, 0], [1, 0.63]] },
+    ]);
+  });
+
+  it("renders envelope walls from the polygon, never the measured quad", () => {
+    const a = assets();
+    const rendered: [number, number, number][] = [
+      [0, -1.4, -2],
+      [4, -1.4, -2],
+      [4, 1.1, -2],
+      [0, 1.1, -2],
+    ];
+    const measured: [number, number, number][] = [
+      [0.4, -0.9, -2],
+      [3.1, -0.9, -2],
+      [3.1, 1.1, -2],
+      [0.4, 1.1, -2],
+    ];
+    a.shell = shellDocV3({
+      method: "anchor_envelope",
+      floor: {
+        polygon: [
+          [0, -1.4, 2],
+          [4, -1.4, 2],
+          [4, -1.4, -2],
+          [0, -1.4, -2],
+        ],
+        measured_polygon: null,
+        y: -1.4,
+        provenance: { source: "envelope_intersection" },
+        material: material(null, "#bbb099"),
+      },
+      walls: [
+        v3Wall({
+          polygon: rendered,
+          measured_quad: measured,
+          confidence: null,
+          provenance: { source: "anchor_envelope", merged_wall_id: "wall_05" },
+        }),
+      ],
+    });
+    const { shell } = assembleScene(a);
+    expect(shell![1].corners).toEqual(rendered);
+    expect(shell![1].confidence).toBeNull();
+  });
+
+  it("yields shell null for a v3 unavailable document", () => {
+    const a = assets();
+    a.shell = shellDocV3({
+      status: "unavailable",
+      reason: "no_geometry_source",
+      method: "anchor_envelope",
+      floor: null,
+      walls: [],
+    });
+    expect(assembleScene(a).shell).toBeNull();
+  });
+
+  it("skips a degenerate v3 wall polygon, keeps its siblings", () => {
+    const a = assets();
+    a.shell = shellDocV3({
+      walls: [
+        v3Wall({ polygon: [[0, -1, -2], [4, -1, -2]] }),
+        v3Wall({ wall_id: "wall_02" }),
+      ],
+    });
+    const { shell } = assembleScene(a);
+    expect(shell!.filter((p) => p.kind === "wall")).toHaveLength(1);
   });
 });
