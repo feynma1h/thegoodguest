@@ -166,6 +166,40 @@ final class ManifestBuilderTests: XCTestCase {
         XCTAssertEqual(manifest[0].relativePath, "bundle.pb")
     }
 
+    func test_roomplanBlobs_includedBeforeBundlePb() throws {
+        // A LIDAR_ROOMPLAN capture: roomplan/room.json + room.usdz are ordinary
+        // phase-1 blobs in the manifest, before bundle.pb (decision 0077).
+        try makeDir("frames")
+        try makeDir("roomplan")
+        try writeFile("frames/000000.jpg",  bytes: 100)
+        try writeFile("roomplan/room.json", bytes: 2048)
+        try writeFile("roomplan/room.usdz", bytes: 512)
+        try writeFile("bundle.pb",          bytes: 40)
+
+        let manifest = try ManifestBuilder.build(outputDir: tempDir)
+
+        let paths = manifest.map(\.relativePath)
+        XCTAssertTrue(paths.contains("roomplan/room.json"))
+        XCTAssertTrue(paths.contains("roomplan/room.usdz"))
+        XCTAssertEqual(paths.last, "bundle.pb")
+        XCTAssertEqual(
+            manifest.first { $0.relativePath == "roomplan/room.json" }?.expectedSizeBytes, 2048)
+        XCTAssertEqual(
+            manifest.first { $0.relativePath == "roomplan/room.usdz" }?.expectedSizeBytes, 512)
+    }
+
+    func test_missingRoomplanDir_silentlySkipped() throws {
+        // RoomPlan failed (or non-RoomPlan tier): no roomplan/ dir, no entries —
+        // the wire shape every existing capture already has.
+        try makeDir("frames")
+        try writeFile("frames/000000.jpg", bytes: 100)
+        try writeFile("bundle.pb",         bytes: 40)
+
+        let manifest = try ManifestBuilder.build(outputDir: tempDir)
+
+        XCTAssertFalse(manifest.map(\.relativePath).contains { $0.hasPrefix("roomplan/") })
+    }
+
     func test_multipleFrames_correctCount() throws {
         try makeDir("frames")
         for i in 0..<10 {
