@@ -27,6 +27,16 @@ import type {
 /** Fixed UUIDs so deep links are stable across reloads. */
 export const MOCK_READY_SCENE_ID = "11111111-1111-4111-8111-111111111111";
 
+/**
+ * Off-list v3 scene (decision 0077): /room?bundle=!v3 walks the room page
+ * — reveal included — over a shell.json v3 roomplan-shaped fixture with
+ * polygon walls. Off the scenes list so the one-scene-per-status contract
+ * (and its pin) stands; conversation 404s for it, exercising the degraded
+ * settled branch. Same `!` convention as the composer triggers below.
+ */
+export const MOCK_V3_BUNDLE_TRIGGER = "!v3";
+export const MOCK_V3_SCENE_ID = "33333333-3333-4333-8333-333333333333";
+
 const STATUS_FIXTURES: Array<{ status: SceneStatus; minutesAgo: number }> = [
   { status: "ready", minutesAgo: 30 },
   { status: "processing", minutesAgo: 4 },
@@ -252,6 +262,141 @@ const READY_ASSETS: SceneAssets = {
   expires_at: new Date(Date.now() + 3600_000).toISOString(),
 };
 
+/**
+ * The v3 room (decision 0077, method "roomplan"): a five-sided polygon
+ * room around the same synthetic objects — four rect-from-dimensions
+ * walls (one with its start corner rotated: v3 winding normalization
+ * means corner 0 need NOT be the UV origin, and the door on that wall
+ * pins the frame math visually), one explicit 6-corner notched outline
+ * (the spike's wall_00 class), a through-"opening" on the diagonal wall,
+ * per-surface confidence, and one unobserved wall (albedo null).
+ */
+const V3_ASSETS: SceneAssets = {
+  scene_id: MOCK_V3_SCENE_ID,
+  manifest: {
+    ...READY_ASSETS.manifest,
+    scene_id: MOCK_V3_SCENE_ID,
+  },
+  shell: {
+    shell_version: 3,
+    scene_id: MOCK_V3_SCENE_ID,
+    status: "ready",
+    reason: null,
+    method: "roomplan",
+    floor: {
+      // CCW in XZ; the cut corner (P4->P3) makes the room non-rectangular.
+      polygon: [
+        [-2.2, 0, 1.4],
+        [-2.2, 0, -1.2],
+        [-0.5, 0, -2.6],
+        [1.8, 0, -2.6],
+        [1.8, 0, 1.4],
+      ],
+      y: 0,
+      confidence: "high",
+      provenance: { source: "roomplan" },
+      material: mockMaterial("stone", "#c8c1b7", 0.8, 0.44),
+    },
+    walls: [
+      {
+        // Front wall (z=1.4, interior -Z) with its start corner ROTATED:
+        // corner 0 is a top corner, not the UV origin. The door must still
+        // land right of center (u measured along -X for this facing).
+        wall_id: "wall_00",
+        polygon: [
+          [-2.2, 2.2, 1.4],
+          [1.8, 2.2, 1.4],
+          [1.8, 0, 1.4],
+          [-2.2, 0, 1.4],
+        ],
+        classification: "wall",
+        confidence: "high",
+        openings: [
+          { classification: "door", rect_uv: [[0.15, 0], [0.34, 0.86]] },
+        ],
+        provenance: { source: "roomplan" },
+        material: mockMaterial("painted", "#c9b9a4", 0.85, 0.5),
+      },
+      {
+        // Left wall (x=-2.2, interior +X), fully unobserved: the neutral
+        // treatment stays reachable on v3 offline.
+        wall_id: "wall_01",
+        polygon: [
+          [-2.2, 0, 1.4],
+          [-2.2, 0, -1.2],
+          [-2.2, 2.2, -1.2],
+          [-2.2, 2.2, 1.4],
+        ],
+        classification: "wall",
+        confidence: "medium",
+        openings: [],
+        provenance: { source: "roomplan" },
+        material: mockMaterial(null, null, 0.9, 0.03),
+      },
+      {
+        // The diagonal wall (cut corner) with a full through-opening.
+        wall_id: "wall_02",
+        polygon: [
+          [-2.2, 0, -1.2],
+          [-0.5, 0, -2.6],
+          [-0.5, 2.2, -2.6],
+          [-2.2, 2.2, -1.2],
+        ],
+        classification: "wall",
+        confidence: "low",
+        openings: [
+          { classification: "opening", rect_uv: [[0.1, 0], [0.9, 0.75]] },
+        ],
+        provenance: { source: "roomplan" },
+        material: mockMaterial("painted", "#b7ada0", 0.85, 0.21),
+      },
+      {
+        // Back wall: an EXPLICIT 6-corner outline (notched top — the
+        // explicit-polygon path; rect-from-dimensions is the dominant one).
+        wall_id: "wall_03",
+        polygon: [
+          [-0.5, 0, -2.6],
+          [1.8, 0, -2.6],
+          [1.8, 2.2, -2.6],
+          [0.9, 2.2, -2.6],
+          [0.9, 1.7, -2.6],
+          [-0.5, 1.7, -2.6],
+        ],
+        classification: "wall",
+        confidence: "high",
+        openings: [],
+        provenance: { source: "roomplan" },
+        material: mockMaterial("painted", "#aab9c3", 0.85, 0.4),
+      },
+      {
+        // Right wall (x=1.8, interior -X) with a window.
+        wall_id: "wall_04",
+        polygon: [
+          [1.8, 0, -2.6],
+          [1.8, 0, 1.4],
+          [1.8, 2.2, 1.4],
+          [1.8, 2.2, -2.6],
+        ],
+        classification: "wall",
+        confidence: "high",
+        openings: [
+          { classification: "window", rect_uv: [[0.3, 0.35], [0.7, 0.8]] },
+        ],
+        provenance: { source: "roomplan" },
+        material: mockMaterial("painted", "#c2b8a8", 0.85, 0.46),
+      },
+    ],
+    quality: {
+      roomplan: { version: 2, source: "bundle", walls: 5, floors: 1 },
+      wall_count: 5,
+      frames_used: 9,
+      material_version: 1,
+    },
+  },
+  asset_urls: READY_ASSETS.asset_urls,
+  expires_at: READY_ASSETS.expires_at,
+};
+
 const LATENCY_MS = 250;
 
 function delay<T>(value: T): Promise<T> {
@@ -316,6 +461,18 @@ export class MockApiClient implements ApiClient {
   }
 
   async getSceneByBundle(bundleId: string): Promise<SceneSummary> {
+    if (bundleId === MOCK_V3_BUNDLE_TRIGGER) {
+      const t = new Date(Date.now() - 45 * 60_000).toISOString();
+      return delay({
+        scene_id: MOCK_V3_SCENE_ID,
+        bundle_id: MOCK_V3_BUNDLE_TRIGGER,
+        status: "ready",
+        result_uri: `gs://mock-outputs/scenes/${MOCK_V3_SCENE_ID}/manifest.json`,
+        missing_paths: null,
+        created_at: t,
+        updated_at: t,
+      });
+    }
     const scene = this.scenes.find((s) => s.bundle_id === bundleId);
     if (!scene) {
       throw new ApiError(404, "not_found", `No scene for bundle ${bundleId}`);
@@ -324,6 +481,7 @@ export class MockApiClient implements ApiClient {
   }
 
   async getSceneAssets(sceneId: string): Promise<SceneAssets> {
+    if (sceneId === MOCK_V3_SCENE_ID) return delay(V3_ASSETS);
     const scene = this.scenes.find((s) => s.scene_id === sceneId);
     if (!scene) {
       throw new ApiError(404, "not_found", `No scene ${sceneId}`);
