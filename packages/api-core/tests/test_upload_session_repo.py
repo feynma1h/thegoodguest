@@ -29,8 +29,12 @@ import time
 
 import pytest
 
+from datetime import datetime, timezone
+
 from roomstudio_api_core.upload_session_repo import (
+    ForeignBundleError,
     InMemoryUploadSessionRepository,
+    MintRateLimitedError,
     validate_manifest_path,
 )
 
@@ -215,7 +219,7 @@ class TestParallelMinting:
         )
         assert max_in_flight > 1
 
-    def test_first_error_aborts_and_stores_nothing(self) -> None:
+    def test_first_error_aborts_and_stores_no_entries(self) -> None:
         def failing_mint(bucket: str, blob_path: str, size_bytes: int) -> str:
             if blob_path.endswith("000003.jpg"):
                 raise RuntimeError("mint boom")
@@ -227,9 +231,16 @@ class TestParallelMinting:
                 "b1", "u", _sized_manifest(16), None,
                 mint_uri_fn=failing_mint, bucket="bkt",
             )
-        # A failed mint must not leave a partial record: the retry must take
-        # the mint-everything path, not the idempotent short-circuit.
-        assert repo.get_user_id("b1") is None
+        # The atomic claim (gap a) keeps ownership — but a failed mint must
+        # never leave servable entries: the retry must take the
+        # mint-everything path, not the idempotent short-circuit.
+        assert repo.get_user_id("b1") == "u"
+        entries = repo.create_or_get(
+            "b1", "u", _sized_manifest(16), None,
+            mint_uri_fn=_fake_mint, bucket="bkt",
+        )
+        assert len(entries) == 16
+        assert all(e["session_uri"].startswith("https://fake/") for e in entries)
 
     def test_concurrency_one_is_serial_and_correct(self, monkeypatch) -> None:
         monkeypatch.setenv("UPLOAD_SESSION_MINT_CONCURRENCY", "1")
@@ -263,6 +274,135 @@ class TestParallelMinting:
             "b1", "u", [], None, mint_uri_fn=_fake_mint, bucket="bkt",
         )
         assert entries == []
+
+
+# ---------------------------------------------------------------------------
+# Atomic ownership claim (gap a)
+# ---------------------------------------------------------------------------
+
+class TestOwnershipClaim:
+    def test_foreign_uid_raises(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 128}]
+        repo.create_or_get("b1", "user-a", manifest, None,
+                           mint_uri_fn=_fake_mint, bucket="bkt")
+        with pytest.raises(ForeignBundleError):
+            repo.create_or_get("b1", "user-b", manifest, None,
+                               mint_uri_fn=_fake_mint, bucket="bkt")
+
+    def test_foreign_uid_raises_even_mid_mint(self) -> None:
+        # The claim lands BEFORE minting: a foreign caller arriving while the
+        # owner's mint is still in flight (entries not yet stored) must be
+        # rejected, not allowed to race for ownership.
+        repo = InMemoryUploadSessionRepository()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 128}]
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_mint(bucket: str, blob_path: str, size_bytes: int) -> str:
+            started.set()
+            release.wait(timeout=5)
+            return f"https://fake/{blob_path}"
+
+        result: dict = {}
+
+        def owner_call() -> None:
+            result["entries"] = repo.create_or_get(
+                "b1", "user-a", manifest, None,
+                mint_uri_fn=slow_mint, bucket="bkt",
+            )
+
+        t = threading.Thread(target=owner_call)
+        t.start()
+        assert started.wait(timeout=5)
+        try:
+            with pytest.raises(ForeignBundleError):
+                repo.create_or_get("b1", "user-b", manifest, None,
+                                   mint_uri_fn=_fake_mint, bucket="bkt")
+        finally:
+            release.set()
+            t.join(timeout=5)
+        assert len(result["entries"]) == 1
+
+    def test_owner_can_remint_after_partial_claim(self) -> None:
+        # Crash-mid-mint recovery: same-UID retry with the same path set
+        # mints fresh entries instead of replaying the empty claim.
+        repo = InMemoryUploadSessionRepository()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 128}]
+
+        def boom(bucket: str, blob_path: str, size_bytes: int) -> str:
+            raise RuntimeError("mint died")
+
+        with pytest.raises(RuntimeError):
+            repo.create_or_get("b1", "user-a", manifest, None,
+                               mint_uri_fn=boom, bucket="bkt")
+        entries = repo.create_or_get("b1", "user-a", manifest, None,
+                                     mint_uri_fn=_fake_mint, bucket="bkt")
+        assert len(entries) == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-UID daily mint quota (gap b)
+# ---------------------------------------------------------------------------
+
+_NOW = datetime(2026, 8, 7, 10, 0, 0, tzinfo=timezone.utc)
+
+
+def _mint_once(repo, bundle_id: str, uid: str, quota: int, now=_NOW):
+    manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 128}]
+    return repo.create_or_get(
+        bundle_id, uid, manifest, None,
+        mint_uri_fn=_fake_mint, bucket="bkt",
+        daily_mint_quota=quota, now=now,
+    )
+
+
+class TestMintQuota:
+    def test_at_cap_raises_with_resets_at(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        _mint_once(repo, "b1", "u", quota=2)
+        _mint_once(repo, "b2", "u", quota=2)
+        with pytest.raises(MintRateLimitedError) as exc_info:
+            _mint_once(repo, "b3", "u", quota=2)
+        resets_at = exc_info.value.resets_at
+        assert resets_at == datetime(2026, 8, 8, 0, 0, 0, tzinfo=timezone.utc)
+
+    def test_replay_is_free(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        first = _mint_once(repo, "b1", "u", quota=1)
+        for _ in range(3):
+            assert _mint_once(repo, "b1", "u", quota=1) == first
+
+    def test_rejected_call_claims_nothing(self) -> None:
+        # A 429'd first-mint must not leave a claim record: retrying tomorrow
+        # (or after a cap raise) is a fresh mint, and the bundle_id is not
+        # burned.
+        repo = InMemoryUploadSessionRepository()
+        _mint_once(repo, "b1", "u", quota=1)
+        with pytest.raises(MintRateLimitedError):
+            _mint_once(repo, "b2", "u", quota=1)
+        assert repo.get_user_id("b2") is None
+
+    def test_day_roll_resets_count(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        _mint_once(repo, "b1", "u", quota=1, now=_NOW)
+        next_day = datetime(2026, 8, 8, 0, 0, 1, tzinfo=timezone.utc)
+        entries = _mint_once(repo, "b2", "u", quota=1, now=next_day)
+        assert len(entries) == 1
+
+    def test_quota_is_per_uid(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        _mint_once(repo, "b1", "user-a", quota=1)
+        entries = _mint_once(repo, "b2", "user-b", quota=1)
+        assert len(entries) == 1
+
+    def test_none_quota_is_unlimited(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        for i in range(5):
+            manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 128}]
+            repo.create_or_get(f"b{i}", "u", manifest, None,
+                               mint_uri_fn=_fake_mint, bucket="bkt")
 
 
 # ---------------------------------------------------------------------------
