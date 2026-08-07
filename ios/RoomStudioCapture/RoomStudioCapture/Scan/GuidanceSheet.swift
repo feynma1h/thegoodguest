@@ -48,6 +48,18 @@ struct GuidanceSheet: View {
                     title: "Turn the lights on",
                     detail: "Even light helps me see truly. I'll tell you if it gets too dark to trust."
                 )
+                // The capture-time half of the person-observation gap. The server
+                // suppresses people it can detect, but a shoulder at the frame edge
+                // or an arm across a wall is not a person to a detector — it is just
+                // that wall's colour, and it ships as the wall's colour. Asking here
+                // is the only thing that catches those, and the WHY earns the ask:
+                // stated as what it costs the ROOM, not as a warning about privacy,
+                // which would make the guest sound like it is watching people.
+                GuidanceRow(
+                    symbol: "person.2.slash",
+                    title: "Ask people to step out",
+                    detail: "Anyone standing in the room gets measured as part of it — I'd read them as a wall. A minute alone in here and the room comes back as itself."
+                )
             }
             .padding(.top, 24)
 
