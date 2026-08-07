@@ -227,11 +227,14 @@ def test_prior_class_map():
     assert contact_priors.prior_class("door") == "wall"
     assert contact_priors.prior_class("curtain") == "wall"
     assert contact_priors.prior_class("artwork") == "wall"
+    # The RP-8 walk moved clock into the wall family ("clock ... should sit
+    # flat against the wall" — decision 0082); the single-view evidence
+    # gate still refuses a desk clock a wall-contact solve would misplace.
+    assert contact_priors.prior_class("clock") == "wall"
     # Ambiguous / free-standing classes get NO prior (stay unplaced on 1 view).
     assert contact_priors.prior_class("table lamp") is None
     assert contact_priors.prior_class("speaker") is None
     assert contact_priors.prior_class("plant") is None
-    assert contact_priors.prior_class("clock") is None
     assert contact_priors.prior_class(None) is None
     assert contact_priors.prior_class("") is None
 

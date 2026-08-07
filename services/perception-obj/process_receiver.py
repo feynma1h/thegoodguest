@@ -799,6 +799,7 @@ def _build_refinement_context(
     splat_pts_cache: dict[str, Optional[Any]] = {}
     appearance_cache: dict[str, Optional[Any]] = {}
     rgb_cache: dict[int, Optional[Any]] = {}
+    depth_cache: dict[int, Optional[tuple]] = {}
 
     # Measured room planes, parsed once (via room_planes — the same reading
     # the shell renders) and reused for every single-view contact-prior
@@ -887,12 +888,34 @@ def _build_refinement_context(
             rgb_cache[frame_index] = rgb
         return rgb_cache[frame_index]
 
+    def get_depth(frame_index):
+        """(depth_raster, confidence, intrinsics) | None — the 0081 cloud
+        scorer's evidence. Same captures-bucket sourcing (and the same
+        swept-capture degrade) as get_rgb; a malformed raster is a warning
+        + None here, never the poison it is on the reconstruction path —
+        scoring is optional, reconstruction is not."""
+        if frame_index not in depth_cache:
+            payload = None
+            frame = frames_by_idx.get(frame_index)
+            if frame is not None and frame.HasField("depth"):
+                try:
+                    depth, conf, dintr = _fetch_frame_depth(frame, bundle_prefix)
+                    if depth is not None:
+                        payload = (depth, conf, dintr)
+                except Exception:
+                    logger.warning(
+                        "refinement: depth unavailable for frame %d", frame_index
+                    )
+            depth_cache[frame_index] = payload
+        return depth_cache[frame_index]
+
     return fusion_mod.RefinementContext(
         get_camera=get_camera,
         get_mask_stack=get_mask_stack,
         get_splat=get_splat,
         get_appearance=get_appearance,
         get_rgb=get_rgb,
+        get_depth=get_depth,
         get_room_planes=get_room_planes,
         get_roomplan=(lambda: room_plan),
         budget=budget,

@@ -402,6 +402,30 @@ def compute_frame_placement(
         return unplaced(f"placement_error: {exc}", layout)
 
 
+def observation_world_cloud(
+    depth_raster: np.ndarray,
+    depth_confidence: Optional[np.ndarray],
+    depth_intrinsics,
+    mask_rgb: np.ndarray,
+    camera_pose,
+    min_points: int = MIN_CLOUD_POINTS,
+) -> Optional[np.ndarray]:
+    """The world-frame LiDAR point cloud under one observation's mask —
+    place_object's exact cloud recipe (mask resized to the depth raster,
+    confidence-filtered unprojection, camera→world), extracted so the
+    box-axis cloud scorer (decision 0081) and the depth_fit path can never
+    diverge on what "the observation's cloud" means. None when the masked
+    cloud is too sparse to say anything (< min_points)."""
+    dh, dw = depth_raster.shape
+    mask_d = resize_mask_to(mask_rgb, (dw, dh))
+    cam_pts = unproject_depth(
+        depth_raster, depth_intrinsics, mask=mask_d, confidence=depth_confidence
+    )
+    if cam_pts.shape[0] < min_points:
+        return None
+    return camera_to_world(cam_pts, camera_pose)
+
+
 def place_object(
     *,
     splat_xyz: np.ndarray,

@@ -117,6 +117,7 @@ sampling.refinement_skipped).
 from __future__ import annotations
 
 import logging
+import math
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -131,12 +132,13 @@ from roomstudio_schemas.placement_math import (
     DegenerateGeometryError,
     MaskEvidence,
     mask_containment,
+    minimal_rotation,
     prepare_mask,
     project_points,
     robust_cloud_stats,
     triangulate_rays,
 )
-from roomstudio_schemas.pose_math import pose_quat, quat_to_rotmat
+from roomstudio_schemas.pose_math import pose_quat, quat_to_rotmat, rotmat_to_quat
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +229,69 @@ _DEPTH_TRUST_RMS_M = float(os.environ.get("PLACEMENT_DEPTH_TRUST_RMS_M", "0.05")
 # in v1: scale_suspect + the measured ratio, never a mutation.
 _SPAN_MIN = float(os.environ.get("PLACEMENT_SPAN_MIN", "0.5"))
 
+# --- RP-8 walk classes 2-5 (decision 0082) ----------------------------------
+# Cross-label 3D duplicate gate (walk class 2): two placed objects whose
+# VOLUMES coincide (sampled-point containment either way >= this) under
+# confusable labels are one physical object — the near-identity mask gate's
+# 3D, cross-frame sibling (desk+nightstand, monitor+tv, mirror x2 all
+# survived it at partial mask overlap).
+_CROSS_LABEL_3D_MIN = float(os.environ.get("PLACEMENT_CROSS_LABEL_3D_MIN", "0.5"))
+# Labels that SAM confuses for one physical object, beyond exact equality.
+# "|"-separated groups; same-label pairs always qualify.
+_CROSS_LABEL_3D_GROUPS = [
+    frozenset(x.strip().lower() for x in grp.split(",") if x.strip())
+    for grp in os.environ.get(
+        "PLACEMENT_CROSS_LABEL_3D_GROUPS",
+        "tv,television,monitor"
+        "|desk,table,nightstand,cabinet,dresser,stool,bench,shelf,bookshelf"
+        "|artwork,painting,poster,frame,mirror"
+        "|bed,sofa,couch",
+    ).split("|")
+    if grp.strip()
+]
+
+# Wall back-face anchoring (walk class 3): a wall-class splat placed by
+# depth/triangulation renders centered IN the wall; snap its back face onto
+# the nearest measured wall plane instead. Bounds keep the snap a
+# refinement, never a teleport.
+_WALL_SNAP_NEAR_M = float(os.environ.get("PLACEMENT_WALL_SNAP_NEAR_M", "0.6"))
+_WALL_SNAP_MAX_M = float(os.environ.get("PLACEMENT_WALL_SNAP_MAX_M", "0.5"))
+_WALL_SNAP_RECT_PAD_M = float(os.environ.get("PLACEMENT_WALL_SNAP_RECT_PAD_M", "0.4"))
+_WALL_ALIGN_MAX_DEG = float(os.environ.get("PLACEMENT_WALL_ALIGN_MAX_DEG", "60"))
+# Floor-class wall declip (class 3's second half): furniture may clip a
+# measured wall by at most this before being pushed back into the room.
+_WALL_PENETRATION_TOL_M = float(os.environ.get("PLACEMENT_WALL_PENETRATION_TOL_M", "0.08"))
+_WALL_DECLIP_MAX_M = float(os.environ.get("PLACEMENT_WALL_DECLIP_MAX_M", "0.35"))
+
+# Door-geometry demotion (walk class 4): a placed object of a storage-ish
+# label sitting ON a RoomPlan door/window surface is that opening,
+# mislabeled ("cabinet N is actually a door" x5) — demote like the label
+# rule does, keyed on measured geometry instead of the label.
+_OPENING_GEOM_CLASSES = frozenset(
+    s.strip().lower()
+    for s in os.environ.get(
+        "PLACEMENT_OPENING_GEOM_CLASSES",
+        "cabinet,dresser,wardrobe,shelf,bookshelf,storage,door,window",
+    ).split(",")
+    if s.strip()
+)
+_OPENING_GEOM_NEAR_M = float(os.environ.get("PLACEMENT_OPENING_GEOM_NEAR_M", "0.35"))
+_OPENING_GEOM_RECT_PAD_M = float(os.environ.get("PLACEMENT_OPENING_GEOM_RECT_PAD_M", "0.25"))
+
+# On-top-of support snap (walk class 5, v1: RoomPlan box tops only — the
+# measured support surfaces): a small-class object whose bottom hovers or
+# sinks within reach of a box top, over that box's footprint, rests ON it.
+_SUPPORT_CLASSES = frozenset(
+    s.strip().lower()
+    for s in os.environ.get(
+        "PLACEMENT_SUPPORT_CLASSES",
+        "speaker,table lamp,lamp,monitor,tv,television,plant,vase,laptop,keyboard",
+    ).split(",")
+    if s.strip()
+)
+_SUPPORT_SNAP_M = float(os.environ.get("PLACEMENT_SUPPORT_SNAP_M", "0.35"))
+_SUPPORT_XZ_PAD_M = float(os.environ.get("PLACEMENT_SUPPORT_XZ_PAD_M", "0.15"))
+
 
 def _refinement_enabled() -> bool:
     return os.environ.get("PLACEMENT_REFINE", "1") == "1"
@@ -275,6 +340,11 @@ class RefinementContext:
     get_splat: Callable[[str], Optional[np.ndarray]]
     get_appearance: Optional[Callable[[str], Optional[reproject.SplatAppearance]]] = None
     get_rgb: Optional[Callable[[int], Optional[np.ndarray]]] = None
+    # (depth_raster, depth_confidence, depth_intrinsics) | None — the
+    # frame's LiDAR payload, for the box-axis cloud scorer (decision 0081).
+    # Captures-bucket sourced like get_rgb: a swept capture degrades the
+    # scorer to the up-filtered extent default, recorded, never a crash.
+    get_depth: Optional[Callable[[int], Optional[tuple]]] = None
     get_room_planes: Optional[Callable[[], Any]] = None
     get_roomplan: Optional[Callable[[], Any]] = None
     budget: Optional[Any] = None
@@ -788,6 +858,378 @@ def _apply_silhouette_span(obj: dict, ctx: RefinementContext) -> dict:
             obj.get("object_id"), obj.get("label"), ratio,
         )
     return obj
+
+
+# -----------------------------------------------------------------------------
+# RP-8 walk classes 2-5 (decision 0082): post-fusion placement passes
+# -----------------------------------------------------------------------------
+
+def _sampled_world_points(obj: dict, ctx: RefinementContext, cap: int = 600):
+    """Deterministically subsampled world-frame splat points of a placed
+    object, or None when its splat/transform is unavailable."""
+    wt = obj.get("world_transform") or {}
+    if not wt or obj.get("splat_gcs_uri") is None:
+        return None
+    splat = ctx.get_splat(obj["splat_gcs_uri"])
+    if splat is None:
+        return None
+    n = splat.shape[0]
+    if n > cap:
+        splat = splat[np.unique(np.linspace(0, n - 1, cap).astype(int))]
+    return reproject.transform_points(
+        splat, wt["rotation_xyzw"], wt["position"], wt["scale"]
+    )
+
+
+def _containment_in_object(pts: np.ndarray, obj: dict, ctx: RefinementContext) -> float:
+    """Fraction of pts inside obj's volume: the exact oriented box for a
+    box-anchored object (its RoomPlan box is the measured volume), a padded
+    world AABB of its own sampled points otherwise."""
+    rb = obj.get("roomplan_box")
+    if rb:
+        R = _yaw_rotation(float(rb["yaw_rad"]))
+        t = np.asarray(rb["center_world"], dtype=np.float64)
+        half = np.asarray(rb["dims"], dtype=np.float64) / 2.0
+        local = (pts - t) @ R
+        return float(np.all(np.abs(local) <= half + 1e-6, axis=1).mean())
+    own = _sampled_world_points(obj, ctx)
+    if own is None or own.shape[0] < 8:
+        return 0.0
+    lo = own.min(axis=0) - 0.05
+    hi = own.max(axis=0) + 0.05
+    return float(np.all((pts >= lo) & (pts <= hi), axis=1).mean())
+
+
+def _yaw_rotation(yaw_rad: float) -> np.ndarray:
+    """world_from_local for a pure-yaw box, roomplan_room's yaw convention
+    (heading of local +X: yaw = atan2(x.z, x.x))."""
+    c, s = math.cos(yaw_rad), math.sin(yaw_rad)
+    return np.array([[c, 0.0, -s], [0.0, 1.0, 0.0], [s, 0.0, c]])
+
+
+def _labels_confusable(a: str | None, b: str | None) -> bool:
+    la = (a or "").strip().lower()
+    lb = (b or "").strip().lower()
+    if not la or not lb:
+        return False
+    if la == lb:
+        return True
+    return any(la in grp and lb in grp for grp in _CROSS_LABEL_3D_GROUPS)
+
+
+def _duplicate_priority(obj: dict) -> tuple:
+    """Higher wins a duplicate pair: measured box first, then a measured-
+    surface contact placement, then detection score; object_id breaks ties
+    deterministically."""
+    return (
+        1 if obj.get("roomplan_box") else 0,
+        1 if obj.get("position_source") in _CONTACT_POSITION_SOURCES else 0,
+        float((obj.get("quality") or {}).get("score") or 0.0),
+        obj.get("object_id") or "",
+    )
+
+
+def _dedup_cross_label_3d(fused: list[dict], ctx: RefinementContext) -> None:
+    """Walk class 2: collapse placed objects whose VOLUMES coincide under
+    confusable (or identical) labels — the cross-frame duplicates the
+    same-frame mask gates can't reach. Two box-anchored objects never
+    dedup (RoomPlan measured two boxes = two real objects). In place."""
+    placed = [i for i, o in enumerate(fused) if o.get("placed")]
+    pts_cache: dict[int, Any] = {}
+
+    def _pts(i: int):
+        if i not in pts_cache:
+            pts_cache[i] = _sampled_world_points(fused[i], ctx)
+        return pts_cache[i]
+
+    demoted: set[int] = set()
+    for ai in range(len(placed)):
+        for bi in range(ai + 1, len(placed)):
+            i, j = placed[ai], placed[bi]
+            if i in demoted or j in demoted:
+                continue
+            a, b = fused[i], fused[j]
+            if a.get("roomplan_box") and b.get("roomplan_box"):
+                continue
+            if not _labels_confusable(a.get("label"), b.get("label")):
+                continue
+            pa, pb = _pts(i), _pts(j)
+            frac_ab = _containment_in_object(pa, b, ctx) if pa is not None else 0.0
+            frac_ba = _containment_in_object(pb, a, ctx) if pb is not None else 0.0
+            if max(frac_ab, frac_ba) < _CROSS_LABEL_3D_MIN:
+                continue
+            keep_i = i if _duplicate_priority(a) >= _duplicate_priority(b) else j
+            drop_i = j if keep_i == i else i
+            dropped = fused[drop_i]
+            out = _demote_object(dropped, "cross_label_duplicate")
+            out["suppressed_by"] = fused[keep_i].get("object_id")
+            out["cross_label_containment"] = round(max(frac_ab, frac_ba), 4)
+            if "deduped_observations" in dropped:
+                out["deduped_observations"] = dropped["deduped_observations"]
+            logger.info(
+                "fusion: cross-label 3D duplicate %s (%s) -> kept %s (%s) cont=%.2f",
+                dropped.get("object_id"), dropped.get("label"),
+                fused[keep_i].get("object_id"), fused[keep_i].get("label"),
+                max(frac_ab, frac_ba),
+            )
+            fused[drop_i] = out
+            demoted.add(drop_i)
+
+
+def _fusion_walls(ctx: RefinementContext, room) -> list:
+    """The measured wall set placement passes snap against: the CapturedRoom
+    walls (interior-oriented adapter geoms) when a parsed room carries any,
+    else the anchor-plane walls. Same ShellPlaneGeom-shaped frames either
+    way. Duck-typed defensively — census test stubs (and any future partial
+    room object) may carry only `objects`."""
+    if room is not None and getattr(room, "walls", None):
+        import roomplan_room as roomplan_room_mod
+
+        try:
+            walls = roomplan_room_mod.roomplan_wall_geoms(room)
+        except Exception:
+            logger.warning("fusion: roomplan wall geoms failed", exc_info=True)
+            walls = []
+        if walls:
+            return walls
+    planes = _room_planes(ctx)
+    return list(getattr(planes, "walls", []) or [])
+
+
+def _center_in_wall_rect(center: np.ndarray, wall, pad: float) -> tuple[float, bool]:
+    """(signed distance to plane, projects-inside-rect±pad)."""
+    rel = center - wall.origin
+    d = float(np.dot(rel, wall.normal))
+    u = float(np.dot(rel, wall.axis_u))
+    v = float(np.dot(rel, wall.axis_v))
+    inside = (-pad <= u <= wall.width_m + pad) and (-pad <= v <= wall.height_m + pad)
+    return d, inside
+
+
+def _snap_wall_class_object(obj: dict, walls: list, ctx: RefinementContext) -> dict:
+    """Walk class 3: anchor a wall-class object's BACK FACE onto its wall.
+    Applies only to free placements (depth/triangulated/silhouette); the
+    contact paths and box anchors already sit on measured geometry. The
+    rotation may align to the wall normal (planar splats within
+    _WALL_ALIGN_MAX_DEG — solve_wall_contact's own convention); the
+    position shifts along the wall normal so the rearmost splat point
+    touches the plane. Bounded; a no-op when no wall is near."""
+    label = (obj.get("label") or "").strip().lower()
+    if label not in contact_priors._WALL_CLASSES:
+        return obj
+    if obj.get("roomplan_box") or obj.get("position_source") in _CONTACT_POSITION_SOURCES:
+        return obj
+    wt = dict(obj.get("world_transform") or {})
+    if not wt or not walls:
+        return obj
+    center = np.asarray(wt["position"], dtype=np.float64)
+    best = None
+    for wall in walls:
+        d, inside = _center_in_wall_rect(center, wall, _WALL_SNAP_RECT_PAD_M)
+        if not inside or abs(d) > _WALL_SNAP_NEAR_M:
+            continue
+        if best is None or abs(d) < abs(best[0]):
+            best = (d, wall)
+    if best is None:
+        return obj
+    _d, wall = best
+    splat = ctx.get_splat(obj.get("splat_gcs_uri")) if obj.get("splat_gcs_uri") else None
+    if splat is None:
+        return obj
+
+    constraints = list(obj.get("constraints_applied") or [])
+    quality = dict(obj.get("quality") or {})
+    aligned = False
+    R_world = quat_to_rotmat(tuple(wt["rotation_xyzw"]))
+    if reproject.is_planar(splat):
+        try:
+            stats = robust_cloud_stats(splat)
+            obj_normal_world = R_world @ stats.axes[:, 2]
+            obj_normal_world /= np.linalg.norm(obj_normal_world)
+            cos = float(np.dot(obj_normal_world, wall.normal))
+            n_signed = wall.normal if cos >= 0.0 else -wall.normal
+            angle_deg = math.degrees(math.acos(min(1.0, abs(cos))))
+            if angle_deg <= _WALL_ALIGN_MAX_DEG and angle_deg > 0.5:
+                R_align = minimal_rotation(obj_normal_world, n_signed)
+                R_world = R_align @ R_world
+                wt["rotation_xyzw"] = [
+                    float(c) for c in rotmat_to_quat(R_world)
+                ]
+                aligned = True
+        except (DegenerateGeometryError, ValueError):
+            pass
+
+    world_pts = reproject.transform_points(
+        splat, wt["rotation_xyzw"], center, wt["scale"]
+    )
+    d_pts = (world_pts - wall.origin) @ wall.normal
+    back = float(d_pts.min())
+    shift = -back  # move so the rearmost point sits ON the plane
+    if abs(shift) < 0.01 or abs(shift) > _WALL_SNAP_MAX_M:
+        if not aligned:
+            return obj
+        shift = 0.0
+    if shift:
+        center = center + shift * wall.normal
+        wt["position"] = [float(c) for c in center]
+        quality["wall_snap_m"] = round(shift, 4)
+        constraints.append("wall_back_face")
+    if aligned and "wall_normal" not in constraints:
+        constraints.append("wall_normal")
+    out = dict(obj)
+    out["world_transform"] = wt
+    out["constraints_applied"] = constraints
+    out["quality"] = quality
+    if shift or aligned:
+        logger.info(
+            "fusion: wall snap %s (%s) shift=%.3f aligned=%s",
+            obj.get("object_id"), obj.get("label"), shift, aligned,
+        )
+    return out
+
+
+def _declip_floor_class_object(obj: dict, walls: list, ctx: RefinementContext) -> dict:
+    """Walk class 3, second half: a floor-class splat clipping through a
+    measured wall beyond tolerance is pushed back into the room along that
+    wall's normal (bounded). Box-anchored objects are exempt — their
+    position is RoomPlan measurement; residual overflow there is splat
+    truncation (class 6), not a placement error."""
+    label = (obj.get("label") or "").strip().lower()
+    if label not in contact_priors._FLOOR_CLASSES:
+        return obj
+    if obj.get("roomplan_box") or obj.get("position_source") in _CONTACT_POSITION_SOURCES:
+        return obj
+    wt = dict(obj.get("world_transform") or {})
+    if not wt or not walls:
+        return obj
+    center = np.asarray(wt["position"], dtype=np.float64)
+    pts = _sampled_world_points(obj, ctx)
+    if pts is None:
+        return obj
+    worst = None
+    for wall in walls:
+        d_c, inside = _center_in_wall_rect(center, wall, _WALL_SNAP_RECT_PAD_M)
+        if not inside or d_c <= 0.0:
+            continue  # center must be on the interior side of this wall
+        pen = -float(((pts - wall.origin) @ wall.normal).min())
+        if pen > _WALL_PENETRATION_TOL_M and (worst is None or pen > worst[0]):
+            worst = (pen, wall)
+    if worst is None:
+        return obj
+    pen, wall = worst
+    shift = min(pen - _WALL_PENETRATION_TOL_M, _WALL_DECLIP_MAX_M)
+    center = center + shift * wall.normal
+    out = dict(obj)
+    wt["position"] = [float(c) for c in center]
+    out["world_transform"] = wt
+    quality = dict(out.get("quality") or {})
+    quality["wall_declip_m"] = round(shift, 4)
+    out["quality"] = quality
+    constraints = list(out.get("constraints_applied") or [])
+    constraints.append("wall_declip")
+    out["constraints_applied"] = constraints
+    logger.info(
+        "fusion: wall declip %s (%s) by %.3f m", obj.get("object_id"),
+        obj.get("label"), shift,
+    )
+    return out
+
+
+def _demote_on_opening_geometry(obj: dict, room) -> dict:
+    """Walk class 4: a storage-ish placed object sitting ON a RoomPlan
+    door/window surface is that opening mislabeled — demote exactly like
+    the label rule (same reason string; the shell already renders the
+    opening). Geometry-keyed, so a door SAM calls "cabinet" demotes too."""
+    if room is None or not obj.get("placed") or obj.get("roomplan_box"):
+        return obj
+    label = (obj.get("label") or "").strip().lower()
+    if label not in _OPENING_GEOM_CLASSES:
+        return obj
+    wt = obj.get("world_transform") or {}
+    pos = wt.get("position")
+    if pos is None:
+        return obj
+    center = np.asarray(pos, dtype=np.float64)
+    surfaces = (*getattr(room, "doors", []), *getattr(room, "windows", []))
+    for surface in surfaces:
+        poly = surface.polygon_world
+        R = surface.transform[:3, :3]
+        origin = poly.mean(axis=0)
+        normal = R[:, 2]
+        d = float(np.dot(center - origin, normal))
+        if abs(d) > _OPENING_GEOM_NEAR_M:
+            continue
+        u = (poly - origin) @ R[:, 0]
+        v = (poly - origin) @ R[:, 1]
+        cu = float(np.dot(center - origin, R[:, 0]))
+        cv = float(np.dot(center - origin, R[:, 1]))
+        pad = _OPENING_GEOM_RECT_PAD_M
+        if (u.min() - pad <= cu <= u.max() + pad) and (v.min() - pad <= cv <= v.max() + pad):
+            logger.info(
+                "fusion: demoting %s (%s) -> opening geometry (%s %s)",
+                obj.get("object_id"), obj.get("label"), surface.kind,
+                surface.identifier,
+            )
+            out = _demote_object(obj, "represented_as_shell_opening")
+            out["opening_surface"] = surface.identifier
+            if "deduped_observations" in obj:
+                out["deduped_observations"] = obj["deduped_observations"]
+            return out
+    return obj
+
+
+def _snap_onto_support(obj: dict, boxes: list, ctx: RefinementContext) -> dict:
+    """Walk class 5 (v1): rest a small-class object ON the nearest RoomPlan
+    box top when its bottom hovers or sinks within reach over that box's
+    footprint. Box tops are measured geometry; vertical shift only,
+    bounded by construction."""
+    label = (obj.get("label") or "").strip().lower()
+    if label not in _SUPPORT_CLASSES:
+        return obj
+    if obj.get("roomplan_box") or not obj.get("placed"):
+        return obj
+    wt = dict(obj.get("world_transform") or {})
+    if not wt or not boxes:
+        return obj
+    pts = _sampled_world_points(obj, ctx)
+    if pts is None:
+        return obj
+    bottom = float(pts[:, 1].min())
+    center = np.asarray(wt["position"], dtype=np.float64)
+    best = None
+    for bi, box in enumerate(boxes):
+        dims = np.asarray(box.dimensions, dtype=np.float64)
+        top = float(box.center_world[1]) + dims[1] / 2.0
+        dy = top - bottom
+        if abs(dy) > _SUPPORT_SNAP_M:
+            continue
+        R = box.transform[:3, :3]
+        local = R.T @ (center - np.asarray(box.center_world, dtype=np.float64))
+        if abs(local[0]) > dims[0] / 2.0 + _SUPPORT_XZ_PAD_M or abs(local[2]) > dims[2] / 2.0 + _SUPPORT_XZ_PAD_M:
+            continue
+        if best is None or abs(dy) < abs(best[0]):
+            best = (dy, bi)
+    if best is None:
+        return obj
+    dy, bi = best
+    if abs(dy) < 0.005:
+        return obj
+    out = dict(obj)
+    center[1] += dy
+    wt["position"] = [float(c) for c in center]
+    out["world_transform"] = wt
+    quality = dict(out.get("quality") or {})
+    quality["support_snap_m"] = round(dy, 4)
+    quality["support_box"] = f"box_{bi:02d}"
+    out["quality"] = quality
+    constraints = list(out.get("constraints_applied") or [])
+    constraints.append("on_top_of")
+    out["constraints_applied"] = constraints
+    logger.info(
+        "fusion: support snap %s (%s) onto box_%02d dy=%.3f",
+        obj.get("object_id"), obj.get("label"), bi, dy,
+    )
+    return out
 
 
 # -----------------------------------------------------------------------------
@@ -1575,6 +2017,31 @@ def fuse_scene_objects_with_meta(
             bi = box_placement.find_suppressing_box(obj, boxes, matched_box_indices)
             if bi is not None:
                 fused[i] = _suppress_as_box_duplicate(obj, bi)
+
+    # --- RP-8 walk placement passes (decision 0082) -------------------------
+    # Order matters: opening demotion first (a mislabeled door needs no
+    # snapping), then the 3D duplicate gate over raw placements, then the
+    # geometric snaps (wall back-face / declip / support). All bounded
+    # numpy; one budget check for the block keeps the honesty contract.
+    if _budget_allows(ctx):
+        if room is not None:
+            for i in range(len(fused)):
+                fused[i] = _demote_on_opening_geometry(fused[i], room)
+        _dedup_cross_label_3d(fused, ctx)
+        walls = _fusion_walls(ctx, room)
+        if walls:
+            for i in range(len(fused)):
+                if not fused[i].get("placed"):
+                    continue
+                fused[i] = _snap_wall_class_object(fused[i], walls, ctx)
+                fused[i] = _declip_floor_class_object(fused[i], walls, ctx)
+        if boxes:
+            for i in range(len(fused)):
+                if fused[i].get("placed"):
+                    fused[i] = _snap_onto_support(fused[i], boxes, ctx)
+    else:
+        refinement_skipped = True
+
     for i, obj in enumerate(fused):
         if obj.get("roomplan_box"):
             continue

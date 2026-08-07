@@ -70,7 +70,7 @@ _FLOOR_CLASSES = _class_set(
 )
 _WALL_CLASSES = _class_set(
     "PLACEMENT_WALL_CLASSES",
-    "door,window,curtain,artwork,painting,mirror,poster,frame",
+    "door,window,curtain,artwork,painting,mirror,poster,frame,clock",
 )
 
 # How far outside a wall's measured rectangle the ray hit may land and still
