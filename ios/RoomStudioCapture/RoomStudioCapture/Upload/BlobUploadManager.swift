@@ -55,7 +55,7 @@ import os
 /// Created at enqueuePhasOneBlobs time; not persisted.
 /// Cold-relaunch correctness: outputDir is now stored in UploadSessionRecord.outputDir,
 /// not here, so all file-path reconstruction works from the on-disk record alone.
-private struct UploadContext: Sendable {
+private nonisolated struct UploadContext: Sendable {
     /// App-level retry count per relative path (mirrors 0038 policy).
     /// The OS handles transport retries; this counts re-enqueues after OS gives up.
     var retryCount: [String: Int] = [:]
@@ -1285,7 +1285,11 @@ actor BlobUploadManager {
 ///
 /// Thread-safety: OSAllocatedUnfairLock ensures exactly-once semantics regardless of
 /// which path fires first. Decision 0044.
-final class BackgroundTaskHandle: @unchecked Sendable {
+///
+/// nonisolated: endIfNeeded is called from the BlobUploadManager actor
+/// (handleTaskCompletion's defer) and the MainActor expiration handler alike;
+/// the lock provides the synchronisation, not an actor.
+nonisolated final class BackgroundTaskHandle: @unchecked Sendable {
     private let _lock = OSAllocatedUnfairLock(initialState: false)
     private let _endAction: @Sendable () -> Void
 

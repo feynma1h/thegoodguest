@@ -14,7 +14,9 @@ import Foundation
 
 // MARK: - SceneStatus
 
-enum SceneStatus: Equatable {
+/// nonisolated: pure value type, decoded on MainActor (ScenePoller) and off it
+/// (CaptureReaper's confirming GET) — same reasoning as UploadSessionRecord.
+nonisolated enum SceneStatus: Equatable {
     case queued
     case processing
     case ready
@@ -69,7 +71,8 @@ extension SceneStatus: Decodable {
 
 /// Mirrors the 200-body of GET /scenes/by-bundle/{bundle_id}.
 /// All optional fields match the server contract (nullable in the Firestore doc).
-struct SceneResponse: Decodable, Equatable {
+/// nonisolated: decoded from nonisolated contexts too (see SceneStatus above).
+nonisolated struct SceneResponse: Decodable, Equatable {
     let sceneId:      String
     let bundleId:     String?
     let status:       SceneStatus

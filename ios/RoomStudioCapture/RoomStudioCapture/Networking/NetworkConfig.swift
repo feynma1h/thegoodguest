@@ -7,7 +7,10 @@
 
 import Foundation
 
-enum NetworkConfig {
+/// nonisolated: pure constants + pure functions, read from nonisolated network
+/// code (UploadSessionClient) — the target's MainActor default isolation must
+/// not apply here.
+nonisolated enum NetworkConfig {
     /// Base URL for the api-public Cloud Run service.
     /// Route: POST /captures/{bundle_id}/upload_session
     static let apiPublicBaseURL = URL(string: "https://api-public-q62kcditqa-as.a.run.app")!

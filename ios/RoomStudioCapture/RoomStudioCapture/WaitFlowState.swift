@@ -18,7 +18,11 @@
 import SwiftUI
 
 /// What the post-send surface should show.
-enum WaitScreen: Equatable {
+/// nonisolated (with WaitPhase and WaitFlowState below): pure routing
+/// vocabulary, consulted from MainActor views, nonisolated tests, and the
+/// CaptureReaper-adjacent tables — the target's MainActor default isolation
+/// must not attach to the Equatable conformances.
+nonisolated enum WaitScreen: Equatable {
     /// Handing the capture over, or uploading it: nothing has arrived yet.
     case sending
     /// Uploaded and being worked on. `anchor` is the SERVER-side scene start, nil
@@ -50,9 +54,9 @@ enum WaitScreen: Equatable {
 
 /// The narrated sub-state of an in-flight room (mirrors WaitingView.Phase's
 /// analyzing family, without the failure cases).
-enum WaitPhase: Equatable { case queued, analyzing, longRunning }
+nonisolated enum WaitPhase: Equatable { case queued, analyzing, longRunning }
 
-enum WaitFlowState {
+nonisolated enum WaitFlowState {
 
     /// Decide the screen. Order matters and is the whole point:
     ///

@@ -32,6 +32,7 @@
 ///
 /// Decisions: 0040, 0044
 
+import os
 @preconcurrency import UIKit
 
 final class BlobUploadDelegate: NSObject, URLSessionTaskDelegate {
@@ -55,19 +56,25 @@ final class BlobUploadDelegate: NSObject, URLSessionTaskDelegate {
         // thread-safe despite its @MainActor annotation; @preconcurrency suppresses the
         // Swift 6 isolation check at this call site.
         //
-        // var + forward-reference in expiration closure: safe because the OS cannot fire
-        // the expiration handler before beginBackgroundTask returns — the assignment on
-        // the next line always precedes any expiration-handler invocation.
-        var handle: BackgroundTaskHandle!
+        // The handle and the expiration closure reference each other; a lock box
+        // breaks the cycle without a mutated-after-capture var (a Swift 6 error).
+        // The OS cannot fire the expiration handler before beginBackgroundTask
+        // returns; even if it could, the nil read is a no-op and the
+        // handleTaskCompletion defer still ends the assertion.
+        let handleBox = OSAllocatedUnfairLock<BackgroundTaskHandle?>(initialState: nil)
         let token = UIApplication.shared.beginBackgroundTask(withName: "blob-upload-completion") {
-            handle.endIfNeeded()
+            handleBox.withLock { $0 }?.endIfNeeded()
         }
-        handle = BackgroundTaskHandle {
+        let handle = BackgroundTaskHandle {
             // Token .invalid means beginBackgroundTask failed (e.g. app extension context).
             // Calling endBackgroundTask(.invalid) is a documented no-op but guard explicitly.
             guard token != .invalid else { return }
-            UIApplication.shared.endBackgroundTask(token)
+            // endBackgroundTask via the main actor: the endAction runs from the
+            // manager actor's defer or the (main-thread) expiration handler; the
+            // one-hop delay in releasing the assertion is harmless.
+            Task { @MainActor in UIApplication.shared.endBackgroundTask(token) }
         }
+        handleBox.withLock { $0 = handle }
 
         // Increment before spawn so urlSessionDidFinishEvents never observes
         // count == 0 while handleTaskCompletion chains are still pending.

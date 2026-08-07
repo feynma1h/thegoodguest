@@ -116,18 +116,24 @@ final class UploadCoordinator: ObservableObject {
 
         // Acquire UIBackgroundTask assertion before the first await. UploadCoordinator is
         // @MainActor so UIApplication.shared is directly accessible (no @preconcurrency needed).
-        // var + forward-reference in expiration closure: safe because the OS cannot fire the
-        // expiration handler before beginBackgroundTask returns — the assignment always precedes
-        // any expiration-handler invocation.
-        var handle: BackgroundTaskHandle!
+        // The handle and the expiration closure reference each other; a lock box
+        // breaks the cycle without a mutated-after-capture var (a Swift 6 error).
+        // If the OS could fire the expiration handler before the box is filled
+        // (it cannot — beginBackgroundTask returns first), the nil read is a
+        // no-op and the defer below still ends the assertion.
+        let handleBox = OSAllocatedUnfairLock<BackgroundTaskHandle?>(initialState: nil)
         let bgToken = UIApplication.shared.beginBackgroundTask(withName: "upload-session-\(bundleId)") {
-            handle.endIfNeeded()
+            handleBox.withLock { $0 }?.endIfNeeded()
         }
-        handle = BackgroundTaskHandle {
+        let handle = BackgroundTaskHandle {
             // Token .invalid means beginBackgroundTask failed (e.g. app extension context).
             guard bgToken != .invalid else { return }
-            UIApplication.shared.endBackgroundTask(bgToken)
+            // endBackgroundTask via the main actor: the @Sendable endAction may
+            // not reference MainActor state directly under Swift 6; the one-hop
+            // delay in releasing the assertion is harmless.
+            Task { @MainActor in UIApplication.shared.endBackgroundTask(bgToken) }
         }
+        handleBox.withLock { $0 = handle }
         // Single defer covers every exit path from here through publish(.ready(_)).
         defer { handle.endIfNeeded() }
 
