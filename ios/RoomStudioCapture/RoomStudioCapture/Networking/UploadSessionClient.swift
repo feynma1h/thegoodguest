@@ -16,7 +16,7 @@ import Foundation
 
 /// One entry in the request body sent to POST /upload_session.
 /// Named distinctly from UploadSessionEntry (the response type).
-struct UploadManifestEntry: Codable, Equatable, Sendable {
+nonisolated struct UploadManifestEntry: Codable, Equatable, Sendable {
     let relativePath: String
     let expectedSizeBytes: Int
 
@@ -28,7 +28,7 @@ struct UploadManifestEntry: Codable, Equatable, Sendable {
 
 /// One entry in the 200 response from POST /upload_session.
 /// session_uri is a GCS resumable URI — it IS the upload credential.
-struct UploadSessionEntry: Codable, Sendable {
+nonisolated struct UploadSessionEntry: Codable, Sendable {
     let relativePath: String
     let sessionUri: String
 
@@ -72,7 +72,10 @@ enum UploadSessionError: LocalizedError {
 
 // MARK: - Private request body
 
-private struct UploadSessionRequestBody: Encodable {
+// nonisolated: encoded from the client actor's context — the target's
+// MainActor default isolation would make the Encodable conformance
+// actor-crossing (a Swift 6 error).
+private nonisolated struct UploadSessionRequestBody: Encodable {
     let manifest: [UploadManifestEntry]
     let fcmToken: String?
 

@@ -1325,19 +1325,19 @@ final class BlobUploadManagerTests: XCTestCase {
 
     func test_backgroundTaskHandle_endCalledOnce_normalPath() async throws {
         // endIfNeeded called once → end action fires once.
-        var callCount = 0
-        let handle = BackgroundTaskHandle { callCount += 1 }
+        let callCount = OSAllocatedUnfairLock(initialState: 0)
+        let handle = BackgroundTaskHandle { callCount.withLock { $0 += 1 } }
         handle.endIfNeeded()
-        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(callCount.withLock { $0 }, 1)
     }
 
     func test_backgroundTaskHandle_endCalledOnce_doubleEnd() async throws {
         // endIfNeeded called twice → end action fires exactly once.
-        var callCount = 0
-        let handle = BackgroundTaskHandle { callCount += 1 }
+        let callCount = OSAllocatedUnfairLock(initialState: 0)
+        let handle = BackgroundTaskHandle { callCount.withLock { $0 += 1 } }
         handle.endIfNeeded()
         handle.endIfNeeded()
-        XCTAssertEqual(callCount, 1, "Double endIfNeeded must fire end action exactly once")
+        XCTAssertEqual(callCount.withLock { $0 }, 1, "Double endIfNeeded must fire end action exactly once")
     }
 
     func test_backgroundTaskHandle_concurrentEnd_exactlyOnce() async {
