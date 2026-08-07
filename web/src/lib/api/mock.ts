@@ -453,6 +453,22 @@ function mockGuestReply(text: string): string {
 export class MockApiClient implements ApiClient {
   readonly scenes = STATUS_FIXTURES.map((f, i) => sceneFixture(i, f.status, f.minutesAgo));
 
+  /**
+   * Deletion is refused in mock mode rather than faked. There is no account
+   * to erase, and a button that reports "5 rooms deleted" while the fixtures
+   * sit untouched is exactly the fake UI this codebase refuses to ship. The
+   * account menu already hides the control outside live mode; this is the
+   * backstop if that ever slips.
+   */
+  async deleteAccount(): Promise<never> {
+    await delay(null);
+    throw new ApiError(
+      503,
+      "deletion_unavailable",
+      "demo data has no account to delete",
+    );
+  }
+
   async listScenes(limit = 50): Promise<SceneSummary[]> {
     const sorted = [...this.scenes].sort((a, b) =>
       b.created_at.localeCompare(a.created_at),

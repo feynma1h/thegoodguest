@@ -5,7 +5,10 @@ These pin the layer's invariants, not its prose:
     rendered block, across calls)
   - inventory confidence tiers from quality.frames_observed / cluster_spread_m
   - distance strings: absolute facts carry their own framing and honest
-    rounding; comparative facts exist; NO gap/clearance vocabulary anywhere
+    rounding; comparative facts exist; a center distance is NEVER restated
+    with gap/clearance vocabulary
+  - sizes come only from trusted RoomPlan boxes, name only the longest
+    dimension, and clearances are rigorous lower bounds (0096)
   - vertical relations are relative-only (no floor references)
   - unplaced objects contribute no positional facts and appear in limits
   - empty / single-placed / unplaced-only manifests degrade honestly
@@ -191,13 +194,15 @@ class TestDistances:
         joined = " ".join(d.text for d in facts.distances)
         assert "plant" not in joined
 
-    def test_no_gap_or_clearance_vocabulary(self):
-        block = render_facts_block(derive_scene_facts(_room()))
-        for banned in ("gap", "clearance", "fits", "walkway"):
-            # The words appear only inside the explicit prohibition line.
-            for line in block.splitlines():
-                if banned in line.lower():
-                    assert "never restate" in line.lower()
+    def test_distance_strings_never_use_gap_or_clearance_vocabulary(self):
+        """0096 gave clearances their own separate, rigorously-derived fact
+        class — but a CENTER DISTANCE restated as a gap remains the forbidden
+        move, so the distance strings themselves stay clean."""
+        facts = derive_scene_facts(_room())
+        for d in facts.distances:
+            lowered = d.text.lower()
+            for banned in ("gap", "clearance", "clear space", "fits", "walkway"):
+                assert banned not in lowered, f"{banned!r} leaked into {d.text!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -307,3 +312,198 @@ class TestRenderAndCache:
         for i in range(scene_facts._CACHE_MAX_ENTRIES + 10):
             cached_scene_facts(f"scene-{i}", lambda: _manifest([]))
         assert len(scene_facts._cache) == scene_facts._CACHE_MAX_ENTRIES
+
+
+# ---------------------------------------------------------------------------
+# Sizes and clearances (facts_version 2, decision 0096)
+# ---------------------------------------------------------------------------
+
+def _boxed(
+    object_id: str,
+    label: str,
+    position: list[float] | None,
+    dims: list[float],
+    *,
+    confidence: str = "high",
+    **kw,
+) -> dict:
+    """An object carrying a RoomPlan box — the only size source 0096 trusts."""
+    entry = _obj(object_id, label, position, **kw)
+    entry["roomplan_box"] = {
+        "box_id": f"box_{object_id[-2:]}",
+        "category": label,
+        "confidence": confidence,
+        "dims": dims,
+    }
+    entry["extent_m_sorted"] = sorted(dims, reverse=True)
+    if position is not None:
+        entry["method"] = "roomplan_box"
+    return entry
+
+
+class TestSizes:
+    def test_speaks_a_trusted_box_size(self):
+        facts = derive_scene_facts(
+            _manifest([_boxed("obj_000", "bed", [0, 0.3, 0], [2.1581, 1.854, 0.6109])])
+        )
+        assert facts.inventory[0].size_text == "about 2.2 m at its longest"
+
+    def test_only_the_longest_dimension_is_ever_named(self):
+        """The shipped dims triple has no recoverable axis semantics (module
+        docstring): the bed's largest is a length, the wardrobe's a height.
+        Any height/width/footprint claim would be a coin flip."""
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0, 0.3, 0], [2.1581, 1.854, 0.6109]),
+                _boxed("obj_001", "wardrobe", [3, 0.9, 0], [1.9119, 0.6845, 0.3815]),
+            ])
+        )
+        sizes = " ".join(i.size_text or "" for i in facts.inventory).lower()
+        for banned in ("tall", "height", "wide", "width", "deep", "footprint", "area"):
+            assert banned not in sizes, f"{banned!r} claims an axis we don't have"
+        # The two other dimensions are never quoted at all.
+        block = render_facts_block(facts)
+        assert "1.9 m" in block and "1.8 m" not in block
+        assert "0.7 m" not in block
+        # Those words may appear ONLY in the limit that disclaims them.
+        for line in block.splitlines():
+            if "height" in line:
+                assert "unavailable" in line
+
+    def test_splat_extents_are_never_spoken_as_a_size(self):
+        """The measured reason this rule exists: a real meter-scale rug ships
+        extent_m_sorted of 0.46 x 0.29 x 0.005 (textile scale collapse, 0075),
+        and every splat extent is exposed to visible-region truncation."""
+        rug = _obj("obj_000", "rug", [0.0, 0.0, 0.0])
+        rug["extent_m_sorted"] = [0.4563, 0.2922, 0.0051]
+        facts = derive_scene_facts(_manifest([rug]))
+
+        assert facts.inventory[0].size_text is None
+        assert "0.5 m" not in render_facts_block(facts)
+
+    def test_low_box_confidence_is_size_silent(self):
+        """Low confidence is where the LABEL is wrong too — the spike room's
+        wardrobe arrives as a 'refrigerator'. RP-7 withholds the name there;
+        0096 withholds the authoritative size that would attach to it."""
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "refrigerator", [0, 0.9, 0],
+                       [1.6351, 0.9063, 0.678], confidence="low")
+            ])
+        )
+        assert facts.inventory[0].size_text is None
+
+    def test_an_unplaced_box_still_has_a_size(self):
+        """Placement and measurement are independent: a RoomPlan box that
+        failed placement still measured the thing."""
+        facts = derive_scene_facts(
+            _manifest([_boxed("obj_000", "wardrobe", None, [1.9119, 0.6845, 0.3815])])
+        )
+        item = facts.inventory[0]
+        assert item.placed is False
+        assert item.size_text == "about 1.9 m at its longest"
+
+    def test_size_comparisons_are_ordinal_and_measured_only(self):
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0, 0.3, 0], [2.16, 1.85, 0.61]),
+                _boxed("obj_001", "chair", [2, 0.4, 0], [0.68, 0.49, 0.45]),
+                _obj("obj_002", "rug", [1, 0.0, 0]),  # splat-only: excluded
+            ])
+        )
+        joined = " ".join(facts.size_comparisons)
+        assert "the bed is the largest" in joined
+        assert "the chair is the smallest" in joined
+        assert "rug" not in joined
+
+    def test_limits_name_the_unmeasured_pieces_and_the_axis_gap(self):
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0, 0.3, 0], [2.16, 1.85, 0.61]),
+                _obj("obj_001", "rug", [1, 0.0, 0]),
+            ])
+        )
+        limits = " ".join(facts.limits)
+        assert "the rug" in limits
+        assert "LONGEST dimension" in limits
+
+
+class TestClearances:
+    def test_bound_is_a_floor_and_is_phrased_as_one(self):
+        # Centers 3 m apart; circumradii 1.454 + 0.562 → bound 0.984, and the
+        # round-DOWN rule takes that to 0.9. Rounding to nearest would have
+        # said 1.0 — overstating a floor, which is the one forbidden direction.
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0.0, 0.3, 0.0], [2.16, 1.85, 0.61]),
+                _boxed("obj_001", "desk", [3.0, 0.3, 0.0], [0.9, 0.5, 0.45]),
+            ])
+        )
+        assert len(facts.clearances) == 1
+        text = facts.clearances[0]
+        assert text.startswith("at least ")
+        assert "0.9 m of clear space" in text
+
+    def test_bound_never_exceeds_the_true_minimum_separation(self):
+        """The property the whole class rests on: whatever the yaws, no point
+        of one box is closer to the other than the quoted number. Checked
+        against the worst case — both boxes' longest axes pointed at each
+        other, which is the tightest the geometry can ever be."""
+        import math
+
+        dims_a, dims_b = (2.16, 1.85, 0.61), (0.9, 0.5, 0.45)
+        d = 3.0
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0.0, 0.3, 0.0], list(dims_a)),
+                _boxed("obj_001", "desk", [d, 0.3, 0.0], list(dims_b)),
+            ])
+        )
+        quoted = float(facts.clearances[0].split("at least ")[1].split(" m")[0])
+        worst_case = d - math.dist((0, 0, 0), dims_a) / 2 - math.dist((0, 0, 0), dims_b) / 2
+        assert quoted <= worst_case + 1e-9
+
+    def test_overlapping_or_near_boxes_produce_no_claim(self):
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0.0, 0.3, 0.0], [2.16, 1.85, 0.61]),
+                _boxed("obj_001", "table", [0.5, 0.3, 0.0], [0.9, 0.5, 0.45]),
+            ])
+        )
+        assert facts.clearances == ()
+
+    def test_never_between_a_box_and_a_splat_only_object(self):
+        """A truncated splat understates the object, so a bound built on it
+        would OVERSTATE the gap — the one direction the error must not go."""
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0.0, 0.3, 0.0], [2.16, 1.85, 0.61]),
+                _obj("obj_001", "rug", [4.0, 0.0, 0.0]),
+            ])
+        )
+        assert facts.clearances == ()
+
+    def test_unplaced_boxes_contribute_no_clearance(self):
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0.0, 0.3, 0.0], [2.16, 1.85, 0.61]),
+                _boxed("obj_001", "wardrobe", None, [1.91, 0.68, 0.38]),
+            ])
+        )
+        assert facts.clearances == ()
+
+    def test_rendered_block_frames_clearances_as_floors(self):
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0.0, 0.3, 0.0], [2.16, 1.85, 0.61]),
+                _boxed("obj_001", "desk", [3.0, 0.3, 0.0], [0.9, 0.5, 0.45]),
+            ])
+        )
+        block = render_facts_block(facts)
+        assert "floors, not measurements" in block
+        assert "never as an exact gap" in block
+
+
+class TestFactsVersion:
+    def test_version_is_two(self):
+        assert FACTS_VERSION == 2

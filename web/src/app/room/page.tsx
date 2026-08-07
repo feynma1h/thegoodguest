@@ -23,7 +23,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
-import AppleSignInButton from "@/components/AppleSignInButton";
+import SignInPanel from "@/components/SignInPanel";
 import RoomStage from "@/components/RoomStage";
 import Wordmark from "@/components/Wordmark";
 import { PillLink } from "@/components/ui/spring";
@@ -234,11 +234,11 @@ function RoomDetail() {
         <RoomChrome tone="ink" title="" />
         <div className="mx-auto flex max-w-lg flex-1 flex-col items-start justify-center px-6 pt-14">
           <GuestLine className="text-[17px]">
-            This room belongs to an account. Sign in with the Apple ID from
-            your iPhone and I&rsquo;ll open it for you.
+            This room belongs to an account. Sign in with the one from your
+            iPhone and I&rsquo;ll open it for you.
           </GuestLine>
           <div className="mt-9">
-            <AppleSignInButton />
+            <SignInPanel />
           </div>
         </div>
       </div>

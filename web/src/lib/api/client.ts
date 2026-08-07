@@ -13,6 +13,7 @@
  */
 
 import type {
+  AccountDeletionResult,
   ConversationSnapshot,
   ConversationTurn,
   GuestEvent,
@@ -79,6 +80,13 @@ export interface ApiClient {
     text: string,
     clientMsgId: string,
   ): Promise<AsyncIterable<GuestEvent>>;
+  /**
+   * Erase the signed-in account and everything in it (decision 0095).
+   * `confirmUserId` must be the caller's own uid — an accident control, so
+   * the caller has to have looked its identity up before it can ask.
+   * Irreversible on success.
+   */
+  deleteAccount(confirmUserId: string): Promise<AccountDeletionResult>;
 }
 
 export type TokenProvider = () => Promise<string | null>;
@@ -209,6 +217,35 @@ export class LiveApiClient implements ApiClient {
     return (await this.request(
       `/scenes/${sceneId}/conversation`,
     )) as ConversationSnapshot;
+  }
+
+  async deleteAccount(confirmUserId: string): Promise<AccountDeletionResult> {
+    const resp = await fetch(`${this.baseUrl}/account`, {
+      method: "DELETE",
+      headers: {
+        Authorization: await this.authHeader(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ confirm_user_id: confirmUserId }),
+    });
+    const body = (await resp.json().catch(() => ({}))) as Record<string, never>;
+    // 202 is a PARTIAL pass, not a failure — it carries real counts and the
+    // caller retries. Only a non-2xx is an error.
+    if (!resp.ok) {
+      this.throwTyped(resp.status, body as Record<string, string>);
+    }
+    const counts = (body.counts ?? {}) as Record<string, number>;
+    return {
+      deleted: Boolean(body.deleted),
+      identityDeleted: Boolean(body.identity_deleted),
+      counts: {
+        rooms: counts.rooms ?? 0,
+        conversations: counts.conversations ?? 0,
+        conversationMessages: counts.conversation_messages ?? 0,
+        uploadSessions: counts.upload_sessions ?? 0,
+        files: counts.files ?? 0,
+      },
+    };
   }
 
   async sendMessage(

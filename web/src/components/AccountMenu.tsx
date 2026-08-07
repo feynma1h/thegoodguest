@@ -15,7 +15,8 @@ import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import AppleSignInButton from "@/components/AppleSignInButton";
+import DeleteAccountPanel from "@/components/DeleteAccountPanel";
+import SignInPanel from "@/components/SignInPanel";
 import { SPRING } from "@/components/ui/spring";
 import { apiMode } from "@/lib/api";
 
@@ -28,6 +29,7 @@ export default function AccountMenu() {
   const mode = apiMode();
   const [open, setOpen] = useState(false);
   const [liveAuth, setLiveAuth] = useState<LiveAuth>({ phase: "checking" });
+  const [deleting, setDeleting] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -48,6 +50,12 @@ export default function AccountMenu() {
       cancelled = true;
     };
   }, [mode]);
+
+  // Closing the menu abandons a half-finished delete confirmation rather than
+  // leaving it armed for the next open.
+  useEffect(() => {
+    if (!open) setDeleting(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -144,21 +152,39 @@ export default function AccountMenu() {
             {mode === "live" && liveAuth.phase === "signedOut" && (
               <div className="px-4 py-4">
                 <p className="mb-3 text-xs leading-relaxed text-ink/55">
-                  Sign in with the Apple ID from your iPhone — the rooms you
+                  Sign in with the account from your iPhone — the rooms you
                   scanned there follow it here.
                 </p>
-                <AppleSignInButton compact />
+                <SignInPanel compact />
               </div>
             )}
 
-            {mode === "live" && liveAuth.phase === "signedIn" && (
-              <button
-                type="button"
-                onClick={onSignOut}
-                className="block w-full cursor-pointer px-4 py-3 text-left text-sm text-ink/70 transition-colors hover:bg-ink/[0.04] hover:text-ink"
-              >
-                Sign out
-              </button>
+            {mode === "live" && liveAuth.phase === "signedIn" && !deleting && (
+              <>
+                <button
+                  type="button"
+                  onClick={onSignOut}
+                  className="block w-full cursor-pointer px-4 py-3 text-left text-sm text-ink/70 transition-colors hover:bg-ink/[0.04] hover:text-ink"
+                >
+                  Sign out
+                </button>
+                {/* Deletion is the only account operation iOS cannot offer
+                    (0064: no sign-out there), so the web carries it. */}
+                <button
+                  type="button"
+                  onClick={() => setDeleting(true)}
+                  className="block w-full cursor-pointer border-t border-ink/10 px-4 py-3 text-left text-sm text-ink/55 transition-colors hover:bg-ink/[0.04] hover:text-accent"
+                >
+                  Delete account
+                </button>
+              </>
+            )}
+
+            {mode === "live" && liveAuth.phase === "signedIn" && deleting && (
+              <DeleteAccountPanel
+                uid={liveAuth.uid}
+                onCancel={() => setDeleting(false)}
+              />
             )}
           </motion.div>
         )}

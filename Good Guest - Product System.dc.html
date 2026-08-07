@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400;1,8..60,500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#e9e2d2;font-family:'Instrument Sans',sans-serif;color:#3a2d22}
+a{color:#8e3b2f;text-decoration:none}a:hover{color:#6e2d24}
+.gs-sec{padding:36px 44px;border-bottom:1px solid rgba(58,45,34,.12);scroll-margin-top:16px}
+.gs-h{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+.gs-id{font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px}
+.gs-t{font:600 15px 'Instrument Sans',sans-serif;color:#3a2d22}
+.gs-note{font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1100px;margin:0 0 18px}
+.gs-card{width:1460px;background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:8px;box-shadow:0 2px 8px rgba(58,45,34,.08);overflow:hidden;position:relative}
+.gs-splat{position:absolute;inset:0;background:repeating-linear-gradient(45deg,#efe5d0 0 12px,#e7dcc4 12px 24px)}
+.gs-splab{position:absolute;left:0;right:0;text-align:center;font:500 10.5px 'IBM Plex Mono',monospace;color:rgba(58,45,34,.5);letter-spacing:.08em}
+.gs-mono{font:500 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)}
+.gs-guest{font:italic 400 16px/1.6 'Source Serif 4',serif;color:#3a2d22}
+.gs-ann{font:11.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.6)}
+</style>
+</helmet>
+<section class="gs-sec" id="s0">
+<div class="gs-h"><span class="gs-id">0</span><span class="gs-t">The system in one map — every surface, one conversation</span></div>
+<p class="gs-note">Locked: 8a Spoken Guest voice (warm, permission-spoken, ceremony decays with rapport) · real splat, real imperfections · sun-arc dial. Governing rule on every screen: the room page is one thing — a conversation happening in a room; everything else is furniture the conversation can summon.</p>
+<div class="gs-card" style="height:430px;padding:28px 32px;box-sizing:border-box">
+  <div style="display:flex;gap:18px;align-items:stretch;height:100%">
+    <div style="flex:1;display:flex;flex-direction:column;gap:10px">
+      <div class="gs-mono">ARRIVE</div>
+      <div style="border:1.5px solid #3a2d22;border-radius:8px;padding:12px 14px;background:#fff"><b style="font-size:13px">Landing</b><div class="gs-ann"><a href="#s1">§1</a> — thesis-led; returning state skips straight to the house</div></div>
+      <div style="border:1.5px solid #3a2d22;border-radius:8px;padding:12px 14px;background:#fff"><b style="font-size:13px">Sign in → Handoff</b><div class="gs-ann"><a href="#s2">§2</a> — phone scans, desk receives</div></div>
+      <div style="border:1.5px solid #8e3b2f;border-radius:8px;padding:12px 14px;background:#fff;box-shadow:0 4px 12px rgba(142,59,47,.15)"><b style="font-size:13px;color:#8e3b2f">The Wait</b><div class="gs-ann"><a href="#s3">§3</a> — the guest is on their way; the relationship starts here, before the room exists</div></div>
+      <div style="border:1.5px solid #3a2d22;border-radius:8px;padding:12px 14px;background:#fff"><b style="font-size:13px">The Reveal</b><div class="gs-ann"><a href="#s4">§4</a> — holds until you're present; degrades objects-first</div></div>
+    </div>
+    <div style="display:flex;align-items:center;font-size:20px;color:rgba(58,45,34,.4)">→</div>
+    <div style="flex:1.6;display:flex;flex-direction:column;gap:10px">
+      <div class="gs-mono">LIVE — THE ROOM PAGE</div>
+      <div style="flex:1;border:2px solid #8e3b2f;border-radius:10px;padding:14px 16px;background:#fff;box-shadow:0 6px 18px rgba(142,59,47,.15)">
+        <b style="font-size:14px;color:#8e3b2f">The Room — a conversation happening in a room</b>
+        <div class="gs-ann" style="margin-top:4px"><a href="#s5">§5</a> Stage 1 read-only · <a href="#s6">§6</a> Stage 2 mutable</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px">
+          <span style="border:1px dashed rgba(58,45,34,.4);border-radius:99px;padding:4px 10px;font-size:11px">ledger — put into words</span>
+          <span style="border:1px dashed rgba(58,45,34,.4);border-radius:99px;padding:4px 10px;font-size:11px">keeps shelf</span>
+          <span style="border:1px dashed rgba(58,45,34,.4);border-radius:99px;padding:4px 10px;font-size:11px">sun-arc dial</span>
+          <span style="border:1px dashed rgba(58,45,34,.4);border-radius:99px;padding:4px 10px;font-size:11px">object selection = asking</span>
+          <span style="border:1px dashed rgba(58,45,34,.4);border-radius:99px;padding:4px 10px;font-size:11px">directions compare (<a href="#s7">§7</a>)</span>
+        </div>
+        <div class="gs-ann" style="margin-top:10px;font-style:italic">all summoned by the conversation, none visible on first sight until earned or asked for</div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <div style="flex:1;border:1.5px solid rgba(58,45,34,.5);border-radius:8px;padding:10px 12px;background:#fff"><b style="font-size:12.5px">Gaps &amp; rescan</b><div class="gs-ann"><a href="#s8">§8</a> owned in voice</div></div>
+        <div style="flex:1;border:1.5px solid rgba(58,45,34,.5);border-radius:8px;padding:10px 12px;background:#fff"><b style="font-size:12.5px">Failure</b><div class="gs-ann"><a href="#s8">§8</a> honest, next step</div></div>
+        <div style="flex:1;border:1.5px solid rgba(58,45,34,.5);border-radius:8px;padding:10px 12px;background:#fff"><b style="font-size:12.5px">Ambient</b><div class="gs-ann"><a href="#s11">§11</a> room as living art</div></div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;font-size:20px;color:rgba(58,45,34,.4)">→</div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:10px">
+      <div class="gs-mono">AROUND IT</div>
+      <div style="border:1.5px solid #3a2d22;border-radius:8px;padding:12px 14px;background:#fff"><b style="font-size:13px">The House</b><div class="gs-ann"><a href="#s9">§9</a> — rooms as siblings; the guest proposes names</div></div>
+      <div style="border:1.5px solid #3a2d22;border-radius:8px;padding:12px 14px;background:#fff"><b style="font-size:13px">Sharing</b><div class="gs-ann"><a href="#s10">§10</a> — one view-only link, nothing social</div></div>
+      <div style="border:1.5px solid #3a2d22;border-radius:8px;padding:12px 14px;background:#fff"><b style="font-size:13px">Account &amp; privacy</b><div class="gs-ann"><a href="#s10">§10</a> — the consent register; "unsee it"</div></div>
+      <div style="border:1px dashed rgba(58,45,34,.45);border-radius:8px;padding:12px 14px"><b style="font-size:13px;color:rgba(58,45,34,.7)">Seams only</b><div class="gs-ann"><a href="#s12">§12</a> — room health = a lens on the ledger; shopping = a quiet link on stage-2 proposals</div></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s1">
+<div class="gs-h"><span class="gs-id">1</span><span class="gs-t">Landing — thesis first, product second</span></div>
+<p class="gs-note">One claim, one image, one action. The returning state drops the pitch entirely — the product greets you like someone expecting you.</p>
+<div class="gs-card" style="height:640px">
+  <div style="position:absolute;inset:0;display:flex">
+    <div style="width:46%;padding:60px 0 0 64px;box-sizing:border-box">
+      <div class="gs-mono">❖ WORDMARK</div>
+      <div style="font:400 46px/1.25 'Source Serif 4',serif;color:#3a2d22;margin-top:40px;letter-spacing:-.01em">Every home contains a version of itself its owner has never seen.</div>
+      <div style="font:16px/1.6 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:22px;max-width:420px">Scan a room with your phone. Meet it again on your desk — real, in 3D, exactly as you live in it — with a guest who understands it and talks it through with you.</div>
+      <div style="display:flex;gap:12px;margin-top:34px">
+        <span style="background:#8e3b2f;color:#f7efdf;border-radius:99px;padding:13px 26px;font:600 15px 'Instrument Sans',sans-serif">Scan your first room</span>
+        <span style="border:1.5px solid rgba(58,45,34,.35);color:#3a2d22;border-radius:99px;padding:13px 22px;font:500 15px 'Instrument Sans',sans-serif">See one first</span>
+      </div>
+      <div style="font:12px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.45);margin-top:20px">No photos generated. No feed. Your rooms are yours — <a href="#s10">how we treat them</a>.</div>
+    </div>
+    <div style="flex:1;position:relative;margin:24px 24px 24px 0;border-radius:10px;overflow:hidden">
+      <div class="gs-splat"></div>
+      <div class="gs-splab" style="top:42%">[ A REAL SCANNED ROOM, SLOWLY ORBITING — imperfections visible ]<br><span style="color:rgba(58,45,34,.35)">not a showroom: someone's actual living room, cushions dented</span></div>
+      <div style="position:absolute;left:24px;bottom:24px;background:rgba(247,239,223,.94);border-radius:12px;padding:13px 17px;max-width:380px;box-shadow:0 8px 24px rgba(58,45,34,.15)">
+        <div class="gs-guest" style="font-size:14.5px">“The reading chair is two metres from the best light in the room. May I show you?”</div>
+        <div class="gs-ann" style="margin-top:5px">the live demo room — the guest mid-thought, not a tagline</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="gs-card" style="height:150px;margin-top:14px">
+  <div style="position:absolute;left:0;top:0;bottom:0;width:200px;background:#3a2d22;display:flex;align-items:center;justify-content:center"><span class="gs-mono" style="color:rgba(247,239,223,.6)">RETURNING,<br>SIGNED IN</span></div>
+  <div style="position:absolute;left:230px;top:34px;right:40px;display:flex;align-items:center;gap:28px">
+    <div>
+      <div class="gs-guest">Welcome back. The living room is as you left it — and the afternoon light will be gone in an hour, if you wanted to see it one more time.</div>
+      <div class="gs-ann" style="margin-top:6px">no pitch, no hero — straight to the house, one time-sensitive observation at most</div>
+    </div>
+    <span style="background:#8e3b2f;color:#f7efdf;border-radius:99px;padding:11px 22px;font:600 13.5px 'Instrument Sans',sans-serif;white-space:nowrap">Go to the living room</span>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s2">
+<div class="gs-h"><span class="gs-id">2</span><span class="gs-t">First-run — sign in, then the bridge from phone to desk</span></div>
+<p class="gs-note">Capture is iOS-only; the web is the product. The handoff is framed as sending the room, not installing an app — and the desk visibly waits for it.</p>
+<div class="gs-card" style="height:520px;display:flex">
+  <div style="flex:1;border-right:1px solid rgba(58,45,34,.12);padding:44px 48px;box-sizing:border-box">
+    <div class="gs-mono">STEP 1 — SIGN IN</div>
+    <div style="font:400 26px/1.35 'Source Serif 4',serif;margin-top:18px">First, a door with your name on it.</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:26px;max-width:320px">
+      <span style="border:1.5px solid #3a2d22;border-radius:10px;padding:13px 18px;font:500 14px 'Instrument Sans',sans-serif;text-align:center"> Continue with Apple</span>
+      <span style="border:1.5px solid #3a2d22;border-radius:10px;padding:13px 18px;font:500 14px 'Instrument Sans',sans-serif;text-align:center">G Continue with Google</span>
+    </div>
+    <div class="gs-ann" style="margin-top:18px;max-width:320px">no email forms, no onboarding quiz — the guest learns about you by talking, not by survey</div>
+  </div>
+  <div style="flex:1.4;padding:44px 48px;box-sizing:border-box;position:relative">
+    <div class="gs-mono">STEP 2 — THE BRIDGE</div>
+    <div style="display:flex;gap:36px;margin-top:18px;align-items:flex-start">
+      <div>
+        <div style="width:170px;height:170px;border:2px solid #3a2d22;border-radius:14px;display:flex;align-items:center;justify-content:center;background:#fff">
+          <div style="width:120px;height:120px;background:repeating-conic-gradient(#3a2d22 0 25%,#fff 0 50%) 0 0/24px 24px;border-radius:4px;opacity:.85"></div>
+        </div>
+        <div class="gs-ann" style="width:170px;margin-top:10px;text-align:center">point your phone here — it opens the scanner, already signed in</div>
+      </div>
+      <div style="flex:1">
+        <div style="font:400 24px/1.4 'Source Serif 4',serif">Your phone does the walking. This desk is where the room arrives.</div>
+        <div style="font:14px/1.6 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:14px">Walk the room slowly with your phone — a minute or two. The moment you finish, the scan travels here on its own; leave this window open and watch it land.</div>
+        <div style="margin-top:22px;border:1.5px dashed rgba(58,45,34,.35);border-radius:12px;padding:16px 18px;background:rgba(255,255,255,.5)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="width:10px;height:10px;border-radius:50%;background:#c9a25e;box-shadow:0 0 0 5px rgba(201,162,94,.2)"></span>
+            <span style="font:500 13.5px 'Instrument Sans',sans-serif">This desk is listening for your scan…</span>
+          </div>
+          <div class="gs-ann" style="margin-top:8px">when the phone finishes: this panel swells, the filename never shows — <i>“It's here. Give me a few minutes with it.”</i> — and the wait (<a href="#s3">§3</a>) begins in place</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s3">
+<div class="gs-h"><span class="gs-id">3</span><span class="gs-t">The Wait — the guest is on their way, and the conversation starts before the room exists</span></div>
+<p class="gs-note">Minutes, honestly owned. The guest gathers context that will shape the first analysis — wait time is when the relationship starts. Progress is narrated as arrival, never as pipeline. The reveal never fires into an empty tab.</p>
+<div class="gs-card" style="height:640px">
+  <div style="position:absolute;inset:0;background:#f7efdf"></div>
+  <div style="position:absolute;left:0;right:0;top:0;height:64px;display:flex;align-items:center;padding:0 32px;gap:14px">
+    <span class="gs-mono">❖ WORDMARK</span>
+    <span style="font:italic 400 16px 'Source Serif 4',serif;color:rgba(58,45,34,.6)">a new room, being rebuilt</span>
+    <span style="margin-left:auto;font:12px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.5)">about 4 minutes · you can leave, I'll knock</span>
+  </div>
+  <div style="position:absolute;left:60px;top:90px;width:520px;height:400px;border-radius:12px;overflow:hidden">
+    <div class="gs-splat" style="opacity:.55"></div>
+    <div class="gs-splab" style="top:36%">[ THE ROOM FORMING — soft, partial, honest ]<br><span style="color:rgba(58,45,34,.35)">a slow silhouette gaining substance; never a percentage bar</span></div>
+    <div style="position:absolute;left:18px;bottom:16px;display:flex;flex-direction:column;gap:6px">
+      <span style="font:italic 400 13px 'Source Serif 4',serif;color:rgba(58,45,34,.75);background:rgba(247,239,223,.92);padding:5px 10px;border-radius:6px;align-self:flex-start">“I can see the shape of it now — the walls, and that big window.”</span>
+      <span style="font:italic 400 13px 'Source Serif 4',serif;color:rgba(58,45,34,.55);background:rgba(247,239,223,.8);padding:5px 10px;border-radius:6px;align-self:flex-start">“Your sofa just arrived. Nearly everyone's here.”</span>
+    </div>
+  </div>
+  <div style="position:absolute;left:630px;right:60px;top:90px;bottom:110px;display:flex;flex-direction:column;gap:14px">
+    <div class="gs-guest">While I make my way over — tell me about this room. What is it for, on a normal Tuesday? And what's the thing about it that quietly drives you mad?</div>
+    <div style="align-self:flex-end;max-width:82%;background:#3a2d22;color:#f7efdf;border-radius:14px 14px 4px 14px;padding:12px 16px;font:14px/1.5 'Instrument Sans',sans-serif">It's the everything room — dinner, work calls, TV. It always feels crowded even though it isn't.</div>
+    <div class="gs-guest" style="font-size:15px">“Crowded even though it isn't” — that's a sentence I can work with. I'll look for what's stealing the space: usually it's a path, not the furniture count. Anyone else live here? Pets that own a particular chair?</div>
+    <div class="gs-ann">everything said here is remembered — the first analysis opens with their words, not generic findings</div>
+  </div>
+  <div style="position:absolute;left:630px;right:60px;bottom:36px;display:flex;align-items:center;gap:12px;background:#fff;border-radius:99px;padding:13px 20px;box-shadow:0 8px 24px rgba(58,45,34,.1)">
+    <span style="flex:1;font:14.5px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.4)">Tell it about the room…</span>
+    <span style="width:31px;height:31px;border-radius:50%;background:#8e3b2f;color:#f7efdf;display:flex;align-items:center;justify-content:center;font-weight:600">↑</span>
+  </div>
+</div>
+<div class="gs-card" style="height:170px;margin-top:14px;display:flex">
+  <div style="flex:1;border-right:1px solid rgba(58,45,34,.12);padding:22px 26px;box-sizing:border-box">
+    <div class="gs-mono">IF YOU LEAVE</div>
+    <div class="gs-guest" style="font-size:14px;margin-top:10px">“Go on with your day — I'll knock when it's ready.”</div>
+    <div class="gs-ann" style="margin-top:8px">notification, later: <b>“Your living room is ready when you are.”</b> — no urgency, no streak, no ‘don't miss out'</div>
+  </div>
+  <div style="flex:1;border-right:1px solid rgba(58,45,34,.12);padding:22px 26px;box-sizing:border-box">
+    <div class="gs-mono">THE HOLD RULE</div>
+    <div style="font:13.5px/1.55 'Instrument Sans',sans-serif;margin-top:10px">The reveal <b>never auto-plays</b>. If reconstruction finishes while you're away, the room waits behind a door: a still, darkened threshold and one line — <span style="font:italic 400 13.5px 'Source Serif 4',serif">“It's ready. Come in when you have a minute — this is worth your full attention.”</span></div>
+  </div>
+  <div style="flex:1;padding:22px 26px;box-sizing:border-box">
+    <div class="gs-mono">HONESTY ABOUT TIME</div>
+    <div style="font:13.5px/1.55 'Instrument Sans',sans-serif;margin-top:10px">Estimates are real and revised out loud: <span style="font:italic 400 13.5px 'Source Serif 4',serif">“Slower than I hoped — two more minutes. The mirror is confusing me, which is fair.”</span> Never pipeline jargon, never a fake spinner.</div>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s4">
+<div class="gs-h"><span class="gs-id">4</span><span class="gs-t">The Reveal — threshold, permission, first words; degrades objects-first</span></div>
+<p class="gs-note">As locked in 8a/8d: camera arrives through the doorway, stops, asks. The first words are specific admiration informed by what you said during the wait. When early builds produce furniture before walls, the choreography degrades gracefully — assembly becomes the show.</p>
+<div class="gs-card" style="height:420px;display:flex">
+  <div style="flex:1;position:relative;border-right:1px solid rgba(58,45,34,.1);overflow:hidden">
+    <div style="position:absolute;inset:0;background:#3a2d22"></div>
+    <div style="position:absolute;right:0;top:0;bottom:0;width:38%;overflow:hidden"><div class="gs-splat" style="opacity:.9"></div></div>
+    <div class="gs-mono" style="position:absolute;left:16px;top:14px;color:rgba(247,239,223,.5)">FRAME 1 — THE THRESHOLD</div>
+    <div style="position:absolute;left:16px;bottom:14px;font:12.5px 'Instrument Sans',sans-serif;color:rgba(247,239,223,.75)">the camera walks the hallway and stops at the doorframe — your room visible past the jamb</div>
+  </div>
+  <div style="flex:1;position:relative;border-right:1px solid rgba(58,45,34,.1)">
+    <div class="gs-mono" style="position:absolute;left:16px;top:14px">FRAME 2 — PERMISSION</div>
+    <div style="position:absolute;left:24px;right:24px;top:34%;text-align:center" class="gs-guest">“May I look around?”</div>
+    <div style="position:absolute;left:0;right:0;top:54%;display:flex;justify-content:center;gap:10px;font:500 13px 'Instrument Sans',sans-serif">
+      <span style="background:#8e3b2f;color:#f7efdf;border-radius:99px;padding:8px 18px">come in</span>
+      <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:8px 18px">give me a second</span>
+    </div>
+    <div style="position:absolute;left:16px;bottom:14px" class="gs-ann">“give me a second” holds the room still, indefinitely — some people need a beat alone with it</div>
+  </div>
+  <div style="flex:1;position:relative">
+    <div class="gs-mono" style="position:absolute;left:16px;top:14px">FRAME 3 — FIRST WORDS, INFORMED</div>
+    <div style="position:absolute;left:24px;right:24px;top:24%" class="gs-guest" style="font-size:15px">“So this is the everything room. I see why it works — that window is doing half your lighting for free, and you've kept the middle open where the living actually happens. Crowded, though? I think I've already found the thief. When you're ready.”</div>
+    <div style="position:absolute;left:16px;bottom:14px" class="gs-ann">admiration first, their own words handed back, the first finding withheld until invited</div>
+  </div>
+</div>
+<div class="gs-card" style="height:180px;margin-top:14px">
+  <div style="position:absolute;left:0;top:0;bottom:0;width:200px;background:#3a2d22;display:flex;align-items:center;justify-content:center;text-align:center"><span class="gs-mono" style="color:rgba(247,239,223,.6)">DEGRADED PATH:<br>OBJECTS BEFORE<br>WALLS</span></div>
+  <div style="position:absolute;left:230px;right:40px;top:28px">
+    <div style="font:13.5px/1.6 'Instrument Sans',sans-serif">When a build ships furniture without architecture, the reveal becomes an <b>assembly</b>: the doorway framing is skipped; objects arrive one at a time onto the bare ground plane, each named as it lands — sofa, then table, then the lamp — and the guest treats it as moving-day, not failure:</div>
+    <div class="gs-guest" style="font-size:14.5px;margin-top:12px">“Your furniture came through ahead of the walls — they're still on their way. But honestly, this is my favorite way to meet a room: just the things you chose, with nothing behind them. Shall we start here?”</div>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s5">
+<div class="gs-h"><span class="gs-id">5</span><span class="gs-t">The Room, Stage 1 — read-only, and complete</span></div>
+<p class="gs-note">First sight after the reveal: the room, one guest line, one composer. Nothing else. The ledger, dial, and object-asking exist but are summoned. The three-level conversation-length system (voice rhythm · ledger · mechanics) is shown live. Read-only is framed as the guest's nature, not a padlock.</p>
+<div class="gs-card" style="height:820px">
+  <div style="position:absolute;inset:0;overflow:hidden">
+    <div class="gs-splat"></div>
+    <div class="gs-splab" style="top:34%">[ GAUSSIAN SPLAT, FULL-BLEED — the room is the page ]<br><span style="color:rgba(58,45,34,.35)">seated-height camera · everything else floats sparsely over it</span></div>
+  </div>
+  <div style="position:absolute;left:28px;top:22px;display:flex;align-items:baseline;gap:12px">
+    <span class="gs-mono">❖ WORDMARK</span>
+    <span style="font:italic 400 17px 'Source Serif 4',serif">the everything room</span>
+  </div>
+  <div style="position:absolute;right:28px;top:22px;display:flex;align-items:center;gap:10px;background:rgba(247,239,223,.92);border:1px solid rgba(58,45,34,.15);border-radius:99px;padding:7px 13px">
+    <svg width="74" height="22" viewBox="0 0 74 22"><path d="M5 19 Q 37 -7 69 19" fill="none" stroke="rgba(58,45,34,.3)" stroke-width="1.5"/><circle cx="37" cy="6" r="4.5" fill="#c9a25e"/></svg>
+    <span style="font:12px 'Instrument Sans',sans-serif">as captured · 1:40 pm</span>
+  </div>
+  <div style="position:absolute;left:36%;top:47%;width:16px;height:16px;border-radius:50%;border:2px solid #8e3b2f;background:rgba(247,239,223,.6);box-shadow:0 0 0 5px rgba(142,59,47,.15)"></div>
+  <div style="position:absolute;left:38%;top:41%;font:12px 'Instrument Sans',sans-serif;background:rgba(247,239,223,.94);padding:6px 11px;border-radius:8px;box-shadow:0 4px 14px rgba(58,45,34,.12)">the sofa — selected. Selecting is asking: the next reply is about this.</div>
+  <div style="position:absolute;left:50%;bottom:170px;transform:translateX(-50%);width:780px;display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;flex-direction:column;gap:4px;opacity:.65">
+      <div style="display:flex;align-items:center;gap:8px;background:rgba(247,239,223,.85);border-radius:8px;padding:7px 13px;font:12.5px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75)"><span class="gs-mono" style="letter-spacing:.06em">↩</span>earlier — the window, and what it's worth <span style="margin-left:auto" class="gs-ann">pinned to ledger ①</span></div>
+      <div style="display:flex;align-items:center;gap:8px;background:rgba(247,239,223,.85);border-radius:8px;padding:7px 13px;font:12.5px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75)"><span class="gs-mono" style="letter-spacing:.06em">↩</span>earlier — “crowded” diagnosed: the 58 cm pinch <span style="margin-left:auto" class="gs-ann">pinned ②</span></div>
+    </div>
+    <div style="background:rgba(247,239,223,.96);border:1px solid rgba(58,45,34,.15);border-radius:14px;padding:17px 22px;box-shadow:0 12px 32px rgba(58,45,34,.16)">
+      <div class="gs-guest">About this sofa — it's the right scale for that wall, genuinely. One thing worth knowing, though. Want the short version or the walk-through?</div>
+      <div style="display:flex;gap:8px;margin-top:12px;font:500 12.5px 'Instrument Sans',sans-serif">
+        <span style="background:#8e3b2f;color:#f7efdf;border-radius:99px;padding:7px 14px">short version</span>
+        <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:7px 14px">walk me through it</span>
+        <span style="border:1.5px solid rgba(58,45,34,.2);color:rgba(58,45,34,.6);border-radius:99px;padding:7px 14px">later — pin it</span>
+      </div>
+      <div class="gs-ann" style="margin-top:9px">voice rhythm: one beat, then an invitation — the guest never monologues. Older exchanges collapse above; anything load-bearing is already in the ledger.</div>
+    </div>
+  </div>
+  <div style="position:absolute;left:50%;bottom:96px;transform:translateX(-50%);width:640px;display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.96);border-radius:99px;padding:13px 20px;box-shadow:0 8px 24px rgba(58,45,34,.12)">
+    <span style="flex:1;font:14.5px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.4)">Ask, or click anything in the room…</span>
+    <span style="width:31px;height:31px;border-radius:50%;background:#8e3b2f;color:#f7efdf;display:flex;align-items:center;justify-content:center;font-weight:600">↑</span>
+  </div>
+  <div style="position:absolute;left:28px;bottom:96px;width:250px;background:rgba(247,239,223,.94);border-radius:12px;padding:13px 15px;box-shadow:0 8px 22px rgba(58,45,34,.12)">
+    <div class="gs-mono">PUT INTO WORDS — 2</div>
+    <div style="display:flex;flex-direction:column;gap:7px;margin-top:9px;font:italic 400 13px/1.4 'Source Serif 4',serif">
+      <div style="display:flex;gap:8px"><span style="color:#8e3b2f">①</span>the window does half the lighting — protect it</div>
+      <div style="display:flex;gap:8px"><span style="color:#8e3b2f">②</span>“crowded” = the 58 cm pinch, not the furniture</div>
+    </div>
+    <div class="gs-ann" style="margin-top:9px">the ledger — summoned by the guest the first time it pins something: <i>“I'll keep the things we put into words over here.”</i> Findings attach to objects; tap one and the camera walks to its evidence. The transcript is speech; this is the record.</div>
+  </div>
+  <div style="position:absolute;right:28px;bottom:96px;font:12px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.65);background:rgba(247,239,223,.9);border-radius:10px;padding:9px 13px;max-width:230px">Stage 1 honesty, in voice, when asked to move something: <span style="font:italic 400 12.5px 'Source Serif 4',serif">“I can't lift a thing yet — I'm a guest, not a mover. Soon. But I can show you exactly what moving it would win.”</span></div>
+  <div style="position:absolute;left:0;right:0;bottom:0;height:64px;background:rgba(58,45,34,.92);display:flex;align-items:center;gap:24px;padding:0 28px">
+    <span class="gs-mono" style="color:rgba(247,239,223,.55)">FIRST-SIGHT RULE</span>
+    <span style="font:12.5px 'Instrument Sans',sans-serif;color:rgba(247,239,223,.85)">a first-time user sees: the room · one guest line · the composer. The ledger appears at the first pin; the dial at the first light mention; object-hints at the first click. Nothing else exists until the conversation summons it.</span>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s6">
+<div class="gs-h"><span class="gs-id">6</span><span class="gs-t">The Room, Stage 2 — conversation moves furniture; keeps appear</span></div>
+<p class="gs-note">Same page, two additions earned by maturity: proposals render as the guest "carrying" pieces (ghosted origin, real-splat piece in transit), and the keeps shelf — named moments of the room, always visible once the first keep exists. Undo and rewind are ambient rights, never a version UI.</p>
+<div class="gs-card" style="height:760px">
+  <div style="position:absolute;inset:0;overflow:hidden">
+    <div class="gs-splat"></div>
+    <div class="gs-splab" style="top:32%">[ SPLAT — the armchair mid-move: real piece drifting, dashed ghost at its origin ]<br><span style="color:rgba(58,45,34,.35)">moved pieces keep their scanned scruff — proof it's really yours</span></div>
+  </div>
+  <div style="position:absolute;left:28px;top:22px;display:flex;align-items:baseline;gap:12px">
+    <span class="gs-mono">❖ WORDMARK</span>
+    <span style="font:italic 400 17px 'Source Serif 4',serif">the everything room</span>
+    <span style="font:12px 'Instrument Sans',sans-serif;color:#8e3b2f;background:rgba(142,59,47,.1);border-radius:99px;padding:4px 11px">trying something — nothing is lost, ever</span>
+  </div>
+  <div style="position:absolute;left:34%;top:44%;width:150px;height:80px;border:2px dashed rgba(58,45,34,.45);border-radius:8px"></div>
+  <div style="position:absolute;left:35%;top:38.5%;font:11.5px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.65);background:rgba(247,239,223,.9);padding:3px 9px;border-radius:99px">it was here — say “put it back” anytime</div>
+  <div style="position:absolute;left:50%;bottom:150px;transform:translateX(-50%);width:780px;background:rgba(247,239,223,.96);border:1px solid rgba(58,45,34,.15);border-radius:14px;padding:17px 22px;box-shadow:0 12px 32px rgba(58,45,34,.16)">
+    <div class="gs-guest">There — your chair, in the light it deserved all along. Sit with it a moment. If this feels right, shall I remember the room like this before we try anything bolder?</div>
+    <div style="display:flex;gap:8px;margin-top:12px;font:500 12.5px 'Instrument Sans',sans-serif">
+      <span style="background:#8e3b2f;color:#f7efdf;border-radius:99px;padding:7px 14px">keep this — call it “reading corner”</span>
+      <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:7px 14px">keep, I'll name it</span>
+      <span style="border:1.5px solid rgba(58,45,34,.2);color:rgba(58,45,34,.6);border-radius:99px;padding:7px 14px">put it back</span>
+    </div>
+    <div class="gs-ann" style="margin-top:9px">the keep moment: always offered at junctures (before bolder moves, after a “sit with it” pause, before you leave) — never demanded, never auto-named without consent</div>
+  </div>
+  <div style="position:absolute;left:50%;bottom:76px;transform:translateX(-50%);width:640px;display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.96);border-radius:99px;padding:13px 20px;box-shadow:0 8px 24px rgba(58,45,34,.12)">
+    <span style="flex:1;font:14.5px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.4)">What if we…</span>
+    <span style="width:31px;height:31px;border-radius:50%;background:#8e3b2f;color:#f7efdf;display:flex;align-items:center;justify-content:center;font-weight:600">↑</span>
+  </div>
+  <div style="position:absolute;left:0;right:0;bottom:0;height:58px;background:rgba(247,239,223,.97);border-top:1px solid rgba(58,45,34,.15);display:flex;align-items:center;gap:10px;padding:0 28px">
+    <span class="gs-mono">KEPT</span>
+    <span style="display:flex;align-items:center;gap:7px;border:1.5px solid #3a2d22;border-radius:99px;padding:6px 14px;font:500 12.5px 'Instrument Sans',sans-serif;background:#fff"><span style="width:8px;height:8px;border-radius:50%;background:#c9a25e"></span>as scanned · always</span>
+    <span style="display:flex;align-items:center;gap:7px;border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:6px 14px;font:500 12.5px 'Instrument Sans',sans-serif;background:#fff">Sunday, calm</span>
+    <span style="display:flex;align-items:center;gap:7px;border:1.5px solid #8e3b2f;border-radius:99px;padding:6px 14px;font:500 12.5px 'Instrument Sans',sans-serif;background:#fff;color:#8e3b2f">reading corner · now</span>
+    <span style="border:1.5px dashed rgba(58,45,34,.3);border-radius:99px;padding:6px 14px;font:500 12.5px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.55)">compare →</span>
+    <span style="margin-left:auto" class="gs-ann">the shelf: every keep is one tap away, “as scanned” can never be deleted, and “rewind ten minutes” works even between keeps — recording is total, the UI shows only names</span>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s7">
+<div class="gs-h"><span class="gs-id">7</span><span class="gs-t">Directions — two or three futures, side by side</span></div>
+<p class="gs-note">Branching surfaces only here: keeps grown into named directions, compared as rooms — never as a tree. The guest referees with its ledger, not with scores.</p>
+<div class="gs-card" style="height:560px;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:14px;padding:18px 28px">
+    <span class="gs-mono">❖ WORDMARK</span>
+    <span style="font:italic 400 16px 'Source Serif 4',serif">the everything room — two ways it could go</span>
+    <span style="margin-left:auto;font:12px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.55)">grown from “Sunday, calm” · both keep the pinch fixed</span>
+  </div>
+  <div style="flex:1;display:flex;gap:14px;padding:0 28px;min-height:0">
+    <div style="flex:1;position:relative;border-radius:10px;overflow:hidden;border:2px solid #8e3b2f">
+      <div class="gs-splat"></div>
+      <div class="gs-splab" style="top:36%">[ SPLAT — “the open room” ]</div>
+      <div style="position:absolute;left:14px;top:12px;font:500 12.5px 'Instrument Sans',sans-serif;background:rgba(247,239,223,.94);border-radius:99px;padding:5px 12px">the open room</div>
+      <div style="position:absolute;left:14px;right:14px;bottom:12px;font:italic 400 13px/1.5 'Source Serif 4',serif;background:rgba(247,239,223,.94);border-radius:10px;padding:10px 13px">“This one gives you the door-to-window sweep — the room greets you. It costs the second reading spot.”</div>
+    </div>
+    <div style="flex:1;position:relative;border-radius:10px;overflow:hidden;border:1.5px solid rgba(58,45,34,.25)">
+      <div class="gs-splat"></div>
+      <div class="gs-splab" style="top:36%">[ SPLAT — “the two-rooms-in-one” ]</div>
+      <div style="position:absolute;left:14px;top:12px;font:500 12.5px 'Instrument Sans',sans-serif;background:rgba(247,239,223,.94);border-radius:99px;padding:5px 12px">two rooms in one</div>
+      <div style="position:absolute;left:14px;right:14px;bottom:12px;font:italic 400 13px/1.5 'Source Serif 4',serif;background:rgba(247,239,223,.94);border-radius:10px;padding:10px 13px">“This one earns your work calls a corner of their own. The trade: the middle stops being open floor.”</div>
+    </div>
+    <div style="width:300px;display:flex;flex-direction:column;gap:10px">
+      <div class="gs-mono">THE GUEST'S HONEST COMPARISON</div>
+      <div class="gs-guest" style="font-size:14px">Both fix what you came with. If Tuesday-you picks: the open room. If deadline-you picks: two rooms. You can hold both — rooms are allowed to have moods.</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;font:500 12.5px 'Instrument Sans',sans-serif">
+        <span style="background:#8e3b2f;color:#f7efdf;border-radius:99px;padding:8px 14px;text-align:center">walk “the open room”</span>
+        <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:8px 14px;text-align:center">walk “two rooms in one”</span>
+        <span style="border:1.5px solid rgba(58,45,34,.2);color:rgba(58,45,34,.55);border-radius:99px;padding:8px 14px;text-align:center">neither — back to Sunday, calm</span>
+      </div>
+      <div class="gs-ann" style="margin-top:auto;padding-bottom:16px">max three directions at once — the guest refuses a fourth: <i>“Three futures is plenty. Let one go and we'll make room.”</i></div>
+    </div>
+  </div>
+  <div style="height:18px"></div>
+</div>
+</section>
+
+<section class="gs-sec" id="s8">
+<div class="gs-h"><span class="gs-id">8</span><span class="gs-t">Honest imperfection &amp; failure — the guest owns what it can't see</span></div>
+<p class="gs-note">Gaps, merges, and occlusions are the guest's fallibility, spoken plainly, each with one concrete path. Failure follows the same rule: honest words, a next step, never a stack trace.</p>
+<div class="gs-card" style="height:470px;display:flex">
+  <div style="flex:1.4;position:relative;border-right:1px solid rgba(58,45,34,.12);overflow:hidden">
+    <div class="gs-splat"></div>
+    <div class="gs-splab" style="top:30%">[ SPLAT — soft void behind the sofa, gently marked ]</div>
+    <div style="position:absolute;left:30%;top:46%;width:180px;height:90px;border:1.5px dashed rgba(58,45,34,.5);border-radius:10px;background:rgba(247,239,223,.35)"></div>
+    <div style="position:absolute;left:31%;top:40%;font:11.5px 'Instrument Sans',sans-serif;background:rgba(247,239,223,.92);padding:3px 9px;border-radius:99px;color:rgba(58,45,34,.7)">unseen — behind the sofa</div>
+    <div style="position:absolute;left:20px;right:20px;bottom:18px;background:rgba(247,239,223,.96);border-radius:12px;padding:14px 18px;box-shadow:0 8px 24px rgba(58,45,34,.14)">
+      <div class="gs-guest" style="font-size:14.5px">Two confessions. I couldn't see behind the sofa — I've marked where I'm guessing. And I may have read your two dining chairs as one; they were sitting very close. Neither hurts what we've done so far. When you're next in the room, one slow pass of your phone over those spots and I'll be caught up.</div>
+      <div style="display:flex;gap:8px;margin-top:10px;font:500 12.5px 'Instrument Sans',sans-serif">
+        <span style="background:#8e3b2f;color:#f7efdf;border-radius:99px;padding:7px 14px">send the spots to my phone</span>
+        <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:7px 14px">it's fine — work around it</span>
+      </div>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;flex-direction:column">
+    <div style="flex:1;border-bottom:1px solid rgba(58,45,34,.12);padding:22px 26px;box-sizing:border-box">
+      <div class="gs-mono">PARTIAL FAILURE — RECOVERABLE</div>
+      <div class="gs-guest" style="font-size:14px;margin-top:10px">“Most of the room made the trip. The corner by the door didn't — it arrived scrambled, so I've set it aside rather than show you something false. We can work without it, or you can send that corner again — thirty seconds of phone time.”</div>
+      <div class="gs-ann" style="margin-top:8px">the bad region is hidden, never rendered broken — the guest would rather admit a gap than show a lie</div>
+    </div>
+    <div style="flex:1;padding:22px 26px;box-sizing:border-box;background:#3a2d22">
+      <div class="gs-mono" style="color:rgba(247,239,223,.5)">TERMINAL FAILURE</div>
+      <div class="gs-guest" style="font-size:14px;margin-top:10px;color:#f7efdf">“I'm sorry — the scan didn't survive the trip, and there's nothing here I could honestly show you. It's not something you did. When you're near the room again, let's try one more pass — slower is better, and I'll be less confused by the mirror this time.”</div>
+      <div style="display:flex;gap:8px;margin-top:12px;font:500 12.5px 'Instrument Sans',sans-serif">
+        <span style="background:#f7efdf;color:#3a2d22;border-radius:99px;padding:7px 14px">rescan from my phone</span>
+        <span style="border:1.5px solid rgba(247,239,223,.35);color:rgba(247,239,223,.85);border-radius:99px;padding:7px 14px">later</span>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s9">
+<div class="gs-h"><span class="gs-id">9</span><span class="gs-t">The House — rooms as siblings; the guest proposes names</span></div>
+<div class="gs-card" style="height:430px;padding:26px 30px;box-sizing:border-box">
+  <div style="display:flex;align-items:baseline;gap:12px">
+    <span class="gs-mono">❖ WORDMARK</span>
+    <span style="font:italic 400 18px 'Source Serif 4',serif">your house — three rooms so far</span>
+    <span style="margin-left:auto;font:12px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.55)">no floor plan, no map — rooms are siblings, each its own conversation</span>
+  </div>
+  <div style="display:flex;gap:16px;margin-top:20px;height:300px">
+    <div style="flex:1;position:relative;border-radius:12px;overflow:hidden;border:1px solid rgba(58,45,34,.2)">
+      <div class="gs-splat"></div>
+      <div class="gs-splab" style="top:34%">[ SPLAT THUMB ]</div>
+      <div style="position:absolute;left:0;right:0;bottom:0;background:rgba(247,239,223,.96);padding:12px 15px">
+        <div style="font:italic 400 15px 'Source Serif 4',serif">the everything room</div>
+        <div class="gs-ann" style="margin-top:3px">2 keeps · 6 things put into words · last visit yesterday</div>
+      </div>
+    </div>
+    <div style="flex:1;position:relative;border-radius:12px;overflow:hidden;border:1px solid rgba(58,45,34,.2)">
+      <div class="gs-splat"></div>
+      <div class="gs-splab" style="top:34%">[ SPLAT THUMB ]</div>
+      <div style="position:absolute;left:12px;top:12px;font:11.5px 'Instrument Sans',sans-serif;background:rgba(247,239,223,.94);border-radius:99px;padding:4px 11px;color:#8e3b2f">naming suggestion</div>
+      <div style="position:absolute;left:0;right:0;bottom:0;background:rgba(247,239,223,.96);padding:12px 15px">
+        <div class="gs-guest" style="font-size:13.5px">“Desk, two monitors, a chair that's seen things — this looks like where you work. Shall I call it the study?”</div>
+        <div style="display:flex;gap:8px;margin-top:8px;font:500 12px 'Instrument Sans',sans-serif"><span style="background:#8e3b2f;color:#f7efdf;border-radius:99px;padding:5px 12px">the study it is</span><span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:5px 12px">I'll name it</span></div>
+      </div>
+    </div>
+    <div style="flex:1;position:relative;border-radius:12px;overflow:hidden;border:1px solid rgba(58,45,34,.2)">
+      <div class="gs-splat" style="opacity:.5"></div>
+      <div style="position:absolute;left:0;right:0;top:38%;text-align:center">
+        <div style="font:500 12px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.6)">bedroom — still being rebuilt</div>
+        <div class="gs-ann" style="margin-top:4px">about 2 minutes · the wait conversation is open</div>
+      </div>
+    </div>
+    <div style="width:220px;border:1.5px dashed rgba(58,45,34,.35);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px">
+      <span style="font-size:26px;color:rgba(58,45,34,.4)">+</span>
+      <span style="font:500 13px 'Instrument Sans',sans-serif">scan another room</span>
+      <span class="gs-ann" style="text-align:center;padding:0 18px">empty-state line, first visit: <i>“One room is a conversation. A house is a life — whenever you're ready.”</i></span>
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s10">
+<div class="gs-h"><span class="gs-id">10</span><span class="gs-t">Sharing &amp; privacy — one link out; the consent register within</span></div>
+<p class="gs-note">Sharing is a view-only link to a room or a keep — no accounts needed to view, no feed, no comments. Privacy is a voice moment: "unsee it" is a first-class reply anywhere, and the register shows exactly what the guest has agreed to ignore.</p>
+<div class="gs-card" style="height:500px;display:flex">
+  <div style="flex:1;border-right:1px solid rgba(58,45,34,.12);padding:26px 30px;box-sizing:border-box;display:flex;flex-direction:column">
+    <div class="gs-mono">SHARING — WHAT THE RECIPIENT SEES</div>
+    <div style="flex:1;position:relative;border-radius:10px;overflow:hidden;border:1px solid rgba(58,45,34,.2);margin-top:14px">
+      <div class="gs-splat"></div>
+      <div class="gs-splab" style="top:36%">[ SPLAT — “reading corner”, orbitable, view-only ]</div>
+      <div style="position:absolute;left:14px;top:12px;font:11.5px 'Instrument Sans',sans-serif;background:rgba(247,239,223,.94);border-radius:99px;padding:4px 11px">Maya's everything room · “reading corner” · shared to view</div>
+      <div style="position:absolute;left:14px;right:14px;bottom:12px;font:12.5px 'Instrument Sans',sans-serif;background:rgba(247,239,223,.94);border-radius:10px;padding:10px 13px;color:rgba(58,45,34,.75)">the recipient can orbit, change the hour, and read pinned findings — they cannot talk to the guest, see the transcript, or see anything unseen. One line of guest text greets them: <span style="font:italic 400 12.5px 'Source Serif 4',serif;color:#3a2d22">“Maya wanted you to see this. Look around.”</span></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+      <span style="flex:1;border:1.5px solid rgba(58,45,34,.25);border-radius:99px;padding:10px 16px;font:12.5px 'IBM Plex Mono',monospace;color:rgba(58,45,34,.6)">yourroom.app/v/reading-corner-x7f2</span>
+      <span style="background:#3a2d22;color:#f7efdf;border-radius:99px;padding:10px 18px;font:500 13px 'Instrument Sans',sans-serif">copy link</span>
+      <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:10px 16px;font:500 13px 'Instrument Sans',sans-serif">revoke</span>
+    </div>
+  </div>
+  <div style="flex:1;padding:26px 30px;box-sizing:border-box">
+    <div class="gs-mono">ACCOUNT &amp; PRIVACY — A CONVERSATION, NOT A SETTINGS MAZE</div>
+    <div class="gs-guest" style="font-size:15px;margin-top:14px">Your rooms live here and nowhere else — they're not training material, and they're not anyone's to browse. Ask me to forget a room and it's gone; not archived, gone. And anything you've told me to unsee, I genuinely don't use — here's the list, so you can check my manners.</div>
+    <div style="border:1px solid rgba(58,45,34,.2);border-radius:12px;margin-top:16px;background:#fff">
+      <div style="padding:12px 16px;border-bottom:1px solid rgba(58,45,34,.12)" class="gs-mono">THE CONSENT REGISTER — UNSEEN, AT YOUR WORD</div>
+      <div style="padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(58,45,34,.08);font:13px 'Instrument Sans',sans-serif"><span style="width:8px;height:8px;border-radius:50%;background:rgba(58,45,34,.35)"></span>the clothes on the bedroom chair <span style="margin-left:auto" class="gs-ann">“just mess” — unseen 12 Jul</span><span style="font:500 12px 'Instrument Sans',sans-serif;color:#8e3b2f">let it see again</span></div>
+      <div style="padding:10px 16px;display:flex;align-items:center;gap:10px;font:13px 'Instrument Sans',sans-serif"><span style="width:8px;height:8px;border-radius:50%;background:rgba(58,45,34,.35)"></span>the desk paperwork, the study <span style="margin-left:auto" class="gs-ann">unseen 15 Jul</span><span style="font:500 12px 'Instrument Sans',sans-serif;color:#8e3b2f">let it see again</span></div>
+    </div>
+    <div class="gs-ann" style="margin-top:12px">“that's just mess — unsee it” is a valid reply to any observation, anywhere; it lands here instantly, excluded from analysis, ledger, and every shared link</div>
+    <div style="display:flex;gap:10px;margin-top:18px;font:500 13px 'Instrument Sans',sans-serif">
+      <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:9px 16px">export my rooms</span>
+      <span style="border:1.5px solid #8e3b2f;color:#8e3b2f;border-radius:99px;padding:9px 16px">forget a room…</span>
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="gs-sec" id="s11">
+<div class="gs-h"><span class="gs-id">11</span><span class="gs-t">Ambient — the room as living art (earns its place)</span></div>
+<div class="gs-card" style="height:420px">
+  <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 55% 40%,#4a3a2a 0%,#332818 55%,#241c12 100%)"></div>
+  <div class="gs-splab" style="top:40%;color:rgba(243,226,200,.5)">[ SPLAT, FULL-BLEED — drifting through golden hour on the sun arc ]<br><span style="color:rgba(243,226,200,.3)">the light travels the arc over real minutes; the camera barely breathes · no UI at all until the mouse moves</span></div>
+  <div style="position:absolute;left:28px;bottom:24px;font:italic 400 14px 'Source Serif 4',serif;color:rgba(243,226,200,.6)">the everything room · living through its afternoon</div>
+  <div style="position:absolute;right:28px;bottom:24px;font:12px 'Instrument Sans',sans-serif;color:rgba(243,226,200,.45)">move the mouse to return · the guest stays silent in ambient — art doesn't talk</div>
+</div>
+</section>
+
+<section class="gs-sec" id="s12">
+<div class="gs-h"><span class="gs-id">12</span><span class="gs-t">Seams, not features — room health and shopping</span></div>
+<div class="gs-card" style="height:360px;display:flex">
+  <div style="flex:1;border-right:1px solid rgba(58,45,34,.12);padding:24px 28px;box-sizing:border-box">
+    <div class="gs-mono">ROOM HEALTH = A LENS ON THE LEDGER</div>
+    <div style="font:13.5px/1.6 'Instrument Sans',sans-serif;margin-top:12px;max-width:560px">My stance: no dashboard, no scores, no radar. "Health" is the ledger regrouped — the same findings, organized by <b>light / flow / proportion</b> instead of by time. It's a filter row on the ledger panel, nothing more:</div>
+    <div style="display:flex;gap:8px;margin-top:14px;font:500 12.5px 'Instrument Sans',sans-serif">
+      <span style="background:#3a2d22;color:#f7efdf;border-radius:99px;padding:6px 14px">all · 6</span>
+      <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:6px 14px">light · 2</span>
+      <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:6px 14px">flow · 3</span>
+      <span style="border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:6px 14px">proportion · 1</span>
+    </div>
+    <div class="gs-guest" style="font-size:13.5px;margin-top:14px">“Asked for the state of the room? Three of our six findings are about flow — that's the room's real subject. Start there.”</div>
+    <div class="gs-ann" style="margin-top:10px">a number only ever counts findings — it never grades the home</div>
+  </div>
+  <div style="flex:1;padding:24px 28px;box-sizing:border-box">
+    <div class="gs-mono">SHOPPING — A SEAM ON STAGE-2 PROPOSALS</div>
+    <div style="border:1px solid rgba(58,45,34,.2);border-radius:12px;padding:14px 17px;background:#fff;margin-top:12px;max-width:520px">
+      <div class="gs-guest" style="font-size:14px">“A reading lamp would finish this corner — around 150 cm, warm bulb. That's the whole spec.”</div>
+      <div style="display:flex;gap:12px;margin-top:10px;font:500 12.5px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.55)">
+        <span style="border-bottom:1px solid rgba(58,45,34,.35)">find something like this</span>
+        <span class="gs-ann" style="align-self:center">← the entire seam: one quiet link, budget tiers behind it, designed later</span>
+      </div>
+    </div>
+    <div class="gs-ann" style="margin-top:12px;max-width:520px">the guest recommends the <i>need</i> (dimensions, light temperature, placement) as part of its normal speech; commerce, when it comes, hangs off that phrase without changing a single screen designed here</div>
+  </div>
+</div>
+</section>
+</x-dc>
+</body>
+</html>

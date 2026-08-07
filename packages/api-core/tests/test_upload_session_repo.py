@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from roomstudio_api_core.upload_session_repo import (
     ForeignBundleError,
     InMemoryUploadSessionRepository,
+    CaptureLimitError,
     MintRateLimitedError,
     validate_manifest_path,
 )
@@ -403,6 +404,104 @@ class TestMintQuota:
             manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 128}]
             repo.create_or_get(f"b{i}", "u", manifest, None,
                                mint_uri_fn=_fake_mint, bucket="bkt")
+
+
+# ---------------------------------------------------------------------------
+# Per-UID daily CAPTURE ceiling (decision 0097)
+#
+# The mint quota bounds API calls; this bounds GPU spend. The pair of tests
+# that matter are the ones separating the two: a re-mint of a capture already
+# started today is free (it commits no new GPU), and a refused capture must
+# not burn mint quota (or the user loses two allowances for one refusal).
+# ---------------------------------------------------------------------------
+
+def _capture(repo, bundle_id: str, uid: str, *, captures: int,
+             mints: int | None = None, now=_NOW, paths=("bundle.pb",)):
+    manifest = [{"relative_path": p, "expected_size_bytes": 128} for p in paths]
+    return repo.create_or_get(
+        bundle_id, uid, manifest, None,
+        mint_uri_fn=_fake_mint, bucket="bkt",
+        daily_mint_quota=mints, daily_capture_quota=captures, now=now,
+    )
+
+
+class TestCaptureCeiling:
+    def test_at_cap_raises_with_resets_at(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        _capture(repo, "b1", "u", captures=2)
+        _capture(repo, "b2", "u", captures=2)
+        with pytest.raises(CaptureLimitError) as exc_info:
+            _capture(repo, "b3", "u", captures=2)
+        assert exc_info.value.resets_at == datetime(
+            2026, 8, 8, 0, 0, 0, tzinfo=timezone.utc
+        )
+
+    def test_re_minting_the_same_capture_is_free(self) -> None:
+        """A re-mint (0049 session expiry) sends a DIFFERENT path set for a
+        bundle already claimed. It commits no new GPU, so it must not consume
+        a capture — otherwise a user with flaky uploads runs out of captures
+        without ever starting a second one."""
+        repo = InMemoryUploadSessionRepository()
+        _capture(repo, "b1", "u", captures=1, paths=("bundle.pb",))
+        _capture(repo, "b1", "u", captures=1, paths=("bundle.pb", "frames/0.jpg"))
+        # Still exactly one capture spent: a second bundle would now be the
+        # one refused.
+        with pytest.raises(CaptureLimitError):
+            _capture(repo, "b2", "u", captures=1)
+
+    def test_replay_is_free(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        first = _capture(repo, "b1", "u", captures=1)
+        for _ in range(3):
+            assert _capture(repo, "b1", "u", captures=1) == first
+
+    def test_refused_capture_does_not_burn_mint_quota(self) -> None:
+        """The capture cap is evaluated FIRST for exactly this reason."""
+        repo = InMemoryUploadSessionRepository()
+        _capture(repo, "b1", "u", captures=1, mints=10)
+        with pytest.raises(CaptureLimitError):
+            _capture(repo, "b2", "u", captures=1, mints=10)
+        # 9 mints must remain against the SAME bundle (b1 is claimed, so no
+        # capture is charged); the 10th would be the mint cap, not the capture.
+        for i in range(9):
+            _capture(repo, "b1", "u", captures=1, mints=10,
+                     paths=("bundle.pb", f"frames/{i}.jpg"))
+        with pytest.raises(MintRateLimitedError):
+            _capture(repo, "b1", "u", captures=1, mints=10, paths=("x.jpg",))
+
+    def test_refused_capture_claims_nothing(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        _capture(repo, "b1", "u", captures=1)
+        with pytest.raises(CaptureLimitError):
+            _capture(repo, "b2", "u", captures=1)
+        assert repo.get_user_id("b2") is None
+
+    def test_day_roll_resets_captures(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        _capture(repo, "b1", "u", captures=1, now=_NOW)
+        next_day = datetime(2026, 8, 8, 0, 0, 1, tzinfo=timezone.utc)
+        assert len(_capture(repo, "b2", "u", captures=1, now=next_day)) == 1
+
+    def test_ceiling_is_per_uid(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        _capture(repo, "b1", "user-a", captures=1)
+        assert len(_capture(repo, "b2", "user-b", captures=1)) == 1
+
+    def test_none_ceiling_is_unlimited(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        for i in range(5):
+            manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 128}]
+            repo.create_or_get(f"b{i}", "u", manifest, None,
+                               mint_uri_fn=_fake_mint, bucket="bkt")
+
+    def test_both_counters_share_one_day_roll(self) -> None:
+        repo = InMemoryUploadSessionRepository()
+        _capture(repo, "b1", "u", captures=5, mints=5)
+        next_day = datetime(2026, 8, 8, 0, 0, 1, tzinfo=timezone.utc)
+        for i in range(5):
+            _capture(repo, f"n{i}", "u", captures=5, mints=5, now=next_day)
+        with pytest.raises(CaptureLimitError):
+            _capture(repo, "n9", "u", captures=5, mints=5, now=next_day)
 
 
 # ---------------------------------------------------------------------------
