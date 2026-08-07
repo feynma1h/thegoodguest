@@ -5,10 +5,16 @@ Covers:
   - JWT is verified; invalid token → 401
   - bundle_id must be UUIDv4; non-UUID → 400 invalid_bundle_id
   - Manifest path validation: empty, leading slash, gs://, .. traversal → 400
+  - Semantic manifest validation (gaps c + F3): missing/zero/oversized
+    expected_size_bytes, unknown directory/extension, nesting, duplicates,
+    and the exactly-one-bundle.pb rule → 400 invalid_manifest
   - Empty manifest → 400 manifest_empty
   - Idempotency: repeated call with same manifest paths returns stored URIs
   - New manifest (different paths) replaces stored URIs
   - 403 when JWT uid does not match the stored user_id for the bundle_id
+    (atomic claim inside the repository, gap a)
+  - 429 rate_limited with resets_at + Retry-After at the per-UID daily mint
+    quota (gap b); idempotent replays never consume quota
   - fcm_token stored and retrievable from the upload session record
 
 NullTokenVerifier is used for all tests (accepts "test-uid:<uid>" tokens).
@@ -94,7 +100,10 @@ class TestUploadSessionHappyPath:
 
     def test_session_uris_are_non_empty_strings(self, client: TestClient) -> None:
         bundle_id = _make_bundle_id()
-        manifest = [{"relative_path": "frames/000000.jpg", "expected_size_bytes": 100}]
+        manifest = [
+            {"relative_path": "frames/000000.jpg", "expected_size_bytes": 100},
+            {"relative_path": "bundle.pb", "expected_size_bytes": 64},
+        ]
         resp, _ = _post_upload_session(client, bundle_id, manifest)
         assert resp.status_code == 200
         for entry in resp.json():
@@ -277,8 +286,14 @@ class TestUploadSessionIdempotency:
 
     def test_different_manifest_paths_replaces_session(self, client: TestClient) -> None:
         bundle_id = _make_bundle_id()
-        manifest_a = [{"relative_path": "frames/000000.jpg", "expected_size_bytes": 512}]
-        manifest_b = [{"relative_path": "frames/000001.jpg", "expected_size_bytes": 512}]
+        manifest_a = [
+            {"relative_path": "frames/000000.jpg", "expected_size_bytes": 512},
+            {"relative_path": "bundle.pb", "expected_size_bytes": 128},
+        ]
+        manifest_b = [
+            {"relative_path": "frames/000001.jpg", "expected_size_bytes": 512},
+            {"relative_path": "bundle.pb", "expected_size_bytes": 128},
+        ]
         repo = InMemoryUploadSessionRepository()
 
         resp1, _ = _post_upload_session(client, bundle_id, manifest_a, upload_repo=repo)
@@ -287,5 +302,161 @@ class TestUploadSessionIdempotency:
         assert resp2.status_code == 200
         paths1 = {e["relative_path"] for e in resp1.json()}
         paths2 = {e["relative_path"] for e in resp2.json()}
-        assert paths1 == {"frames/000000.jpg"}
-        assert paths2 == {"frames/000001.jpg"}
+        assert paths1 == {"frames/000000.jpg", "bundle.pb"}
+        assert paths2 == {"frames/000001.jpg", "bundle.pb"}
+
+
+# ---------------------------------------------------------------------------
+# Semantic manifest validation (gaps c + F3)
+# ---------------------------------------------------------------------------
+
+class TestUploadSessionSemanticValidation:
+    def _post(self, client: TestClient, manifest: list[dict]):
+        with (
+            patch.object(server, "_token_verifier", NullTokenVerifier()),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+        ):
+            return client.post(
+                f"/captures/{_make_bundle_id()}/upload_session",
+                json={"manifest": manifest},
+                headers={"Authorization": _auth_header()},
+            )
+
+    def test_missing_expected_size_returns_400(self, client: TestClient) -> None:
+        resp = self._post(client, [{"relative_path": "bundle.pb"}])
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error"] == "invalid_manifest"
+        assert "expected_size_bytes" in body["detail"]
+
+    def test_zero_expected_size_returns_400(self, client: TestClient) -> None:
+        resp = self._post(
+            client, [{"relative_path": "bundle.pb", "expected_size_bytes": 0}]
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "invalid_manifest"
+
+    def test_non_integer_expected_size_returns_400(self, client: TestClient) -> None:
+        resp = self._post(
+            client, [{"relative_path": "bundle.pb", "expected_size_bytes": "big"}]
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "invalid_manifest"
+
+    def test_unknown_directory_returns_400(self, client: TestClient) -> None:
+        resp = self._post(client, [
+            {"relative_path": "exfil/data.jpg", "expected_size_bytes": 100},
+            {"relative_path": "bundle.pb", "expected_size_bytes": 64},
+        ])
+        assert resp.status_code == 400
+        assert "exfil" in resp.json()["detail"]
+
+    def test_unknown_extension_returns_400(self, client: TestClient) -> None:
+        resp = self._post(client, [
+            {"relative_path": "frames/000000.exe", "expected_size_bytes": 100},
+            {"relative_path": "bundle.pb", "expected_size_bytes": 64},
+        ])
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "invalid_manifest"
+
+    def test_nested_path_returns_400(self, client: TestClient) -> None:
+        resp = self._post(client, [
+            {"relative_path": "frames/deep/000000.jpg", "expected_size_bytes": 100},
+            {"relative_path": "bundle.pb", "expected_size_bytes": 64},
+        ])
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "invalid_manifest"
+
+    def test_duplicate_path_returns_400(self, client: TestClient) -> None:
+        resp = self._post(client, [
+            {"relative_path": "frames/000000.jpg", "expected_size_bytes": 100},
+            {"relative_path": "frames/000000.jpg", "expected_size_bytes": 100},
+            {"relative_path": "bundle.pb", "expected_size_bytes": 64},
+        ])
+        assert resp.status_code == 400
+        assert "duplicate" in resp.json()["detail"]
+
+    def test_manifest_without_bundle_pb_returns_400(self, client: TestClient) -> None:
+        resp = self._post(
+            client, [{"relative_path": "frames/000000.jpg", "expected_size_bytes": 100}]
+        )
+        assert resp.status_code == 400
+        assert "bundle.pb" in resp.json()["detail"]
+
+    def test_full_real_shape_manifest_accepted(self, client: TestClient) -> None:
+        # The exact path shapes every deployed client emits (iOS
+        # ManifestBuilder + the api-core fixture builder) must all pass.
+        manifest = [
+            {"relative_path": "frames/000000.jpg", "expected_size_bytes": 350_000},
+            {"relative_path": "depth/000000.f32", "expected_size_bytes": 196_608},
+            {"relative_path": "confidence/000000.png", "expected_size_bytes": 12_288},
+            {"relative_path": "roomplan/room.json", "expected_size_bytes": 81_900},
+            {"relative_path": "roomplan/room.usdz", "expected_size_bytes": 4_200_000},
+            {"relative_path": "bundle.pb", "expected_size_bytes": 517_000},
+        ]
+        resp = self._post(client, manifest)
+        assert resp.status_code == 200
+        assert len(resp.json()) == len(manifest)
+
+
+# ---------------------------------------------------------------------------
+# Per-UID rate limit (gap b)
+# ---------------------------------------------------------------------------
+
+class TestUploadSessionRateLimit:
+    def test_over_quota_returns_429_with_resets_at(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(server, "UPLOAD_DAILY_MINTS", 2)
+        repo = InMemoryUploadSessionRepository()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 64}]
+
+        for _ in range(2):
+            resp, _ = _post_upload_session(
+                client, _make_bundle_id(), manifest, uid="user-q", upload_repo=repo
+            )
+            assert resp.status_code == 200
+
+        resp, _ = _post_upload_session(
+            client, _make_bundle_id(), manifest, uid="user-q", upload_repo=repo
+        )
+        assert resp.status_code == 429
+        body = resp.json()
+        assert body["error"] == "rate_limited"
+        assert "resets_at" in body
+        assert int(resp.headers["Retry-After"]) >= 1
+
+    def test_replay_does_not_consume_quota(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        # One mint at quota 1, then unlimited replays of the same manifest —
+        # the timed-out-POST retry path must never be rate-limited.
+        monkeypatch.setattr(server, "UPLOAD_DAILY_MINTS", 1)
+        repo = InMemoryUploadSessionRepository()
+        bundle_id = _make_bundle_id()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 64}]
+
+        first, _ = _post_upload_session(
+            client, bundle_id, manifest, uid="user-r", upload_repo=repo
+        )
+        assert first.status_code == 200
+        for _ in range(3):
+            replay, _ = _post_upload_session(
+                client, bundle_id, manifest, uid="user-r", upload_repo=repo
+            )
+            assert replay.status_code == 200
+            assert replay.json() == first.json()
+
+    def test_quota_is_per_uid(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setattr(server, "UPLOAD_DAILY_MINTS", 1)
+        repo = InMemoryUploadSessionRepository()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 64}]
+
+        resp_a, _ = _post_upload_session(
+            client, _make_bundle_id(), manifest, uid="user-a", upload_repo=repo
+        )
+        resp_b, _ = _post_upload_session(
+            client, _make_bundle_id(), manifest, uid="user-b", upload_repo=repo
+        )
+        assert resp_a.status_code == 200
+        assert resp_b.status_code == 200
