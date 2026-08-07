@@ -66,6 +66,18 @@ interface SplatViewerProps {
   reveal?: boolean;
   onRevealStep?: (index: number, label: string) => void;
   onRevealDone?: () => void;
+  /** Dev-workbench badges (RP-8 walk): short texts floated at world
+   * positions — wall letters and template piece numbers. Renderer-agnostic
+   * input like everything else here; null/absent renders nothing. */
+  labels?: ViewerLabel[] | null;
+}
+
+/** One floating badge: 1–2 chars at a world position. kind picks color
+ * (box = orange, tail = blue, wall = brown). */
+export interface ViewerLabel {
+  text: string;
+  position: [number, number, number];
+  kind?: "box" | "tail" | "wall";
 }
 
 /** Async-only load outcome, stamped with the splat-set key it belongs to.
@@ -151,6 +163,7 @@ export default function SplatViewer({
   reveal = false,
   onRevealStep,
   onRevealDone,
+  labels = null,
 }: SplatViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const key = useMemo(
@@ -383,6 +396,51 @@ export default function SplatViewer({
           return mesh;
         });
 
+        // Dev walk badges: always-on-top sprites, one per label. Canvas
+        // circle + text, no external assets (CSP holds).
+        const labelSprites: Array<{
+          sprite: InstanceType<typeof THREE.Sprite>;
+          dispose: () => void;
+        }> = [];
+        for (const l of labels ?? []) {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 128;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) continue;
+          const bg =
+            l.kind === "wall" ? "#6b5d49" : l.kind === "tail" ? "#3d6b8e" : "#c66a4a";
+          ctx.beginPath();
+          ctx.arc(64, 64, 55, 0, Math.PI * 2);
+          ctx.fillStyle = bg;
+          ctx.fill();
+          ctx.lineWidth = 7;
+          ctx.strokeStyle = "#faf6ee";
+          ctx.stroke();
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "700 58px ui-monospace, Menlo, monospace";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(l.text, 64, 68);
+          const tex = new THREE.CanvasTexture(canvas);
+          const mat = new THREE.SpriteMaterial({
+            map: tex,
+            depthTest: false,
+            transparent: true,
+          });
+          const sprite = new THREE.Sprite(mat);
+          sprite.position.set(...l.position);
+          sprite.scale.setScalar(l.kind === "wall" ? 0.42 : 0.3);
+          sprite.renderOrder = 999;
+          scene.add(sprite);
+          labelSprites.push({
+            sprite,
+            dispose: () => {
+              tex.dispose();
+              mat.dispose();
+            },
+          });
+        }
+
         // --- Framing: fit the camera to the content, not the content to a
         // hardcoded camera. Object extents aren't known until meshes load,
         // so the radius is estimated from placements (position spread +
@@ -599,6 +657,10 @@ export default function SplatViewer({
             scene.remove(m);
             m.dispose?.();
           }
+          for (const { sprite, dispose } of labelSprites) {
+            scene.remove(sprite);
+            dispose();
+          }
           for (const { mesh, extras } of shellMeshes) {
             for (const extra of extras) {
               scene.remove(extra);
@@ -630,7 +692,7 @@ export default function SplatViewer({
       disposed = true;
       cleanup?.();
     };
-  }, [key, splats, shell, idleOrbit, reveal]);
+  }, [key, splats, shell, idleOrbit, reveal, labels]);
 
   return (
     <div
