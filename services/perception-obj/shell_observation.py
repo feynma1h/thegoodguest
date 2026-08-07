@@ -27,6 +27,17 @@ Outputs per plane (all in-memory; NOTHING is written to GCS):
     median observed color and accounted in fill_fraction; a tile below
     SHELL_EVIDENCE_MIN_OBS observation is never a crop.
 
+Privacy (decision 0089): a frame's suppressed mask — people — arrives inside
+exclusion_mask, so suppressed pixels are already unsampleable and can never
+reach an albedo. It arrives a SECOND time as FrameSample.suppressed_mask,
+because a crop is evidence sent to a vision model and "those pixels were
+unobserved and filled with the median color" is not good enough there: a tile
+a person stood in is disqualified for that frame outright, and the tile falls
+back to a person-free frame or produces no crop at all. Fewer crops degrade
+through shell_material's existing gates (no crops → family None), and a plane
+whose person-free evidence falls under the texel gate degrades to albedo None
+— the honest neutral. Nothing new was built to make that happen.
+
 Camera model: exact inverse of placement_math.unproject_depth — ARKit
 camera looks down -Z, u = cx + fx*x/(-z), v = cy - fy*y/(-z). World→camera
 uses the Pose contract (world_from_camera) inverted.
@@ -85,6 +96,13 @@ class FrameSample:
     exclusion_mask is the union of the frame's SAM 3 object masks at RGB
     resolution (True = never sample here). pose/intrinsics are the frame's
     proto messages from the bundle.
+
+    suppressed_mask (decision 0089) is the privacy-suppressed subset of that
+    union — people. It is ALREADY inside exclusion_mask, so it changes nothing
+    about sampling; it travels separately because an evidence crop must be
+    rejected outright when a person stood in that tile, which "those pixels
+    were unobserved" does not accomplish. None = nothing suppressed in this
+    frame (and every masks.npz written before 0089).
     """
 
     frame_index: int
@@ -92,6 +110,7 @@ class FrameSample:
     exclusion_mask: np.ndarray  # (H, W) bool
     pose: object  # roomstudio_schemas.Pose (world_from_camera)
     intrinsics: object  # roomstudio_schemas.Intrinsics
+    suppressed_mask: np.ndarray | None = None  # (H, W) bool
 
 
 @dataclass
@@ -118,6 +137,7 @@ class ObservationResult:
     in_region_count: int  # texels in the plane's measured region
     frames_used: int  # frames contributing >= 1 valid sample
     grid_px: tuple[int, int]  # (width, height) of the texel grid
+    suppressed_texels: int = 0  # in-region texels a person covered in >=1 frame
     colors: np.ndarray = field(repr=False, default=None)  # (N_obs, 3) f32
     weights: np.ndarray = field(repr=False, default=None)  # (N_obs,) f32
     crops: list[EvidenceCrop] = field(default_factory=list)
@@ -181,16 +201,24 @@ def _sample_frame(
     points_world: np.ndarray,
     plane_normal: np.ndarray,
     frame: FrameSample,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Project texel centers into one frame.
 
     Returns (colors (N, 3) float32, weights (N,) float32, luminance (N,)
-    float32); weight 0 marks an invalid sample (behind camera, outside the
-    image, masked, grazing, or viewing the plane's back face).
+    float32, suppressed (N,) bool); weight 0 marks an invalid sample (behind
+    camera, outside the image, masked, grazing, or viewing the plane's back
+    face).
+
+    `suppressed` marks points that project onto this frame's privacy-suppressed
+    pixels (decision 0089). Those points are also weight-0 — the suppressed
+    mask is inside exclusion_mask — so the flag adds no sampling behaviour; it
+    tells the caller a person occupied that part of the plane in this frame,
+    which is what disqualifies the region as evidence.
     """
     n_pts = len(points_world)
     colors = np.zeros((n_pts, 3), dtype=np.float32)
     weights = np.zeros(n_pts, dtype=np.float32)
+    suppressed = np.zeros(n_pts, dtype=bool)
 
     R = quat_to_rotmat(pose_quat(frame.pose))
     cam_pos = pose_position(frame.pose)
@@ -210,7 +238,7 @@ def _sample_frame(
     valid &= cos_inc > _MIN_COS_INCIDENCE
 
     if not np.any(valid):
-        return colors, weights, np.zeros(n_pts, dtype=np.float32)
+        return colors, weights, np.zeros(n_pts, dtype=np.float32), suppressed
 
     intr = frame.intrinsics
     u = np.zeros(n_pts)
@@ -222,7 +250,7 @@ def _sample_frame(
     # Bilinear neighborhood must be fully inside the image.
     valid &= (u >= 0) & (u <= img_w - 1.001) & (v >= 0) & (v <= img_h - 1.001)
     if not np.any(valid):
-        return colors, weights, np.zeros(n_pts, dtype=np.float32)
+        return colors, weights, np.zeros(n_pts, dtype=np.float32), suppressed
 
     ui = np.floor(u[valid]).astype(np.int64)
     vi = np.floor(v[valid]).astype(np.int64)
@@ -234,6 +262,16 @@ def _sample_frame(
     m = frame.exclusion_mask
     excluded = m[vi, ui] | m[vi, ui + 1] | m[vi + 1, ui] | m[vi + 1, ui + 1]
     keep = ~excluded
+
+    # Suppression flag, evaluated over the SAME neighborhood before the keep
+    # filter — a suppressed sample is by construction an excluded one, so it
+    # would be invisible afterwards.
+    sup_mask = frame.suppressed_mask
+    if sup_mask is not None:
+        suppressed[np.nonzero(valid)[0]] = (
+            sup_mask[vi, ui] | sup_mask[vi, ui + 1]
+            | sup_mask[vi + 1, ui] | sup_mask[vi + 1, ui + 1]
+        )
 
     idx = np.nonzero(valid)[0][keep]
     ui, vi, fu, fv = ui[keep], vi[keep], fu[keep], fv[keep]
@@ -253,7 +291,7 @@ def _sample_frame(
     lum = (
         0.2126 * colors[:, 0] + 0.7152 * colors[:, 1] + 0.0722 * colors[:, 2]
     ).astype(np.float32)
-    return colors, weights, lum
+    return colors, weights, lum, suppressed
 
 
 def _weighted_median_select(
@@ -301,7 +339,14 @@ def _rectify_crop(
     """Re-sample one frame over a fine grid on the plane tile
     [u0,u1]x[v0,v1] (meters in the plane frame). Returns None when the
     frame observes none of it (cannot happen for tiles chosen from that
-    frame's weights, guarded anyway)."""
+    frame's weights, guarded anyway), or when ANY of the crop's pixels fall
+    on privacy-suppressed content in this frame (decision 0089).
+
+    The suppression check lives here, at crop resolution (~2.5 mm/px), rather
+    than on the ~2 cm texel grid the caller ranks tiles with: this is the
+    surface that is actually sent to the material-inference model, so this is
+    where "no person pixel ever reaches a crop" has to be true. The caller
+    treats None as "try the next-best frame for this tile"."""
     p = SHELL_EVIDENCE_CROP_PX
     us = (np.arange(p) + 0.5) * (u1 - u0) / p + u0
     vs = (np.arange(p) + 0.5) * (v1 - v0) / p + v0
@@ -311,7 +356,9 @@ def _rectify_crop(
         + uu.ravel()[:, None] * geom.axis_u[None, :]
         + vv.ravel()[:, None] * geom.axis_v[None, :]
     )
-    colors, weights, _ = _sample_frame(pts, geom.normal, frame)
+    colors, weights, _, suppressed = _sample_frame(pts, geom.normal, frame)
+    if np.any(suppressed):
+        return None  # a person occupied this tile in this frame
     observed = weights > 0
     if member_polygons:
         observed &= _region_mask(pts, member_polygons)
@@ -362,6 +409,7 @@ def observe_plane(
     total_weight = np.zeros((h_px, w_px), dtype=np.float32)
     observed = np.zeros((h_px, w_px), dtype=bool)
     in_region = np.ones((h_px, w_px), dtype=bool)
+    suppressed_any = np.zeros((h_px, w_px), dtype=bool)
     frame_any = np.zeros(n_frames, dtype=bool)
 
     # Evidence tiling: disjoint tiles of ~SHELL_EVIDENCE_CROP_M, aligned to
@@ -371,6 +419,9 @@ def observe_plane(
     n_tc = (w_px + tile_w_px - 1) // tile_w_px
     n_tr = (h_px + tile_h_px - 1) // tile_h_px
     tile_frame_weight = np.zeros((n_frames, n_tr, n_tc), dtype=np.float64)
+    # Per (frame, tile): how many texels a suppressed pixel covered. Non-zero
+    # disqualifies that frame as the tile's evidence source (0089).
+    tile_frame_sup = np.zeros((n_frames, n_tr, n_tc), dtype=np.int64)
     tile_obs = np.zeros((n_tr, n_tc), dtype=np.int64)
     tile_count = np.zeros((n_tr, n_tc), dtype=np.int64)
 
@@ -408,15 +459,22 @@ def observe_plane(
         band_weights = np.zeros((n_frames, len(pts)), dtype=np.float32)
         band_lums = np.zeros((n_frames, len(pts)), dtype=np.float32)
         for fi, frame in enumerate(frames):
-            band_colors[fi], band_weights[fi], band_lums[fi] = _sample_frame(
-                pts, geom.normal, frame
-            )
+            (
+                band_colors[fi], band_weights[fi], band_lums[fi], band_sup
+            ) = _sample_frame(pts, geom.normal, frame)
             frame_any[fi] |= bool(np.any(band_weights[fi] > 0))
             tile_frame_weight[fi].ravel()[:] += np.bincount(
                 band_tiles,
                 weights=band_weights[fi].astype(np.float64),
                 minlength=n_tr * n_tc,
             )
+            if band_sup.any():
+                tile_frame_sup[fi].ravel()[:] += np.bincount(
+                    band_tiles[band_sup], minlength=n_tr * n_tc
+                )
+                suppressed_any[rows[0]: rows[-1] + 1, :] |= band_sup.reshape(
+                    len(rows), w_px
+                )
 
         sel, obs = _weighted_median_select(band_colors, band_weights, band_lums)
         band_slice = slice(rows[0], rows[-1] + 1)
@@ -450,7 +508,6 @@ def observe_plane(
             tr, tc = divmod(int(flat), n_tc)
             if tile_frac[tr, tc] < SHELL_EVIDENCE_MIN_OBS or tile_total[tr, tc] <= 0:
                 continue
-            best_frame = int(np.argmax(tile_frame_weight[:, tr, tc]))
             u0 = tc * tile_w_px * step_u
             v0 = tr * tile_h_px * step_v
             u1 = min(w_px, (tc + 1) * tile_w_px) * step_u
@@ -460,12 +517,24 @@ def observe_plane(
             side = min(u1 - u0, v1 - v0)
             if side < _MIN_CROP_SIDE_M:
                 continue
-            crop = _rectify_crop(
-                geom, frames[best_frame], u0, v0, u0 + side, v0 + side,
-                floor_member_polygons if geom.kind == "floor" else None,
-            )
-            if crop is not None:
-                crops.append(crop)
+            # Candidate frames for this tile, best-observing first, with
+            # frames that saw a person here dropped (0089). With nothing
+            # suppressed this is [argmax] followed by the also-rans, so the
+            # first attempt is the pre-0089 choice and the fallbacks only
+            # ever run in the guarded "frame observes none of it" case.
+            order_f = np.argsort(-tile_frame_weight[:, tr, tc], kind="stable")
+            candidates = [
+                int(fi) for fi in order_f
+                if tile_frame_weight[fi, tr, tc] > 0 and tile_frame_sup[fi, tr, tc] == 0
+            ]
+            for fi in candidates:
+                crop = _rectify_crop(
+                    geom, frames[fi], u0, v0, u0 + side, v0 + side,
+                    floor_member_polygons if geom.kind == "floor" else None,
+                )
+                if crop is not None:
+                    crops.append(crop)
+                    break
 
     return ObservationResult(
         observed_fraction=round(observed_fraction, 4),
@@ -473,6 +542,7 @@ def observe_plane(
         in_region_count=in_count,
         frames_used=int(frame_any.sum()),
         grid_px=(w_px, h_px),
+        suppressed_texels=int((suppressed_any & in_region).sum()),
         colors=sel_colors[observed_in].reshape(-1, 3),
         weights=total_weight[observed_in].ravel(),
         crops=crops,

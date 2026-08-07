@@ -62,7 +62,6 @@ from typing import Any, Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-
 from roomstudio_schemas import CaptureBundle
 
 logger = logging.getLogger(__name__)
@@ -627,11 +626,22 @@ def _process_frame(
     except Exception as exc:
         raise PoisonError(f"Frame {frame_idx} image cannot be opened: {exc}") from exc
 
-    # SAM 3 segmentation.
+    # SAM 3 segmentation. Suppressed concepts (decision 0089) ride the same
+    # pass and are partitioned straight back out: they exist only to build the
+    # exclusion union the shell reads, and must never reach reconstruction.
+    from privacy import masks_npz_bytes, partition_detections, segmentation_prompt
+
     try:
-        detections = sam3_model.segment(pil, object_prompt)
+        detections = sam3_model.segment(pil, segmentation_prompt(object_prompt))
     except Exception as exc:
         raise EnvironmentalError(f"SAM 3 failed on frame {frame_idx}: {exc}") from exc
+    detections, suppressed = partition_detections(detections)
+    if suppressed:
+        logger.info(
+            "privacy: frame %d scene %s suppressed=%d labels=%s",
+            frame_idx, scene_id, len(suppressed),
+            sorted({d["label"] for d in suppressed}),
+        )
 
     # LiDAR depth payload for this frame; (None, None, None) on ARKIT_ONLY
     # frames or when the caller provided no Frame proto.
@@ -680,16 +690,10 @@ def _process_frame(
             "budget_stopped": True,
         }
 
-    # Upload masks.npz.
-    import numpy as np  # deferred: heavy dep, only needed during actual processing
-    masks_buf = io.BytesIO()
-    if detections:
-        np.savez_compressed(masks_buf, masks=np.stack([d["mask"] for d in detections]))
-    else:
-        np.savez_compressed(masks_buf, masks=np.zeros((0,), dtype=bool))
+    # Upload masks.npz (kept stack + the suppressed union, when any).
     masks_uri = _gcs_upload_for_scene(
         f"gs://{outputs_bucket}/", f"{frame_prefix}/masks.npz",
-        masks_buf.getvalue(), "application/octet-stream"
+        masks_npz_bytes(detections, suppressed), "application/octet-stream"
     )
 
     frame_result = {
@@ -1141,6 +1145,7 @@ def _run_census_two_pass(
     """
     import numpy as np  # deferred: heavy dep, only during processing
     from PIL import Image
+    from privacy import masks_npz_bytes, partition_detections, segmentation_prompt
 
     prefix = _bundle_prefix(bundle_uri)
     frames_by_idx = {f.frame_index: f for f in bundle.frames}
@@ -1188,25 +1193,27 @@ def _run_census_two_pass(
             ) from exc
 
         try:
-            detections = sam3_model.segment(pil, object_prompt)
+            detections = sam3_model.segment(pil, segmentation_prompt(object_prompt))
         except Exception as exc:
             raise EnvironmentalError(
                 f"SAM 3 failed on frame {frame_idx}: {exc}"
             ) from exc
+        # Suppressed concepts leave the pipeline here (decision 0089): only
+        # the exclusion union survives, and only inside masks.npz.
+        detections, suppressed = partition_detections(detections)
+        if suppressed:
+            logger.info(
+                "privacy: frame %d scene %s suppressed=%d labels=%s",
+                frame_idx, scene_id, len(suppressed),
+                sorted({d["label"] for d in suppressed}),
+            )
 
         # masks.npz is complete at segmentation time — write it now (the
         # shell + refinement read it; there is no masks-only cache-hit
         # path, so an early write can never short-circuit reprocessing).
-        masks_buf = io.BytesIO()
-        if detections:
-            np.savez_compressed(
-                masks_buf, masks=np.stack([d["mask"] for d in detections])
-            )
-        else:
-            np.savez_compressed(masks_buf, masks=np.zeros((0,), dtype=bool))
         masks_uri = _gcs_upload_for_scene(
             f"gs://{outputs_bucket}/", f"{frame_prefix}/masks.npz",
-            masks_buf.getvalue(), "application/octet-stream"
+            masks_npz_bytes(detections, suppressed), "application/octet-stream"
         )
 
         # Hold masks bit-packed (~8x smaller than bool) for association +
