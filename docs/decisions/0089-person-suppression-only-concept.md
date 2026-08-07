@@ -65,6 +65,27 @@ Three pins contain it:
    again. That is worse than a crash, because the pipeline keeps working. The
    build asserts the default concept is armed in the image.
 
+## What the fix itself stores, and why that is acceptable
+
+Suppression persists a person-shaped boolean mask in `masks.npz`, in the
+outputs bucket, under the `scenes/*/frames/*/masks.npz` 180-day lifecycle
+(0086) — a retained silhouette where none existed before. Weighed and
+accepted:
+
+- it is a silhouette, no pixels, strictly less identifying than the RGB frames
+  the pipeline already read (those live in captures and sweep at 1 day);
+- it is never served. api-public signs only `splat_gcs_uri` values from the
+  manifest's `objects[]`, and a person is never in `objects[]`. `masks.npz`
+  appears in the manifest only as an unsigned `gs://` provenance string;
+- the alternative — not persisting it — means every warm `/shell` re-drive
+  must re-run SAM 3 on every frame to rediscover the exclusions, turning a
+  seconds-long shell run into a GPU job. Persisting the union is what makes
+  suppression survive the cache, which is the whole point.
+
+If retention ever needs to shrink, the narrow lever is a separate, shorter
+lifecycle on the suppressed union — not on masks.npz as a whole, which the
+refinement path depends on.
+
 ## Measured, on the real capture
 
 Offline replication of f3d70236's shell reproduced every shipped albedo and
