@@ -19,7 +19,7 @@ Run from repo root:
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from receiver_repo import (
     ClaimStatus,
@@ -30,8 +30,8 @@ _SCENE_ID = "scene-abc"
 _BUNDLE_URI = "gs://bucket/captures/test/bundle.pb"
 _DEVICE_ID = "device-xyz"
 
-_future = datetime.now(tz=timezone.utc) + timedelta(hours=1)
-_past   = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+_future = datetime.now(tz=UTC) + timedelta(hours=1)
+_past   = datetime.now(tz=UTC) - timedelta(hours=1)
 
 
 # ---------------------------------------------------------------------------
@@ -54,9 +54,9 @@ class TestClaimQueued:
     def test_lease_is_written(self):
         repo = InMemoryReceiverRepository()
         repo.seed(_SCENE_ID, status="queued")
-        before = datetime.now(tz=timezone.utc)
+        before = datetime.now(tz=UTC)
         repo.claim(_SCENE_ID, lease_ttl_seconds=300)
-        after = datetime.now(tz=timezone.utc)
+        after = datetime.now(tz=UTC)
         lease = repo.get_raw(_SCENE_ID)["lease_expires_at"]
         assert lease is not None
         assert lease > before + timedelta(seconds=299)
@@ -111,7 +111,7 @@ class TestClaimProcessingStale:
     def test_lease_is_refreshed(self):
         repo = InMemoryReceiverRepository()
         repo.seed(_SCENE_ID, status="processing", lease_expires_at=_past)
-        before = datetime.now(tz=timezone.utc)
+        before = datetime.now(tz=UTC)
         repo.claim(_SCENE_ID, lease_ttl_seconds=300)
         lease = repo.get_raw(_SCENE_ID)["lease_expires_at"]
         assert lease > before
@@ -509,11 +509,11 @@ class TestFailedSceneExpiry:
     def test_release_failed_stamps_expire_at_at_the_ttl(self):
         repo = InMemoryReceiverRepository()
         repo.seed(_SCENE_ID, status="processing", lease_holder_id="w1")
-        before = datetime.now(tz=timezone.utc)
+        before = datetime.now(tz=UTC)
 
         repo.release_failed(_SCENE_ID, "boom", holder_id="w1")
 
-        after = datetime.now(tz=timezone.utc)
+        after = datetime.now(tz=UTC)
         raw = repo.get_raw(_SCENE_ID)
         assert raw["status"] == "failed"
         assert raw["expire_at"] is not None
@@ -534,7 +534,7 @@ class TestFailedSceneExpiry:
         repo = InMemoryReceiverRepository()
         repo.seed(
             _SCENE_ID, status="processing", lease_holder_id="w1",
-            expire_at=datetime.now(tz=timezone.utc) + timedelta(days=90),
+            expire_at=datetime.now(tz=UTC) + timedelta(days=90),
         )
 
         repo.release_queued(_SCENE_ID, holder_id="w1")
@@ -569,7 +569,7 @@ class TestFailedSceneExpiry:
         monkeypatch.setenv("SCENES_FAILED_TTL_DAYS", "7")
         repo = InMemoryReceiverRepository()
         repo.seed(_SCENE_ID, status="processing", lease_holder_id="w1")
-        before = datetime.now(tz=timezone.utc)
+        before = datetime.now(tz=UTC)
 
         repo.release_failed(_SCENE_ID, "boom", holder_id="w1")
 
