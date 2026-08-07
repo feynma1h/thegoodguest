@@ -477,6 +477,11 @@ struct RootFlowView: View {
 
     private func sendItHome() {
         stage = .sent
+        #if DEBUG
+        // Staging (failed_invalid): corrupt a frame IN PLACE, same byte length,
+        // before the manifest reads sizes off disk. No-op unless the flag is set.
+        StagingHooks.applyPreSendSabotage(outputDir: capture.bundleOutputDir)
+        #endif
         // Drop the previous capture's poll + session state SYNCHRONOUSLY, before the
         // Task. beginUploadSession only writes pollState at its very end (after
         // sign-in + manifest + POST), so without this reset postSend would render
@@ -500,6 +505,11 @@ struct RootFlowView: View {
         // ~a minute, and leaving in that window previously left the capture invisible
         // on every surface (no re-entry row, no banner, no record to scan).
         sentBundleId = bundleId
+        // Declare the flight to the poller (after reset(), which cleared the prior
+        // expectation): a PREVIOUS capture's resumed upload completing mid-flight
+        // must not start polling the old bundle and flash its doorway over this
+        // capture's wait. See ScenePoller.expectedBundleId.
+        ScenePoller.shared.expectBundle(bundleId)
         sendGeneration &+= 1
         let generation = sendGeneration
         Task {
@@ -597,11 +607,23 @@ struct RootFlowView: View {
     /// for a bundle that will never arrive — and re-entering showed a permanent
     /// "Sending your room" for it.
     private func endFlight() {
+        // Reclaim decision BEFORE clearing (clearFlight resets the poller, which
+        // would blank the screen this decision reads). Keyed on the screen the
+        // user is LEAVING — the terminal outcome they have actually seen
+        // (decision 0084; table in CaptureReclaim). incompleteUpload retains its
+        // files for the future re-upload coordinator by that same table.
+        let leavingScreen = waitScreen
         // Acknowledge BEFORE clearing: this is the one place that knows the user is
-        // done with this bundle, and the record outlives the app (a `.complete`
-        // record is never deleted), so without a persisted note the launch restore
-        // re-adopts it forever.
-        if let sentBundleId { DismissedBundles().acknowledge(sentBundleId) }
+        // done with this bundle, and the record can outlive the app (an
+        // unreclaimed record would otherwise be re-adopted by the launch restore
+        // forever).
+        if let sentBundleId {
+            DismissedBundles().acknowledge(sentBundleId)
+            if CaptureReclaim.reclaimsAtFlightEnd(leavingScreen) {
+                let bundleId = sentBundleId
+                Task { await CaptureReaper.shared.reclaim(bundleId: bundleId) }
+            }
+        }
         clearFlight()
         stage = .home
     }

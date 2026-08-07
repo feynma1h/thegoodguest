@@ -42,6 +42,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     ) {
         guard identifier == BlobUploadManager.backgroundSessionIdentifier else { return }
         logger.info("[AppDelegate] OS relaunch for background URLSession: \(identifier, privacy: .public)")
+        #if DEBUG
+        StagingHooks.breadcrumb("appdelegate-handleEvents \(identifier)")
+        #endif
         // Apple requires the system-provided completionHandler to be called on the main queue.
         // Wrap before storing so drainBackgroundSessionEvents can invoke it directly.
         let mainQueueHandler: () -> Void = {
