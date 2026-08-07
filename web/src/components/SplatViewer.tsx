@@ -19,13 +19,20 @@
  * disc, bounded orbit, and a short dolly-in on arrival. Spark's splat
  * shaders ignore three.js fog, so all depth falloff here is texture/CSS.
  *
- * Reveal (design §4 + decision 0066): with `reveal`, the shell arrives
- * first — floor, then walls, the stage standing up — and then objects
- * one at a time, largest first, each dropping softly into place;
- * `onRevealStep` fires as each object arrives (the DOM layer names it)
- * and `onRevealDone` when the room is assembled. Without a shell the
- * objects assemble on the honest grid, as before. Reduced motion
- * collapses everything to an immediate full room.
+ * Reveal (design §4, redesigned by decision 0097): with `reveal`, the room
+ * draws its measured boundary first — a pen tracing the floor perimeter,
+ * verticals rising at the corners, the top edge closing the box — then the
+ * surfaces MATERIALIZE IN PLACE inside it (fade only; nothing translates),
+ * then the pieces settle, easing down a few centimetres on a curve that
+ * starts and ends at rest. `onRevealStep` fires for the pieces the guest
+ * introduces by name, `onRevealCaptionsDone` when the last name should
+ * leave, and `onRevealDone` after a beat of quiet. Without a shell the
+ * pieces settle on the honest grid. Reduced motion collapses to an
+ * immediate full room with no captions.
+ *
+ * This file PLAYS the choreography; lib/reveal DECIDES it — every cue's
+ * timing, ordering and naming is a pure function there, pinned by tests,
+ * because the pacing cannot be judged in a throttled automation browser.
  *
  * Shell rendering (decisions 0069/0077): single-sided PARAMETRIC
  * surfaces — MeshStandardMaterial built from each plane's measured albedo
@@ -46,6 +53,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PositionedSplat, ShellPlane } from "@/lib/api/types";
+import {
+  SETTLE_DROP_M,
+  SETTLE_FADE_FRACTION,
+  pathLengths,
+  pathPointAt,
+  planReveal,
+  settleEase,
+  windowProgress,
+} from "@/lib/reveal";
 import { openingRect, projectToWallPlane, wallFrame } from "@/lib/shell3d";
 
 interface SplatViewerProps {
@@ -62,9 +78,14 @@ interface SplatViewerProps {
   idleOrbit?: boolean;
   /** Full-bleed stage: no rounded frame, no hairline (immersive room). */
   frameless?: boolean;
-  /** Play the objects-first assembly on load. */
+  /** Play the reveal on load (decision 0097). */
   reveal?: boolean;
+  /** Fires for each piece the guest introduces by name — the leading few,
+   * not every arrival (the tail flows in unnamed). */
   onRevealStep?: (index: number, label: string) => void;
+  /** The last name has had its dwell; the DOM should clear the caption
+   * while the remaining pieces flow in. */
+  onRevealCaptionsDone?: () => void;
   onRevealDone?: () => void;
   /** Dev-workbench badges (RP-8 walk): short texts floated at world
    * positions — wall letters and template piece numbers. Renderer-agnostic
@@ -132,17 +153,20 @@ function makeGroundTexture(): HTMLCanvasElement {
 
 const GROUND_SIZE = 16; // meters; also the grid line count (1m spacing)
 
-// Assembly timing: object i starts at REVEAL_LEAD + i*REVEAL_STEP and
-// settles over REVEAL_DROP_MS from REVEAL_DROP_M above its place.
-const REVEAL_LEAD_MS = 500;
-const REVEAL_STEP_MS = 650;
-const REVEAL_DROP_MS = 700;
-const REVEAL_DROP_M = 0.4;
-// Shell staging (0066: the shell is the stage — floor, then walls, then
-// the objects): floor appears at REVEAL_LEAD, each wall SHELL_WALL_STEP
-// later, and the object assembly starts a beat after the last wall.
-const SHELL_FLOOR_MS = 600;
-const SHELL_WALL_STEP_MS = 350;
+/* Reveal look (decision 0097; all timing lives in lib/reveal). The contour
+ * is the MEASUREMENT — drawn in the paper tone, not gold, which the design
+ * system reserves for light semantics. The floor's own perimeter reads
+ * brightest because it is the room's real footprint; the verticals and the
+ * top edge are its extent, and stay quieter. */
+const CONTOUR_COLOR = 0xf7efdf;
+const CONTOUR_FLOOR_OPACITY = 0.62;
+const CONTOUR_EDGE_OPACITY = 0.32;
+const CONTOUR_DOT_COLOR = 0xfff6e6;
+/** The pen: a few dots riding at and just behind the drawing tip. */
+const CONTOUR_DOT_COUNT = 3;
+/** Dot spacing behind the tip, as a fraction of the perimeter. */
+const CONTOUR_DOT_SPACING = 0.035;
+const CONTOUR_DOT_SIZE_PX = 5;
 
 /** Unobserved planes (albedo null) get a flat warm neutral — a surface
  * honestly present but never measured; nothing fake renders. */
@@ -162,6 +186,7 @@ export default function SplatViewer({
   frameless = false,
   reveal = false,
   onRevealStep,
+  onRevealCaptionsDone,
   onRevealDone,
   labels = null,
 }: SplatViewerProps) {
@@ -180,11 +205,20 @@ export default function SplatViewer({
   // Callback identity must not restart the renderer; refs are written
   // after commit (never during render) and read at call time.
   const revealStepRef = useRef(onRevealStep);
+  const revealCaptionsDoneRef = useRef(onRevealCaptionsDone);
   const revealDoneRef = useRef(onRevealDone);
   useEffect(() => {
     revealStepRef.current = onRevealStep;
+    revealCaptionsDoneRef.current = onRevealCaptionsDone;
     revealDoneRef.current = onRevealDone;
   });
+
+  // `reveal` is read ONCE, when the renderer is built, and is deliberately
+  // not an effect dependency. The caller turns it off when the reveal ends
+  // (RoomStage moves to its settled phase); restarting the renderer there
+  // would tear down and reload the room the user just watched assemble —
+  // a blink at exactly the moment the reveal is supposed to have landed.
+  const revealRef = useRef(reveal);
 
   const hasContent = splats.length > 0 || (shell?.length ?? 0) > 0;
   const phase: "empty" | "loading" | "ready" | "error" = !hasContent
@@ -513,59 +547,224 @@ export default function SplatViewer({
         setOutcome({ key, phase: "ready" });
         renderer.domElement.style.opacity = "1";
 
-        // --- Assembly (design §4, extended by 0066): the shell is the
-        // stage — floor, then walls — then the largest pieces first, each
-        // dropped softly onto it. Reduced motion skips straight to the
-        // assembled room.
+        // --- The reveal (decision 0097). lib/reveal decides every cue;
+        // this block builds what the cues drive and the render loop plays
+        // them. Reduced motion produces an `immediate` plan — the room is
+        // simply there, and nothing pretends to have materialized.
         const reducedMotion = window.matchMedia(
           "(prefers-reduced-motion: reduce)",
         ).matches;
-        const assembling =
-          reveal && !reducedMotion && (meshes.length > 0 || shellMeshes.length > 0);
-        // Shell first: floor at the lead, each wall a step later; objects
-        // begin a beat after the last wall (or at the lead when no shell).
-        const shellOrder = [...shellMeshes].sort((a) =>
-          a.plane.kind === "floor" ? -1 : 1,
-        );
-        const shellStartAt = new Map<number, number>(); // shell idx -> start ms
-        const shellDelayMs =
-          shellMeshes.length > 0
-            ? SHELL_FLOOR_MS +
-              shellOrder.filter((s) => s.plane.kind === "wall").length *
-                SHELL_WALL_STEP_MS +
-              250
-            : 0;
-        const revealOrder = splats
-          .map((s, i) => ({ i, size: scaleMax(s.scale) }))
-          .sort((a, b) => b.size - a.size)
-          .map((entry, seq) => ({ ...entry, seq }));
-        const revealStartAt = new Map<number, number>(); // mesh idx -> start ms
-        const revealFired = new Set<number>();
+        const plan = planReveal({ shell: shellPlanes, splats, reducedMotion });
+        const assembling = revealRef.current && !plan.immediate;
+
+        // Cue lookups keyed by the index each cue addresses.
+        const surfaceCue = new Map(plan.surfaces.map((c) => [c.index, c]));
+        const objectCue = new Map(plan.objects.map((c) => [c.index, c]));
+        const firedSteps = new Set<number>();
+        let captionsDoneFired = false;
         let revealDoneFired = !assembling;
         const revealT0 = performance.now();
-        if (assembling) {
-          let wallSeq = 0;
-          shellOrder.forEach((entry) => {
-            const idx = shellMeshes.indexOf(entry);
-            const at =
-              entry.plane.kind === "floor"
-                ? revealT0 + REVEAL_LEAD_MS
-                : revealT0 +
-                  REVEAL_LEAD_MS +
-                  SHELL_FLOOR_MS +
-                  wallSeq++ * SHELL_WALL_STEP_MS;
-            shellStartAt.set(idx, at);
-            entry.mesh.visible = false;
-            for (const extra of entry.extras) extra.visible = false;
-          });
-          for (const { i, seq } of revealOrder) {
-            revealStartAt.set(
-              i,
-              revealT0 + REVEAL_LEAD_MS + shellDelayMs + seq * REVEAL_STEP_MS,
+
+        // --- Movement 1: the boundary contour. A pen traces the measured
+        // floor perimeter; verticals rise at the corners; the top edge
+        // closes the box. Plain three.js lines and points — no new
+        // dependency, no CSP surface.
+        const contourParts: Array<{
+          object: InstanceType<typeof THREE.Object3D>;
+          material: { opacity: number; dispose(): void };
+          geometry: { dispose(): void };
+          baseOpacity: number;
+        }> = [];
+        let drawContour: ((now: number) => void) | null = null;
+
+        if (assembling && plan.contour) {
+          const c = plan.contour;
+          const loopLengths = pathLengths(c.loop);
+          const perimeter = loopLengths[loopLengths.length - 1];
+
+          /** A progressively drawn polyline: complete vertices plus an
+           * exact fractional tip, so the line grows smoothly instead of
+           * stepping corner to corner. */
+          const makeTracedLine = (path: typeof c.loop, opacity: number) => {
+            const lengths = pathLengths(path);
+            const total = lengths[lengths.length - 1];
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(path.length * 3);
+            geometry.setAttribute(
+              "position",
+              new THREE.BufferAttribute(positions, 3),
             );
-            meshes[i].visible = false;
+            const material = new THREE.LineBasicMaterial({
+              color: CONTOUR_COLOR,
+              transparent: true,
+              opacity,
+              depthWrite: false,
+            });
+            const line = new THREE.Line(geometry, material);
+            line.visible = false;
+            scene.add(line);
+            contourParts.push({
+              object: line,
+              material,
+              geometry,
+              baseOpacity: opacity,
+            });
+            return (progress: number) => {
+              if (progress <= 0 || total <= 0) {
+                line.visible = false;
+                return;
+              }
+              line.visible = true;
+              const { point, segment } = pathPointAt(
+                path,
+                lengths,
+                total * progress,
+              );
+              for (let i = 0; i <= segment; i++) {
+                positions[i * 3] = path[i][0];
+                positions[i * 3 + 1] = path[i][1];
+                positions[i * 3 + 2] = path[i][2];
+              }
+              positions[(segment + 1) * 3] = point[0];
+              positions[(segment + 1) * 3 + 1] = point[1];
+              positions[(segment + 1) * 3 + 2] = point[2];
+              geometry.setDrawRange(0, segment + 2);
+              geometry.attributes.position.needsUpdate = true;
+            };
+          };
+
+          const drawFloorLoop = makeTracedLine(c.loop, CONTOUR_FLOOR_OPACITY);
+          const drawTopLoop = c.topLoop
+            ? makeTracedLine(c.topLoop, CONTOUR_EDGE_OPACITY)
+            : null;
+
+          // Risers grow together — the room standing up, not a queue.
+          let drawRisers: ((progress: number) => void) | null = null;
+          if (c.risers.length > 0) {
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(c.risers.length * 6);
+            c.risers.forEach((r, i) => {
+              positions[i * 6] = r.from[0];
+              positions[i * 6 + 1] = r.from[1];
+              positions[i * 6 + 2] = r.from[2];
+            });
+            geometry.setAttribute(
+              "position",
+              new THREE.BufferAttribute(positions, 3),
+            );
+            const material = new THREE.LineBasicMaterial({
+              color: CONTOUR_COLOR,
+              transparent: true,
+              opacity: CONTOUR_EDGE_OPACITY,
+              depthWrite: false,
+            });
+            const segs = new THREE.LineSegments(geometry, material);
+            segs.visible = false;
+            scene.add(segs);
+            contourParts.push({
+              object: segs,
+              material,
+              geometry,
+              baseOpacity: CONTOUR_EDGE_OPACITY,
+            });
+            drawRisers = (progress: number) => {
+              segs.visible = progress > 0;
+              c.risers.forEach((r, i) => {
+                positions[i * 6 + 3] = r.from[0] + (r.to[0] - r.from[0]) * progress;
+                positions[i * 6 + 4] = r.from[1] + (r.to[1] - r.from[1]) * progress;
+                positions[i * 6 + 5] = r.from[2] + (r.to[2] - r.from[2]) * progress;
+              });
+              geometry.attributes.position.needsUpdate = true;
+            };
           }
-        } else if (reveal && !disposed) {
+
+          // The pen itself: dots riding at and just behind the tip.
+          const dotGeometry = new THREE.BufferGeometry();
+          const dotPositions = new Float32Array(CONTOUR_DOT_COUNT * 3);
+          dotGeometry.setAttribute(
+            "position",
+            new THREE.BufferAttribute(dotPositions, 3),
+          );
+          const dotMaterial = new THREE.PointsMaterial({
+            color: CONTOUR_DOT_COLOR,
+            size: CONTOUR_DOT_SIZE_PX,
+            sizeAttenuation: false,
+            transparent: true,
+            opacity: 1,
+            depthWrite: false,
+          });
+          const dots = new THREE.Points(dotGeometry, dotMaterial);
+          dots.visible = false;
+          scene.add(dots);
+          contourParts.push({
+            object: dots,
+            material: dotMaterial,
+            geometry: dotGeometry,
+            baseOpacity: 1,
+          });
+
+          drawContour = (now: number) => {
+            const t = now - revealT0;
+            const loopP = settleEase(windowProgress(t, c.startMs, c.drawMs));
+            drawFloorLoop(loopP);
+            drawRisers?.(
+              settleEase(windowProgress(t, c.riserStartMs, c.riserDrawMs)),
+            );
+            drawTopLoop?.(
+              settleEase(windowProgress(t, c.topStartMs, c.topDrawMs)),
+            );
+
+            // Dots ride the tip while the perimeter draws, then retire.
+            const penning = loopP > 0 && loopP < 1;
+            dots.visible = penning;
+            if (penning) {
+              const tipS = perimeter * loopP;
+              for (let i = 0; i < CONTOUR_DOT_COUNT; i++) {
+                const { point } = pathPointAt(
+                  c.loop,
+                  loopLengths,
+                  tipS - i * CONTOUR_DOT_SPACING * perimeter,
+                );
+                dotPositions[i * 3] = point[0];
+                dotPositions[i * 3 + 1] = point[1];
+                dotPositions[i * 3 + 2] = point[2];
+              }
+              dotGeometry.attributes.position.needsUpdate = true;
+            }
+
+            // The measurement hands off to the material.
+            const fade = settleEase(windowProgress(t, c.fadeStartMs, c.fadeMs));
+            for (const part of contourParts) {
+              part.material.opacity = part.baseOpacity * (1 - fade);
+              if (fade >= 1) part.object.visible = false;
+            }
+            if (fade >= 1) drawContour = null;
+          };
+        }
+
+        // --- Movement 2: surfaces materialize in place. During the ramp
+        // the material is transparent and does NOT write depth, so a
+        // half-present surface never occludes anything; on completion it
+        // is restored to the exact configuration decision 0066's depth
+        // probe proved composites with Spark splats.
+        if (assembling) {
+          shellMeshes.forEach(({ mesh, extras }, i) => {
+            if (!surfaceCue.has(i)) return;
+            for (const o of [mesh, ...extras]) {
+              o.visible = false;
+              const m = o.material as InstanceType<
+                typeof THREE.MeshStandardMaterial
+              >;
+              m.transparent = true;
+              m.depthWrite = false;
+              m.opacity = 0;
+            }
+          });
+          for (const { index } of plan.objects) {
+            meshes[index].visible = false;
+            meshes[index].opacity = 0;
+          }
+        } else if (revealRef.current && !disposed) {
           // Reveal requested but not animated: the room is simply there.
           revealDoneRef.current?.();
         }
@@ -595,37 +794,61 @@ export default function SplatViewer({
               .add(fromOffset.clone().lerp(finalOffset, eased));
             if (t >= 1) entranceStart = null;
           }
+          // The contour outlives `done` — its hand-off fade is longer than
+          // the closing beat — so it runs on its own until it retires.
+          if (assembling) drawContour?.(now);
           if (assembling && !revealDoneFired) {
-            let allSettled = true;
-            for (const [i, startMs] of shellStartAt) {
-              if (now >= startMs) {
-                shellMeshes[i].mesh.visible = true;
-                for (const extra of shellMeshes[i].extras) extra.visible = true;
-              } else {
-                allSettled = false;
+            const t = now - revealT0;
+
+            // Surfaces: fade up in place. No translation, ever.
+            for (const [i, cue] of surfaceCue) {
+              const p = settleEase(windowProgress(t, cue.startMs, cue.durationMs));
+              const { mesh, extras } = shellMeshes[i];
+              for (const o of [mesh, ...extras]) {
+                if (p <= 0) {
+                  o.visible = false;
+                  continue;
+                }
+                o.visible = true;
+                const m = o.material as InstanceType<
+                  typeof THREE.MeshStandardMaterial
+                >;
+                if (p >= 1) {
+                  if (m.transparent) {
+                    m.transparent = false;
+                    m.depthWrite = true;
+                    m.opacity = 1;
+                    m.needsUpdate = true;
+                  }
+                } else {
+                  m.opacity = p;
+                }
               }
             }
-            for (const [i, startMs] of revealStartAt) {
-              const p = (now - startMs) / REVEAL_DROP_MS;
-              if (p < 0) {
-                allSettled = false;
+
+            // Pieces: settle from rest to rest, present before still.
+            for (const [i, cue] of objectCue) {
+              const raw = windowProgress(t, cue.startMs, cue.durationMs);
+              const mesh = meshes[i];
+              if (raw <= 0) {
+                mesh.visible = false;
                 continue;
               }
-              const mesh = meshes[i];
-              if (!revealFired.has(i)) {
-                revealFired.add(i);
+              if (!firedSteps.has(i)) {
+                firedSteps.add(i);
                 mesh.visible = true;
-                revealStepRef.current?.(i, splats[i].label);
+                if (cue.named) revealStepRef.current?.(i, splats[i].label);
               }
-              if (p < 1) {
-                allSettled = false;
-                const eased = 1 - Math.pow(1 - Math.min(1, p), 3);
-                mesh.position.y = splats[i].position[1] + REVEAL_DROP_M * (1 - eased);
-              } else {
-                mesh.position.y = splats[i].position[1];
-              }
+              const eased = settleEase(raw);
+              mesh.position.y = splats[i].position[1] + SETTLE_DROP_M * (1 - eased);
+              mesh.opacity = settleEase(Math.min(1, raw / SETTLE_FADE_FRACTION));
             }
-            if (allSettled) {
+
+            if (!captionsDoneFired && t >= plan.captionsDoneMs) {
+              captionsDoneFired = true;
+              revealCaptionsDoneRef.current?.();
+            }
+            if (t >= plan.doneMs) {
               revealDoneFired = true;
               revealDoneRef.current?.();
             }
@@ -661,6 +884,11 @@ export default function SplatViewer({
             scene.remove(sprite);
             dispose();
           }
+          for (const { object, material, geometry } of contourParts) {
+            scene.remove(object);
+            geometry.dispose();
+            material.dispose();
+          }
           for (const { mesh, extras } of shellMeshes) {
             for (const extra of extras) {
               scene.remove(extra);
@@ -692,7 +920,7 @@ export default function SplatViewer({
       disposed = true;
       cleanup?.();
     };
-  }, [key, splats, shell, idleOrbit, reveal, labels]);
+  }, [key, splats, shell, idleOrbit, labels]);
 
   return (
     <div
