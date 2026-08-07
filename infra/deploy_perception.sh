@@ -27,6 +27,14 @@ CLOUDBUILD_CONFIG="infra/cloudbuild/perception-${WHICH}.yaml"
 PROJECT_ID="roomstudio"
 REGION="asia-southeast1"
 REPO="roomstudio"
+
+# Dedicated least-privilege runtime SA for perception-obj (decision 0090,
+# remediating 0088 finding 1: the service parses UNTRUSTED user bundles and
+# ran as the default compute SA, which holds project-level roles/editor).
+# Everything it is granted is enumerated in ensure_obj_runtime_iam below —
+# that function IS the grant list, and it is idempotent so every deploy
+# reasserts it. perception-geom keeps the default SA (parked, no workload).
+OBJ_RUNTIME_SA="perception-obj-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
 IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:${IMAGE_TAG}"
 
@@ -34,6 +42,105 @@ IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:${IMAGE_TAG
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
+
+# ---------------------------------------------------------------------------
+# perception-obj runtime IAM (decision 0090). Every grant the service needs,
+# in one place, all idempotent (add-iam-policy-binding no-ops when the binding
+# exists). Scoped to the exact resource wherever the API allows it — only
+# Firestore, logging, metrics and the FCM send permission are project-level,
+# because none of them has a narrower scope.
+#
+# Runs BEFORE the deploy: --service-account and --set-secrets are both
+# validated at revision creation, so an ungranted SA fails the deploy itself
+# (observed live 2026-07-23 when the secret grant sat in a post-deploy block).
+# ---------------------------------------------------------------------------
+ensure_obj_runtime_iam() {
+    echo "=== Runtime IAM for ${OBJ_RUNTIME_SA} ==="
+
+    gcloud iam service-accounts describe "${OBJ_RUNTIME_SA}" \
+        --project="${PROJECT_ID}" >/dev/null 2>&1 \
+      || gcloud iam service-accounts create perception-obj-runtime \
+            --project="${PROJECT_ID}" \
+            --display-name="perception-obj Cloud Run runtime" \
+            --description="Least-privilege runtime SA for perception-obj (decision 0090)"
+
+    # Capture bundles: READ ONLY. The service never writes to captures.
+    gcloud storage buckets add-iam-policy-binding "gs://roomstudio-captures" \
+        --member="serviceAccount:${OBJ_RUNTIME_SA}" \
+        --role="roles/storage.objectViewer" \
+        --project="${PROJECT_ID}" >/dev/null
+
+    # Perception outputs: read + write (splats, manifests, masks, shell.json).
+    # objectAdmin is the minimal managed role covering create+get+list — the
+    # same rationale recorded for api-public's mint grant.
+    gcloud storage buckets add-iam-policy-binding "gs://roomstudio-perception-outputs" \
+        --member="serviceAccount:${OBJ_RUNTIME_SA}" \
+        --role="roles/storage.objectAdmin" \
+        --project="${PROJECT_ID}" >/dev/null
+
+    # Firestore 'scenes': claim/release transactions (receiver_repo.py).
+    # datastore.user is the narrowest role with transactional read+write; it
+    # cannot create or drop indexes or databases.
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${OBJ_RUNTIME_SA}" \
+        --role="roles/datastore.user" --condition=None >/dev/null
+
+    # Cloud Run runtime baseline. Container stdout is collected by the
+    # platform, but any Cloud Logging/Monitoring API call needs these.
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${OBJ_RUNTIME_SA}" \
+        --role="roles/logging.logWriter" --condition=None >/dev/null
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${OBJ_RUNTIME_SA}" \
+        --role="roles/monitoring.metricWriter" --condition=None >/dev/null
+
+    # FCM terminal-transition notifications (fcm.py). A CUSTOM role holding
+    # exactly cloudmessaging.messages.create: the predefined
+    # firebasecloudmessaging.admin would also grant topicSubscriptions.*,
+    # which this service never touches.
+    gcloud iam roles describe perceptionFcmSender --project="${PROJECT_ID}" \
+        >/dev/null 2>&1 \
+      || gcloud iam roles create perceptionFcmSender --project="${PROJECT_ID}" \
+            --title="perception-obj FCM sender" \
+            --description="Send FCM data messages only (decision 0090)." \
+            --permissions=cloudmessaging.messages.create --stage=GA >/dev/null
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${OBJ_RUNTIME_SA}" \
+        --role="projects/${PROJECT_ID}/roles/perceptionFcmSender" \
+        --condition=None >/dev/null
+
+    # Anthropic key for shell material inference (decision 0069).
+    # SECRET-scoped, not project-scoped — the api-public pattern.
+    gcloud secrets add-iam-policy-binding anthropic-api-key \
+        --member="serviceAccount:${OBJ_RUNTIME_SA}" \
+        --role="roles/secretmanager.secretAccessor" \
+        --project="${PROJECT_ID}" --quiet >/dev/null
+
+    # /process enqueues its own /shell task: enqueue rights on the queue and
+    # actAs on the Cloud Tasks OIDC invoker SA (decision 0066).
+    gcloud tasks queues add-iam-policy-binding perception-dispatch \
+        --location="${REGION}" --project="${PROJECT_ID}" \
+        --member="serviceAccount:${OBJ_RUNTIME_SA}" \
+        --role="roles/cloudtasks.enqueuer" >/dev/null
+    gcloud iam service-accounts add-iam-policy-binding \
+        "tasks-invoker@${PROJECT_ID}.iam.gserviceaccount.com" \
+        --project="${PROJECT_ID}" \
+        --member="serviceAccount:${OBJ_RUNTIME_SA}" \
+        --role="roles/iam.serviceAccountUser" >/dev/null
+
+    # The deployer must be able to act as the runtime SA, or `gcloud run
+    # deploy --service-account` is rejected.
+    local deployer
+    deployer="$(gcloud config get-value account 2>/dev/null)"
+    if [[ -n "${deployer}" ]]; then
+        gcloud iam service-accounts add-iam-policy-binding "${OBJ_RUNTIME_SA}" \
+            --project="${PROJECT_ID}" \
+            --member="user:${deployer}" \
+            --role="roles/iam.serviceAccountUser" >/dev/null 2>&1 || true
+    fi
+
+    echo "runtime IAM ensured"
+}
 
 echo "=== Deploying ${SERVICE} ==="
 
@@ -62,34 +169,24 @@ gcloud builds submit . \
     --config="${CLOUDBUILD_CONFIG}" \
     --substitutions="_IMAGE_URI=${IMAGE_URI}"
 
-# Secret grant must precede the deploy: --set-secrets validates at
-# revision creation, so an ungranted runtime SA fails the deploy itself
-# (observed live 2026-07-23 — the first 0069 deploy died here when this
-# grant sat in the post-deploy IAM block). The runtime SA comes from the
-# CURRENT service spec (empty = the Compute Engine default SA).
 if [[ "${WHICH}" == "obj" ]]; then
-    RUNTIME_SA=$(gcloud run services describe "${SERVICE}" \
-        --region="${REGION}" --project="${PROJECT_ID}" \
-        --format='value(spec.template.spec.serviceAccountName)' 2>/dev/null || true)
-    RUNTIME_SA="${RUNTIME_SA:-$(gcloud projects describe "${PROJECT_ID}" \
-        --format='value(projectNumber)')-compute@developer.gserviceaccount.com}"
-    echo "=== Pre-deploy: secretAccessor on anthropic-api-key for ${RUNTIME_SA} ==="
-    # Reads the Anthropic key for shell material inference (decision 0069).
-    # SECRET-scoped, not project-scoped — the api-public pattern. Idempotent.
-    gcloud secrets add-iam-policy-binding anthropic-api-key \
-        --member="serviceAccount:${RUNTIME_SA}" \
-        --role="roles/secretmanager.secretAccessor" \
-        --project="${PROJECT_ID}" \
-        --quiet >/dev/null
-    echo "secretAccessor ensured"
+    ensure_obj_runtime_iam
 fi
 
 echo "=== 3/3: Deploy to Cloud Run with L4 GPU ==="
+# perception-obj pins its dedicated runtime SA (0090); geom keeps the default.
+# --platform seeds the array so it is never empty: expanding an empty array
+# under `set -u` is an unbound-variable error on bash < 4.4, and macOS ships
+# 3.2 as /bin/bash.
+DEPLOY_FLAGS=(--platform=managed)
+if [[ "${WHICH}" == "obj" ]]; then
+    DEPLOY_FLAGS+=(--service-account="${OBJ_RUNTIME_SA}")
+fi
 gcloud run deploy "${SERVICE}" \
     --image="${IMAGE_URI}" \
     --region="${REGION}" \
     --project="${PROJECT_ID}" \
-    --platform=managed \
+    "${DEPLOY_FLAGS[@]}" \
     --gpu=1 \
     --gpu-type=nvidia-l4 \
     --no-gpu-zonal-redundancy \
@@ -112,29 +209,15 @@ gcloud run deploy "${SERVICE}" \
     # powers the same call; without it the 0069 fallback rule nulls every
     # family (clean neutral) rather than failing the shell.
 
-# Shell-stage IAM (decision 0066; folds in the runtime-SA audit item):
-# /process enqueues /shell tasks itself, so THIS service's runtime SA needs
-# enqueue rights on the queue and actAs on the Cloud Tasks invoker SA.
-# Idempotent (add-iam-policy-binding is a no-op when the binding exists).
-# The describe also surfaces the effective runtime SA — the audit record.
+# Post-deploy audit line: the runtime SA actually in the served spec.
 if [[ "${WHICH}" == "obj" ]]; then
-    RUNTIME_SA=$(gcloud run services describe "${SERVICE}" \
+    EFFECTIVE_SA=$(gcloud run services describe "${SERVICE}" \
         --region="${REGION}" --project="${PROJECT_ID}" \
         --format='value(spec.template.spec.serviceAccountName)')
-    # An empty value means the Compute Engine default SA.
-    RUNTIME_SA="${RUNTIME_SA:-$(gcloud projects describe "${PROJECT_ID}" \
-        --format='value(projectNumber)')-compute@developer.gserviceaccount.com}"
-    echo "=== Shell-stage IAM (runtime SA: ${RUNTIME_SA}) ==="
-    gcloud tasks queues add-iam-policy-binding perception-dispatch \
-        --location="${REGION}" --project="${PROJECT_ID}" \
-        --member="serviceAccount:${RUNTIME_SA}" \
-        --role="roles/cloudtasks.enqueuer" >/dev/null
-    gcloud iam service-accounts add-iam-policy-binding \
-        "tasks-invoker@${PROJECT_ID}.iam.gserviceaccount.com" \
-        --project="${PROJECT_ID}" \
-        --member="serviceAccount:${RUNTIME_SA}" \
-        --role="roles/iam.serviceAccountUser" >/dev/null
-    echo "shell-stage IAM ensured (cloudtasks.enqueuer + serviceAccountUser)"
+    echo "=== Runtime SA on the new revision: ${EFFECTIVE_SA:-<compute default>} ==="
+    if [[ "${EFFECTIVE_SA}" != "${OBJ_RUNTIME_SA}" ]]; then
+        echo "WARNING: expected ${OBJ_RUNTIME_SA}" >&2
+    fi
 fi
 
 # gcloud run deploy creates the revision but does NOT move traffic when the
