@@ -73,13 +73,17 @@ nonisolated enum CaptureReclaim {
     ///   .uploadFailed     → reclaim (client-terminal .failed — the reason is on
     ///                       screen right now; leaving it is the acknowledgment)
     ///   .incompleteUpload → RETAIN (failed_incomplete keeps its files)
+    ///   .sendRateLimited  → RETAIN (the daily cap: nothing left the phone, and the
+    ///                       same capture sends once the quota rolls — reclaiming
+    ///                       here would destroy a perfectly good room over a limit
+    ///                       that lifts by itself)
     ///   everything else   → retain (nothing terminal has been shown)
     static func reclaimsAtFlightEnd(_ screen: WaitScreen) -> Bool {
         switch screen {
         case .doorway, .processingFailed, .uploadFailed:
             return true
         case .sending, .waiting, .incompleteUpload, .sendFailed,
-             .sendPaused, .checkFailed, .notOurs:
+             .sendRateLimited, .sendPaused, .checkFailed, .notOurs:
             return false
         }
     }

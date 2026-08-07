@@ -22,6 +22,21 @@ see `StagingHooks.swift`.
 **Phone prep [OP]:** unlocked, on WiFi, notifications visible. Keep the phone
 UNLOCKED except where a step says otherwise.
 
+**Live Activity (added by the ios-live-activity branch, 2026-08-08).** The app
+now raises a Lock Screen / Dynamic Island card at "Send it home" and ends it
+when the flight ends. Three consequences for this sitting, none of which change
+a step:
+
+- **On the FIRST send, iOS asks "Allow Live Activities from RoomStudioCapture?"
+  on the Lock Screen. [OP] must tap Allow** — declining silences the card for
+  every later run (the app is unaffected either way: the card is advisory and
+  every ActivityKit call is fire-and-forget).
+- Every run's screenshots will now include the card. That is expected, not a
+  defect; it is also the only hardware evidence this feature gets, so keep it in
+  frame rather than dismissing it.
+- The card is keyed on bundle_id, so a run's card must never narrate a previous
+  run's capture. If it ever does, that is a real finding — record it.
+
 ---
 
 ## Run 0 — first launch: launch-reaper real-data verification (~2 min)
@@ -97,6 +112,12 @@ Predictions from the pre-install store pull (8 records, all `.complete`):
    Then `scene_status.py` — the scene should go queued → processing (a real
    capture; it may take minutes on GPU — do not hold the sitting for
    `ready`; [OP] may leave the wait screen).
+8. **Free Live Activity check** (costs nothing, and this run is the only place
+   it can be observed): the card must SURVIVE the force-quit at step 4 — the
+   activity outlives the process by design, as does the background session
+   feeding it — and after the reopen at step 6 it must resume moving rather
+   than freeze, which is `reconcileOnLaunch` adopting it instead of orphaning
+   it. A card that goes dead after the reopen is a real finding.
 
 ## Run E — OS-kill / Fork A probe (~8 min, one MEDIUM scan, then hands off)
 
@@ -121,6 +142,14 @@ Predictions from the pre-install store pull (8 records, all `.complete`):
 4. [OP] Reopen the app whenever convenient — rehydration finishes the
    upload either way (this is also the swipe-kill-free variant of relaunch
    recovery).
+5. **Free Live Activity check — the feature's headline claim, and this is the
+   only run that tests it.** With the app PROCESS DEAD and the phone locked,
+   the card's count must keep climbing as nsurlsessiond lands the remaining
+   blobs (the progress hook runs on the background session, not in a live
+   app). [OP]: glance at the Lock Screen during the 3-minute wait and note the
+   count; [CC]: compare it against the GCS prefix at the same moment. A frozen
+   count with GCS still growing means the background progress hook is not
+   firing — record it as a finding; nothing else in the sitting depends on it.
 
 ## Wrap (~2 min)
 

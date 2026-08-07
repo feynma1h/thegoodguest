@@ -485,7 +485,7 @@ actor BlobUploadManager {
             await handleServerError(
                 bundleId: bundleId, relativePath: relativePath,
                 statusCode: statusCode!,
-                retryAfter: Self.parseRetryAfter(retryAfterHeader, now: clock())
+                retryAfter: RetryAfter.parse(retryAfterHeader, now: clock())
             )
 
         case let code where (400..<500).contains(code ?? -1):
@@ -502,7 +502,7 @@ actor BlobUploadManager {
             await handleServerError(
                 bundleId: bundleId, relativePath: relativePath,
                 statusCode: statusCode ?? 0,
-                retryAfter: Self.parseRetryAfter(retryAfterHeader, now: clock())
+                retryAfter: RetryAfter.parse(retryAfterHeader, now: clock())
             )
         }
     }
@@ -549,6 +549,14 @@ actor BlobUploadManager {
             // blobs, erasing a genuine deferral milliseconds after it was raised.
             await MainActor.run {
                 UploadFailureMonitor.shared.clearDeferral(bundleId: bundleId, relativePath: relativePath)
+                // Lock Screen progress. THIS is the path that earns the Live
+                // Activity: it runs on the background session, so the count keeps
+                // moving with the app closed and the phone locked. The controller
+                // throttles — publishing 2,170 updates would spend the ActivityKit
+                // budget long before the upload finished.
+                let progress = record.nonBundlePbProgress
+                LiveActivityController.shared.noteUploadProgress(
+                    bundleId: bundleId, sent: progress.sent, total: progress.total)
             }
 
             if record.allNonBundlePbBlobsUploaded {
@@ -672,28 +680,6 @@ actor BlobUploadManager {
             await onFatalBlobError(bundleId: bundleId, relativePath: relativePath,
                                    reason: "reput_failed: \(error)")
         }
-    }
-
-    // MARK: - Retry-After parsing
-
-    /// Parse an HTTP Retry-After header value (RFC 9110 §10.2.3) into a wait interval.
-    ///
-    /// Two wire forms: delta-seconds ("120") and HTTP-date ("Wed, 21 Oct 2015 07:28:00 GMT").
-    /// Returns nil for an absent or malformed value — callers fall back to the local
-    /// backoff schedule. An HTTP-date already in the past yields 0 (the wait has elapsed).
-    static func parseRetryAfter(_ headerValue: String?, now: Date) -> TimeInterval? {
-        guard let raw = headerValue?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
-            return nil
-        }
-        if let seconds = TimeInterval(raw) {
-            return (seconds.isFinite && seconds >= 0) ? seconds : nil
-        }
-        let formatter = DateFormatter()
-        formatter.locale     = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone   = TimeZone(identifier: "GMT")
-        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-        guard let date = formatter.date(from: raw) else { return nil }
-        return max(0, date.timeIntervalSince(now))
     }
 
     // MARK: - Private: shared re-enqueue (used by 308 and 5xx retry paths)
