@@ -354,6 +354,15 @@ struct RootFlowView: View {
                 }
                 .onDisappear { ScenePoller.shared.setVisible(false) }
                 .onChange(of: poller.pollState) { old, _ in retainAnchor(from: old) }
+                // Mirror the SAME routing decision the screen just made onto the
+                // Lock Screen. Driving the activity off waitScreen rather than off
+                // the raw poll state is the point: two surfaces narrating one
+                // capture from two different derivations is how they come to
+                // disagree. `initial: true` because the screen the user lands on
+                // is itself news (a relaunch straight into `.waiting`).
+                .onChange(of: waitScreen, initial: true) { _, screen in
+                    LiveActivityController.shared.noteWaitScreen(screen, bundleId: sentBundleId)
+                }
             // A terminal blob failure for a DIFFERENT (earlier) bundle is otherwise
             // invisible here — float it over whatever this capture is doing.
             if let failure = failures.latestFailure, failure.bundleId != sentBundleId {
@@ -439,6 +448,14 @@ struct RootFlowView: View {
                         onTryNow: { if !terminal { sendItHome() } },
                         onLeave: endFlight)
 
+        case .sendRateLimited(let resetsAt):
+            // The daily mint cap (decision 0087). No "Try now" — it would provably
+            // fail until the quota rolls — and no rescan offer: the capture on disk
+            // is fine, and rescanning would only spend a second mint against the
+            // same cap. Leaving is the only action, and it is enough: the record
+            // survives and the relaunch rehydration re-drives the send.
+            WaitingView(phase: .sendRateLimited(resetsAt: resetsAt), onLeave: endFlight)
+
         case .sendPaused:
             // Paused until the next launch — ending the flight is honest here:
             // rehydrateAllUnfinishedBundles picks the bundle up on relaunch, and
@@ -510,6 +527,10 @@ struct RootFlowView: View {
         // must not start polling the old bundle and flash its doorway over this
         // capture's wait. See ScenePoller.expectedBundleId.
         ScenePoller.shared.expectBundle(bundleId)
+        // The Lock Screen card starts HERE, not when the mint returns: minting a
+        // long walk's manifest measured 14 s, and that is exactly the window in
+        // which a user locks the phone and wants to know something is happening.
+        LiveActivityController.shared.begin(bundleId: bundleId)
         sendGeneration &+= 1
         let generation = sendGeneration
         Task {
@@ -561,6 +582,13 @@ struct RootFlowView: View {
                                     minted: record.clientMintTimestamp))
         }
         let pick = BundleRestore.pick(from: candidates, dismissed: DismissedBundles().set)
+        // Adopt the Lock Screen card belonging to the restored flight (its
+        // background upload outlived the process, so the card is still live and
+        // still correct) and end any other. Deliberately AFTER the pick, so a
+        // launch that restores nothing clears the leftovers. If the scan above
+        // failed outright we skip this and leave the card alone — a stale card is
+        // a smaller wrong than ending a live upload's only visible surface.
+        LiveActivityController.shared.reconcileOnLaunch(restoredBundleId: pick)
         // Re-check: the scan awaited disk, and a send started in that window owns
         // sentBundleId.
         if let pick, sentBundleId == nil {
@@ -624,6 +652,10 @@ struct RootFlowView: View {
                 Task { await CaptureReaper.shared.reclaim(bundleId: bundleId) }
             }
         }
+        // The user has SEEN the outcome — the same trigger the reaper uses. Leaving
+        // the card up past that point would be the Lock Screen still reporting on a
+        // room the user has already closed the book on.
+        LiveActivityController.shared.end(bundleId: sentBundleId)
         clearFlight()
         stage = .home
     }
@@ -650,6 +682,9 @@ struct RootFlowView: View {
         if let foreignId = WaitFlowState.foreignBundleToAcknowledge(
             pollerBundleId: poller.currentBundleId, sentBundleId: sentBundleId) {
             DismissedBundles().acknowledge(foreignId)
+            // A card narrating a room this identity will never own is exactly the
+            // phantom decision 0074 exists to kill — end it, don't narrate it.
+            LiveActivityController.shared.end(bundleId: foreignId)
         }
         clearFlight()
         if stage == .sent { stage = .home }

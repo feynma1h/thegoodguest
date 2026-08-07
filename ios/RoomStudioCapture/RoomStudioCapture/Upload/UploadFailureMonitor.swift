@@ -78,6 +78,11 @@ final class UploadFailureMonitor: ObservableObject {
     /// ScenePoller.notifyBundleComplete). The caller has already persisted the
     /// .failed record — the shared seam refresh() reads independently.
     func notifyUploadFailed(bundleId: String, reason: String) {
+        // The Lock Screen is told BEFORE the dismissal guard: dismissing the
+        // in-app banner is a statement about the banner, not about the upload, and
+        // a card left saying "sending" for a bundle that terminally failed is the
+        // exact stale-surface class the review passes kept finding.
+        LiveActivityController.shared.noteUploadFailed(bundleId: bundleId)
         guard !dismissedThisLaunch.contains(bundleId) else { return }
         latestFailure = UploadFailure(bundleId: bundleId, reason: reason)
     }
@@ -88,6 +93,11 @@ final class UploadFailureMonitor: ObservableObject {
     func notifyUploadDeferred(bundleId: String, relativePath: String, reason: String) {
         deferredPaths[bundleId, default: []].insert(relativePath)
         latestDeferral = UploadDeferral(bundleId: bundleId, reason: reason)
+        // Hooked at the SOURCE rather than off the wait screen: a deferral raised
+        // while the app is backgrounded is precisely when the Lock Screen must stop
+        // implying the upload is still moving. It resumes on the next app open, and
+        // the card says so.
+        LiveActivityController.shared.noteUploadPaused(bundleId: bundleId)
     }
 
     /// One blob progressed. Clears only THAT path — the bundle stays paused while
