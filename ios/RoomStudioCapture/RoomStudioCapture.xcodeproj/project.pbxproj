@@ -10,6 +10,7 @@
 		7E21B2FE2FCAFA4700823738 /* SwiftProtobuf in Frameworks */ = {isa = PBXBuildFile; productRef = 7E21B2FD2FCAFA4700823738 /* SwiftProtobuf */; };
 		7EAA00042FCBFF0000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7EAA00022FCBFF0000000001 /* FirebaseCore */; };
 		7EAA00052FCBFF0000000001 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 7EAA00032FCBFF0000000001 /* FirebaseAuth */; };
+		7EDA00022FD0A00000000001 /* RoomStudioLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7EDA00012FD0A00000000001 /* RoomStudioLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -20,12 +21,44 @@
 			remoteGlobalIDString = 7E1EC71A2FCA67820085D0D3;
 			remoteInfo = RoomStudioCapture;
 		};
+		7EDA000D2FD0A00000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7E1EC7132FCA67820085D0D3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7EDA00052FD0A00000000001;
+			remoteInfo = RoomStudioLiveActivity;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7EDA00092FD0A00000000001 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7EDA00022FD0A00000000001 /* RoomStudioLiveActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		7E1EC71B2FCA67820085D0D3 /* RoomStudioCapture.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoomStudioCapture.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7E1EC7282FCA67840085D0D3 /* RoomStudioCaptureTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RoomStudioCaptureTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7EDA00012FD0A00000000001 /* RoomStudioLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RoomStudioLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		7EDA000F2FD0A00000000001 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 7EDA00052FD0A00000000001 /* RoomStudioLiveActivity */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		7E1EC71D2FCA67820085D0D3 /* RoomStudioCapture */ = {
@@ -36,6 +69,19 @@
 		7E1EC72B2FCA67840085D0D3 /* RoomStudioCaptureTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = RoomStudioCaptureTests;
+			sourceTree = "<group>";
+		};
+		7EDA00032FD0A00000000001 /* RoomStudioLiveActivity */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7EDA000F2FD0A00000000001 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+			);
+			path = RoomStudioLiveActivity;
+			sourceTree = "<group>";
+		};
+		7EDA00042FD0A00000000001 /* RoomStudioShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RoomStudioShared;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -58,6 +104,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7EDA00072FD0A00000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -65,6 +118,8 @@
 			isa = PBXGroup;
 			children = (
 				7E1EC71D2FCA67820085D0D3 /* RoomStudioCapture */,
+				7EDA00042FD0A00000000001 /* RoomStudioShared */,
+				7EDA00032FD0A00000000001 /* RoomStudioLiveActivity */,
 				7E1EC72B2FCA67840085D0D3 /* RoomStudioCaptureTests */,
 				7E1EC71C2FCA67820085D0D3 /* Products */,
 			);
@@ -75,6 +130,7 @@
 			children = (
 				7E1EC71B2FCA67820085D0D3 /* RoomStudioCapture.app */,
 				7E1EC7282FCA67840085D0D3 /* RoomStudioCaptureTests.xctest */,
+				7EDA00012FD0A00000000001 /* RoomStudioLiveActivity.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -89,13 +145,16 @@
 				7E1EC7172FCA67820085D0D3 /* Sources */,
 				7E1EC7182FCA67820085D0D3 /* Frameworks */,
 				7E1EC7192FCA67820085D0D3 /* Resources */,
+				7EDA00092FD0A00000000001 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7EDA000E2FD0A00000000001 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				7E1EC71D2FCA67820085D0D3 /* RoomStudioCapture */,
+				7EDA00042FD0A00000000001 /* RoomStudioShared */,
 			);
 			name = RoomStudioCapture;
 			packageProductDependencies = (
@@ -130,6 +189,29 @@
 			productReference = 7E1EC7282FCA67840085D0D3 /* RoomStudioCaptureTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		7EDA00052FD0A00000000001 /* RoomStudioLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7EDA000C2FD0A00000000001 /* Build configuration list for PBXNativeTarget "RoomStudioLiveActivity" */;
+			buildPhases = (
+				7EDA00062FD0A00000000001 /* Sources */,
+				7EDA00072FD0A00000000001 /* Frameworks */,
+				7EDA00082FD0A00000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7EDA00032FD0A00000000001 /* RoomStudioLiveActivity */,
+				7EDA00042FD0A00000000001 /* RoomStudioShared */,
+			);
+			name = RoomStudioLiveActivity;
+			packageProductDependencies = (
+			);
+			productName = RoomStudioLiveActivity;
+			productReference = 7EDA00012FD0A00000000001 /* RoomStudioLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -146,6 +228,9 @@
 					7E1EC7272FCA67840085D0D3 = {
 						CreatedOnToolsVersion = 26.5;
 						TestTargetID = 7E1EC71A2FCA67820085D0D3;
+					};
+					7EDA00052FD0A00000000001 = {
+						CreatedOnToolsVersion = 26.5;
 					};
 				};
 			};
@@ -168,6 +253,7 @@
 			projectRoot = "";
 			targets = (
 				7E1EC71A2FCA67820085D0D3 /* RoomStudioCapture */,
+				7EDA00052FD0A00000000001 /* RoomStudioLiveActivity */,
 				7E1EC7272FCA67840085D0D3 /* RoomStudioCaptureTests */,
 			);
 		};
@@ -182,6 +268,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		7E1EC7262FCA67840085D0D3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7EDA00082FD0A00000000001 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -205,6 +298,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7EDA00062FD0A00000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -212,6 +312,11 @@
 			isa = PBXTargetDependency;
 			target = 7E1EC71A2FCA67820085D0D3 /* RoomStudioCapture */;
 			targetProxy = 7E1EC7292FCA67840085D0D3 /* PBXContainerItemProxy */;
+		};
+		7EDA000E2FD0A00000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7EDA00052FD0A00000000001 /* RoomStudioLiveActivity */;
+			targetProxy = 7EDA000D2FD0A00000000001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -349,6 +454,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "RoomStudio captures your room with ARKit.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -383,6 +489,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "RoomStudio captures your room with ARKit.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -449,6 +556,64 @@
 			};
 			name = Release;
 		};
+		7EDA000A2FD0A00000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3HU2SP8346;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RoomStudioLiveActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Room status";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.roomstudio.RoomStudioCapture.LiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7EDA000B2FD0A00000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3HU2SP8346;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RoomStudioLiveActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Room status";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.roomstudio.RoomStudioCapture.LiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -475,6 +640,15 @@
 			buildConfigurations = (
 				7E1EC7402FCA67840085D0D3 /* Debug */,
 				7E1EC7412FCA67840085D0D3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7EDA000C2FD0A00000000001 /* Build configuration list for PBXNativeTarget "RoomStudioLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7EDA000A2FD0A00000000001 /* Debug */,
+				7EDA000B2FD0A00000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

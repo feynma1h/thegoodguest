@@ -295,4 +295,14 @@ nonisolated struct UploadSessionRecord: Codable, Sendable {
         guard !nonBundle.isEmpty else { return true }
         return nonBundle.allSatisfy { blobStatuses[$0.relativePath] == .uploaded }
     }
+
+    /// How much of the room's DATA has landed, for progress surfaces (the §5 Live
+    /// Activity). Counts the same set the Phase-1 gate does — bundle.pb excluded,
+    /// for the same reason: it is the finalize, not part of the room. Including it
+    /// would park a long upload at "N-1 of N" for its whole duration and then jump.
+    nonisolated var nonBundlePbProgress: (sent: Int, total: Int) {
+        let nonBundle = sessionEntries.filter { $0.relativePath != "bundle.pb" }
+        let sent = nonBundle.count { blobStatuses[$0.relativePath] == .uploaded }
+        return (sent: sent, total: nonBundle.count)
+    }
 }

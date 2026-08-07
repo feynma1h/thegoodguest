@@ -15,7 +15,10 @@
 import SwiftUI
 
 struct WaitingView: View {
-    enum Phase {
+    /// Equatable is DECLARED, not inherited: a payload-free enum gets `==` for
+    /// free, and adding `sendRateLimited`'s associated value silently withdrew it
+    /// from every `phase == .x` comparison in this file.
+    enum Phase: Equatable {
         /// Still handing the room over: sign-in / manifest / POST /upload_session,
         /// before a single byte has left the phone. NOT "analyzing" — the room has
         /// not arrived anywhere, so no arrival claim, no ETA, no elapsed clock.
@@ -36,6 +39,11 @@ struct WaitingView: View {
         /// The upload paused and only resumes on the next launch. Distinct from
         /// sendFailed, which invites an immediate retry that would actually work.
         case sendPaused
+        /// The account's daily upload-session quota is spent (429, decision 0087).
+        /// Distinct from BOTH failure phases: "Try now" would provably fail, and
+        /// nothing is lost — the capture is on disk and the send works once the
+        /// day rolls. The only honest content is when it lifts.
+        case sendRateLimited(resetsAt: Date?)
     }
 
     var phase: Phase = .analyzing
@@ -76,6 +84,8 @@ struct WaitingView: View {
             sendFailedBody(terminal: true)
         case .sendPaused:
             sendPausedBody
+        case .sendRateLimited(let resetsAt):
+            sendRateLimitedBody(resetsAt: resetsAt)
         }
     }
 
@@ -329,6 +339,86 @@ struct WaitingView: View {
         .modifier(RSScrollableScreen(background: nil, transparent: true))
     }
 
+    // MARK: Send rate-limited (the daily cap; lifts on its own)
+
+    /// Deliberately NOT a failure treatment. Nothing is broken and nothing is
+    /// lost — the guest has simply been asked to carry more in one day than it is
+    /// allowed to, and the only useful thing to say is when that lifts. So: no
+    /// dark ink panel, no "try again" (which would provably fail), and no
+    /// rescan offer (which would waste the capture that is already fine on disk).
+    private func sendRateLimitedBody(resetsAt: Date?) -> some View {
+        VStack {
+            Spacer()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 9) {
+                    Image(systemName: "hourglass")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.rsInkMuted)
+                    Text("That's all I can carry today")
+                        .font(RSFont.ui(.callout, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(Color.rsInk)
+                }
+                GuestLine(Self.rateLimitLine(resetsAt: resetsAt, now: Date()),
+                          size: 14.5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 9)
+                if let resetsAt {
+                    // Machine data — the one exact fact on this screen — in mono,
+                    // as the design system reserves it.
+                    Text(Self.resetStamp(resetsAt))
+                        .rsFont(.mono, size: 11)
+                        .foregroundStyle(Color.rsInkFaint)
+                        .padding(.top, 10)
+                }
+                Button(action: onLeave) {
+                    Text("All right")
+                        .font(RSFont.ui(.subheadline, weight: .medium))
+                        .foregroundStyle(Color.rsInkMuted)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(Capsule().stroke(Color.rsHairline, lineWidth: 1.5))
+                }
+                .padding(.top, 14)
+            }
+            .padding(18)
+            .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil, transparent: true))
+    }
+
+    /// The guest's line for the daily cap. Pure so the honesty is testable: it must
+    /// never promise a time the server did not name, and must never say "tomorrow"
+    /// for a reset that is later today.
+    static func rateLimitLine(resetsAt: Date?, now: Date) -> String {
+        let kept = "Your scan is safe on your phone — nothing was lost, and I'll send it the moment I can."
+        guard let resetsAt, resetsAt > now else {
+            return "I've hit my limit for how many rooms I can take up today. \(kept)"
+        }
+        let hours = resetsAt.timeIntervalSince(now) / 3600
+        let when: String
+        if hours < 1 {
+            when = "in under an hour"
+        } else if hours < 2 {
+            when = "in about an hour"
+        } else if Calendar.current.isDate(resetsAt, inSameDayAs: now) {
+            when = "later today"
+        } else {
+            when = "tomorrow"
+        }
+        return "I've hit my limit for how many rooms I can take up today — I can take more \(when). \(kept)"
+    }
+
+    /// The exact reset instant, in the device's own time zone. Mono machine data,
+    /// never prose: the line above owns the human reading.
+    static func resetStamp(_ resetsAt: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale     = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM, HH:mm"
+        return "RESETS \(formatter.string(from: resetsAt))"
+    }
+
     // MARK: Copy
 
     private var title: String {
@@ -337,7 +427,7 @@ struct WaitingView: View {
         case .queued:       return "Getting in line"
         case .analyzing:    return "Making sense of your room"
         case .longRunning:  return "Making sense of your room"
-        case .connectionTrouble, .sendFailed, .sendFailedTerminal, .sendPaused: return ""
+        case .connectionTrouble, .sendFailed, .sendFailedTerminal, .sendPaused, .sendRateLimited: return ""
         }
     }
 
@@ -357,7 +447,7 @@ struct WaitingView: View {
             // No "I'll knock": push (FCM) registration is not built on iOS yet, so
             // promising a notification would be a promise nothing can keep.
             return "Slower than I hoped — a couple more minutes. Your room has a lot going on, which is a compliment."
-        case .connectionTrouble, .sendFailed, .sendFailedTerminal, .sendPaused:
+        case .connectionTrouble, .sendFailed, .sendFailedTerminal, .sendPaused, .sendRateLimited:
             return ""
         }
     }

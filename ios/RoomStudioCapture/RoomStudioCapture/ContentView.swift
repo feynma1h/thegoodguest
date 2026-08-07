@@ -185,6 +185,10 @@ struct ContentView: View {
             case .creatingSession:   ("Creating session…", .orange)
             case .ready:             ("Upload authorized — uploading in background", .blue)
             case .failed(let msg, _): ("Session error: \(msg)", .red)
+            // The daily mint cap (decision 0087). This is the unreferenced rollback
+            // root — it gets a correct, plain line; RootFlowView owns the real
+            // treatment (WaitingView.sendRateLimited).
+            case .rateLimited:       ("Daily upload limit reached — try again later", .orange)
             }
             if !label.isEmpty {
                 Text(label)
