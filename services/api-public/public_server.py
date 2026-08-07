@@ -39,6 +39,14 @@ Endpoints:
       on a ready scene (decision 0058). 200-empty when no conversation
       exists; 409 scene_not_ready until ready. Consumer: the web app.
 
+  DELETE /account
+      Erase the caller's account: every scene, conversation, upload session,
+      mint-quota record, GCS capture and perception artifact, and finally
+      the Firebase user itself (decision 0095). Auth: Firebase ID token; the
+      token's uid IS the target — there is no way to delete anyone else.
+      Idempotent and resumable; 202 means "call again", not "corrupt".
+      Consumers: the web account menu, and the iOS app when it grows one.
+
   POST /scenes/{scene_id}/conversation/messages
       One conversation turn. Body {text, client_msg_id}; the response IS
       the stream: text/event-stream with events delta/done/error and
@@ -58,7 +66,14 @@ Environment variables:
                         and conversations collections; absent → in-memory
                         repositories
   GCS_CAPTURES_BUCKET — bucket name for capture blobs; used when minting
-                        GCS resumable session URIs
+                        GCS resumable session URIs, and swept by DELETE
+                        /account
+  PERCEPTION_OUTPUTS_BUCKET
+                      — bucket holding scenes/{id}/** perception artifacts.
+                        Read only by DELETE /account (the assets route uses
+                        each scene's recorded result_uri instead). Required
+                        in production: without it, deletion would silently
+                        leave every reconstruction behind.
   ANTHROPIC_API_KEY   — Anthropic API key for the conversation guest model
                         (production: Secret Manager via Cloud Run
                         --set-secrets). Absent in dev → the conversation
@@ -139,6 +154,10 @@ _PRODUCTION_REQUIRED_VARS: tuple[str, ...] = (
     "FIRESTORE_PROJECT",
     "GCS_CAPTURES_BUCKET",
     "ANTHROPIC_API_KEY",  # conversation guest model (Secret Manager-mounted)
+    # Required, not defaulted: a wrong-or-absent outputs bucket makes DELETE
+    # /account report success while every reconstruction survives (0095).
+    # Fail at startup instead.
+    "PERCEPTION_OUTPUTS_BUCKET",
 )
 
 
@@ -182,7 +201,7 @@ if _cors_origins:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
         allow_credentials=False,
     )
@@ -203,6 +222,18 @@ class UploadSessionEntry(BaseModel):
     """One entry in the upload_session response."""
     relative_path: str
     session_uri: str
+
+
+class AccountDeleteRequest(BaseModel):
+    """Body for DELETE /account.
+
+    confirm_user_id must equal the token's uid. It is not a security control
+    — the verified token already is one — it is an ACCIDENT control: an
+    irreversible whole-account erase should be impossible to trigger by a
+    client bug that fires the wrong request, and echoing your own uid back is
+    something only deliberate code does.
+    """
+    confirm_user_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +283,41 @@ def _get_upload_session_repo() -> UploadSessionRepository:
             _upload_session_repo = InMemoryUploadSessionRepository()
             logger.info("FIRESTORE_PROJECT unset — using in-memory UploadSessionRepository")
     return _upload_session_repo
+
+
+_account_deleter = None
+
+
+def _get_account_deleter():
+    """AccountDeleter over live Firestore/GCS/Firebase Auth, or None when the
+    service is running without Firestore (local dev, tests). The route turns
+    None into a 503 rather than pretending to delete anything."""
+    global _account_deleter
+    if _account_deleter is None:
+        project = os.environ.get("FIRESTORE_PROJECT")
+        if not project:
+            return None
+        from google.cloud import firestore as _fs  # deferred
+        from google.cloud import storage as _storage  # deferred
+        import firebase_admin  # deferred
+        from firebase_admin import auth as _fb_auth  # deferred
+
+        try:
+            firebase_admin.get_app()
+        except ValueError:
+            firebase_admin.initialize_app()
+
+        from account_deletion import AccountDeleter
+
+        _account_deleter = AccountDeleter(
+            firestore_client=_fs.Client(project=project),
+            storage_client=_storage.Client(project=project),
+            auth_client=_fb_auth,
+            captures_bucket=_GCS_CAPTURES_BUCKET,
+            outputs_bucket=os.environ["PERCEPTION_OUTPUTS_BUCKET"],
+        )
+        logger.info("AccountDeleter ready")
+    return _account_deleter
 
 
 def _get_scene_read_repo() -> SceneReadRepository:
@@ -920,6 +986,110 @@ def list_scenes(
     return JSONResponse(
         status_code=200,
         content={"scenes": [_scene_to_client_dict(s) for s in scenes]},
+    )
+
+
+@app.delete("/account", summary="Erase the caller's account and everything in it")
+# Plain def for the same event-loop reason as create_upload_session above —
+# Firestore queries, GCS deletes and the Firebase Auth call all block.
+def delete_account(
+    req: AccountDeleteRequest,
+    authorization: str = Header(...),
+) -> JSONResponse:
+    """Delete the authenticated user's account in full (decision 0095).
+
+    THE TOKEN IS THE TARGET. There is no uid path or query parameter, so this
+    route cannot be pointed at another account — the worst a stolen token can
+    do is what its owner could already do.
+
+    Removes, in this order: GCS capture blobs and perception artifacts →
+    conversations (with their turns subcollection, which Firestore does NOT
+    cascade) → scenes → upload sessions → the mint-quota record → the
+    Firebase Auth user. See account_deletion.py for why that order and not
+    the faster-looking one.
+
+    Idempotent and resumable: a second call on an already-deleted account
+    finds nothing left and returns 200 with zero counts.
+
+    Request body: {confirm_user_id: <the caller's own uid>} — an accident
+    control, not a security one (see AccountDeleteRequest).
+
+    Response (200) — the pass completed, the identity is gone:
+      {deleted: true, identity_deleted: true,
+       counts: {rooms, conversations, conversation_messages,
+                upload_sessions, files}}
+
+    Response (202) — partial; storage errors stopped the pass before any
+    Firestore record was touched, so nothing is stranded and the same call
+    repeated resumes it:
+      {deleted: false, identity_deleted: false, counts: {...},
+       detail: "..."}
+
+    Errors:
+      400 confirmation_mismatch — confirm_user_id != the token's uid
+      401 missing_token / invalid_token
+      503 deletion_unavailable  — the service has no Firestore configured
+                                  (local dev); never returned in production
+    """
+    user_id, err = _verify_bearer(authorization)
+    if err is not None:
+        return err
+
+    if req.confirm_user_id != user_id:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "confirmation_mismatch",
+                "detail": "confirm_user_id must equal the authenticated uid",
+            },
+        )
+
+    deleter = _get_account_deleter()
+    if deleter is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "deletion_unavailable",
+                "detail": "account deletion requires a configured datastore",
+            },
+        )
+
+    try:
+        report = deleter.delete(user_id)
+    except Exception as exc:
+        # The user is still signed in and every record they own still exists —
+        # a retry re-derives the same plan. Say so rather than implying loss.
+        logger.exception("account_deletion failed for uid=%s", user_id)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "deletion_failed",
+                "detail": f"nothing was left in a partial state; try again ({exc})",
+            },
+        )
+
+    if not report.complete:
+        # errors[] can carry object paths — logged above, never shipped.
+        logger.error(
+            "account_deletion incomplete uid=%s errors=%s", user_id, report.errors
+        )
+        return JSONResponse(
+            status_code=202,
+            content={
+                "deleted": False,
+                "identity_deleted": False,
+                "counts": report.counts(),
+                "detail": "some files could not be removed; call again to resume",
+            },
+        )
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "deleted": True,
+            "identity_deleted": report.identity_deleted,
+            "counts": report.counts(),
+        },
     )
 
 
