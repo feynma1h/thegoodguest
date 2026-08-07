@@ -1,8 +1,8 @@
 # 0089 — Person as a suppression-only SAM 3 concept
 
 **Date:** 2026-08-08
-**Status:** built, offline-verified on real data; live proof owed on the next
-warm re-drive of a person-carrying capture
+**Status:** built, deployed (`perception-obj-00036-l9l`), and live-verified
+end-to-end on the person-carrying capture
 
 ## Context
 
@@ -115,6 +115,59 @@ The current `wall_03` albedo is #616161, not 0070's recorded #899fbf: the scene
 was re-driven 2026-07-24 with a different completed-frame set, which reshuffled
 which plane carries which evidence. The contamination is the same; the value
 moved.
+
+## Live, on the deployed revision
+
+f3d70236 was re-driven on `perception-obj-00036-l9l` with the three person
+frames' `objects.json` + `masks.npz` deleted (splat caches retained), forcing
+real SAM 3 segmentation with the concept armed.
+
+**SAM found the person in all three frames** — `suppressed=1 labels=['person']`
+on 40, 124 and 152 — and the shell consumed the unions (144,131 / 201,285 /
+239,244 px). The hand-labelled stand-ins had been 1.2–1.5× larger than SAM's
+actual masks, so the offline numbers were conservative in the right direction.
+
+The measured result is **larger than the offline estimate predicted**:
+
+| plane | albedo | observed fraction | texels |
+|---|---|---|---|
+| wall_03 | #616161 → **#50504f** | 1.0000 → **0.6603** | 936 → 618 |
+| floor | #b7b3a9 → #b7b4a9 | 0.8872 → **0.8286** | 24171 → 22576 |
+| wall_04 / wall_05 / wall_06 | unchanged | unchanged | unchanged |
+
+**A third of wall_03's measured surface evidence was a person** (34% of its
+observed texels). The offline probe under-read this because a hand-drawn
+polygon left neighbouring frames covering the same texels; SAM's real masks
+removed them outright. The floor's observed fraction landed at 0.8286 against
+the offline prediction of 0.8285.
+
+**Degrade lock confirmed on real data, the strongest form available:** the
+`masks` stacks the re-segmented frames wrote are **bit-identical** to the ones
+they replaced (0 differing pixels across all three), and the kept labels and
+their ORDER are identical, so every per-object splat cache hit. The partition
+removed exactly the person and perturbed nothing else. SAM 3 is deterministic
+here; that is now measured, not assumed.
+
+## An unrelated finding this re-drive surfaced
+
+Material FAMILY assignments are not stable across invocations at the confidence
+gate. `wall_06`'s evidence was byte-identical before and after (18,329 texels,
+5 frames, same albedo) yet its family moved None → "tile"; the floor moved
+"stone" → "tile". Both came back at confidence exactly 0.6 —
+`SHELL_MATERIAL_MIN_CONF` — so they are sitting ON the gate, where the call is
+a coin flip and 0070's "rectangular stone" floor is a defensible either way.
+Not caused by suppression (the evidence for wall_06 did not change at all), but
+it means a re-baked shell can ship a different family than the one the operator
+adjudicated. Worth its own look before families are trusted as stable product
+data.
+
+The same re-drive was also f3d70236's FIRST run on the 0081/0082 code (it was
+last driven 2026-07-24; those re-drives covered only the four LiDAR walk
+rooms), so its manifest moved 24 → 21 objects with placed 7 → 8. That is the
+cross-label dedup collapsing the artwork/painting confusable group and the wall
+anchoring pass landing — `wall_normal` appears in `constraints_applied` for the
+first time, and every dropped object was an UNPLACED inventory entry. Verified
+not to be this change: masks bit-identical, per-frame detections identical.
 
 ## What would change this decision
 
