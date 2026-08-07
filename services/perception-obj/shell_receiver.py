@@ -54,6 +54,8 @@ import asyncio
 import io
 import json
 import logging
+import math
+import os
 import time
 from typing import Any
 
@@ -312,6 +314,90 @@ def _wound_wall_polygon(surface, geom) -> np.ndarray:
     return poly if area2 >= 0 else poly[::-1]
 
 
+# RoomPlan stitches long walls into several segments whose planes disagree
+# by fractions of a degree to a few degrees and centimetres of offset — the
+# RP-8 walk read the spike's four-segment run as kinked ("should be a
+# straight line"). Adjacent near-coplanar segments are co-planarized at
+# RENDER time: the rendered polygon projects onto the group's area-weighted
+# mean plane; the measured polygon ships beside it (the 0069 honesty
+# invariant — closure never mutates measured geometry). Calibrated on the
+# spike fixture: exactly {02,10}, {07,08}, {04,11,12} group; every other
+# pair fails offset or adjacency by an order of magnitude.
+SHELL_COPLANAR_MAX_DEG = float(os.environ.get("SHELL_COPLANAR_MAX_DEG", "4.0"))
+SHELL_COPLANAR_MAX_OFFSET_M = float(os.environ.get("SHELL_COPLANAR_MAX_OFFSET_M", "0.08"))
+SHELL_COPLANAR_MAX_GAP_M = float(os.environ.get("SHELL_COPLANAR_MAX_GAP_M", "0.15"))
+
+
+def _coplanar_wall_groups(pairs: list) -> list[list[int]]:
+    """Union-find groups over (surface, geom) pairs: two walls chain when
+    their planes agree (angle <= SHELL_COPLANAR_MAX_DEG, mutual anchor
+    offset <= SHELL_COPLANAR_MAX_OFFSET_M) and their lateral extents are
+    adjacent (gap <= SHELL_COPLANAR_MAX_GAP_M). Deterministic."""
+    n = len(pairs)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    cos_min = math.cos(math.radians(SHELL_COPLANAR_MAX_DEG))
+    for i in range(n):
+        _si, gi = pairs[i]
+        for j in range(i + 1, n):
+            _sj, gj = pairs[j]
+            if abs(float(np.dot(gi.normal, gj.normal))) < cos_min:
+                continue
+            anchor_j = gj.corners_world.mean(axis=0)
+            anchor_i = gi.corners_world.mean(axis=0)
+            off = max(
+                abs(float(np.dot(anchor_j - gi.origin, gi.normal))),
+                abs(float(np.dot(anchor_i - gj.origin, gj.normal))),
+            )
+            if off > SHELL_COPLANAR_MAX_OFFSET_M:
+                continue
+            si = (gi.corners_world - gi.origin) @ gi.axis_u
+            sj = (gj.corners_world - gi.origin) @ gi.axis_u
+            gap = max(float(sj.min() - si.max()), float(si.min() - sj.max()))
+            if gap > SHELL_COPLANAR_MAX_GAP_M:
+                continue
+            parent[find(j)] = find(i)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    return [sorted(g) for _r, g in sorted(groups.items()) if len(g) > 1]
+
+
+def _coplanarized_polygons(pairs: list) -> dict[int, tuple[np.ndarray, list[str]]]:
+    """index → (projected polygon, group wall_ids) for every wall in a
+    co-planar group. Projection is along the group's area-weighted mean
+    normal onto its area-weighted mean plane — a pure per-vertex slide of
+    at most the measured offsets (cm), never an in-plane change."""
+    out: dict[int, tuple[np.ndarray, list[str]]] = {}
+    for group in _coplanar_wall_groups(pairs):
+        ref_n = pairs[group[0]][1].normal
+        weights, normals, anchors = [], [], []
+        for i in group:
+            _s, g = pairs[i]
+            w = max(g.area_m2, 1e-6)
+            n = g.normal if float(np.dot(g.normal, ref_n)) >= 0 else -g.normal
+            weights.append(w)
+            normals.append(w * n)
+            anchors.append(w * g.corners_world.mean(axis=0))
+        n_mean = np.sum(normals, axis=0)
+        n_mean /= np.linalg.norm(n_mean)
+        p_mean = np.sum(anchors, axis=0) / float(np.sum(weights))
+        ids = [pairs[i][1].wall_id for i in group]
+        for i in group:
+            surface, geom = pairs[i]
+            poly = _wound_wall_polygon(surface, geom)
+            d = (poly - p_mean) @ n_mean
+            out[i] = (poly - d[:, None] * n_mean, ids)
+    return out
+
+
 def _v3_roomplan_planes(
     room: RoomPlanRoom,
     plane_results: dict[str, tuple[ObservationResult, MaterialResult]],
@@ -332,11 +418,23 @@ def _v3_roomplan_planes(
         }
 
     walls_out: list[dict[str, Any]] = []
-    for surface, geom in roomplan_wall_pairs(room):
+    pairs = roomplan_wall_pairs(room)
+    coplanarized = _coplanarized_polygons(pairs)
+    for idx, (surface, geom) in enumerate(pairs):
         obs, mat = plane_results[geom.wall_id]
-        walls_out.append({
+        provenance: dict[str, Any] = {"source": "roomplan"}
+        if idx in coplanarized:
+            polygon, group_ids = coplanarized[idx]
+            provenance["coplanarized_with"] = [
+                w for w in group_ids if w != geom.wall_id
+            ]
+            measured = _points(_wound_wall_polygon(surface, geom))
+        else:
+            polygon = _wound_wall_polygon(surface, geom)
+            measured = None
+        entry = {
             "wall_id": geom.wall_id,
-            "polygon": _points(_wound_wall_polygon(surface, geom)),
+            "polygon": _points(polygon),
             "classification": surface.category,
             "confidence": surface.confidence,
             "openings": [
@@ -348,9 +446,12 @@ def _v3_roomplan_planes(
                 }
                 for op in geom.openings
             ],
-            "provenance": {"source": "roomplan"},
+            "provenance": provenance,
             "material": _material_dict(mat, obs),
-        })
+        }
+        if measured is not None:
+            entry["measured_polygon"] = measured
+        walls_out.append(entry)
     return floor_out, walls_out
 
 
