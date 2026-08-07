@@ -280,17 +280,81 @@ class TestAxisMapping:
         assert cands[p].signs == (1, -1)
         assert cands[p].assignment == cands[0].assignment
 
+    def test_up_filter_keeps_only_the_layout_up_axis(self):
+        """With a layout up prior (decision 0081), all six assignments are
+        enumerated and only those mapping the up AXIS LINE near vertical
+        survive — both signs (the layout's sign is never trusted: it
+        measured wrong on a real RP-8 table)."""
+        cands = box_placement.axis_mapping_candidates(
+            _box(), np.array([1.0, 0.25, 0.5]), up_local=np.array([0.0, 1.0, 0.0])
+        )
+        assert cands  # never empty for an axis-aligned prior
+        assert {c.assignment[1] for c in cands} == {1}  # splat axis 1 -> up only
+        assert {c.signs[0] for c in cands} == {1, -1}  # both up signs alive
+        assert len(cands) == 8  # 2 horizontal assignments x 4 signs
+        # Order convention unchanged: extent-best assignment, (+, +) first.
+        assert cands[0].signs == (1, 1)
+
+    def test_up_filter_excludes_truncation_misleading_assignment(self):
+        """The RP-8 bed's failure class in synthetic form: extents prefer
+        an assignment whose up axis contradicts the layout prior; with the
+        prior the wrong-up assignment is simply not enumerated."""
+        cands = box_placement.axis_mapping_candidates(
+            _box(), np.array([1.0, 0.25, 0.5]), up_local=np.array([0.0, 0.0, 1.0])
+        )
+        assert {c.assignment[1] for c in cands} == {2}
+
+    def test_up_filter_diagonal_prior_falls_back(self):
+        """A near-diagonal layout up (54.7° from every axis) fails the
+        filter for every mapping; the extent-tolerance enumeration stands
+        rather than an empty candidate list."""
+        diag = np.array([1.0, 1.0, 1.0]) / np.sqrt(3.0)
+        with_prior = box_placement.axis_mapping_candidates(
+            _box(), np.array([1.0, 0.25, 0.5]), up_local=diag
+        )
+        without = box_placement.axis_mapping_candidates(
+            _box(), np.array([1.0, 0.25, 0.5])
+        )
+        assert [c.rotation_xyzw for c in with_prior] == [
+            c.rotation_xyzw for c in without
+        ]
+
+    def test_no_prior_matches_pre_0081_enumeration(self):
+        """The 2-arg call (and up_local=None) is byte-identical to the
+        pre-0081 extent-tolerance enumeration — the degrade lock for
+        observations without a layout rotation."""
+        a = box_placement.axis_mapping_candidates(_box(), np.array([1.0, 0.25, 0.5]))
+        b = box_placement.axis_mapping_candidates(
+            _box(), np.array([1.0, 0.25, 0.5]), up_local=None
+        )
+        assert [c.rotation_xyzw for c in a] == [c.rotation_xyzw for c in b]
+        assert len(a) == 4
+
 
 # ---------------------------------------------------------------------------
-# build_box_object decision semantics (scores injected — the margins are
-# the contract; the instrument's discrimination is pinned on real data)
+# build_box_object decision semantics (decision 0081: assignment resolution
+# by the cloud instrument, sign by the fixed convention, facing by the
+# appearance partner check — scores injected here; the instruments'
+# discrimination is pinned on real data)
 # ---------------------------------------------------------------------------
 
-def _built(box, ctx, associations, monkeypatch=None, scores=None, allow_scoring=True):
-    if scores is not None:
+def _built(
+    box, ctx, associations, monkeypatch=None,
+    cloud_scores=None, pair_scores=None, allow_scoring=True,
+):
+    if cloud_scores is not None:
+        monkeypatch.setattr(
+            box_placement, "observation_cloud_from_ctx",
+            lambda ctx, fi, mi: np.zeros((100, 3)),
+        )
+        monkeypatch.setattr(
+            box_placement, "score_candidates_cloud",
+            lambda candidates, pts, cloud, scale: list(cloud_scores[: len(candidates)]),
+        )
+    if pair_scores is not None:
         monkeypatch.setattr(
             box_placement, "score_candidates_at_center",
-            lambda candidates, center, pts, app, views: list(scores[: len(candidates)]),
+            lambda candidates, center, pts, app, views: list(pair_scores[: len(candidates)]),
         )
     return box_placement.build_box_object(
         box=box, box_index=0, object_id="obj_000",
@@ -298,49 +362,83 @@ def _built(box, ctx, associations, monkeypatch=None, scores=None, allow_scoring=
     )
 
 
-def _assoc_scene():
-    box = _box()
+def _assoc_scene(dims=(1.0, 0.5, 1.0), ext=(0.5, 0.25, 0.5)):
+    """A near-square box (two live assignments — 8 candidates) so
+    assignment resolution has a rival to beat."""
+    box = _box(dims=dims)
     ctx, obs = _scene_with_box(box)
-    ctx.splats["gs://o/s.ply"] = _slab_cloud()
+    ctx.splats["gs://o/s.ply"] = _slab_cloud(ext)
     assoc = box_placement.associate_observations([box], [obs], ctx)[0]
     return box, ctx, assoc
 
 
+def _cands(box, ctx):
+    return box_placement.axis_mapping_candidates(
+        box, box_placement.splat_axis_extents(ctx.splats["gs://o/s.ply"])
+    )
+
+
 class TestBuildBoxObject:
     def test_resolved_winner_ships(self, monkeypatch):
+        """A rival assignment whose best cloud score clears the margin
+        resolves the mapping; the shipped candidate is that assignment's
+        (+,+) sign (the sign leaf stays convention-bound)."""
         box, ctx, assoc = _assoc_scene()
-        obj = _built(box, ctx, assoc, monkeypatch, scores=[0.5, 0.75, 0.4, 0.3])
+        cands = _cands(box, ctx)
+        assert len(cands) == 8  # 2 assignments x 4 signs
+        cloud_scores = [0.5, 0.4, 0.3, 0.2, 0.75, 0.6, 0.1, 0.1]
+        obj = _built(box, ctx, assoc, monkeypatch,
+                     cloud_scores=cloud_scores, pair_scores=[0.5, 0.4])
         assert obj["placed"] is True
         assert obj["method"] == "roomplan_box"
         assert obj["position_source"] == "roomplan_box"
         assert obj["splat_axis_resolved"] is True
         assert obj["facing_flag"] is False
         assert obj["quality"]["axis_margin"] == pytest.approx(0.25)
-        cands = box_placement.axis_mapping_candidates(
-            box, box_placement.splat_axis_extents(ctx.splats["gs://o/s.ply"])
-        )
-        assert obj["world_transform"]["rotation_xyzw"] == list(cands[1].rotation_xyzw)
+        assert obj["world_transform"]["rotation_xyzw"] == list(cands[4].rotation_xyzw)
+        assert cands[4].signs == (1, 1)
 
     def test_below_margin_ships_default_unresolved(self, monkeypatch):
         box, ctx, assoc = _assoc_scene()
-        obj = _built(box, ctx, assoc, monkeypatch, scores=[0.50, 0.52, 0.45, 0.44])
+        cands = _cands(box, ctx)
+        cloud_scores = [0.50, 0.4, 0.3, 0.2, 0.52, 0.4, 0.1, 0.1]
+        obj = _built(box, ctx, assoc, monkeypatch,
+                     cloud_scores=cloud_scores, pair_scores=[0.5, 0.4])
         assert obj["splat_axis_resolved"] is False
-        cands = box_placement.axis_mapping_candidates(
-            box, box_placement.splat_axis_extents(ctx.splats["gs://o/s.ply"])
-        )
+        assert obj["quality"]["axis_margin"] == pytest.approx(0.02)
+        assert obj["world_transform"]["rotation_xyzw"] == list(cands[0].rotation_xyzw)
+
+    def test_single_assignment_never_resolves(self, monkeypatch):
+        """With one surviving assignment there is no rival — margin None,
+        default ships (the RP-8 live failure mode, now honest)."""
+        box, ctx, assoc = _assoc_scene(dims=(2.0, 0.5, 1.0), ext=(1.0, 0.25, 0.5))
+        cands = _cands(box, ctx)
+        assert len({c.assignment for c in cands}) == 1
+        obj = _built(box, ctx, assoc, monkeypatch,
+                     cloud_scores=[0.9, 0.5, 0.4, 0.3], pair_scores=[0.5, 0.4])
+        assert obj["splat_axis_resolved"] is False
+        assert "axis_margin" not in obj["quality"]
+        assert obj["world_transform"]["rotation_xyzw"] == list(cands[0].rotation_xyzw)
+
+    def test_no_cloud_ships_default_unresolved(self, monkeypatch):
+        """No depth accessor (StubCtx) → no cloud → the up-filtered extent
+        default ships, recorded unresolved — the warm re-drive degrade."""
+        box, ctx, assoc = _assoc_scene()
+        cands = _cands(box, ctx)
+        obj = _built(box, ctx, assoc, monkeypatch, pair_scores=[0.5, 0.4])
+        assert obj["splat_axis_resolved"] is False
+        assert "axis_cloud_points" not in obj["quality"]
         assert obj["world_transform"]["rotation_xyzw"] == list(cands[0].rotation_xyzw)
 
     def test_facing_flag_fires_flag_only(self, monkeypatch):
-        """The scorer prefers the anti-RoomPlan facing (the default's
-        180°-about-vertical partner) but below the ship margin: flag it,
-        ship RoomPlan's conventional mapping — flag-only v1."""
+        """The appearance scorer prefers the shipped mapping's 180°
+        partner: flag it, ship the conventional sign — flag-only v1,
+        semantics unchanged from the pre-0081 clause."""
         box, ctx, assoc = _assoc_scene()
-        obj = _built(box, ctx, assoc, monkeypatch, scores=[0.50, 0.55, 0.45, 0.44])
+        cands = _cands(box, ctx)
+        obj = _built(box, ctx, assoc, monkeypatch, pair_scores=[0.50, 0.55])
         assert obj["splat_axis_resolved"] is False
         assert obj["facing_flag"] is True
-        cands = box_placement.axis_mapping_candidates(
-            box, box_placement.splat_axis_extents(ctx.splats["gs://o/s.ply"])
-        )
         assert obj["world_transform"]["rotation_xyzw"] == list(cands[0].rotation_xyzw)
 
     def test_budget_refused_ships_default_without_scoring(self):
@@ -351,8 +449,8 @@ class TestBuildBoxObject:
         assert obj["quality"]["axis_scored_views"] == 0
 
     def test_box_owns_position_scale_and_extents(self, monkeypatch):
-        box, ctx, assoc = _assoc_scene()
-        obj = _built(box, ctx, assoc, monkeypatch, scores=[0.5, 0.4, 0.3, 0.2])
+        box, ctx, assoc = _assoc_scene(dims=(2.0, 0.5, 1.0), ext=(1.0, 0.25, 0.5))
+        obj = _built(box, ctx, assoc, monkeypatch, pair_scores=[0.5, 0.4])
         assert obj["world_transform"]["position"] == pytest.approx([0.0, 0.0, -3.0])
         assert obj["extent_m_sorted"] == [2.0, 1.0, 0.5]  # BOX dims, sorted
         assert obj["world_transform"]["scale"] == pytest.approx(2.0, abs=0.2)

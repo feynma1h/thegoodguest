@@ -74,9 +74,29 @@ _BOX_SCORE_MIN_INFRAME = float(os.environ.get("PLACEMENT_BOX_SCORE_MIN_INFRAME",
 # alive — exactly the "enumerate all" clause.
 _AXIS_RATIO_TOL = float(os.environ.get("PLACEMENT_AXIS_RATIO_TOL", "1.6"))
 
-# The winner must beat every other candidate's mean combined score by this
-# to ship (P1's achieved combined winner margin: 0.0999 on the real bed).
+# The winning ASSIGNMENT's best cloud score must beat every other
+# assignment's best by this to ship (decision 0081: the margin gate keeps
+# its value and its meaning — refuse coin flips — but gates the assignment
+# DOF, the one the cloud instrument actually measures; P1's appearance
+# margin never materialized live: 0.0018-0.089 on RP-8 vs the 0.10 gate).
 _AXIS_MARGIN = float(os.environ.get("PLACEMENT_AXIS_MARGIN", "0.10"))
+
+# Axis-level up filter (decision 0081): a candidate must map the layout
+# prior's splat-up direction to within this many degrees of the world
+# vertical AXIS LINE (sign-agnostic — the layout's up AXIS measured
+# trustworthy on 6/6 RP-8 spike boxes, its SIGN measured wrong on one, so
+# the sign is never trusted). Only applies when the observation carries a
+# layout rotation; without one the extent-tolerance enumeration stands.
+_AXIS_UP_MAX_DEG = float(os.environ.get("PLACEMENT_AXIS_UP_MAX_DEG", "45"))
+
+# Cloud-NN score mapping: score = exp(-rms / sigma). Sigma chosen so the
+# probe's measured assignment margins (0.15-0.47 correct, 0.002-0.014
+# ambiguous) straddle the 0.10 gate exactly as adjudicated.
+_AXIS_CLOUD_SIGMA = float(os.environ.get("PLACEMENT_AXIS_CLOUD_SIGMA", "0.05"))
+
+# Translation-only NN passes per candidate when fitting the splat to the
+# observation cloud (2 measured sufficient to settle correspondence).
+_AXIS_CLOUD_ITERS = 2
 
 # Below the ship margin, a partner (180°-about-vertical) preference this
 # large over the shipped default raises facing_flag (flag-only v1).
@@ -356,8 +376,38 @@ class AxisCandidate:
     residual_m: list  # (dim, |scale*ext - dim|) pairs sorted by dim desc
 
 
+def splat_up_local(obs: dict) -> np.ndarray | None:
+    """The splat-local direction the observation's layout rotation calls
+    world-up, or None when the observation carries no layout rotation.
+    Reads the same fields fusion's ray path trusts (world_transform on a
+    placed depth_fit, world_rotation_xyzw on a demoted/ray observation)."""
+    pl = obs.get("placement") or {}
+    q = None
+    if pl.get("rotation_source") == "sam3d_layout":
+        wt = pl.get("world_transform") or {}
+        q = wt.get("rotation_xyzw") or pl.get("world_rotation_xyzw")
+    if q is None and pl.get("world_rotation_xyzw"):
+        q = pl["world_rotation_xyzw"]
+    if q is None:
+        return None
+    from roomstudio_schemas.pose_math import quat_to_rotmat
+
+    R = quat_to_rotmat(tuple(q))
+    return R.T @ np.array([0.0, 1.0, 0.0])
+
+
+def axis_up_angle_deg(cand: AxisCandidate, up_local: np.ndarray) -> float:
+    """Angle of the candidate's mapped layout-up to the vertical AXIS LINE
+    (sign-agnostic: min of the angles to +Y and −Y)."""
+    from roomstudio_schemas.pose_math import quat_to_rotmat
+
+    R = quat_to_rotmat(tuple(cand.rotation_xyzw))
+    up_world = R @ np.asarray(up_local, dtype=np.float64)
+    return float(np.degrees(np.arccos(np.clip(abs(up_world[1]), 0.0, 1.0))))
+
+
 def axis_mapping_candidates(
-    box, splat_extents: np.ndarray
+    box, splat_extents: np.ndarray, up_local: np.ndarray | None = None
 ) -> list[AxisCandidate]:
     """Enumerate extent-consistent right-handed mappings of the splat's
     coordinate axes onto the box axes. Per assignment, four sign candidates
@@ -365,7 +415,19 @@ def axis_mapping_candidates(
     exactly the P1 probe's candidate set. Ordered: assignments by
     consistency (extent-best first), signs in the fixed order
     (+,+), (+,−), (−,+), (−,−) — so candidates[0] is the extent-best
-    default ("RoomPlan's" conventional mapping)."""
+    default ("RoomPlan's" conventional mapping).
+
+    With `up_local` (the layout prior's splat-up direction, decision 0081):
+    ALL SIX assignments are enumerated and filtered to those whose mapped
+    up stays within PLACEMENT_AXIS_UP_MAX_DEG of the vertical axis line —
+    extent consistency measured actively MISLEADING under visible-region
+    truncation (the RP-8 spike bed: the correct assignment sat at
+    consistency 2.07, excluded by the 1.6 tolerance, while 1.53 shipped
+    90° wrong), so when a trustworthy up axis exists it replaces the
+    extent tolerance as the gate. Candidate ORDER is unchanged
+    (consistency-ascending, so candidates[0] stays the extent-best
+    surviving default). Without `up_local` the behaviour is byte-identical
+    to the pre-0081 enumeration (the degrade lock)."""
     R = box.transform[:3, :3]
     bx, by = R[:, 0].copy(), R[:, 1].copy()
     dims = np.asarray(box.dimensions, dtype=np.float64)
@@ -384,7 +446,10 @@ def axis_mapping_candidates(
             assignments.append(((i_x, i_up, i_z), consistency, float(np.median(ratios)), ratios))
     assignments.sort(key=lambda a: (a[1], a[0]))
     best_consistency = assignments[0][1]
-    kept = [a for a in assignments if a[1] <= max(_AXIS_RATIO_TOL, best_consistency)]
+    if up_local is None:
+        kept = [a for a in assignments if a[1] <= max(_AXIS_RATIO_TOL, best_consistency)]
+    else:
+        kept = assignments  # all six; the axis-up filter prunes below
 
     out: list[AxisCandidate] = []
     eye = np.eye(3)
@@ -408,15 +473,121 @@ def axis_mapping_candidates(
             H2 = np.cross(U, H1)
             M = np.column_stack([U, H1, H2])
             R_world = M @ E.T
-            out.append(AxisCandidate(
+            cand = AxisCandidate(
                 rotation_xyzw=tuple(float(c) for c in rotmat_to_quat(R_world)),
                 scale=scale,
                 assignment=(i_x, i_up, i_z),
                 signs=(s_up, s_x),
                 consistency=consistency,
                 residual_m=residual,
-            ))
+            )
+            if up_local is not None and axis_up_angle_deg(cand, up_local) > _AXIS_UP_MAX_DEG:
+                continue
+            out.append(cand)
+    if up_local is not None and not out:
+        # A near-diagonal layout up can fail the axis filter for every
+        # mapping (the closest coordinate axis is at most 54.7° away).
+        # Degrade to the extent-tolerance enumeration rather than crash.
+        return axis_mapping_candidates(box, splat_extents, None)
     return out
+
+
+def observation_cloud_from_ctx(ctx, frame_index: int, mask_index) -> np.ndarray | None:
+    """The observation's world-frame LiDAR cloud via the RefinementContext,
+    or None (no depth accessor / swept capture / no mask / sparse cloud —
+    every miss degrades scoring to the up-filtered extent default)."""
+    get_depth = getattr(ctx, "get_depth", None)
+    if get_depth is None:
+        return None
+    payload = get_depth(frame_index)
+    if payload is None:
+        return None
+    depth_raster, depth_confidence, depth_intrinsics = payload
+    mask = ctx.mask_for(frame_index, mask_index)
+    cam = ctx.get_camera(frame_index)
+    if mask is None or cam is None:
+        return None
+    pose, _intr = cam
+    import placement
+
+    return placement.observation_world_cloud(
+        depth_raster, depth_confidence, depth_intrinsics, mask, pose
+    )
+
+
+def score_candidates_cloud(
+    candidates: list[AxisCandidate],
+    local_points: np.ndarray,
+    cloud: np.ndarray,
+    scale: float,
+) -> list[float | None]:
+    """Cloud-alignment score per candidate (decision 0081): the splat under
+    the candidate rotation, at the OBSERVATION's own fitted scale, is
+    translation-fitted to the observation's LiDAR cloud (robust-center init
+    + _AXIS_CLOUD_ITERS trimmed-NN translation passes — the same
+    refine_similarity_nn the depth_fit path trusts) and scored
+    exp(-rms / sigma). World-space by construction: immune to the crop-
+    misalignment that defeats appearance scoring on truncated splats
+    (measured — no appearance variant separated any RP-8 box; this does)."""
+    from roomstudio_schemas.placement_math import (
+        DegenerateGeometryError,
+        refine_similarity_nn,
+        robust_cloud_stats,
+    )
+    from roomstudio_schemas.pose_math import quat_to_rotmat
+
+    try:
+        c_local = robust_cloud_stats(local_points).center
+    except DegenerateGeometryError:
+        return [None] * len(candidates)
+    cloud_c = cloud.mean(axis=0)
+    out: list[float | None] = []
+    for cand in candidates:
+        R = quat_to_rotmat(tuple(cand.rotation_xyzw))
+        t = cloud_c - scale * (R @ c_local)
+        rms = None
+        try:
+            for _ in range(_AXIS_CLOUD_ITERS):
+                _s, _R, t, rms = refine_similarity_nn(
+                    local_points, cloud, scale, R, t, mode="translation"
+                )
+        except DegenerateGeometryError:
+            rms = None
+        out.append(None if rms is None else float(np.exp(-rms / _AXIS_CLOUD_SIGMA)))
+    return out
+
+
+def resolve_axis_mapping(
+    candidates: list[AxisCandidate], cloud_scores: list[float | None]
+) -> tuple[int, bool, float | None]:
+    """(chosen_index, resolved, assignment_margin) — decision 0081's
+    resolution policy. Scores group by ASSIGNMENT (the DOF the cloud
+    instrument measures; 180° sign twins are cloud-near-degenerate —
+    measured 0.003-0.006 apart on the RP-8 bed — and stay with the fixed
+    (+,+)-first convention P1 called RoomPlan's conventional mapping,
+    which measured 5/5 on the corrected truth table). The winning
+    assignment ships only when its best score beats every other
+    assignment's best by _AXIS_MARGIN; otherwise the extent-best surviving
+    assignment (candidates[0]) stands. chosen_index is always the FIRST
+    candidate of the chosen assignment in candidate order (+,+ first)."""
+    by_assign: dict[tuple, list[int]] = {}
+    for i, c in enumerate(candidates):
+        by_assign.setdefault(c.assignment, []).append(i)
+    default_assign = candidates[0].assignment if candidates else None
+    group_best: dict[tuple, float] = {}
+    for a, idxs in by_assign.items():
+        vals = [cloud_scores[i] for i in idxs if cloud_scores[i] is not None]
+        if vals:
+            group_best[a] = max(vals)
+    ranked = sorted(
+        group_best.items(), key=lambda kv: (-kv[1], min(by_assign[kv[0]]))
+    )
+    if len(ranked) < 2:
+        return (by_assign[default_assign][0], False, None)
+    margin = ranked[0][1] - ranked[1][1]
+    if margin >= _AXIS_MARGIN:
+        return (by_assign[ranked[0][0]][0], True, float(margin))
+    return (by_assign[default_assign][0], False, float(margin))
 
 
 def _partner_index(candidates: list[AxisCandidate], idx: int) -> int | None:
@@ -527,7 +698,8 @@ def build_box_object(
         }
 
     extents = splat_axis_extents(splat)
-    candidates = axis_mapping_candidates(box, extents)
+    u_local = splat_up_local(best_view.obs)
+    candidates = axis_mapping_candidates(box, extents, u_local)
     center = np.asarray(box.center_world, dtype=np.float64)
 
     quality: dict = {
@@ -535,59 +707,77 @@ def build_box_object(
         "score": best_view.obs["score"],
         "association_overlap": round(best_view.overlap, 4),
     }
-
-    scores: list[float | None] = [None] * len(candidates)
-    scoreable_views: list[tuple] = []
-    if allow_scoring:
-        appearance = (
-            ctx.get_appearance(best_view.obs["splat_gcs_uri"])
-            if ctx.get_appearance is not None else None
-        )
-        for assoc in associations:
-            if assoc.in_frame_fraction < _BOX_SCORE_MIN_INFRAME:
-                continue  # degenerate view: skip, never average (P1)
-            cam = ctx.get_camera(assoc.frame_index)
-            evidence = ctx.evidence_for(assoc.frame_index, assoc.mask_index)
-            if cam is None or evidence is None:
-                continue
-            pose, intrinsics = cam
-            rgb = (
-                ctx.get_rgb(assoc.frame_index)
-                if (appearance is not None and ctx.get_rgb is not None) else None
-            )
-            scoreable_views.append((evidence, intrinsics, pose, rgb))
-        if scoreable_views:
-            scores = score_candidates_at_center(
-                candidates, center, splat, appearance, scoreable_views
-            )
-    quality["axis_scored_views"] = len(scoreable_views)
     quality["axis_candidates"] = len(candidates)
+    quality["axis_up_filtered"] = u_local is not None
 
-    chosen = 0  # extent-best default: first assignment, signs (+, +)
+    # --- Assignment resolution: cloud-alignment instrument (0081). ------
+    # The appearance instrument measured unable to separate ANY RP-8 box
+    # (margins 0.0018-0.089 across every scorer variant and view set); the
+    # observation's own LiDAR cloud separates the assignment DOF at
+    # measured margins 0.15-0.47 where the geometry is decisive, and
+    # refuses honestly (0.002-0.014) on near-cubic objects.
+    chosen = 0  # extent-best surviving default, signs (+, +)
     splat_axis_resolved = False
     facing_flag = False
-    numeric = [(i, s) for i, s in enumerate(scores) if s is not None]
-    if len(numeric) >= 2:
-        ranked = sorted(numeric, key=lambda p: (-p[1], p[0]))
-        margin = ranked[0][1] - ranked[1][1]
-        quality["axis_margin"] = round(margin, 4)
-        if margin >= _AXIS_MARGIN:
-            chosen = ranked[0][0]
-            splat_axis_resolved = True
-        else:
-            partner = _partner_index(candidates, chosen)
-            if (
-                partner is not None
-                and scores[chosen] is not None
-                and scores[partner] is not None
-                and scores[partner] >= scores[chosen] + _FACING_FLAG_MARGIN
-            ):
-                # The scorer prefers the anti-RoomPlan facing, but not
-                # decisively enough to ship: flag it, ship RoomPlan's
-                # conventional mapping (flag-only v1).
-                facing_flag = True
-    if scores[chosen] is not None:
-        quality["axis_score"] = round(float(scores[chosen]), 4)
+    if allow_scoring and candidates:
+        cloud = observation_cloud_from_ctx(
+            ctx, best_view.frame_index, best_view.mask_index
+        )
+        if cloud is not None:
+            wt_obs = (best_view.obs.get("placement") or {}).get("world_transform") or {}
+            s_obs = float(
+                wt_obs.get("scale")
+                or float(np.median([c.scale for c in candidates]))
+            )
+            cloud_scores = score_candidates_cloud(candidates, splat, cloud, s_obs)
+            chosen, splat_axis_resolved, margin = resolve_axis_mapping(
+                candidates, cloud_scores
+            )
+            quality["axis_cloud_points"] = int(cloud.shape[0])
+            if margin is not None:
+                quality["axis_margin"] = round(margin, 4)
+            if cloud_scores[chosen] is not None:
+                quality["axis_score"] = round(float(cloud_scores[chosen]), 4)
+
+    # --- Facing check (flag-only v1, semantics unchanged): the appearance
+    # instrument still owns the 180°-partner leaf — the cloud is near-
+    # degenerate there (measured 0.003-0.006 on the RP-8 bed's sign twins).
+    scoreable_views: list[tuple] = []
+    if allow_scoring and candidates:
+        partner = _partner_index(candidates, chosen)
+        if partner is not None:
+            appearance = (
+                ctx.get_appearance(best_view.obs["splat_gcs_uri"])
+                if ctx.get_appearance is not None else None
+            )
+            for assoc in associations:
+                if assoc.in_frame_fraction < _BOX_SCORE_MIN_INFRAME:
+                    continue  # degenerate view: skip, never average (P1)
+                cam = ctx.get_camera(assoc.frame_index)
+                evidence = ctx.evidence_for(assoc.frame_index, assoc.mask_index)
+                if cam is None or evidence is None:
+                    continue
+                pose, intrinsics = cam
+                rgb = (
+                    ctx.get_rgb(assoc.frame_index)
+                    if (appearance is not None and ctx.get_rgb is not None) else None
+                )
+                scoreable_views.append((evidence, intrinsics, pose, rgb))
+            if scoreable_views:
+                pair = [candidates[chosen], candidates[partner]]
+                pair_scores = score_candidates_at_center(
+                    pair, center, splat, appearance, scoreable_views
+                )
+                if (
+                    pair_scores[0] is not None
+                    and pair_scores[1] is not None
+                    and pair_scores[1] >= pair_scores[0] + _FACING_FLAG_MARGIN
+                ):
+                    # The appearance scorer prefers the anti-RoomPlan
+                    # facing, but that leaf never ships on appearance
+                    # evidence alone: flag it, ship the conventional sign.
+                    facing_flag = True
+    quality["axis_scored_views"] = len(scoreable_views)
 
     cand = candidates[chosen]
     return {

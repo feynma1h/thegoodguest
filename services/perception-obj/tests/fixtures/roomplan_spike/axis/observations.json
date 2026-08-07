@@ -1,0 +1,452 @@
+{
+ "obj_000": {
+  "box_index": 0,
+  "frame_index": 398,
+  "in_frame_fraction": 0.9824517633235713,
+  "mask_index": 4,
+  "obs": {
+   "frame_index": 398,
+   "label": "cabinet",
+   "mask_index": 4,
+   "placement": {
+    "layout_prior": {
+     "raw_rotation": [
+      0.22585517168045044,
+      -0.7576059699058533,
+      -0.49258652329444885,
+      -0.36385712027549744
+     ],
+     "rotation_xyzw": [
+      0.7576018595033087,
+      0.49258385075888395,
+      0.36385514616323794,
+      0.2258539462998314
+     ],
+     "scale": [
+      0.9779388308525085,
+      0.9779388308525085,
+      0.9779388308525085
+     ],
+     "translation": [
+      -0.572503387928009,
+      -0.022237733006477356,
+      1.8658276796340942
+     ]
+    },
+    "method": "depth_fit",
+    "placed": true,
+    "quality": {
+     "depth_points": 7387,
+     "frames_observed": 1,
+     "min_axis_to_vertical_deg": 10.18217969153561,
+     "nn_rms_m": 0.023930466622638844
+    },
+    "rotation_source": "sam3d_layout",
+    "world_transform": {
+     "position": [
+      0.813848910294195,
+      -0.9890454345855457,
+      -0.1526178676627625
+     ],
+     "rotation_xyzw": [
+      0.30060080753868396,
+      0.6969162593213534,
+      0.5706636216294747,
+      -0.3135122213715996
+     ],
+     "scale": 0.7054013919665403
+    }
+   },
+   "score": 0.52734375,
+   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0398/splats/04_cabinet.ply",
+   "view_ray": {
+    "angular_extent_rad": 0.6080247301469518,
+    "direction": [
+     0.3375004872448354,
+     -0.7319070720414795,
+     0.5929279017142945
+    ],
+    "origin": [
+     0.3919999897480011,
+     -0.013000000268220901,
+     -0.9470000267028809
+    ]
+   }
+  },
+  "overlap": 1.0
+ },
+ "obj_003": {
+  "box_index": 3,
+  "frame_index": 10,
+  "in_frame_fraction": 0.8322616504806372,
+  "mask_index": 0,
+  "obs": {
+   "frame_index": 10,
+   "label": "bed",
+   "mask_index": 0,
+   "placement": {
+    "layout_prior": {
+     "raw_rotation": [
+      0.11588447540998459,
+      -0.8597882986068726,
+      -0.43922528624534607,
+      -0.23330721259117126
+     ],
+     "rotation_xyzw": [
+      0.8597813182483526,
+      0.439221720309436,
+      0.2333053184411906,
+      0.11588353457933294
+     ],
+     "scale": [
+      3.7415146827697754,
+      3.7415146827697754,
+      3.7415146827697754
+     ],
+     "translation": [
+      1.0884273052215576,
+      -0.11270079016685486,
+      2.323427200317383
+     ]
+    },
+    "method": "depth_fit",
+    "placed": true,
+    "quality": {
+     "depth_points": 12295,
+     "frames_observed": 1,
+     "min_axis_to_vertical_deg": 11.698444664395819,
+     "nn_rms_m": 0.04313354955441633
+    },
+    "rotation_source": "sam3d_layout",
+    "world_transform": {
+     "position": [
+      -0.4936254433069665,
+      -0.7777457044922119,
+      -1.2427596119859614
+     ],
+     "rotation_xyzw": [
+      -0.5604169637836132,
+      0.32373781501377286,
+      0.29163870350962817,
+      0.7043248685435491
+     ],
+     "scale": 1.5154117887279404
+    }
+   },
+   "score": 0.92578125,
+   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0010/splats/00_bed.ply",
+   "view_ray": {
+    "angular_extent_rad": 1.077616864510997,
+    "direction": [
+     -0.3679740664323532,
+     -0.5504646223584214,
+     -0.7495586916795266
+    ],
+    "origin": [
+     -0.06400000303983688,
+     -0.13300000131130219,
+     -0.08500000089406967
+    ]
+   }
+  },
+  "overlap": 1.0
+ },
+ "obj_004": {
+  "box_index": 4,
+  "frame_index": 142,
+  "in_frame_fraction": 0.9870535583010487,
+  "mask_index": 2,
+  "obs": {
+   "frame_index": 142,
+   "label": "desk",
+   "mask_index": 2,
+   "placement": {
+    "depth_trust_demoted": true,
+    "layout_prior": {
+     "raw_rotation": [
+      0.6928309798240662,
+      0.1501239687204361,
+      0.41865989565849304,
+      -0.5676857233047485
+     ],
+     "rotation_xyzw": [
+      -0.1501168262368003,
+      -0.4186399769774244,
+      0.5676587143865622,
+      0.6927980168403539
+     ],
+     "scale": [
+      2.051792860031128,
+      2.051792860031128,
+      2.051792860031128
+     ],
+     "translation": [
+      0.28548192977905273,
+      -0.07852685451507568,
+      1.9559249877929688
+     ]
+    },
+    "placed": false,
+    "quality": {
+     "depth_points": 3394,
+     "frames_observed": 1,
+     "min_axis_to_vertical_deg": 19.084915875121123,
+     "nn_rms_m": 0.10443873444451653
+    },
+    "reason": "depth_untrusted",
+    "rotation_source": "sam3d_layout",
+    "splat_max_extent": 0.9951689318757212,
+    "world_rotation_xyzw": [
+     0.7049702293798743,
+     -0.2076957928435357,
+     -0.023961884565093402,
+     0.6777206367016367
+    ]
+   },
+   "score": 0.65234375,
+   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0142/splats/02_desk.ply",
+   "view_ray": {
+    "angular_extent_rad": 0.9851525668321115,
+    "direction": [
+     0.33351001357421123,
+     -0.7411228376993257,
+     -0.5822745117209681
+    ],
+    "origin": [
+     1.3229999542236328,
+     -0.10300000011920929,
+     -2.0309998989105225
+    ]
+   }
+  },
+  "overlap": 0.9992
+ },
+ "obj_005": {
+  "box_index": 5,
+  "frame_index": 171,
+  "in_frame_fraction": 1.0,
+  "mask_index": 1,
+  "obs": {
+   "frame_index": 171,
+   "label": "desk",
+   "mask_index": 1,
+   "placement": {
+    "layout_prior": {
+     "raw_rotation": [
+      0.025498302653431892,
+      0.9209572672843933,
+      0.026069702580571175,
+      0.38795337080955505
+     ],
+     "rotation_xyzw": [
+      -0.9209573138308301,
+      -0.02606970389816951,
+      -0.3879533904172477,
+      0.025498303942150895
+     ],
+     "scale": [
+      0.7287551760673523,
+      0.7287551760673523,
+      0.7287551760673523
+     ],
+     "translation": [
+      0.04025673866271973,
+      -0.05982917547225952,
+      1.716855525970459
+     ]
+    },
+    "method": "depth_fit",
+    "placed": true,
+    "quality": {
+     "depth_points": 807,
+     "frames_observed": 1,
+     "min_axis_to_vertical_deg": 11.415763331496734,
+     "nn_rms_m": 0.02411704991437232
+    },
+    "rotation_source": "sam3d_layout",
+    "world_transform": {
+     "position": [
+      -0.5859063715573718,
+      -0.9457308403872272,
+      -3.2411633524084005
+     ],
+     "rotation_xyzw": [
+      -0.15350441090674505,
+      0.6774547336283869,
+      0.6577185858628812,
+      0.29137217013159683
+     ],
+     "scale": 0.6068627820748664
+    }
+   },
+   "score": 0.703125,
+   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0171/splats/01_desk.ply",
+   "view_ray": {
+    "angular_extent_rad": 0.5866617053183218,
+    "direction": [
+     -0.7500045456850932,
+     -0.48181655620700076,
+     -0.4527304780651317
+    ],
+    "origin": [
+     0.6790000200271606,
+     -0.05700000002980232,
+     -2.4739999771118164
+    ]
+   }
+  },
+  "overlap": 0.9583
+ },
+ "obj_006": {
+  "box_index": 6,
+  "frame_index": 142,
+  "in_frame_fraction": 0.7519564813613953,
+  "mask_index": 0,
+  "obs": {
+   "frame_index": 142,
+   "label": "chair",
+   "mask_index": 0,
+   "placement": {
+    "layout_prior": {
+     "raw_rotation": [
+      0.21445733308792114,
+      -0.49971508979797363,
+      -0.8324350118637085,
+      -0.10654497146606445
+     ],
+     "rotation_xyzw": [
+      0.4997133411520852,
+      0.832432098935741,
+      0.10654459863476501,
+      0.21445658264043338
+     ],
+     "scale": [
+      0.9580339193344116,
+      0.9580339193344116,
+      0.9580339193344116
+     ],
+     "translation": [
+      -0.7468550205230713,
+      -0.26983726024627686,
+      1.1975212097167969
+     ]
+    },
+    "method": "depth_fit",
+    "placed": true,
+    "quality": {
+     "depth_points": 2715,
+     "frames_observed": 1,
+     "min_axis_to_vertical_deg": 17.312952206498597,
+     "nn_rms_m": 0.04066729237019295
+    },
+    "rotation_source": "sam3d_layout",
+    "world_transform": {
+     "position": [
+      1.398115248499672,
+      -0.9555946683343438,
+      -2.363276677829421
+     ],
+     "rotation_xyzw": [
+      -0.49192990342373805,
+      -0.3648639585206732,
+      -0.35994058303002724,
+      0.7037911896138941
+     ],
+     "scale": 0.4320489705309844
+    }
+   },
+   "score": 0.7578125,
+   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0142/splats/00_chair.ply",
+   "view_ray": {
+    "angular_extent_rad": 0.7256271366598369,
+    "direction": [
+     0.060011598133689115,
+     -0.9472559730647312,
+     -0.3136553397461479
+    ],
+    "origin": [
+     1.3229999542236328,
+     -0.10300000011920929,
+     -2.0309998989105225
+    ]
+   }
+  },
+  "overlap": 0.98995
+ },
+ "obj_007": {
+  "box_index": 7,
+  "frame_index": 171,
+  "in_frame_fraction": 0.9513941129769727,
+  "mask_index": 0,
+  "obs": {
+   "frame_index": 171,
+   "label": "chair",
+   "mask_index": 0,
+   "placement": {
+    "layout_prior": {
+     "raw_rotation": [
+      0.4504101872444153,
+      0.06255941838026047,
+      -0.8906157612800598,
+      0.004543692339211702
+     ],
+     "rotation_xyzw": [
+      -0.06255941534668694,
+      0.8906157180931429,
+      -0.00454369211888317,
+      0.4504101654035405
+     ],
+     "scale": [
+      1.656937599182129,
+      1.656937599182129,
+      1.656937599182129
+     ],
+     "translation": [
+      -0.4094974994659424,
+      -0.04880976676940918,
+      1.29437255859375
+     ]
+    },
+    "method": "depth_fit",
+    "placed": true,
+    "quality": {
+     "depth_points": 8410,
+     "frames_observed": 1,
+     "min_axis_to_vertical_deg": 4.7007490664105145,
+     "nn_rms_m": 0.02818758395398742
+    },
+    "rotation_source": "sam3d_layout",
+    "world_transform": {
+     "position": [
+      0.14336093022252286,
+      -0.7328340681405479,
+      -2.867650289976156
+     ],
+     "rotation_xyzw": [
+      -0.6777245836597724,
+      -0.234036332382351,
+      -0.2736228811815622,
+      0.6411293962392512
+     ],
+     "scale": 0.7998281403954568
+    }
+   },
+   "score": 0.92578125,
+   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0171/splats/00_chair.ply",
+   "view_ray": {
+    "angular_extent_rad": 0.8777533911632908,
+    "direction": [
+     -0.4990472813881708,
+     -0.7345766212750547,
+     -0.45905020857921264
+    ],
+    "origin": [
+     0.6790000200271606,
+     -0.05700000002980232,
+     -2.4739999771118164
+    ]
+   }
+  },
+  "overlap": 1.0
+ }
+}
