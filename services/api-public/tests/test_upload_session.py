@@ -460,3 +460,60 @@ class TestUploadSessionRateLimit:
         )
         assert resp_a.status_code == 200
         assert resp_b.status_code == 200
+
+
+class TestUploadSessionCaptureCeiling:
+    """The GPU-cost ceiling (decision 0098). Distinct from the mint quota
+    above: that one bounds API calls, this bounds reconstruction runs."""
+
+    def test_over_ceiling_returns_429_capture_limit_reached(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(server, "UPLOAD_DAILY_CAPTURES", 2)
+        monkeypatch.setattr(server, "UPLOAD_DAILY_MINTS", 50)
+        repo = InMemoryUploadSessionRepository()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 64}]
+
+        for _ in range(2):
+            resp, _ = _post_upload_session(
+                client, _make_bundle_id(), manifest, uid="user-c", upload_repo=repo
+            )
+            assert resp.status_code == 200
+
+        resp, _ = _post_upload_session(
+            client, _make_bundle_id(), manifest, uid="user-c", upload_repo=repo
+        )
+        assert resp.status_code == 429
+        body = resp.json()
+        # A distinct code from rate_limited — the client should say a
+        # different thing, and the operator should see a different signal.
+        assert body["error"] == "capture_limit_reached"
+        assert "resets_at" in body
+        assert int(resp.headers["Retry-After"]) >= 1
+
+    def test_re_minting_an_existing_capture_is_not_a_new_capture(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(server, "UPLOAD_DAILY_CAPTURES", 1)
+        monkeypatch.setattr(server, "UPLOAD_DAILY_MINTS", 50)
+        repo = InMemoryUploadSessionRepository()
+        bundle_id = _make_bundle_id()
+
+        first, _ = _post_upload_session(
+            client, bundle_id,
+            [{"relative_path": "bundle.pb", "expected_size_bytes": 64}],
+            uid="user-d", upload_repo=repo,
+        )
+        assert first.status_code == 200
+
+        # 0049 re-mint: same bundle, grown path set. No new GPU is committed,
+        # so it must not spend the account's one capture.
+        again, _ = _post_upload_session(
+            client, bundle_id,
+            [
+                {"relative_path": "bundle.pb", "expected_size_bytes": 64},
+                {"relative_path": "frames/000000.jpg", "expected_size_bytes": 999},
+            ],
+            uid="user-d", upload_repo=repo,
+        )
+        assert again.status_code == 200

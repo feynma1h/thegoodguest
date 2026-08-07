@@ -155,3 +155,108 @@ class TestGuestVoice:
         _assert_beat(reply)
         assert re.search(r"one room|single room|this room|the room we", reply, re.I), reply
         assert foreign_measurements(reply, _FACTS_BLOCK, []) == [], reply
+
+
+# ---------------------------------------------------------------------------
+# Sizes and clearances (facts_version 2, decision 0096)
+#
+# These are the evals the new fact classes most need. The failure mode isn't
+# refusing — it's the model quietly upgrading a FLOOR into a measurement, or
+# a longest-dimension into a height, because both read so naturally as the
+# thing the person asked for.
+# ---------------------------------------------------------------------------
+
+_SIZED_MANIFEST = {
+    "scene_id": "eval-scene-sized",
+    "manifest_version": 2,
+    "frame_count": 18,
+    "objects": [
+        {
+            "object_id": "obj_000", "label": "bed", "placed": True,
+            "quality": {"frames_observed": 5, "cluster_spread_m": 0.03},
+            "roomplan_box": {"category": "bed", "confidence": "high",
+                             "dims": [2.16, 1.85, 0.61]},
+            "world_transform": {
+                "position": [0.0, 0.3, 0.0],
+                "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0,
+            },
+        },
+        {
+            "object_id": "obj_001", "label": "desk", "placed": True,
+            "quality": {"frames_observed": 4, "cluster_spread_m": 0.04},
+            "roomplan_box": {"category": "table", "confidence": "high",
+                             "dims": [0.9, 0.5, 0.45]},
+            "world_transform": {
+                "position": [3.0, 0.3, 0.0],
+                "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0,
+            },
+        },
+        {
+            "object_id": "obj_002", "label": "rug", "placed": True,
+            "quality": {"frames_observed": 3, "cluster_spread_m": 0.06},
+            "extent_m_sorted": [0.4563, 0.2922, 0.0051],  # scale collapse
+            "world_transform": {
+                "position": [1.4, 0.0, 0.2],
+                "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0,
+            },
+        },
+    ],
+    "frames": [],
+}
+
+_SIZED_FACTS = derive_scene_facts(_SIZED_MANIFEST)
+_SIZED_BLOCK = render_facts_block(_SIZED_FACTS)
+
+
+def _ask_sized(question: str) -> str:
+    import anthropic
+
+    response = anthropic.Anthropic().messages.create(
+        model=GUEST_MODEL,
+        max_tokens=MAX_TOKENS,
+        thinking={"type": "disabled"},
+        system=build_system_prompt(_SIZED_FACTS),
+        messages=[{"role": "user", "content": question}],
+    )
+    return "".join(b.text for b in response.content if b.type == "text")
+
+
+class TestSizeAndClearanceVoice:
+    def test_height_question_refuses_the_axis(self):
+        question = "How tall is the bed?"
+        reply = _ask_sized(question)
+        _assert_beat(reply)
+        assert foreign_measurements(reply, _SIZED_BLOCK, [question]) == [], reply
+        # It may quote 2.2 m as the longest dimension — it may NOT call it a
+        # height. Anything asserting the axis is the failure.
+        lowered = reply.lower()
+        assert not re.search(r"\b(2\.2|2\.16)\s*m\s*(tall|high|in height)", lowered), reply
+        assert re.search(r"longest|don'?t know which|can'?t say|which way", lowered), reply
+
+    def test_clearance_stays_a_floor(self):
+        question = "How much room is there between the bed and the desk?"
+        reply = _ask_sized(question)
+        _assert_beat(reply)
+        assert foreign_measurements(reply, _SIZED_BLOCK, [question]) == [], reply
+        lowered = reply.lower()
+        assert "at least" in lowered, f"floor lost its framing: {reply!r}"
+        # "exactly 0.9" / "0.9 m of space" without the floor is the failure.
+        assert not re.search(r"exactly\s+0\.9", lowered), reply
+
+    def test_fit_question_gets_the_floor_not_a_verdict(self):
+        question = "Will a 1 m armchair fit between the bed and the desk?"
+        reply = _ask_sized(question)
+        _assert_beat(reply)
+        assert foreign_measurements(reply, _SIZED_BLOCK, [question]) == [], reply
+        lowered = reply.lower()
+        assert "at least" in lowered, reply
+        # A flat yes is the thing a floor cannot support.
+        assert not re.match(r"^\s*(yes|yep|sure)\b", lowered), reply
+
+    def test_unmeasured_object_has_no_size(self):
+        question = "How big is the rug?"
+        reply = _ask_sized(question)
+        _assert_beat(reply)
+        # The collapsed splat extent must never surface as a size.
+        assert foreign_measurements(reply, _SIZED_BLOCK, [question]) == [], reply
+        assert "0.5 m" not in reply and "0.46" not in reply, reply

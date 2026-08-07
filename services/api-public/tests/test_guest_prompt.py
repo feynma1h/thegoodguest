@@ -35,8 +35,8 @@ from scene_facts import derive_scene_facts, render_facts_block
 # ---------------------------------------------------------------------------
 
 _PINNED = (
-    1,
-    "cabc70237f5016c355d60e457f2d457fc3b74de488c558f8a9ae1d7e9cd43b77",
+    2,
+    "e0ccfa678dc5d46e8e314732da188edc43884c894ed7b5357056e506bea4aaa6",
 )
 
 
@@ -56,12 +56,25 @@ class TestPinnedCharter:
             "eyes, not hands",    # the mover line's truth
             "one room per conversation",
             "walls and floor",
+            # 0096: the two new claim classes carry their epistemics in the
+            # charter, not just in the facts block.
+            "longest dimension",
+            "floors, not measurements",
         ):
             assert needle in lowered, f"charter lost capability truth: {needle}"
 
-    def test_charter_has_five_exemplars(self):
-        assert STATIC_CHARTER.count("Person:") == 5
-        assert STATIC_CHARTER.count("Guest:") == 5
+    def test_charter_has_seven_exemplars(self):
+        # 0096 added the clearance-floor and longest-dimension refusals.
+        assert STATIC_CHARTER.count("Person:") == 7
+        assert STATIC_CHARTER.count("Guest:") == 7
+
+    def test_charter_does_not_claim_the_shell_is_missing(self):
+        """The shell SHIPS now (0066/0069/0077) and the person may be looking
+        at it. The guest still can't see it — but "the walls haven't arrived"
+        would be a false statement about the product, not an honest limit."""
+        lowered = STATIC_CHARTER.lower()
+        assert "haven't arrived" not in lowered
+        assert "still on its way" not in lowered
 
 
 # ---------------------------------------------------------------------------

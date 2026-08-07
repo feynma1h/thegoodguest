@@ -203,6 +203,24 @@ export interface SceneAssets {
  * carries it — the server's client projection; internal fields (usage,
  * model, versions) never appear here.
  */
+/**
+ * What DELETE /account removed (decision 0095). Counts only — the server
+ * deliberately ships no ids or object paths. `deleted: false` means the pass
+ * was partial and calling again resumes it; the identity survives until a
+ * pass completes, so the user can always retry.
+ */
+export interface AccountDeletionResult {
+  deleted: boolean;
+  identityDeleted: boolean;
+  counts: {
+    rooms: number;
+    conversations: number;
+    conversationMessages: number;
+    uploadSessions: number;
+    files: number;
+  };
+}
+
 export interface ConversationTurn {
   turn_index: number;
   client_msg_id: string;

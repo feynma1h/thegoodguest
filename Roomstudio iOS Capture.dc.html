@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400;1,8..60,500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#e9e2d2;font-family:'Instrument Sans',sans-serif;color:#3a2d22;-webkit-font-smoothing:antialiased}
+a{color:#8e3b2f;text-decoration:none}a:hover{color:#6e2d24}
+@keyframes rs-pulse{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes rs-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+</style>
+</helmet>
+
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s0">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px">0</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">The whole app in one map — a front door and a camera, nothing more</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 20px">The iOS app is deliberately narrow: it establishes identity, captures a room beautifully, and carries the file to the web — where the reveal, the guest, and the redesign live. The design job is to make a small surface feel <i>intentional and premium</i>, and to make the handoff read as a doorway, never a dead end. Good Guest language, translated to iOS idioms: SF Symbols, native navigation &amp; sheets, safe areas, system haptics, standard gestures.</p>
+  <div style="width:1620px;max-width:100%;background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;box-shadow:0 2px 10px rgba(58,45,34,.08);padding:30px 34px;box-sizing:border-box">
+    <div style="display:flex;gap:16px;align-items:stretch">
+      <div style="flex:1;border:1.5px solid #3a2d22;border-radius:12px;background:#fff;padding:16px 18px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">01 · FRONT DOOR</div>
+        <div style="font:600 15px 'Instrument Sans',sans-serif;margin-top:9px">Identity, silently</div>
+        <div style="font:12px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:6px">Anonymous by default — no login wall. Your ID is visible as proof of continuity, upgradeable to Sign in with Apple without losing a single room.</div>
+        <div style="font:11px 'Instrument Sans',sans-serif;color:#8e3b2f;margin-top:10px"><a href="#s1">§1</a> · <a href="#s8">§8</a></div>
+      </div>
+      <div style="display:flex;align-items:center;color:rgba(58,45,34,.35);font-size:22px">→</div>
+      <div style="flex:1.25;border:2px solid #8e3b2f;border-radius:12px;background:#fff;padding:16px 18px;box-shadow:0 6px 18px rgba(142,59,47,.14)">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:#8e3b2f">02 · THE CAMERA — the core</div>
+        <div style="font:600 15px 'Instrument Sans',sans-serif;margin-top:9px;color:#8e3b2f">Capture a room, honestly</div>
+        <div style="font:12px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:6px">Guidance, then a live AR-guided walk. Tracking state, coverage you can <i>feel</i>, and a clear "you have enough." Degrades to a headless tracking view on non-LiDAR phones.</div>
+        <div style="font:11px 'Instrument Sans',sans-serif;color:#8e3b2f;margin-top:10px"><a href="#s2">§2</a> · <a href="#s3">§3</a> · <a href="#s4">§4</a></div>
+      </div>
+      <div style="display:flex;align-items:center;color:rgba(58,45,34,.35);font-size:22px">→</div>
+      <div style="flex:1;border:1.5px solid #3a2d22;border-radius:12px;background:#fff;padding:16px 18px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">03 · THE MESSENGER</div>
+        <div style="font:600 15px 'Instrument Sans',sans-serif;margin-top:9px">Carry it, reliably</div>
+        <div style="font:12px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:6px">Background upload that survives app close. Then analysis narrated as <i>arrival</i>, not pipeline — with a banner that resurfaces on relaunch if it fails.</div>
+        <div style="font:11px 'Instrument Sans',sans-serif;color:#8e3b2f;margin-top:10px"><a href="#s5">§5</a> · <a href="#s7">§7</a></div>
+      </div>
+      <div style="display:flex;align-items:center;color:rgba(58,45,34,.35);font-size:22px">→</div>
+      <div style="flex:1;border:1.5px solid #c9a25e;border-radius:12px;background:linear-gradient(180deg,#fff,#faf3e2);padding:16px 18px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">04 · THE DOORWAY</div>
+        <div style="font:600 15px 'Instrument Sans',sans-serif;margin-top:9px">Hand off to the web</div>
+        <div style="font:12px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:6px">"Your room is ready." A deliberate threshold that sends you to the desk to see it come alive — never a reveal on the phone.</div>
+        <div style="font:11px 'Instrument Sans',sans-serif;color:#8e3b2f;margin-top:10px"><a href="#s6">§6</a> · <a href="#s9">§9</a></div>
+      </div>
+    </div>
+    <div style="margin-top:18px;border-top:1px dashed rgba(58,45,34,.25);padding-top:16px;display:flex;align-items:center;gap:16px">
+      <span style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.45)">STAYS ON THE WEB</span>
+      <span style="font:italic 400 14px 'Source Serif 4',serif;color:rgba(58,45,34,.7)">the 3D room · the cinematic reveal · the guest &amp; the conversation · the redesign. The phone never renders a viewer, a scene, or a chat.</span>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:16px;margin-top:18px;width:1620px;max-width:100%">
+    <div style="flex:1.4;background:#3a2d22;color:#f7efdf;border-radius:10px;padding:22px 26px;box-sizing:border-box">
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(247,239,223,.55)">MY POSITION — HEADLESS vs LIVE AR</div>
+      <div style="font:400 20px/1.4 'Source Serif 4',serif;margin-top:12px">Capture should be <i>live AR-guided</i>, LiDAR-first — but quiet.</div>
+      <div style="font:13px/1.6 'Instrument Sans',sans-serif;color:rgba(247,239,223,.82);margin-top:12px;max-width:640px">The phone's one job is producing a good capture. A headless screen hides the one thing that matters most — <b>whether you're actually getting the room</b>. "Did I get enough?" is the core anxiety, and you can't answer it honestly while blind. RoomPlan/LiDAR already yields a real-time mesh; showing it turns an anxious blind walk into a legible one.</div>
+      <div style="font:13px/1.6 'Instrument Sans',sans-serif;color:rgba(247,239,223,.82);margin-top:10px;max-width:640px">But not a neon-wireframe game. Restraint is the brand: no camera photo-feed as hero (Good Guest generates no photos), no coverage <i>percentage</i>. Instead the LiDAR mesh paints as <b>ink-on-parchment</b>, surfaces filling in like a sketch being completed. Coverage is <b>felt</b> — the sketch settling — not scored.</div>
+    </div>
+    <div style="flex:1;background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:22px 26px;box-sizing:border-box">
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">THE TIER SPLIT DOES DOUBLE DUTY</div>
+      <div style="font:13px/1.6 'Instrument Sans',sans-serif;color:rgba(58,45,34,.78);margin-top:12px">The non-LiDAR (ARKIT_ONLY) fallback isn't a lesser copy of the same screen — it's the <b>headless treatment</b>, honestly. Where geometry can't be trusted, we don't fake a mesh: we show tracking quality + a coverage ring + guidance, and say so plainly. The premium pipeline is LiDAR; the graceful degrade is the minimal view. One decision resolves both the open question and the tier strategy. <a href="#s3">See §3 →</a></div>
+    </div>
+  </div>
+</section>
+
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s1">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px">1</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">First launch &amp; idle home — the invitation, and the resting state</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px">No login wall: an anonymous identity is minted silently on first launch. The home screen is the app's resting state — one warm line, one obvious action, and a quiet proof that this device is already <i>someone</i>. Everything is calm; the guest voice appears only as a light greeting, not a monologue.</p>
+  <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- PHONE: cold start -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#efe6d3,#e6dcc6);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#3a2d22"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#3a2d22"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 34px;text-align:center">
+            <div style="width:44px;height:44px;border:2px solid #3a2d22;border-radius:12px;display:flex;align-items:center;justify-content:center;font:400 22px 'Source Serif 4',serif">❖</div>
+            <div style="font:500 20px 'Source Serif 4',serif;letter-spacing:.02em;margin-top:16px">roomstudio</div>
+            <div style="width:26px;height:26px;margin-top:40px;border:2.5px solid rgba(58,45,34,.25);border-top-color:#8e3b2f;border-radius:50%;animation:rs-pulse 1.4s ease-in-out infinite"></div>
+            <div style="font:italic 400 15px/1.5 'Source Serif 4',serif;color:rgba(58,45,34,.7);margin-top:24px">Setting a place for you…</div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(58,45,34,.32)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">COLD START · ~1s</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">Anonymous identity minted in the background. No account screen, no permission prompt yet — permissions are asked <i>in context</i>, at the moment they're needed (§2).</div>
+    </div>
+
+    <!-- PHONE: idle home -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#f2e9d7,#e7ddc7);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#3a2d22"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#3a2d22"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;padding:8px 26px 0">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:30px;height:30px;border:1.5px solid #3a2d22;border-radius:9px;display:flex;align-items:center;justify-content:center;font:400 16px 'Source Serif 4',serif">❖</span><span style="font:500 17px 'Source Serif 4',serif">roomstudio</span></div>
+              <span style="width:34px;height:34px;border-radius:50%;background:rgba(58,45,34,.08);display:flex;align-items:center;justify-content:center"><svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="#3a2d22" stroke-width="1.4"><circle cx="8.5" cy="5.5" r="3"/><path d="M2.5 14.5c1-3 4-4 6-4s5 1 6 4"/></svg></span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:center">
+              <div style="font:italic 400 25px/1.4 'Source Serif 4',serif;color:#3a2d22">Every home holds a version of itself you've never seen.</div>
+              <div style="font:14px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.68);margin-top:14px">Walk one room slowly with your phone. It comes alive on your desk — real, in 3D, exactly as you live in it.</div>
+            </div>
+            <div style="margin-bottom:8px">
+              <div style="background:#8e3b2f;color:#f7efdf;border-radius:16px;padding:17px;text-align:center;font:600 16px 'Instrument Sans';display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:0 8px 22px rgba(142,59,47,.28)"><svg width="19" height="19" viewBox="0 0 19 19" fill="none" stroke="#f7efdf" stroke-width="1.5"><path d="M2 6.5 5 6.5 6.5 4 12.5 4 14 6.5 17 6.5 17 15 2 15Z"/><circle cx="9.5" cy="10" r="3"/></svg>Scan a room</div>
+              <div style="text-align:center;font:13px 'Instrument Sans',sans-serif;color:rgba(58,45,34,.5);margin-top:12px">Takes about two minutes · works best on LiDAR</div>
+            </div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(58,45,34,.32)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">IDLE HOME · FIRST-TIME, NO ROOMS</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">The resting state. One serif claim (the thesis), one sans support line, one rust primary. No feed, no tabs, no dashboard — the whole screen leans toward the single action.</div>
+    </div>
+
+    <!-- annotations column -->
+    <div style="flex:1;min-width:280px;max-width:380px;display:flex;flex-direction:column;gap:16px">
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">RETURNING HOME</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">Once rooms exist, the hero collapses into a compact recent-rooms strip above the same primary button — status + "open on the web," never editable here (<a href="#s9">§9</a>). The invitation stays; it just makes room.</div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">iOS IDIOM</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">Standard large-title navigation feel, safe-area insets respected top and bottom, primary action as a full-width filled button sitting just above the home indicator — thumb-reachable. The profile glyph is the only chrome.</div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">HAPTIC · SOUND</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">"Scan a room" fires a single <b>soft impact</b> (<span style="font-family:'IBM Plex Mono',monospace;font-size:11px">.impact(.soft)</span>) on press. No sound on the home screen — the app is silent until the camera opens.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s2">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px">2</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">Pre-capture guidance — teach the walk in three breaths, then get out of the way</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px">A short coaching sheet, not a tutorial wall: how to move, what a good scan needs, and the one honest thing about this device. The camera permission is requested here, in context, with a reason. This is also where the LiDAR / non-LiDAR tier reveals itself — plainly, never apologetically.</p>
+  <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- PHONE: guidance sheet (LiDAR) -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:#241c12;display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#f3e9d5"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#f3e9d5"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;padding:6px 26px 0;color:#f3e9d5">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+              <span style="font:500 15px 'Source Serif 4',serif;color:rgba(243,233,213,.8)">Before you start</span>
+              <span style="width:30px;height:30px;border-radius:50%;background:rgba(243,233,213,.12);display:flex;align-items:center;justify-content:center;font:400 16px 'Instrument Sans';color:#f3e9d5">✕</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:7px;background:rgba(201,162,94,.16);border:1px solid rgba(201,162,94,.4);border-radius:99px;padding:5px 12px;align-self:flex-start;margin-bottom:20px"><span style="width:7px;height:7px;border-radius:50%;background:#c9a25e"></span><span style="font:500 11px 'IBM Plex Mono',monospace;letter-spacing:.08em;color:#e7cfa0">LiDAR READY · PRO CAPTURE</span></div>
+            <div style="display:flex;flex-direction:column;gap:18px;flex:1">
+              <div style="display:flex;gap:14px;align-items:flex-start"><span style="width:38px;height:38px;flex:none;border-radius:11px;background:rgba(243,233,213,.1);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#e7cfa0" stroke-width="1.5"><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/><circle cx="10" cy="10" r="4"/></svg></span><div><div style="font:600 15px 'Instrument Sans'">Move slowly, keep it level</div><div style="font:13px/1.5 'Instrument Sans';color:rgba(243,233,213,.6);margin-top:2px">A steady walking pace. Sweep the phone gently, like you're painting the walls with your eyes.</div></div></div>
+              <div style="display:flex;gap:14px;align-items:flex-start"><span style="width:38px;height:38px;flex:none;border-radius:11px;background:rgba(243,233,213,.1);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#e7cfa0" stroke-width="1.5"><path d="M2 10a8 8 0 0 1 16 0M5 10a5 5 0 0 1 10 0M8 10a2 2 0 0 1 4 0"/></svg></span><div><div style="font:600 15px 'Instrument Sans'">Get every corner &amp; the floor</div><div style="font:13px/1.5 'Instrument Sans';color:rgba(243,233,213,.6);margin-top:2px">Walls, floor, and where they meet. Corners are what tell the room its true shape.</div></div></div>
+              <div style="display:flex;gap:14px;align-items:flex-start"><span style="width:38px;height:38px;flex:none;border-radius:11px;background:rgba(243,233,213,.1);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#e7cfa0" stroke-width="1.5"><circle cx="10" cy="10" r="4"/><path d="M10 1v2M10 17v2M1 10h2M17 10h2M4 4l1.4 1.4M14.6 14.6 16 16M16 4l-1.4 1.4M5.4 14.6 4 16"/></svg></span><div><div style="font:600 15px 'Instrument Sans'">Turn the lights on</div><div style="font:13px/1.5 'Instrument Sans';color:rgba(243,233,213,.6);margin-top:2px">Even light helps me see truly. I'll tell you if it gets too dark to trust.</div></div></div>
+            </div>
+            <div style="margin-bottom:8px">
+              <div style="font:12px/1.45 'Instrument Sans';color:rgba(243,233,213,.5);margin-bottom:11px;display:flex;gap:7px;align-items:flex-start"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="rgba(243,233,213,.5)" stroke-width="1.3" style="flex:none;margin-top:1px"><rect x="3.5" y="1" width="7" height="12" rx="2"/><circle cx="7" cy="10" r="1"/></svg>roomstudio uses the camera &amp; LiDAR to measure your room. Nothing is uploaded until you finish.</div>
+              <div style="background:#c9a25e;color:#2a2114;border-radius:16px;padding:16px;text-align:center;font:600 16px 'Instrument Sans';display:flex;align-items:center;justify-content:center;gap:9px"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#2a2114" stroke-width="1.6"><path d="M2 6.5 5 6.5 6.5 4 12.5 4 14 6.5 17 6.5 17 15 2 15Z"/><circle cx="9.5" cy="10" r="3"/></svg>Start scanning</div>
+            </div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(243,233,213,.4)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">GUIDANCE SHEET · LiDAR TIER</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">Dark surface pre-empts the capture screen's darkness — the transition into scanning is a fade, not a jolt. On the LiDAR tier the CTA is <b>gold</b>, tying "Pro capture" to the light-quality promise.</div>
+    </div>
+
+    <!-- annotations -->
+    <div style="flex:1;min-width:300px;max-width:440px;display:flex;flex-direction:column;gap:16px">
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">THE TIER, STATED — NOT APOLOGISED FOR</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">On a LiDAR device the chip reads <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8e6a2e">LiDAR READY · PRO CAPTURE</span> in gold. On ARKit-only hardware it reads <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">STANDARD CAPTURE</span> in muted ink, and a fourth line appears: <i>"Your phone measures a little differently — I'll lean on the camera and take it slower."</i> Honest, never a nag to upgrade.</div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">PERMISSION, IN CONTEXT</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">The system camera prompt fires on "Start scanning," not at launch — with a one-line purpose string set just above it, so the OS dialog lands after the user already understands why. If denied, this sheet stays and the button becomes "Open Settings."</div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">iOS IDIOM · SF SYMBOLS</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">Presented as a <b>medium detent sheet</b> the first time, then a smaller "quick refresher" on repeat scans. Row glyphs map to <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">move.3d</span>, <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">circle.grid.cross</span>, <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">sun.max</span>. Dismiss with the grabber or the ✕.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s3">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#8e3b2f;color:#f7efdf;border-radius:4px">3</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">Active capture — THE core screen. Live AR, quiet. (Plus the degraded &amp; road-not-taken)</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px">The LiDAR mesh renders as an <b>ink-on-parchment sketch drawing itself onto the room</b> — no camera photo-feed, no neon wireframe, no percentage. Three things are always legible: tracking quality (the top pill), what you've covered (the sketch filling in), and whether it's enough (the guest's felt "settle"). Warnings speak plainly and never blame you.</p>
+  <div style="display:flex;gap:40px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- PHONE: active capture LIVE AR -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:radial-gradient(ellipse at 50% 42%,#2c2214 0%,#221a0f 60%,#181109 100%);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <!-- the drawing mesh -->
+          <svg viewBox="0 0 310 694" style="position:absolute;inset:0;width:100%;height:100%" fill="none">
+            <g stroke="#e7cfa0" stroke-width="1" opacity=".85">
+              <path d="M20 250 L150 200 L150 470 L20 540 Z" stroke-opacity=".9"/>
+              <path d="M150 200 L295 250 L295 540 L150 470 Z" stroke-opacity=".55"/>
+              <path d="M20 540 L150 470 L295 540 L150 620 Z" stroke-opacity=".7"/>
+              <path d="M55 470 L55 560 M95 455 L95 545 M125 445 L125 500" stroke-opacity=".3"/>
+              <path d="M185 480 L245 460 L245 520 L185 545 Z" stroke-opacity=".8"/>
+              <path d="M185 480 L185 545 M215 470 L215 530" stroke-opacity=".4"/>
+              <rect x="70" y="240" width="60" height="70" stroke-opacity=".7"/>
+            </g>
+            <g fill="#c9a25e" opacity=".55">
+              <circle cx="150" cy="200" r="2.4"/><circle cx="20" cy="250" r="2.4"/><circle cx="295" cy="250" r="2.4"/><circle cx="150" cy="470" r="2.4"/><circle cx="245" cy="460" r="2.4"/><circle cx="185" cy="480" r="2.4"/>
+            </g>
+          </svg>
+          <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 50% 45%,transparent 40%,rgba(15,10,6,.55) 100%)"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#f3e9d5;position:relative;z-index:3"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#f3e9d5"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;z-index:3;display:flex;flex-direction:column;padding:8px 22px 0">
+            <!-- tracking pill -->
+            <div style="align-self:center;display:flex;align-items:center;gap:8px;background:rgba(24,17,9,.6);backdrop-filter:blur(8px);border:1px solid rgba(120,200,150,.4);border-radius:99px;padding:7px 15px"><span style="width:8px;height:8px;border-radius:50%;background:#7fc8a0;box-shadow:0 0 8px #7fc8a0"></span><span style="font:500 12.5px 'Instrument Sans';color:#f3e9d5">Tracking is good</span></div>
+            <div style="flex:1"></div>
+            <!-- guest line -->
+            <div style="font:italic 400 17px/1.45 'Source Serif 4',serif;color:#f3e9d5;text-align:center;margin-bottom:16px;text-shadow:0 2px 12px rgba(0,0,0,.6)">"You've got most of it — one more pass along that far wall and I'll have the whole room."</div>
+            <!-- coverage as felt -->
+            <div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:18px">
+              <span style="font:500 11px 'IBM Plex Mono',monospace;letter-spacing:.06em;color:rgba(243,233,213,.55)">FLOOR</span>
+              <span style="width:22px;height:5px;border-radius:3px;background:#c9a25e"></span>
+              <span style="font:500 11px 'IBM Plex Mono',monospace;letter-spacing:.06em;color:rgba(243,233,213,.55)">WALLS</span>
+              <span style="width:22px;height:5px;border-radius:3px;background:#c9a25e"></span>
+              <span style="font:500 11px 'IBM Plex Mono',monospace;letter-spacing:.06em;color:rgba(243,233,213,.55)">CORNERS</span>
+              <span style="width:22px;height:5px;border-radius:3px;background:linear-gradient(90deg,#c9a25e 60%,rgba(243,233,213,.18) 60%)"></span>
+            </div>
+            <!-- controls -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <span style="width:52px;height:52px;border-radius:50%;background:rgba(24,17,9,.5);border:1px solid rgba(243,233,213,.25);display:flex;align-items:center;justify-content:center;color:#f3e9d5"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="4" width="14" height="14" rx="3"/></svg></span>
+              <span style="width:78px;height:78px;border-radius:50%;background:#8e3b2f;border:4px solid rgba(243,233,213,.85);display:flex;align-items:center;justify-content:center;color:#f7efdf;box-shadow:0 8px 26px rgba(142,59,47,.5);font:600 12.5px 'Instrument Sans';text-align:center;line-height:1.2">Finish</span>
+              <span style="width:52px;height:52px;border-radius:50%;background:rgba(24,17,9,.5);border:1px solid rgba(243,233,213,.25);display:flex;align-items:center;justify-content:center;color:#f3e9d5"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="3"/><path d="M11 1v3M11 18v3M1 11h3M18 11h3"/></svg></span>
+            </div>
+          </div>
+          <div style="height:22px;flex:none;position:relative;z-index:3;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(243,233,213,.5)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:#8e3b2f;margin-top:14px">▲ RECOMMENDED · LIVE AR · LiDAR</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">The mesh draws in gold ink as you cover surfaces. Three coverage ticks (floor/walls/corners) read as a checklist you <i>feel</i> completing — not a percentage. The guest speaks only to steer.</div>
+    </div>
+
+    <!-- PHONE: degraded / non-LiDAR headless -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#241c12,#181109);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#f3e9d5"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#f3e9d5"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;align-items:center;padding:8px 30px 0;color:#f3e9d5">
+            <div style="align-self:center;display:flex;align-items:center;gap:8px;background:rgba(201,162,94,.14);border:1px solid rgba(201,162,94,.45);border-radius:99px;padding:7px 15px"><span style="width:8px;height:8px;border-radius:50%;background:#c9a25e;animation:rs-pulse 1.6s ease-in-out infinite"></span><span style="font:500 12.5px 'Instrument Sans';color:#e7cfa0">Go a little slower</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%">
+              <!-- coverage ring -->
+              <div style="position:relative;width:180px;height:180px">
+                <svg width="180" height="180" viewBox="0 0 180 180"><circle cx="90" cy="90" r="80" fill="none" stroke="rgba(243,233,213,.14)" stroke-width="6"/><circle cx="90" cy="90" r="80" fill="none" stroke="#c9a25e" stroke-width="6" stroke-linecap="round" stroke-dasharray="502" stroke-dashoffset="180" transform="rotate(-90 90 90)"/></svg>
+                <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#e7cfa0" stroke-width="1.4"><path d="M6 16 20 8 34 16 34 30 6 30Z"/><path d="M6 16 20 24 34 16M20 24 20 30"/></svg><div style="font:italic 400 15px 'Source Serif 4',serif;color:rgba(243,233,213,.8);margin-top:10px">gathering the room</div></div>
+              </div>
+              <div style="font:italic 400 16px/1.5 'Source Serif 4',serif;text-align:center;margin-top:34px;color:#f3e9d5">"Your phone measures a little differently, so I'm taking it slow. Keep circling — we're getting there."</div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:center;margin-bottom:22px"><span style="width:78px;height:78px;border-radius:50%;background:#8e3b2f;border:4px solid rgba(243,233,213,.85);display:flex;align-items:center;justify-content:center;color:#f7efdf;font:600 12.5px 'Instrument Sans'">Finish</span></div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(243,233,213,.5)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">DEGRADED · NON-LiDAR (ARKIT_ONLY)</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">No mesh is shown, because none can be trusted. A single coverage ring stands in for the sketch; guidance carries the burden the geometry can't. This <i>is</i> the "headless" treatment — honest about the tier, not a broken copy of the LiDAR screen.</div>
+    </div>
+
+    <!-- annotations + road not taken -->
+    <div style="flex:1;min-width:300px;max-width:420px;display:flex;flex-direction:column;gap:16px">
+      <div style="background:#3a2d22;color:#f7efdf;border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(247,239,223,.55)">TRACKING &amp; DEGRADED STATES</div>
+        <div style="display:flex;flex-direction:column;gap:9px;margin-top:11px">
+          <div style="display:flex;gap:9px;align-items:center;font:12.5px 'Instrument Sans'"><span style="width:9px;height:9px;border-radius:50%;background:#7fc8a0;flex:none"></span>Tracking is good — mesh draws, pill green</div>
+          <div style="display:flex;gap:9px;align-items:center;font:12.5px 'Instrument Sans'"><span style="width:9px;height:9px;border-radius:50%;background:#c9a25e;flex:none"></span>Slow down / re-find surface — pill gold, mesh pauses</div>
+          <div style="display:flex;gap:9px;align-items:flex-start;font:12.5px 'Instrument Sans'"><span style="width:9px;height:9px;border-radius:50%;background:#8e3b2f;flex:none;margin-top:4px"></span><span>Too dark / lost tracking — mesh dims, a serif line: <i>"It's gone dark — I can't see. A light, or a step back?"</i></span></div>
+        </div>
+        <div style="font:11.5px/1.5 'Instrument Sans';color:rgba(247,239,223,.6);margin-top:12px">Warnings never scold. No red banners, no error codes — the guest names the condition and the fix in one breath.</div>
+      </div>
+      <div style="background:#f7efdf;border:1px dashed rgba(58,45,34,.4);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">THE ROAD NOT TAKEN — PURE HEADLESS</div>
+        <div style="display:flex;gap:14px;margin-top:12px;align-items:center">
+          <div style="width:74px;height:150px;border-radius:14px;background:#241c12;flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:10px"><div style="font:500 8px 'IBM Plex Mono';color:rgba(243,233,213,.45);letter-spacing:.1em">TRACKING</div><div style="width:40px;height:40px;border:2px solid rgba(243,233,213,.25);border-top-color:#c9a25e;border-radius:50%"></div><div style="font:500 9px 'Instrument Sans';color:rgba(243,233,213,.6);text-align:center">00:47<br>captured</div></div>
+          <div style="font:12px/1.55 'Instrument Sans';color:rgba(58,45,34,.75)">A timer + a tracking dot + no view of the room. <b>Rejected as the default</b>: it leaves "did I get enough?" unanswerable and makes a premium device feel blindfolded. It survives only as the honest ARKit-only fallback (middle phone), where trustworthy geometry doesn't exist to show.</div>
+        </div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">HAPTIC · MOTION · SOUND</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px"><b>Start:</b> medium impact + a low warm tone as the first strokes appear. <b>Each surface completes</b> (a coverage tick fills): a light <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">.impact(.light)</span> tick. <b>"Enough" reached:</b> success notification haptic + a soft resolving two-note chord; the mesh gives one gentle <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">rs-breathe</span> settle. Screen stays awake throughout; auto-lock disabled.</div>
+      </div>
+    </div>
+  </div>
+</section>
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s4">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px">4</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">Finish — the "got the room" moment, and answering "did I get enough?"</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px">Two beats. First, the instant of enough — a felt settle, not a modal. Then a brief review: the sketch made whole, the guest confirming it's a good capture, and one honest chance to add more before it travels. Finishing is a decision the user makes with confidence, not a gamble.</p>
+  <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- PHONE: got the room -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:radial-gradient(ellipse at 50% 42%,#3a2c17 0%,#241a0d 65%,#181109 100%);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <svg viewBox="0 0 310 694" style="position:absolute;inset:0;width:100%;height:100%;opacity:.6" fill="none" stroke="#e7cfa0" stroke-width="1"><path d="M40 260 L155 215 L270 260 L270 470 L155 520 L40 470 Z" stroke-opacity=".7"/><path d="M155 215 L155 520 M40 260 L40 470 M270 260 L270 470"/></svg>
+          <div style="position:absolute;inset:0;background:radial-gradient(circle at 50% 42%,rgba(201,162,94,.22) 0%,transparent 55%)"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#f3e9d5;position:relative;z-index:3"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#f3e9d5"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 34px;text-align:center">
+            <div style="width:64px;height:64px;border-radius:50%;background:#c9a25e;display:flex;align-items:center;justify-content:center;box-shadow:0 0 40px rgba(201,162,94,.6);animation:rs-breathe 3s ease-in-out infinite"><svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="#2a2114" stroke-width="2"><path d="M7 15.5 12.5 21 23 9"/></svg></div>
+            <div style="font:400 26px/1.35 'Source Serif 4',serif;color:#f3e9d5;margin-top:26px">I've got the room.</div>
+            <div style="font:italic 400 16px/1.5 'Source Serif 4',serif;color:rgba(243,233,213,.72);margin-top:12px">Walls, floor, corners, and everything on them. That's a good capture — let's send it home.</div>
+          </div>
+          <div style="height:22px;flex:none;position:relative;z-index:3;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(243,233,213,.5)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">"GOT THE ROOM" · THE PEAK MOMENT</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">Fires the instant coverage is sufficient (or on Finish). <b>Success haptic + a soft resolving chord</b>, a gold bloom, the checkmark breathing once. The single unambiguously joyful beat in the app — earned, not decorative.</div>
+    </div>
+
+    <!-- PHONE: review before send -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#f2e9d7,#e7ddc7);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#3a2d22"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#3a2d22"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;padding:6px 24px 0">
+            <div style="font:500 14px 'IBM Plex Mono',monospace;letter-spacing:.08em;color:rgba(58,45,34,.5);text-align:center;margin-bottom:14px">YOUR CAPTURE</div>
+            <div style="position:relative;height:230px;border-radius:16px;overflow:hidden;background:#241c12;box-shadow:0 10px 28px rgba(58,45,34,.2)">
+              <svg viewBox="0 0 262 230" style="position:absolute;inset:0;width:100%;height:100%" fill="none" stroke="#e7cfa0" stroke-width="1.2"><path d="M30 80 L131 50 L232 80 L232 165 L131 200 L30 165 Z" stroke-opacity=".85"/><path d="M131 50 L131 200 M30 80 L30 165 M232 80 L232 165"/><rect x="60" y="110" width="46" height="46" stroke-opacity=".6"/><path d="M150 120 L195 108 L195 150 L150 162 Z" stroke-opacity=".6"/></svg>
+              <div style="position:absolute;left:12px;bottom:10px;font:500 10px 'IBM Plex Mono',monospace;color:rgba(243,233,213,.6);letter-spacing:.06em">42 m² · 3.9 M PTS · LiDAR</div>
+            </div>
+            <div style="background:rgba(247,239,223,.85);border:1px solid rgba(58,45,34,.14);border-radius:14px;padding:14px 16px;margin-top:16px">
+              <div style="font:italic 400 15.5px/1.5 'Source Serif 4',serif">"This is a clean one — I can see the whole room. Send it, and I'll start making sense of it on your desk."</div>
+            </div>
+            <div style="flex:1"></div>
+            <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px">
+              <div style="background:#8e3b2f;color:#f7efdf;border-radius:15px;padding:16px;text-align:center;font:600 16px 'Instrument Sans';display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:0 8px 22px rgba(142,59,47,.26)"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#f7efdf" stroke-width="1.6"><path d="M9 12V3M5.5 6.5 9 3l3.5 3.5M3 12v2.5h12V12"/></svg>Send it home</div>
+              <div style="text-align:center;font:500 14px 'Instrument Sans';color:rgba(58,45,34,.6)">Add a little more</div>
+            </div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(58,45,34,.32)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">REVIEW · CONFIRM BEFORE UPLOAD</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">The finished sketch shown whole, with mono capture metrics (the one place raw numbers belong). "Add a little more" returns to capture with progress intact. "Send it home" begins the background upload (§5).</div>
+    </div>
+
+    <!-- annotations -->
+    <div style="flex:1;min-width:280px;max-width:380px;display:flex;flex-direction:column;gap:16px">
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">"DID I GET ENOUGH?" — ANSWERED THREE WAYS</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">During capture the sketch fills (felt). At enough, the guest says so (spoken). At review, the capture is shown whole with a plain verdict (seen). The user never has to guess — and if coverage is thin, the review copy shifts to <i>"I've got the bones, but a few gaps. Worth another minute?"</i> with "Add more" as the primary.</div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">NO PREVIEW, ON PURPOSE</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">The review shows the <b>sketch</b>, never a rendered 3D room. The real room belongs to the reveal, on the web. Showing a rough version here would spend the magic early and set the wrong expectation for phone-side fidelity.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s5">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px">5</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">Upload &amp; processing — honest waiting, narrated as arrival</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px">Files are large; upload runs in the background and survives app close via a Live Activity. Once uploaded, the copy narrates <i>analysis</i> — the room being understood — never pipeline internals. A server-anchored clock keeps time honest across relaunches. Every waiting state has a felt temperature: patient, then reassuring, then candid if it runs long.</p>
+  <div style="display:flex;gap:36px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- PHONE: background upload + live activity -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#1c1710,#120d07);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#f3e9d5"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#f3e9d5"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <!-- lock-screen-style live activity treatment -->
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;padding:6px 22px 0;color:#f3e9d5">
+            <div style="font:500 11px 'IBM Plex Mono',monospace;letter-spacing:.1em;color:rgba(243,233,213,.4);text-align:center">LOCK SCREEN · LIVE ACTIVITY</div>
+            <div style="background:rgba(243,233,213,.07);border:1px solid rgba(243,233,213,.12);border-radius:20px;padding:16px 18px;margin-top:14px">
+              <div style="display:flex;align-items:center;gap:11px">
+                <span style="width:34px;height:34px;border-radius:9px;background:#8e3b2f;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#f7efdf" stroke-width="1.6"><path d="M9 12V3M5.5 6.5 9 3l3.5 3.5M3 12v2.5h12V12"/></svg></span>
+                <div style="flex:1"><div style="font:600 14px 'Instrument Sans'">Sending the everything room</div><div style="font:12px 'Instrument Sans';color:rgba(243,233,213,.55)">roomstudio · uploading</div></div>
+                <span style="font:500 13px 'IBM Plex Mono',monospace;color:#e7cfa0">64%</span>
+              </div>
+              <div style="height:6px;border-radius:3px;background:rgba(243,233,213,.14);margin-top:14px;overflow:hidden"><div style="width:64%;height:100%;background:#c9a25e;border-radius:3px"></div></div>
+              <div style="display:flex;justify-content:space-between;margin-top:8px;font:11.5px 'Instrument Sans';color:rgba(243,233,213,.5)"><span>128 of 201 MB</span><span>about a minute left</span></div>
+            </div>
+            <div style="font:italic 400 14px/1.5 'Source Serif 4',serif;color:rgba(243,233,213,.6);text-align:center;margin-top:22px;padding:0 10px">"Go on with your day — this keeps going even if you close the app. I'll knock when your room is ready."</div>
+            <div style="flex:1"></div>
+            <div style="border-top:1px solid rgba(243,233,213,.1);padding:16px 4px;margin-bottom:6px"><div style="font:11px 'Instrument Sans';color:rgba(243,233,213,.4);text-align:center">the Dynamic Island shows the same progress ring while you're in other apps</div></div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(243,233,213,.5)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">BACKGROUND UPLOAD · SURVIVES CLOSE</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">A <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">URLSession</span> background upload + a <b>Live Activity</b> on the Lock Screen &amp; Dynamic Island. Bytes and time are shown here (transport is honest); this is the one place a progress bar is allowed.</div>
+    </div>
+
+    <!-- PHONE: analyzing + elapsed clock -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#f2e9d7,#e7ddc7);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#3a2d22"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#3a2d22"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;align-items:center;padding:10px 30px 0">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center">
+              <div style="position:relative;width:150px;height:150px">
+                <svg width="150" height="150" viewBox="0 0 150 150"><circle cx="75" cy="75" r="66" fill="none" stroke="rgba(58,45,34,.12)" stroke-width="2"/></svg>
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><div style="width:80px;height:80px;border-radius:50%;background:radial-gradient(circle,#c9a25e,#b98d43);opacity:.9;animation:rs-breathe 3.4s ease-in-out infinite;box-shadow:0 0 30px rgba(201,162,94,.4)"></div></div>
+              </div>
+              <div style="font:400 23px/1.35 'Source Serif 4',serif;text-align:center;margin-top:30px">Making sense of your room</div>
+              <div style="font:italic 400 15px/1.5 'Source Serif 4',serif;color:rgba(58,45,34,.65);text-align:center;margin-top:10px">"It's here — all of it. Give me a few minutes to understand how you live in it."</div>
+            </div>
+            <div style="width:100%;border-top:1px solid rgba(58,45,34,.12);padding:16px 0;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:6px">
+              <span style="font:500 11px 'IBM Plex Mono',monospace;letter-spacing:.08em;color:rgba(58,45,34,.45)">ELAPSED</span>
+              <span style="font:500 15px 'IBM Plex Mono',monospace;color:#3a2d22">02:14</span>
+              <span style="width:4px;height:4px;border-radius:50%;background:rgba(58,45,34,.3)"></span>
+              <span style="font:13px 'Instrument Sans';color:rgba(58,45,34,.55)">usually about 4 minutes</span>
+            </div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(58,45,34,.32)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">ANALYZING · SERVER-ANCHORED CLOCK</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">No fake spinner filling to 100%. A slow gold pulse (light, not machinery) + a mono elapsed clock driven by the server's start time — so it reads true even if you left and came back. Copy narrates understanding, never "meshing / segmenting."</div>
+    </div>
+
+    <!-- PHONE: taking a while / trouble reaching server -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#f2e9d7,#e7ddc7);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#3a2d22"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#3a2d22"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;padding:14px 26px 0">
+            <div style="font:500 11px 'IBM Plex Mono',monospace;letter-spacing:.1em;color:rgba(58,45,34,.45);margin-bottom:16px">TWO LONGER-RUNNING STATES</div>
+            <!-- taking a while -->
+            <div style="background:rgba(247,239,223,.9);border:1px solid rgba(58,45,34,.14);border-radius:16px;padding:16px 18px">
+              <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px"><span style="width:9px;height:9px;border-radius:50%;background:#c9a25e;animation:rs-pulse 1.8s infinite"></span><span style="font:600 13px 'Instrument Sans'">Still working</span><span style="margin-left:auto;font:500 13px 'IBM Plex Mono',monospace;color:rgba(58,45,34,.5)">06:38</span></div>
+              <div style="font:italic 400 14.5px/1.5 'Source Serif 4',serif">"Slower than I hoped — a couple more minutes. Your room has a lot going on, which is a compliment. You can leave; I'll knock."</div>
+            </div>
+            <!-- trouble reaching server -->
+            <div style="background:#3a2d22;border-radius:16px;padding:16px 18px;margin-top:14px;color:#f3e9d5">
+              <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px"><svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="#e7cfa0" stroke-width="1.5"><path d="M2 6a11 11 0 0 1 13 0M4.5 9a7 7 0 0 1 8 0M8.5 12h.01"/><path d="M14 3 3 14" stroke="#c9a25e"/></svg><span style="font:600 13px 'Instrument Sans'">Can't reach the studio</span></div>
+              <div style="font:italic 400 14.5px/1.5 'Source Serif 4',serif;color:rgba(243,233,213,.9)">"I've lost my line to the desk for a moment — your room is safe, I just can't check on it. I'll keep trying quietly."</div>
+              <div style="display:flex;gap:8px;margin-top:12px"><span style="background:#f7efdf;color:#3a2d22;border-radius:99px;padding:8px 16px;font:600 12.5px 'Instrument Sans'">Try now</span><span style="border:1.5px solid rgba(243,233,213,.35);color:rgba(243,233,213,.85);border-radius:99px;padding:8px 16px;font:500 12.5px 'Instrument Sans'">Leave it with me</span></div>
+            </div>
+            <div style="flex:1"></div>
+            <div style="font:11.5px/1.5 'Instrument Sans';color:rgba(58,45,34,.5);text-align:center;margin-bottom:14px">retries use exponential backoff; the clock keeps counting from the server's start, so returning users never see it reset</div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(58,45,34,.32)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">LONG-RUNNING · CONNECTION TROUBLE</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">Both states keep the guest calm and the room "safe." Connection trouble is the only place with a functional "Try now" — and even it is phrased as the guest, not an error. No spinner is ever shown spinning against a dead server.</div>
+    </div>
+
+    <!-- annotations -->
+    <div style="flex:1;min-width:280px;max-width:400px;display:flex;flex-direction:column;gap:16px">
+      <div style="background:#3a2d22;color:#f7efdf;border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(247,239,223,.55)">THE STATE MACHINE, IN VOICE</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:11px;font:12.5px 'Instrument Sans'">
+          <div style="display:flex;gap:9px"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#c9a25e;width:80px;flex:none">UPLOADING</span><span style="color:rgba(247,239,223,.8)">bytes + time (honest transport)</span></div>
+          <div style="display:flex;gap:9px"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#c9a25e;width:80px;flex:none">QUEUED</span><span style="color:rgba(247,239,223,.8)">"in line — I'll start the moment there's room"</span></div>
+          <div style="display:flex;gap:9px"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#c9a25e;width:80px;flex:none">ANALYZING</span><span style="color:rgba(247,239,223,.8)">"making sense of your room" + clock</span></div>
+          <div style="display:flex;gap:9px"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#c9a25e;width:80px;flex:none">LONG_RUN</span><span style="color:rgba(247,239,223,.8)">candid, still reassuring</span></div>
+          <div style="display:flex;gap:9px"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#c9a25e;width:80px;flex:none">UNREACHABLE</span><span style="color:rgba(247,239,223,.8)">"room is safe, line is down"</span></div>
+          <div style="display:flex;gap:9px"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#7fc8a0;width:80px;flex:none">READY</span><span style="color:rgba(247,239,223,.8)">the doorway (§6)</span></div>
+        </div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">LEAVE FREELY</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">Every waiting state grants permission to leave. The promise is a knock — a push notification (§9) — never a "come back soon" nag or a countdown that punishes leaving. The app is confident enough to let you go.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s6">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#c9a25e;color:#2a2114;border-radius:4px">6</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">The doorway — handing the room to the web as a deliberate, satisfying threshold</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px">The phone's last act. Not a toast, not an auto-redirect — a held threshold that treats the reveal as worth arriving to. The reveal itself never fires on the phone; the phone opens the door and steps back. The moment is designed to feel like being handed a key, then walking toward a lit room.</p>
+  <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- PHONE: ready doorway -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:radial-gradient(ellipse at 50% 38%,#4a3a24 0%,#2e2213 55%,#181109 100%);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <!-- lit doorway -->
+          <div style="position:absolute;left:50%;top:120px;transform:translateX(-50%);width:150px;height:250px;border-radius:75px 75px 8px 8px;background:linear-gradient(180deg,rgba(201,162,94,.55),rgba(231,207,160,.15));box-shadow:0 0 70px rgba(201,162,94,.45);border:1px solid rgba(231,207,160,.4)"></div>
+          <div style="position:absolute;left:50%;top:130px;transform:translateX(-50%);width:120px;height:230px;border-radius:60px 60px 6px 6px;background:radial-gradient(ellipse at 50% 30%,rgba(247,239,223,.5),rgba(201,162,94,.05))"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#f3e9d5;position:relative;z-index:3"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#f3e9d5"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:0 30px 8px;text-align:center;color:#f3e9d5">
+            <div style="font:400 27px/1.3 'Source Serif 4',serif">Your room is ready.</div>
+            <div style="font:italic 400 16px/1.55 'Source Serif 4',serif;color:rgba(243,233,213,.78);margin-top:12px">"I've understood it — and I think you'll want to see it properly. It's waiting on your desk, where there's room to look around."</div>
+            <div style="margin-top:26px;background:#c9a25e;color:#2a2114;border-radius:16px;padding:17px;font:600 16px 'Instrument Sans';display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:0 8px 26px rgba(201,162,94,.4)">Step into it on the web<svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="#2a2114" stroke-width="1.8"><path d="M3 8.5h9M8 4.5l4 4-4 4"/></svg></div>
+            <div style="font:13px 'Instrument Sans';color:rgba(243,233,213,.6);margin-top:14px;margin-bottom:8px">Opens your desk in the browser · you're already signed in there</div>
+          </div>
+          <div style="height:22px;flex:none;position:relative;z-index:3;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(243,233,213,.5)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:#8e6a2e;margin-top:14px">◆ THE DOORWAY · READY</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">A literal lit doorway, gold light spilling from the room beyond. <b>Success haptic + a soft "knock" sound</b> on arrival. The CTA is gold — this is the light-semantic peak of the whole app. It never auto-navigates: the user chooses to step through.</div>
+    </div>
+
+    <!-- PHONE: handoff in progress -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#2e2213,#181109);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#f3e9d5"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#f3e9d5"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 34px;text-align:center;color:#f3e9d5">
+            <div style="display:flex;align-items:center;gap:14px">
+              <span style="width:44px;height:44px;border:1.5px solid rgba(243,233,213,.4);border-radius:11px;display:flex;align-items:center;justify-content:center;font:400 20px 'Source Serif 4'">❖</span>
+              <span style="width:40px;display:flex;justify-content:space-between">·<span style="opacity:.6">·</span><span style="opacity:.3">·</span></span>
+              <span style="width:44px;height:44px;border:1.5px solid rgba(201,162,94,.6);border-radius:11px;display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#e7cfa0" stroke-width="1.4"><rect x="2" y="4" width="16" height="11" rx="1.5"/><path d="M7 18h6M10 15v3"/></svg></span>
+            </div>
+            <div style="font:italic 400 17px/1.5 'Source Serif 4',serif;color:rgba(243,233,213,.8);margin-top:30px">"Opening your desk… look for the room to arrive in this browser."</div>
+            <div style="font:12.5px 'Instrument Sans';color:rgba(243,233,213,.5);margin-top:20px">If nothing opens, we've copied a link — paste it on any computer to see your room.</div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(243,233,213,.5)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">HANDOFF · PHONE → DESK</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">Tapping the doorway opens the web app via a universal link (same signed-in identity). If no desktop session exists, it offers a copyable link + "email myself" so the reveal can happen where it deserves — a big screen — not by default on the phone.</div>
+    </div>
+
+    <!-- annotations -->
+    <div style="flex:1;min-width:280px;max-width:380px;display:flex;flex-direction:column;gap:16px">
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">WHY NOT REVEAL ON THE PHONE?</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">The reveal is a cinematic, room-scale experience the web owns. Cramming it onto the phone would both duplicate the web's crown jewel and diminish it. The doorway reframes "go elsewhere" as <b>anticipation</b> — the room is somewhere better, and you're being invited in.</div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">CONTINUITY, GUARANTEED</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">Because identity is shared (§8), the desk knows it's you the instant you arrive — no re-login, no "sync." The web greets you mid-thought, exactly as its own landing spec describes the returning state.</div>
+      </div>
+      <div style="background:#3a2d22;color:#f7efdf;border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(247,239,223,.55)">HAPTIC · SOUND · MOTION</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(247,239,223,.82);margin-top:9px">On READY: <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">.notification(.success)</span> + a single soft wooden knock (the only distinct sound cue in the app besides capture start/enough). The doorway light blooms up over ~1.2s with a gentle ease — the room "turning its lights on" for you.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s7">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px">7</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">When it goes wrong — honest words, a clear next step, and a banner that waits for you</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px">Failure follows the web system's rule: the guest owns what it couldn't do, never blames the user, and always offers exactly one concrete path. Two kinds — recoverable (part of the room made it) and terminal (nothing survived) — plus an upload-failed banner that resurfaces on relaunch so a failure is never silently lost.</p>
+  <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- PHONE: recoverable -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#f2e9d7,#e7ddc7);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#3a2d22"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#3a2d22"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;padding:14px 26px 0">
+            <div style="position:relative;height:200px;border-radius:16px;overflow:hidden;background:#241c12">
+              <svg viewBox="0 0 262 200" style="position:absolute;inset:0;width:100%;height:100%" fill="none" stroke="#e7cfa0" stroke-width="1.2"><path d="M30 70 L131 44 L232 70 L232 150 L131 180 L30 150 Z" stroke-opacity=".6"/><path d="M131 44 L131 180 M30 70 L30 150"/></svg>
+              <div style="position:absolute;right:14px;top:44px;width:80px;height:70px;border:1.5px dashed rgba(243,233,213,.5);border-radius:10px;background:rgba(36,28,18,.5);display:flex;align-items:center;justify-content:center;font:italic 400 11px 'Source Serif 4';color:rgba(243,233,213,.6);text-align:center;padding:6px">set aside</div>
+            </div>
+            <div style="background:rgba(247,239,223,.9);border:1px solid rgba(58,45,34,.14);border-radius:14px;padding:15px 17px;margin-top:16px">
+              <div style="font:600 13px 'Instrument Sans';margin-bottom:7px">Most of the room made it</div>
+              <div style="font:italic 400 14.5px/1.5 'Source Serif 4',serif">"The corner by the door arrived scrambled, so I've set it aside rather than show you something false. We can work without it — or send that one corner again. Thirty seconds of phone time."</div>
+            </div>
+            <div style="flex:1"></div>
+            <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px">
+              <div style="background:#8e3b2f;color:#f7efdf;border-radius:14px;padding:15px;text-align:center;font:600 15px 'Instrument Sans'">Rescan just that corner</div>
+              <div style="text-align:center;font:500 14px 'Instrument Sans';color:rgba(58,45,34,.62)">Use it as is</div>
+            </div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(58,45,34,.32)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">RECOVERABLE · SOME FILES MISSING</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">The bad region is set aside, never rendered broken. A <b>targeted rescan</b> returns to capture pointed at just that spot — the app remembers what's already good. "Use it as is" proceeds to the doorway honestly diminished.</div>
+    </div>
+
+    <!-- PHONE: terminal -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:#3a2d22;display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#f3e9d5"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#f3e9d5"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;justify-content:center;padding:0 32px;color:#f3e9d5">
+            <div style="width:48px;height:48px;border:1.5px solid rgba(243,233,213,.4);border-radius:13px;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#e7cfa0" stroke-width="1.4"><path d="M12 8v5M12 16h.01M4 5h16v14H4z"/></svg></div>
+            <div style="font:400 24px/1.35 'Source Serif 4',serif;margin-top:24px">The scan didn't survive the trip.</div>
+            <div style="font:italic 400 15.5px/1.55 'Source Serif 4',serif;color:rgba(243,233,213,.82);margin-top:14px">"There's nothing here I could honestly show you — and it's not something you did. When you're near the room again, let's try one more pass. Slower is better, and I'll be less confused by the mirror this time."</div>
+            <div style="margin-top:30px;display:flex;flex-direction:column;gap:11px">
+              <div style="background:#f7efdf;color:#3a2d22;border-radius:14px;padding:15px;text-align:center;font:600 15px 'Instrument Sans'">Scan the room again</div>
+              <div style="border:1.5px solid rgba(243,233,213,.32);color:rgba(243,233,213,.85);border-radius:14px;padding:15px;text-align:center;font:500 15px 'Instrument Sans'">Later</div>
+            </div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(243,233,213,.4)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">TERMINAL · RESCAN</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">Deep ink surface — the app's gravest tone, borrowed straight from the web system's terminal-failure card. No stack trace, no error code visible; the cause ("the mirror") is offered as shared, forgivable context. One primary path: try again.</div>
+    </div>
+
+    <!-- annotations: relaunch banner -->
+    <div style="flex:1;min-width:280px;max-width:380px;display:flex;flex-direction:column;gap:16px">
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">UPLOAD-FAILED BANNER · SURVIVES RELAUNCH</div>
+        <div style="margin-top:12px;background:#3a2d22;border-radius:12px;padding:12px 14px;color:#f3e9d5">
+          <div style="display:flex;align-items:center;gap:9px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#c9a25e" stroke-width="1.5"><path d="M8 4v4M8 11h.01M8 1 1 14h14z"/></svg><span style="font:600 12.5px 'Instrument Sans'">One room didn't make it up</span></div>
+          <div style="font:italic 400 13px/1.45 'Source Serif 4';color:rgba(243,233,213,.82);margin-top:6px">"The everything room stalled on its way to the desk. It's still here on your phone — shall I try again?"</div>
+          <div style="display:flex;gap:8px;margin-top:10px"><span style="background:#c9a25e;color:#2a2114;border-radius:99px;padding:6px 14px;font:600 12px 'Instrument Sans'">Try again</span><span style="color:rgba(243,233,213,.7);padding:6px 6px;font:500 12px 'Instrument Sans'">Dismiss</span></div>
+        </div>
+        <div style="font:12px/1.5 'Instrument Sans';color:rgba(58,45,34,.7);margin-top:11px">Pinned to the top of the idle home on next launch. The capture file is retained on-device until it either uploads or the user dismisses — so a crash or a dead battery mid-upload never loses the room silently.</div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">HAPTIC · TONE</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">Failure uses <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">.notification(.warning)</span> once — a single soft dull note, never a harsh error buzz. No sound. The gravity is carried by color and copy, not by punishing the user's hand.</div>
+      </div>
+    </div>
+  </div>
+</section>
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s8">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px">8</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">Identity — anonymous by default, upgradeable without loss; continuity is the emotional promise</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px">You are someone from first launch — your ID is visible as proof of continuity. Sign in with Apple <i>links</i> that identity rather than replacing it, so no room is ever lost. Sign-out deliberately lives on the web; the phone only ever gains identity, never sheds it.</p>
+  <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- PHONE: profile / anon ID -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#f2e9d7,#e7ddc7);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#3a2d22"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#3a2d22"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;padding:6px 26px 0">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:22px"><span style="font:400 22px 'Instrument Sans';color:rgba(58,45,34,.5)">‹</span><span style="font:500 17px 'Source Serif 4',serif">You</span></div>
+            <div style="display:flex;flex-direction:column;align-items:center;text-align:center">
+              <div style="width:76px;height:76px;border-radius:50%;background:#3a2d22;display:flex;align-items:center;justify-content:center;color:#f3e9d5;font:400 30px 'Source Serif 4'">❖</div>
+              <div style="font:italic 400 18px 'Source Serif 4',serif;margin-top:14px">A guest, so far</div>
+              <div style="font:13px/1.5 'Instrument Sans';color:rgba(58,45,34,.6);margin-top:6px;max-width:250px">This device is already someone — your rooms are tied to the ID below. Sign in to keep them safe across devices.</div>
+            </div>
+            <div style="background:rgba(58,45,34,.05);border:1px solid rgba(58,45,34,.14);border-radius:12px;padding:13px 15px;margin-top:22px;display:flex;align-items:center;gap:10px">
+              <div style="flex:1"><div style="font:500 10px 'IBM Plex Mono',monospace;letter-spacing:.1em;color:rgba(58,45,34,.45)">YOUR ID</div><div style="font:500 13.5px 'IBM Plex Mono',monospace;color:#3a2d22;margin-top:3px">rs_a4f9-2c7e-91d0</div></div>
+              <span style="width:34px;height:34px;border-radius:9px;background:rgba(58,45,34,.08);display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#3a2d22" stroke-width="1.3"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M4 8V3h5"/></svg></span>
+            </div>
+            <div style="background:#0e0b07;color:#fff;border-radius:13px;padding:14px;text-align:center;font:600 15.5px 'Instrument Sans';display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px"><svg width="16" height="18" viewBox="0 0 16 18" fill="#fff"><path d="M13 6.2c-.1.1-2 .9-2 2.9 0 2.4 2.1 3.2 2.2 3.2 0 .1-.3 1.2-1.1 2.3-.7.9-1.4 1.9-2.5 1.9s-1.4-.6-2.6-.6c-1.2 0-1.6.6-2.6.6S2.9 15.4 2.2 14.5C1 13 .5 10.9.5 8.9c0-3.2 2.1-4.9 4.1-4.9 1.1 0 2 .7 2.7.7.6 0 1.6-.7 2.9-.7.5 0 2.3.1 3.5 1.8l-.7.4zM9.3 2.6c.5-.6.9-1.5.9-2.4 0-.1 0-.2 0-.2-.9 0-1.9.6-2.5 1.3-.5.6-1 1.4-1 2.3 0 .1 0 .2 0 .3.1 0 .2 0 .3 0 .8 0 1.8-.5 2.3-1.3z"/></svg>Sign in with Apple</div>
+            <div style="flex:1"></div>
+            <div style="font:11.5px/1.5 'Instrument Sans';color:rgba(58,45,34,.5);text-align:center;margin-bottom:14px">Signing out lives on the web — this app only ever remembers you</div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(58,45,34,.32)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">PROFILE · ANONYMOUS, WITH ID VISIBLE</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">"A guest, so far" — the anonymous state framed warmly, not as incomplete. The ID is shown in mono (machine data) and copyable, so continuity is <i>provable</i>, not just claimed. Sign in with Apple uses the native black button verbatim.</div>
+    </div>
+
+    <!-- PHONE: why sign in / continuity -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#efe6d3,#e6dcc6);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#3a2d22"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#3a2d22"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <!-- bottom sheet feel -->
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;justify-content:flex-end">
+            <div style="position:absolute;inset:0;background:rgba(58,45,34,.28)"></div>
+            <div style="position:relative;background:#f7efdf;border-radius:26px 26px 0 0;padding:22px 26px 8px;box-shadow:0 -12px 40px rgba(58,45,34,.2)">
+              <div style="width:38px;height:5px;border-radius:3px;background:rgba(58,45,34,.22);margin:0 auto 20px"></div>
+              <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+                <span style="width:40px;height:40px;border-radius:11px;background:rgba(201,162,94,.22);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#8e6a2e" stroke-width="1.5"><path d="M10 2 3 5v5c0 4 3 6.5 7 8 4-1.5 7-4 7-8V5z"/></svg></span>
+              </div>
+              <div style="font:400 23px/1.35 'Source Serif 4',serif">Keep your rooms, wherever you are.</div>
+              <div style="font:italic 400 15px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.7);margin-top:12px">"You've got two rooms with me already. Sign in and they come with you — to your desk, to a new phone, to next year. Nothing you've built is left behind. That's the whole reason."</div>
+              <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px;background:rgba(58,45,34,.04);border-radius:12px;padding:13px 15px">
+                <div style="display:flex;align-items:center;gap:9px;font:13px 'Instrument Sans'"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#7a8f5a" stroke-width="1.6"><path d="M3 8l3 3 6-7"/></svg>Your 2 rooms stay exactly as they are</div>
+                <div style="display:flex;align-items:center;gap:9px;font:13px 'Instrument Sans'"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#7a8f5a" stroke-width="1.6"><path d="M3 8l3 3 6-7"/></svg>The same you, on the web and the phone</div>
+                <div style="display:flex;align-items:center;gap:9px;font:13px 'Instrument Sans'"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#7a8f5a" stroke-width="1.6"><path d="M3 8l3 3 6-7"/></svg>No email, no password to remember</div>
+              </div>
+              <div style="background:#0e0b07;color:#fff;border-radius:13px;padding:14px;text-align:center;font:600 15.5px 'Instrument Sans';display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px"><svg width="15" height="17" viewBox="0 0 16 18" fill="#fff"><path d="M13 6.2c-.1.1-2 .9-2 2.9 0 2.4 2.1 3.2 2.2 3.2 0 .1-.3 1.2-1.1 2.3-.7.9-1.4 1.9-2.5 1.9s-1.4-.6-2.6-.6c-1.2 0-1.6.6-2.6.6S2.9 15.4 2.2 14.5C1 13 .5 10.9.5 8.9c0-3.2 2.1-4.9 4.1-4.9 1.1 0 2 .7 2.7.7.6 0 1.6-.7 2.9-.7.5 0 2.3.1 3.5 1.8l-.7.4z"/></svg>Sign in with Apple</div>
+              <div style="text-align:center;font:500 13.5px 'Instrument Sans';color:rgba(58,45,34,.55);padding:12px 0 4px">Not now</div>
+            </div>
+          </div>
+          <div style="height:22px;flex:none;position:relative;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(58,45,34,.32)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">"WHY SIGN IN" · CONTINUITY PROMISE</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">A bottom sheet triggered at natural moments (after a first room, before handoff on a shared computer). The emotional argument is <b>loss-prevention</b>, spoken by the guest; the checklist reassures that linking never wipes existing rooms.</div>
+    </div>
+
+    <!-- annotations: conflict resolution -->
+    <div style="flex:1;min-width:280px;max-width:380px;display:flex;flex-direction:column;gap:16px">
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">ACCOUNT CONFLICT — APPLE ID ALREADY IN USE</div>
+        <div style="margin-top:12px;background:#fff;border:1px solid rgba(58,45,34,.15);border-radius:12px;padding:14px 16px">
+          <div style="font:600 13.5px 'Instrument Sans';margin-bottom:7px">This Apple ID already has a home</div>
+          <div style="font:italic 400 13.5px/1.5 'Source Serif 4';color:rgba(58,45,34,.78)">"You've used this Apple ID before — it has 4 rooms of its own. Which life should this phone join?"</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+            <div style="border:1.5px solid #8e3b2f;border-radius:11px;padding:11px 13px"><div style="font:600 12.5px 'Instrument Sans';color:#8e3b2f">Switch to my existing account</div><div style="font:11.5px 'Instrument Sans';color:rgba(58,45,34,.6);margin-top:2px">Keep the 4 rooms there · this phone's 2 guest-rooms stay retrievable for 30 days</div></div>
+            <div style="border:1.5px solid rgba(58,45,34,.25);border-radius:11px;padding:11px 13px"><div style="font:600 12.5px 'Instrument Sans'">Keep the 2 rooms on this phone</div><div style="font:11.5px 'Instrument Sans';color:rgba(58,45,34,.6);margin-top:2px">Sign in later with a different Apple ID</div></div>
+          </div>
+        </div>
+        <div style="font:12px/1.5 'Instrument Sans';color:rgba(58,45,34,.7);margin-top:11px">The conflict is framed as choosing between two <i>lives</i>, never as a destructive merge. No option silently deletes rooms; the not-chosen set is held, recoverable, and the choice is explicit.</div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">HAPTIC</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">Successful link fires a gentle <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">.notification(.success)</span> and the avatar's ❖ crossfades to the linked initial — a small, felt confirmation that the two selves are now one.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding:38px 46px;border-bottom:1px solid rgba(58,45,34,.12)" id="s9">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px">9</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">Continuity with the web — notifications, the QR bridge, and just enough room history</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px"><b>My call on history:</b> the phone keeps a <i>thin</i> recent-rooms list — status and a way back to the web, nothing editable. Room management (renaming, comparing, deleting) is conversational and belongs to the guest on the web. The phone is a camera with a memory of what it's sent, not a library. It also receives the web's knocks (push) and can accept a scan session handed back from the desk (QR / deep link).</p>
+  <div style="display:flex;gap:44px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- PHONE: recent rooms + push -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#f2e9d7,#e7ddc7);display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#3a2d22"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#3a2d22"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;padding:6px 24px 0">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><span style="font:500 22px 'Source Serif 4',serif">Your rooms</span><span style="width:32px;height:32px;border-radius:50%;background:rgba(58,45,34,.08);display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 17 17" fill="none" stroke="#3a2d22" stroke-width="1.4"><circle cx="8.5" cy="5.5" r="3"/><path d="M2.5 14.5c1-3 4-4 6-4s5 1 6 4"/></svg></span></div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;align-items:center;gap:13px;background:rgba(247,239,223,.85);border:1px solid rgba(58,45,34,.12);border-radius:14px;padding:12px 14px">
+                <div style="width:52px;height:52px;border-radius:10px;overflow:hidden;flex:none;background:#241c12"><svg viewBox="0 0 52 52" style="width:100%;height:100%" fill="none" stroke="#e7cfa0" stroke-width="1"><path d="M8 20 26 12 44 20 44 38 26 46 8 38Z" stroke-opacity=".7"/></svg></div>
+                <div style="flex:1"><div style="font:italic 400 15.5px 'Source Serif 4'">the everything room</div><div style="font:12px 'Instrument Sans';color:rgba(58,45,34,.55);margin-top:2px">on your desk · visited yesterday</div></div>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="rgba(58,45,34,.4)" stroke-width="1.5"><path d="M6 3l5 5-5 5"/></svg>
+              </div>
+              <div style="display:flex;align-items:center;gap:13px;background:rgba(247,239,223,.85);border:1px solid rgba(58,45,34,.12);border-radius:14px;padding:12px 14px">
+                <div style="width:52px;height:52px;border-radius:10px;flex:none;background:#241c12;display:flex;align-items:center;justify-content:center"><div style="width:22px;height:22px;border:2px solid rgba(231,207,160,.4);border-top-color:#c9a25e;border-radius:50%"></div></div>
+                <div style="flex:1"><div style="font:italic 400 15.5px 'Source Serif 4'">the study</div><div style="font:12px 'Instrument Sans';color:#8e6a2e;margin-top:2px">being rebuilt · about 2 min</div></div>
+              </div>
+            </div>
+            <div style="font:11.5px/1.5 'Instrument Sans';color:rgba(58,45,34,.5);margin-top:16px;text-align:center">Rename, compare &amp; revisit happen with the guest, on the web →</div>
+            <div style="flex:1"></div>
+            <div style="background:#8e3b2f;color:#f7efdf;border-radius:15px;padding:16px;text-align:center;font:600 16px 'Instrument Sans';display:flex;align-items:center;justify-content:center;gap:9px;margin-bottom:14px;box-shadow:0 8px 22px rgba(142,59,47,.24)"><svg width="19" height="19" viewBox="0 0 19 19" fill="none" stroke="#f7efdf" stroke-width="1.5"><path d="M2 6.5 5 6.5 6.5 4 12.5 4 14 6.5 17 6.5 17 15 2 15Z"/><circle cx="9.5" cy="10" r="3"/></svg>Scan another room</div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(58,45,34,.32)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">RETURNING HOME · THIN HISTORY</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">Status + "open on the web," nothing editable. Tapping a ready room hands off (§6); a processing room opens its waiting state. The invitation to scan stays anchored at the bottom — the app never stops being a camera first.</div>
+    </div>
+
+    <!-- PHONE: QR bridge -->
+    <div style="flex:none;width:330px">
+      <div style="position:relative;width:330px;height:714px;background:#0e0b07;border-radius:46px;padding:10px;box-sizing:border-box;box-shadow:0 24px 60px rgba(58,45,34,.28)">
+        <div style="position:relative;width:310px;height:694px;border-radius:38px;overflow:hidden;background:#241c12;display:flex;flex-direction:column">
+          <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:92px;height:27px;background:#0e0b07;border-radius:16px;z-index:8"></div>
+          <div style="height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;color:#f3e9d5"><span style="font:600 14px 'Instrument Sans'">9:41</span><span style="color:#f3e9d5"><svg width="62" height="12" viewBox="0 0 62 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1"/><path d="M24.6 4.4a7 7 0 0 1 9.8 0l-1.4 1.4a5 5 0 0 0-7 0z"/><path d="M27.2 7a3.4 3.4 0 0 1 4.6 0l-2.3 2.3z"/><rect x="42" y="2" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="43.5" y="3.5" width="12" height="6" rx="1"/><rect x="60" y="4.4" width="1.6" height="4" rx=".8"/></svg></span></div>
+          <div style="flex:1;position:relative;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 34px;text-align:center;color:#f3e9d5">
+            <div style="font:500 11px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(243,233,213,.45)">FROM YOUR DESK</div>
+            <div style="width:150px;height:150px;border-radius:20px;background:#f7efdf;margin-top:22px;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box"><div style="width:100%;height:100%;background:repeating-conic-gradient(#241c12 0 25%,#f7efdf 0 50%) 0 0/22px 22px;border-radius:5px"></div></div>
+            <div style="font:400 22px/1.35 'Source Serif 4',serif;margin-top:26px">The desk needs one more corner</div>
+            <div style="font:italic 400 15px/1.55 'Source Serif 4',serif;color:rgba(243,233,213,.72);margin-top:12px">"Your desk asked me to grab a spot it couldn't quite see. Point your phone at the screen and I'll pick up right where we left off."</div>
+            <div style="margin-top:24px;background:#c9a25e;color:#2a2114;border-radius:14px;padding:14px 22px;font:600 15px 'Instrument Sans'">Scan the code</div>
+          </div>
+          <div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center"><div style="width:120px;height:5px;border-radius:3px;background:rgba(243,233,213,.5)"></div></div>
+        </div>
+      </div>
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:rgba(58,45,34,.5);margin-top:14px">FUTURE · QR / DEEP-LINK BRIDGE (WEB → PHONE)</div>
+      <div style="font:12.5px/1.5 'Instrument Sans',sans-serif;color:rgba(58,45,34,.7);margin-top:5px;max-width:300px">The web can hand a session <i>back</i> to the phone — most usefully to fill a gap the reveal exposed. A universal link (or QR when scanning from a desktop) opens the app straight into a <b>targeted rescan</b> for that room, already signed in.</div>
+    </div>
+
+    <!-- annotations: push -->
+    <div style="flex:1;min-width:280px;max-width:380px;display:flex;flex-direction:column;gap:16px">
+      <div style="background:#3a2d22;border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(247,239,223,.5)">PUSH — THE KNOCK</div>
+        <div style="margin-top:12px;background:rgba(243,233,213,.1);border:1px solid rgba(243,233,213,.14);border-radius:14px;padding:13px 15px;color:#f3e9d5">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px"><span style="width:26px;height:26px;border-radius:7px;background:#8e3b2f;display:flex;align-items:center;justify-content:center;font:400 13px 'Source Serif 4'">❖</span><span style="font:600 12px 'Instrument Sans'">roomstudio</span><span style="margin-left:auto;font:11px 'Instrument Sans';color:rgba(243,233,213,.5)">now</span></div>
+          <div style="font:italic 400 14px/1.45 'Source Serif 4'">"Your living room is ready when you are."</div>
+        </div>
+        <div style="margin-top:10px;background:rgba(243,233,213,.1);border:1px solid rgba(243,233,213,.14);border-radius:14px;padding:13px 15px;color:#f3e9d5">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px"><span style="width:26px;height:26px;border-radius:7px;background:#8e3b2f;display:flex;align-items:center;justify-content:center;font:400 13px 'Source Serif 4'">❖</span><span style="font:600 12px 'Instrument Sans'">roomstudio</span><span style="margin-left:auto;font:11px 'Instrument Sans';color:rgba(243,233,213,.5)">2m</span></div>
+          <div style="font:italic 400 14px/1.45 'Source Serif 4'">"The study needs one more pass — thirty seconds when you're near it."</div>
+        </div>
+        <div style="font:11.5px/1.5 'Instrument Sans';color:rgba(247,239,223,.6);margin-top:11px">Sent on READY and on recoverable failure, so the user can leave the app entirely and be called back. Permission requested only after a first successful scan — never at launch. No marketing pushes, ever.</div>
+      </div>
+      <div style="background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:18px 20px">
+        <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">WHY HISTORY STAYS THIN — THE JUSTIFICATION</div>
+        <div style="font:12.5px/1.55 'Instrument Sans',sans-serif;color:rgba(58,45,34,.75);margin-top:9px">Management is <i>conversation</i> in this product — "forget this room," "call it the study," "compare Sunday-calm." That lives with the guest, on the web, at full size. Duplicating it on the phone would build a second, lesser control surface and blur the clean role split. The phone shows enough to orient and re-enter; nothing more.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding:38px 46px" id="s10">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px">
+    <span style="font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 8px;background:#3a2d22;color:#f7efdf;border-radius:4px">10</span>
+    <span style="font:600 15px 'Instrument Sans',sans-serif">The system, mapped to iOS — type roles, the warm palette, SF Symbols, haptics &amp; sound</span>
+  </div>
+  <p style="font:13px/1.55 'Source Serif 4',serif;color:rgba(58,45,34,.75);max-width:1120px;margin:0 0 22px">How the Good Guest language becomes SwiftUI. The rule of gold survives translation intact: it is a <i>light-semantic indicator only</i> — never a generic accent, never success/error.</p>
+
+  <div style="display:flex;gap:16px;flex-wrap:wrap;width:1620px;max-width:100%">
+
+    <!-- TYPE -->
+    <div style="flex:1;min-width:360px;background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:22px 26px;box-sizing:border-box">
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">THREE TYPE ROLES → SwiftUI</div>
+      <div style="display:flex;flex-direction:column;gap:16px;margin-top:16px">
+        <div style="border-bottom:1px solid rgba(58,45,34,.1);padding-bottom:14px">
+          <div style="font:italic 400 21px 'Source Serif 4',serif">"I've got the room."</div>
+          <div style="font:12px/1.5 'Instrument Sans';color:rgba(58,45,34,.65);margin-top:6px"><b>Guest voice</b> — Source Serif 4, italic. Every line the guest speaks: greetings, narration, confessions, the doorway. SwiftUI: bundled <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">Font.custom("SourceSerif4")</span>, fallback <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">.serif</span> (New York). Dynamic Type via <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">relativeTo:</span>.</div>
+        </div>
+        <div style="border-bottom:1px solid rgba(58,45,34,.1);padding-bottom:14px">
+          <div style="font:600 18px 'Instrument Sans',sans-serif">Start scanning · Send it home</div>
+          <div style="font:12px/1.5 'Instrument Sans';color:rgba(58,45,34,.65);margin-top:6px"><b>UI sans</b> — Instrument Sans for buttons, labels, controls. SwiftUI: bundle Instrument Sans for brand-forward text; system SF Pro is the acceptable substitute for dense native chrome (nav bars, sheets) so it feels iOS-native.</div>
+        </div>
+        <div>
+          <div style="font:500 15px 'IBM Plex Mono',monospace;letter-spacing:.04em">rs_a4f9-2c7e · 42 m² · 02:14</div>
+          <div style="font:12px/1.5 'Instrument Sans';color:rgba(58,45,34,.65);margin-top:6px"><b>Machine data</b> — IBM Plex Mono for IDs, capture metrics, the elapsed clock, byte counts. SwiftUI: bundled Plex Mono or <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">.monospaced()</span>. Never used for prose.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- COLOR -->
+    <div style="flex:1;min-width:360px;background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:22px 26px;box-sizing:border-box">
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">PALETTE → SEMANTIC COLORS</div>
+      <div style="display:flex;flex-direction:column;gap:11px;margin-top:16px">
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:44px;height:44px;border-radius:10px;background:#e9e2d2;border:1px solid rgba(58,45,34,.15);flex:none"></span><div><div style="font:600 13px 'Instrument Sans'">parchment · <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">#e9e2d2</span></div><div style="font:11.5px 'Instrument Sans';color:rgba(58,45,34,.6)">Color.rsBackground — grouped background, light screens</div></div></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:44px;height:44px;border-radius:10px;background:#f7efdf;border:1px solid rgba(58,45,34,.15);flex:none"></span><div><div style="font:600 13px 'Instrument Sans'">cream · <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">#f7efdf</span></div><div style="font:11.5px 'Instrument Sans';color:rgba(58,45,34,.6)">rsSurface — cards, sheets, secondary fills</div></div></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:44px;height:44px;border-radius:10px;background:#3a2d22;flex:none"></span><div><div style="font:600 13px 'Instrument Sans'">ink · <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">#3a2d22</span></div><div style="font:11.5px 'Instrument Sans';color:rgba(58,45,34,.6)">rsInk — primary label, dark capture &amp; failure surfaces</div></div></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:44px;height:44px;border-radius:10px;background:#8e3b2f;flex:none"></span><div><div style="font:600 13px 'Instrument Sans'">rust · <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">#8e3b2f</span></div><div style="font:11.5px 'Instrument Sans';color:rgba(58,45,34,.6)">rsAction — the <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">.tint</span>; primary buttons, capture shutter</div></div></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:44px;height:44px;border-radius:10px;background:#c9a25e;flex:none;box-shadow:0 0 16px rgba(201,162,94,.5)"></span><div><div style="font:600 13px 'Instrument Sans'">gold · <span style="font-family:'IBM Plex Mono',monospace;font-size:11px">#c9a25e</span></div><div style="font:11.5px 'Instrument Sans';color:#8e6a2e"><b>LIGHT-SEMANTIC ONLY</b> — mesh ink, "enough", the doorway. Never a plain accent.</div></div></div>
+      </div>
+      <div style="font:11.5px/1.5 'Instrument Sans';color:rgba(58,45,34,.6);margin-top:14px;border-top:1px solid rgba(58,45,34,.1);padding-top:12px">Status/tracking colors sit <i>outside</i> the brand: green <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px">#7fc8a0</span> for "good" reads as sensor truth, not decoration. Dark mode ships as the default for capture; light screens invert to ink-on-parchment.</div>
+    </div>
+
+    <!-- SF SYMBOLS -->
+    <div style="flex:1;min-width:360px;background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:22px 26px;box-sizing:border-box">
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">SF SYMBOLS — NATIVE, TINTED WARM</div>
+      <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px;font:12.5px 'Instrument Sans'">
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8e3b2f;width:158px;flex:none">camera.viewfinder</span><span style="color:rgba(58,45,34,.75)">scan a room (primary)</span></div>
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8e3b2f;width:158px;flex:none">move.3d / arkit</span><span style="color:rgba(58,45,34,.75)">capture guidance, motion cue</span></div>
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8e3b2f;width:158px;flex:none">dot.viewfinder</span><span style="color:rgba(58,45,34,.75)">tracking / re-center</span></div>
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8e3b2f;width:158px;flex:none">icloud.and.arrow.up</span><span style="color:rgba(58,45,34,.75)">background upload</span></div>
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8e3b2f;width:158px;flex:none">hourglass</span><span style="color:rgba(58,45,34,.75)">analyzing / the wait</span></div>
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#c9a25e;width:158px;flex:none">door.left.hand.open</span><span style="color:rgba(58,45,34,.75)">the doorway / ready (gold)</span></div>
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8e3b2f;width:158px;flex:none">apple.logo</span><span style="color:rgba(58,45,34,.75)">Sign in with Apple</span></div>
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8e3b2f;width:158px;flex:none">person.crop.circle</span><span style="color:rgba(58,45,34,.75)">profile / identity</span></div>
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8e3b2f;width:158px;flex:none">exclamationmark.bubble</span><span style="color:rgba(58,45,34,.75)">confession / recoverable</span></div>
+      </div>
+      <div style="font:11.5px/1.5 'Instrument Sans';color:rgba(58,45,34,.6);margin-top:14px;border-top:1px solid rgba(58,45,34,.1);padding-top:12px">All rendered as <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px">.hierarchical</span> in rsInk or rsAction — hand-drawn glyphs only where no symbol fits the room metaphor (the mesh, the doorway light).</div>
+    </div>
+
+    <!-- HAPTICS / SOUND / MOTION -->
+    <div style="flex:1.4;min-width:400px;background:#3a2d22;color:#f7efdf;border-radius:10px;padding:22px 26px;box-sizing:border-box">
+      <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(247,239,223,.55)">HAPTICS · SOUND · MOTION — WHERE THEY EARN THEIR PLACE</div>
+      <div style="display:flex;flex-direction:column;gap:0;margin-top:14px">
+        <div style="display:flex;gap:12px;padding:11px 0;border-bottom:1px solid rgba(247,239,223,.12)"><span style="font:600 12.5px 'Instrument Sans';width:130px;flex:none">Capture start</span><span style="font:12px/1.45 'Instrument Sans';color:rgba(247,239,223,.8)"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#e7cfa0">.impact(.medium)</span> + a low warm tone as the first ink strokes land.</span></div>
+        <div style="display:flex;gap:12px;padding:11px 0;border-bottom:1px solid rgba(247,239,223,.12)"><span style="font:600 12.5px 'Instrument Sans';width:130px;flex:none">Surface covered</span><span style="font:12px/1.45 'Instrument Sans';color:rgba(247,239,223,.8)"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#e7cfa0">.impact(.light)</span> tick as each coverage mark fills. Silent.</span></div>
+        <div style="display:flex;gap:12px;padding:11px 0;border-bottom:1px solid rgba(247,239,223,.12)"><span style="font:600 12.5px 'Instrument Sans';width:130px;flex:none">"Got the room"</span><span style="font:12px/1.45 'Instrument Sans';color:rgba(247,239,223,.8)"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#e7cfa0">.notification(.success)</span> + a soft resolving two-note chord; gold bloom, one <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#e7cfa0">breathe</span>.</span></div>
+        <div style="display:flex;gap:12px;padding:11px 0;border-bottom:1px solid rgba(247,239,223,.12)"><span style="font:600 12.5px 'Instrument Sans';width:130px;flex:none">Finish / stop</span><span style="font:12px/1.45 'Instrument Sans';color:rgba(247,239,223,.8)"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#e7cfa0">.impact(.medium)</span>; the sketch stills. No sound.</span></div>
+        <div style="display:flex;gap:12px;padding:11px 0;border-bottom:1px solid rgba(247,239,223,.12)"><span style="font:600 12.5px 'Instrument Sans';width:130px;flex:none">Room is ready</span><span style="font:12px/1.45 'Instrument Sans';color:rgba(247,239,223,.8)"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#e7cfa0">.notification(.success)</span> + a single soft wooden <b>knock</b>; doorway light blooms over ~1.2s.</span></div>
+        <div style="display:flex;gap:12px;padding:11px 0"><span style="font:600 12.5px 'Instrument Sans';width:130px;flex:none">Failure</span><span style="font:12px/1.45 'Instrument Sans';color:rgba(247,239,223,.8)"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#e7cfa0">.notification(.warning)</span> once — a dull soft note, never a harsh buzz. Silent.</span></div>
+      </div>
+      <div style="font:11.5px/1.5 'Instrument Sans';color:rgba(247,239,223,.62);margin-top:14px;border-top:1px solid rgba(247,239,223,.14);padding-top:12px">Sound appears at exactly three moments — start, enough, ready — and honors the silent switch &amp; Reduce Motion (the doorway bloom becomes a cross-fade). Restraint is the point: when the app makes a sound, it means something arrived.</div>
+    </div>
+  </div>
+
+  <div style="width:1620px;max-width:100%;margin-top:18px;background:#f7efdf;border:1px solid rgba(58,45,34,.15);border-radius:10px;padding:22px 26px;box-sizing:border-box">
+    <div style="font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:rgba(58,45,34,.5)">THE SPINE, END TO END</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap;font:600 12.5px 'Instrument Sans'">
+      <span style="background:rgba(58,45,34,.06);border:1px solid rgba(58,45,34,.15);border-radius:99px;padding:8px 15px"><a href="#s1">cold start → idle</a></span><span style="color:rgba(58,45,34,.35)">→</span>
+      <span style="background:rgba(58,45,34,.06);border:1px solid rgba(58,45,34,.15);border-radius:99px;padding:8px 15px"><a href="#s2">guidance</a></span><span style="color:rgba(58,45,34,.35)">→</span>
+      <span style="background:rgba(142,59,47,.1);border:1px solid rgba(142,59,47,.4);border-radius:99px;padding:8px 15px;color:#8e3b2f"><a href="#s3" style="color:#8e3b2f">live capture</a></span><span style="color:rgba(58,45,34,.35)">→</span>
+      <span style="background:rgba(58,45,34,.06);border:1px solid rgba(58,45,34,.15);border-radius:99px;padding:8px 15px"><a href="#s4">got it → review</a></span><span style="color:rgba(58,45,34,.35)">→</span>
+      <span style="background:rgba(58,45,34,.06);border:1px solid rgba(58,45,34,.15);border-radius:99px;padding:8px 15px"><a href="#s5">upload → analyzing</a></span><span style="color:rgba(58,45,34,.35)">→</span>
+      <span style="background:rgba(201,162,94,.18);border:1px solid rgba(201,162,94,.5);border-radius:99px;padding:8px 15px;color:#8e6a2e"><a href="#s6" style="color:#8e6a2e">the doorway</a></span><span style="color:rgba(58,45,34,.35)">→</span>
+      <span style="border:1px dashed rgba(58,45,34,.35);border-radius:99px;padding:8px 15px;color:rgba(58,45,34,.6)">the web (reveal)</span>
+    </div>
+    <div style="display:flex;gap:22px;margin-top:16px;flex-wrap:wrap;font:12px/1.5 'Instrument Sans';color:rgba(58,45,34,.7)">
+      <span><b style="color:#8e3b2f">Off-ramps:</b> <a href="#s7">failure (terminal / recoverable)</a> · relaunch banner</span>
+      <span><b style="color:#8e3b2f">Sidings:</b> <a href="#s8">sign in &amp; conflict</a> · <a href="#s9">QR bridge · push · thin history</a></span>
+    </div>
+  </div>
+</section></x-dc>
+</body>
+</html>
