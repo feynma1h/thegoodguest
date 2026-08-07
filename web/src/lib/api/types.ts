@@ -37,7 +37,9 @@ export interface SceneSummary {
 export interface WorldTransform {
   position: [number, number, number]; // meters, ARKit world frame (+Y up)
   rotation_xyzw: [number, number, number, number]; // unit quaternion
-  scale: number; // uniform, splat-local -> world
+  /** Uniform (the shipped server contract) or per-axis — the latter only
+   * from staged RP-8 A/B fixtures; see PositionedSplat.scale. */
+  scale: number | [number, number, number];
 }
 
 /** One fused physical object from the manifest's scene-level array. */
