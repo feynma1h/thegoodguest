@@ -148,6 +148,7 @@ class FirestoreSceneReadRepository(SceneReadRepository):
             fcm_token=data.get("fcm_token"),
             missing_paths=data.get("missing_paths"),
             invalid_blobs=data.get("invalid_blobs"),
+            expire_at=data.get("expire_at"),
         )
 
     def get(self, scene_id: str) -> Scene:
