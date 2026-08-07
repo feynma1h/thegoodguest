@@ -55,7 +55,7 @@ import os
 /// Created at enqueuePhasOneBlobs time; not persisted.
 /// Cold-relaunch correctness: outputDir is now stored in UploadSessionRecord.outputDir,
 /// not here, so all file-path reconstruction works from the on-disk record alone.
-private struct UploadContext: Sendable {
+private nonisolated struct UploadContext: Sendable {
     /// App-level retry count per relative path (mirrors 0038 policy).
     /// The OS handles transport retries; this counts re-enqueues after OS gives up.
     var retryCount: [String: Int] = [:]
@@ -365,6 +365,26 @@ actor BlobUploadManager {
                 continue
             }
 
+            #if DEBUG
+            // Staging (StagingHooks): fakes injected as ordinary completions so
+            // classification, persistence, and sibling cancellation run for real.
+            // increment mirrors what BlobUploadDelegate does before its Task.
+            if StagingHooks.dropBlobPath() == entry.relativePath {
+                StagingHooks.breadcrumb("staging drop-blob fake-200 \(entry.relativePath)")
+                StagingHooks.consume()
+                incrementPendingCompletions()
+                Task { await self.handleTaskCompletion(taskDescription: taskDesc, statusCode: 200, error: nil) }
+                continue
+            }
+            if StagingHooks.fatalBlobPath() == entry.relativePath {
+                StagingHooks.breadcrumb("staging fatal-blob fake-404 \(entry.relativePath)")
+                StagingHooks.consume()
+                incrementPendingCompletions()
+                Task { await self.handleTaskCompletion(taskDescription: taskDesc, statusCode: 404, error: nil) }
+                continue
+            }
+            #endif
+
             let fileURL = outputDir.appendingPathComponent(entry.relativePath)
             guard let sessionURL = URL(string: entry.sessionUri) else {
                 throw BlobUploadError.invalidSessionUri(entry.sessionUri)
@@ -518,6 +538,12 @@ actor BlobUploadManager {
             // in the same launch can re-count. crossLaunchRetryCount is reset to 0 by
             // markingBlobUploaded (via markBlobUploaded → markingBlobUploaded). Decision 0045.
             transientCountedThisLaunch.remove(bundleId)
+            #if DEBUG
+            // Staged OS-kill probe (Gate 2b / Fork A): abrupt exit(0) after the
+            // Nth success, with sibling transfers still in flight. No-op unless
+            // the staging flag is set.
+            StagingHooks.noteBlobSuccessAndMaybeExit()
+            #endif
             // THIS path progressed, so its deferral is over. Scoped per path: a
             // bundle-wide clear here would be fired by every one of ~127 sibling
             // blobs, erasing a genuine deferral milliseconds after it was raised.
@@ -793,6 +819,18 @@ actor BlobUploadManager {
             task.resume()
             _bundlePbTasksCreatedCount += 1
             logger.info("[BlobUploadManager] → enqueued bundle.pb PUT for bundle \(bundleId, privacy: .public)")
+            #if DEBUG
+            StagingHooks.breadcrumb("bundlepb-enqueued \(bundleId)")
+            // Gate 2b staging: freeze the enqueued PUT so the on-disk state is
+            // exactly "bundle.pb enqueued, not landed" for a force-quit at
+            // leisure. One-shot — the relaunch re-enqueues without suspending.
+            if StagingHooks.suspendBundlePb() {
+                task.suspend()
+                StagingHooks.breadcrumb("staging suspended bundle.pb PUT \(bundleId)")
+                StagingHooks.consume()
+                logger.info("[BlobUploadManager] ⏸ staging: bundle.pb PUT suspended for \(bundleId, privacy: .public)")
+            }
+            #endif
         } catch {
             bundlePbEnqueueInFlight.remove(bundleId)
             await onFatalBlobError(bundleId: bundleId, relativePath: "bundle.pb",
@@ -1055,17 +1093,22 @@ actor BlobUploadManager {
 
     /// Bundle upload fully complete (bundle.pb PUT returned 200/201).
     ///
-    /// Owns exactly ONE completion side effect today: surfacing to the user
-    /// (polling / FCM). It does NOT reclaim the session dir or the
-    /// UploadSessionRecord — that is the unbuilt terminal-state cleanup (see the
-    /// completed-capture disk-accumulation gap), so a `.complete` record persists
-    /// indefinitely. Anything that scans the store must assume completed records
-    /// accumulate and never disappear; a docstring here previously claimed the
-    /// reclaim happened, and a launch-restore scan built on that claim
-    /// re-advertised finished rooms forever.
+    /// Owns exactly ONE completion side effect: surfacing to the user
+    /// (polling / FCM). It deliberately does NOT reclaim the session dir or the
+    /// UploadSessionRecord — upload success is not a terminal BACKEND state
+    /// (the scene may still come back failed_incomplete, whose re-upload needs
+    /// these files). Reclaim is owned by CaptureReaper (decision 0084) and
+    /// fires only on a user-seen terminal outcome (flight end) or the
+    /// launch scan over acknowledged records. Anything that scans the store
+    /// must still tolerate `.complete` records persisting across launches —
+    /// unacknowledged ones do, by design (they are the launch restore's
+    /// inventory).
     func onBundleComplete(bundleId: String) async {
         _bundleCompleteInvocations.append(bundleId)
         logger.info("[BlobUploadManager] ✓ onBundleComplete(\(bundleId, privacy: .public))")
+        #if DEBUG
+        StagingHooks.breadcrumb("bundle-complete \(bundleId)")
+        #endif
         // Notify the foreground poller if visible (decision 0045).
         // The .complete record is already on disk (handleSuccess writes it before this call),
         // so SceneStatusView.onAppear can find it independently if the app is backgrounded.
@@ -1285,7 +1328,11 @@ actor BlobUploadManager {
 ///
 /// Thread-safety: OSAllocatedUnfairLock ensures exactly-once semantics regardless of
 /// which path fires first. Decision 0044.
-final class BackgroundTaskHandle: @unchecked Sendable {
+///
+/// nonisolated: endIfNeeded is called from the BlobUploadManager actor
+/// (handleTaskCompletion's defer) and the MainActor expiration handler alike;
+/// the lock provides the synchronisation, not an actor.
+nonisolated final class BackgroundTaskHandle: @unchecked Sendable {
     private let _lock = OSAllocatedUnfairLock(initialState: false)
     private let _endAction: @Sendable () -> Void
 

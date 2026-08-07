@@ -125,6 +125,14 @@ final class ScenePoller: ObservableObject {
     private(set) var currentBundleId: String?
     /// True while SceneStatusView is in the view hierarchy and foregrounded.
     private(set) var isVisible: Bool = false
+    /// The bundle the ACTIVE flight cares about (set by RootFlowView.sendItHome,
+    /// cleared by reset()). While set, notifyBundleComplete ignores completions
+    /// for OTHER bundles: a previous capture's cross-launch upload finishing
+    /// mid-flight would otherwise start polling the OLD bundle and render its
+    /// doorway over the new capture's wait — the surviving RootFlowView-era form
+    /// of the room-shell-residue (3) stale-panel finding. nil = no active
+    /// expectation; any completion may start (the restore/re-entry path).
+    private(set) var expectedBundleId: String?
 
     /// The long-running poll loop task.
     var _runTask: Task<Void, Never>?
@@ -219,8 +227,15 @@ final class ScenePoller: ObservableObject {
     func reset() {
         cancelLoop()
         currentBundleId = nil
+        expectedBundleId = nil
         pollState = .idle
         logger.info("[ScenePoller] reset")
+    }
+
+    /// Declare which bundle the active flight is about (see expectedBundleId).
+    /// Call AFTER reset() when starting a send; reset() clears the expectation.
+    func expectBundle(_ bundleId: String?) {
+        expectedBundleId = bundleId
     }
 
     /// Fire an immediate poll tick by cancelling the current cadence sleep.
@@ -238,12 +253,20 @@ final class ScenePoller: ObservableObject {
 
     /// Called by BlobUploadManager.onBundleComplete (A-nudge kick).
     ///
-    /// Starts polling immediately ONLY if the status view is already visible.
-    /// If backgrounded, this is a no-op — the .complete disk record is the shared
-    /// seam and SceneStatusView.onAppear will pick it up independently.
+    /// Starts polling immediately ONLY if the status view is already visible,
+    /// and — when a flight expectation is set — only for the expected bundle.
+    /// A different bundle's completion (a previous capture's resumed upload
+    /// finishing cross-launch) is dropped: its .complete disk record is the
+    /// shared seam, and the launch restore surfaces it on a later launch.
+    /// If backgrounded, this is a no-op — same record seam, read by
+    /// resumePollIfUploadFinished / SceneStatusView.onAppear independently.
     func notifyBundleComplete(bundleId: String) {
         logger.info("[ScenePoller] notifyBundleComplete \(bundleId, privacy: .public) visible=\(self.isVisible)")
         guard isVisible else { return }
+        if let expected = expectedBundleId, expected != bundleId {
+            logger.info("[ScenePoller] ⚑ completion for \(bundleId, privacy: .public) ignored — active flight is \(expected, privacy: .public)")
+            return
+        }
         start(bundleId: bundleId)
     }
 

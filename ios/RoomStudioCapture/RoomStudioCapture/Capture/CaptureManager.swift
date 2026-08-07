@@ -49,6 +49,22 @@ struct CapturedKeyframe {
     let depth: RSDepth?
 }
 
+// MARK: - UncheckedSendable
+
+/// Moves a value the compiler cannot prove Sendable across an isolation hop.
+///
+/// SAFETY CONTRACT — every use in this file follows one shape: the wrapped
+/// value is fully written BEFORE the hop (ARKit delivers immutable frame data;
+/// CoreVideo buffers are CF-ref-counted and filled before the ARFrame is
+/// handed to the delegate) and is only READ on the destination side (a
+/// jpegQueue render/packed-byte copy, or a MainActor property store). Nothing
+/// mutates the value after wrapping, so the data race the checker cannot rule
+/// out does not exist. Under strict concurrency (Swift 6) these captures are
+/// errors without this envelope.
+private struct UncheckedSendable<Value>: @unchecked Sendable {
+    let value: Value
+}
+
 // MARK: - WriteStats
 
 /// Mutable counters for JPEG/depth write observability.
@@ -571,8 +587,9 @@ final class CaptureManager: NSObject, ObservableObject {
         let context = ciContext
         let stats   = writeStats
         let log = logger
+        let pixels = UncheckedSendable(value: pixelBuffer)
         jpegQueue.async {
-            let ci = CIImage(cvImageBuffer: pixelBuffer)
+            let ci = CIImage(cvImageBuffer: pixels.value)
             guard
                 let cg   = context.createCGImage(ci, from: ci.extent),
                 let data = UIImage(cgImage: cg).jpegData(compressionQuality: 0.85)
@@ -636,10 +653,12 @@ final class CaptureManager: NSObject, ObservableObject {
         let depthURL   = outputDir.appendingPathComponent(depthRelPath)
         let confURL    = outputDir.appendingPathComponent(confRelPath)
         let log = logger
+        let depthPixels = UncheckedSendable(value: depthMap)
+        let confPixels  = UncheckedSendable(value: confMap)
 
         jpegQueue.async {
             // Float32 raster: width*height*4 bytes, row-major, packed (no stride padding).
-            if let bytes = Self.extractPackedBytes(depthMap, bytesPerPixel: 4) {
+            if let bytes = Self.extractPackedBytes(depthPixels.value, bytesPerPixel: 4) {
                 do {
                     try bytes.write(to: depthURL, options: .completeFileProtectionUntilFirstUserAuthentication)
                 } catch {
@@ -648,7 +667,7 @@ final class CaptureManager: NSObject, ObservableObject {
                 }
             }
             // Confidence raster: uint8, 0=low/1=med/2=high (ARConfidenceLevel).
-            if let conf = confMap,
+            if let conf = confPixels.value,
                let bytes = Self.extractPackedBytes(conf, bytesPerPixel: 1) {
                 do {
                     try bytes.write(to: confURL, options: .completeFileProtectionUntilFirstUserAuthentication)
@@ -669,7 +688,9 @@ final class CaptureManager: NSObject, ObservableObject {
 
     /// Copy pixel buffer bytes into a packed Data (strips stride padding).
     /// Returns nil if the base address cannot be locked.
-    private static func extractPackedBytes(_ buffer: CVPixelBuffer, bytesPerPixel: Int) -> Data? {
+    /// nonisolated: called from jpegQueue closures; pure function of its
+    /// arguments (the class's MainActor default isolation must not apply).
+    nonisolated private static func extractPackedBytes(_ buffer: CVPixelBuffer, bytesPerPixel: Int) -> Data? {
         guard CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return nil }
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
@@ -712,6 +733,7 @@ extension CaptureManager: ARSessionDelegate {
         // Plain values for the floor plan's camera cone (RP-7). Only .normal
         // frames reach here, so the pose is valid by construction.
         let cameraTransform = camera.transform
+        let pixels = UncheckedSendable(value: pixelBuffer)
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else { return }
@@ -720,7 +742,7 @@ extension CaptureManager: ARSessionDelegate {
             if self.accumulator.shouldAccept(camera: camera) {
                 self.acceptFrame(
                     camera:      camera,
-                    pixelBuffer: pixelBuffer,
+                    pixelBuffer: pixels.value,
                     timestamp:   timestamp,
                     depthData:   depthData)
             }
@@ -854,9 +876,10 @@ extension CaptureManager: RoomCaptureSessionDelegate {
         // Token, not the enum, so the guest-voice table (FloorPlanVoice) never
         // imports RoomPlan; unknown future cases degrade to standing down.
         let token = String(describing: instruction)
+        let handoff = UncheckedSendable(value: instruction)
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else { return }
-            self.roomPlanInstruction = instruction
+            self.roomPlanInstruction = handoff.value
             self.floorPlanFeed.noteGuidance(
                 line: FloorPlanVoice.guidanceLine(instructionToken: token))
         }
