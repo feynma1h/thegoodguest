@@ -127,6 +127,24 @@ def _clone_tree(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst)
 
 
+def _clone_file(src: Path, dst: Path) -> None:
+    """Copy one blob, preferring APFS clonefile (instant, no disk)."""
+    if sys.platform == "darwin":
+        r = subprocess.run(["cp", "-c", str(src), str(dst)], capture_output=True)
+        if r.returncode == 0:
+            return
+    shutil.copy2(src, dst)
+
+
+def _client_conf_rel(conf_rel: str) -> str:
+    """The recording's confidence rel-path under the PRODUCTION client's
+    naming: confidence/NNNNNN.png (raw packed u8 bytes — the client's
+    historical misnomer IS the wire convention; api-public's manifest
+    whitelist admits exactly it)."""
+    stem = conf_rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return f"confidence/{stem}.png"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--run", type=Path, default=DEFAULT_RUN,
@@ -231,7 +249,14 @@ def main() -> None:
         f.gravity.x, f.gravity.y, f.gravity.z = kf["gravity"]
         if kf.get("depth_present"):
             f.depth.depth_gcs_path = kf["depth_rel"]
-            f.depth.confidence_gcs_path = kf["conf_rel"]
+            # The recording names confidence rasters *.u8; the PRODUCTION
+            # client convention is *.png holding the same raw packed u8
+            # bytes (CaptureManager.captureDepth — the name is historical).
+            # The bundle must speak the client convention: api-public's
+            # manifest extension whitelist (gap F3, launch hardening)
+            # admits confidence/*.png only, and rejected the *.u8 form at
+            # the first post-hardening re-upload (2026-08-07).
+            f.depth.confidence_gcs_path = _client_conf_rel(kf["conf_rel"])
             f.depth.width = kf["depth_w"]
             f.depth.height = kf["depth_h"]
             f.depth.intrinsics.fx = kf["depth_fx"]
@@ -271,9 +296,18 @@ def main() -> None:
     # --- Write the bundle directory in the GCS prefix layout ------------------
     out: Path = args.out
     out.mkdir(parents=True, exist_ok=True)
-    for sub in ("frames", "depth", "confidence"):
+    for sub in ("frames", "depth"):
         print(f"  copying {sub}/ ...")
         _clone_tree(run / sub, out / sub)
+    # Confidence copies file-by-file under the client's *.png naming (the
+    # bytes stay the recording's raw packed u8 — same as the real client).
+    print("  copying confidence/ (renamed to the client *.png convention) ...")
+    (out / "confidence").mkdir(exist_ok=True)
+    for src in sorted((run / "confidence").glob("*")):
+        if src.is_file():
+            dst = out / _client_conf_rel(f"confidence/{src.name}")
+            if not dst.exists():
+                _clone_file(src, dst)
     if has_room:
         (out / "roomplan").mkdir(exist_ok=True)
         (out / "roomplan" / "room.json").write_bytes(room_json_bytes)
