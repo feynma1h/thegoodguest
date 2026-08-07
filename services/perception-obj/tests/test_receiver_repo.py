@@ -496,3 +496,103 @@ class TestConcurrentClaimRace:
         already_owned_count = results.count(ClaimStatus.ALREADY_OWNED)
         assert claimed_count == 1, f"Expected exactly 1 CLAIMED, got: {results}"
         assert already_owned_count == 1, f"Expected exactly 1 ALREADY_OWNED, got: {results}"
+
+
+# ---------------------------------------------------------------------------
+# Scene TTL stamping (gap F6; decisions 0086/0089)
+# ---------------------------------------------------------------------------
+
+class TestFailedSceneExpiry:
+    """The receiver's half of the scenes.expire_at contract: a perception-side
+    terminal failure must age out on the same policy api-internal enforces."""
+
+    def test_release_failed_stamps_expire_at_at_the_ttl(self):
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="w1")
+        before = datetime.now(tz=timezone.utc)
+
+        repo.release_failed(_SCENE_ID, "boom", holder_id="w1")
+
+        after = datetime.now(tz=timezone.utc)
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "failed"
+        assert raw["expire_at"] is not None
+        # now + 90 days, bracketed by the call's own wall clock.
+        assert before + timedelta(days=90) <= raw["expire_at"] <= after + timedelta(days=90)
+
+    def test_release_ready_never_stamps(self):
+        """Ready rooms are product data — they never age out."""
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="w1")
+
+        repo.release_ready(_SCENE_ID, "gs://out/manifest.json", holder_id="w1")
+
+        assert repo.get_raw(_SCENE_ID)["expire_at"] is None
+
+    def test_release_queued_clears_a_pending_expiry(self):
+        """SIGTERM revival: the scene is live again, so the stamp must go."""
+        repo = InMemoryReceiverRepository()
+        repo.seed(
+            _SCENE_ID, status="processing", lease_holder_id="w1",
+            expire_at=datetime.now(tz=timezone.utc) + timedelta(days=90),
+        )
+
+        repo.release_queued(_SCENE_ID, holder_id="w1")
+
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "queued"
+        assert raw["expire_at"] is None
+
+    def test_release_lease_leaves_expiry_untouched(self):
+        """Still processing — nothing terminal happened, nothing to stamp."""
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="w1")
+
+        repo.release_lease(_SCENE_ID, holder_id="w1")
+
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "processing"
+        assert raw["expire_at"] is None
+
+    def test_foreign_holder_noop_does_not_stamp(self):
+        """A reclaimed-from worker must not write anything, expiry included."""
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="w2")
+
+        repo.release_failed(_SCENE_ID, "boom", holder_id="w1")
+
+        raw = repo.get_raw(_SCENE_ID)
+        assert raw["status"] == "processing"
+        assert raw["expire_at"] is None
+
+    def test_ttl_days_is_env_overridable(self, monkeypatch):
+        monkeypatch.setenv("SCENES_FAILED_TTL_DAYS", "7")
+        repo = InMemoryReceiverRepository()
+        repo.seed(_SCENE_ID, status="processing", lease_holder_id="w1")
+        before = datetime.now(tz=timezone.utc)
+
+        repo.release_failed(_SCENE_ID, "boom", holder_id="w1")
+
+        assert repo.get_raw(_SCENE_ID)["expire_at"] >= before + timedelta(days=7)
+        assert repo.get_raw(_SCENE_ID)["expire_at"] < before + timedelta(days=8)
+
+    def test_mirror_matches_api_internal_constants(self):
+        """The duplication guard: perception-obj cannot import api-internal
+        (its image has no api-core), so the env var name and default days are
+        pinned against api-internal's source text. If either side changes the
+        policy, this fails instead of the two drifting apart silently."""
+        import pathlib
+        import re
+
+        import receiver_repo
+
+        repo_root = pathlib.Path(__file__).resolve().parents[3]
+        src = (repo_root / "services/api-internal/repository.py").read_text()
+
+        env_name = re.search(r'_SCENES_FAILED_TTL_ENV\s*=\s*"([^"]+)"', src).group(1)
+        default_days = int(
+            re.search(r"_SCENES_FAILED_TTL_DEFAULT_DAYS\s*=\s*(\d+)", src).group(1)
+        )
+
+        assert receiver_repo._SCENES_FAILED_TTL_ENV == env_name
+        assert receiver_repo._SCENES_FAILED_TTL_DEFAULT_DAYS == default_days
