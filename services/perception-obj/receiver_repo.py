@@ -88,11 +88,16 @@ class ReceiverRepository(ABC):
                         Returns WRONG_STATE.
           ready       → already done; receiver should 200-exit.
                         Returns WRONG_STATE.
-          not found   → no scene document with this id. Currently expected
-                        only for tasks referencing manually deleted scene
-                        docs (nothing auto-deletes scenes today; a Firestore
-                        TTL on the collection — gap F6 — would make this a
-                        routine stale-task case). Receiver should 200-exit.
+          not found   → no scene document with this id. A Firestore TTL
+                        policy on scenes.expire_at exists (gap F6, decision
+                        0086): api-internal stamps terminal-failure scenes
+                        (failed / failed_invalid / failed_incomplete) for
+                        deletion after SCENES_FAILED_TTL_DAYS. Those scenes
+                        never have live Cloud Tasks, so today this case
+                        still means a manually deleted doc; once expiry
+                        stamping extends to the full lifecycle (the 0086
+                        follow-up), a task outliving its swept scene becomes
+                        a routine stale-task case. Either way: 200-exit.
                         Returns NOT_FOUND.
         """
 
