@@ -442,28 +442,27 @@ class TestEverySegmentationCallSiteIsCovered:
     the fake segmenters in those tests do not return any.
     """
 
-    def _segment_calls(self):
-        import ast
+    def _source(self) -> str:
         import pathlib
 
-        src = pathlib.Path(process_receiver.__file__).read_text()
-        tree = ast.parse(src)
-        calls = []
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "segment"
-            ):
-                calls.append((node, src))
-        return calls
+        return pathlib.Path(process_receiver.__file__).read_text()
+
+    def _segment_calls(self):
+        import ast
+
+        return [
+            node for node in ast.walk(ast.parse(self._source()))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "segment"
+        ]
 
     def test_no_bare_prompt_reaches_the_segmenter(self):
         import ast
 
         calls = self._segment_calls()
         assert calls, "expected to find sam3_model.segment() call sites"
-        for node, src in calls:
+        for node in calls:
             prompt_arg = node.args[1] if len(node.args) > 1 else None
             assert isinstance(prompt_arg, ast.Call), (
                 f"line {node.lineno}: segment() must be given "
@@ -475,11 +474,8 @@ class TestEverySegmentationCallSiteIsCovered:
 
     def test_every_segment_call_site_partitions_the_result(self):
         """Seeing people is only safe if they are removed immediately after."""
-        import pathlib
-
-        src = pathlib.Path(process_receiver.__file__).read_text()
-        lines = src.splitlines()
-        for node, _ in self._segment_calls():
+        lines = self._source().splitlines()
+        for node in self._segment_calls():
             window = "\n".join(lines[node.lineno - 1: node.lineno + 12])
             assert "partition_detections(" in window, (
                 f"line {node.lineno}: no partition_detections() within 12 lines "
