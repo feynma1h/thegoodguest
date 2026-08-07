@@ -24,5 +24,6 @@ testpaths = [
     "services/api-public/tests",
     "tools/test_upload_test_bundle.py",
     "tools/test_smoke_test_e2e.py",
+    "tools/test_backfill_scene_expiry.py",
 ]
 addopts = "--import-mode=importlib"

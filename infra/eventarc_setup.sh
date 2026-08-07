@@ -8,6 +8,14 @@
 #       from pixel-blob events; see decision 0023.
 #   (2) Cloud Storage lifecycle rule: delete orphan captures after 24h
 #   (3) Firestore TTL on upload_sessions (7 days)
+#   (4) Firestore TTL on scenes.expire_at (gap F6, decision 0086): api-internal stamps
+#       terminal-failure scenes (failed / failed_invalid / failed_incomplete) for deletion
+#       after SCENES_FAILED_TTL_DAYS (default 90); ready scenes are never stamped.
+#   (5) Perception-outputs lifecycle (gap F5, decision 0086): delete frame-mask
+#       intermediates (scenes/*/frames/*/masks.npz) after 180 days. Deliberately NARROW —
+#       everything else under scenes/ is either the served product (splats, manifest,
+#       shell) or its warm-re-drive substrate; an age rule on those would delete living
+#       rooms' assets. See decision 0086 for the full retention design.
 #
 # Section (1) also:
 #   - Enables the Eventarc API if not already enabled.
@@ -26,10 +34,12 @@
 #   - GCS bucket GCS_CAPTURES_BUCKET already exists
 #
 # Usage (from repo root):
-#   ./infra/eventarc_setup.sh                  # run all three sections
+#   ./infra/eventarc_setup.sh                  # run all five sections
 #   ./infra/eventarc_setup.sh --lifecycle-only  # section (2) only
 #   ./infra/eventarc_setup.sh --ttl-only        # section (3) only
 #   ./infra/eventarc_setup.sh --trigger-only    # section (1) only
+#   ./infra/eventarc_setup.sh --scenes-ttl-only # section (4) only
+#   ./infra/eventarc_setup.sh --outputs-lifecycle-only # section (5) only
 #   Flags can be combined: --lifecycle-only --ttl-only
 #
 # Re-running is safe: all operations are idempotent.
@@ -40,6 +50,7 @@ PROJECT="roomstudio"
 REGION="asia-southeast1"
 INGESTER_SERVICE="api-internal"
 GCS_CAPTURES_BUCKET="roomstudio-captures"
+GCS_OUTPUTS_BUCKET="roomstudio-perception-outputs"
 TRIGGER_NAME="captures-bundle-pb-finalized"
 INGESTER_SA="api-internal-runtime@${PROJECT}.iam.gserviceaccount.com"
 
@@ -47,18 +58,24 @@ INGESTER_SA="api-internal-runtime@${PROJECT}.iam.gserviceaccount.com"
 RUN_TRIGGER=true
 RUN_LIFECYCLE=true
 RUN_TTL=true
+RUN_SCENES_TTL=true
+RUN_OUTPUTS_LIFECYCLE=true
 
 if [[ "$#" -gt 0 ]]; then
   RUN_TRIGGER=false
   RUN_LIFECYCLE=false
   RUN_TTL=false
+  RUN_SCENES_TTL=false
+  RUN_OUTPUTS_LIFECYCLE=false
   for arg in "$@"; do
     case "$arg" in
-      --trigger-only)    RUN_TRIGGER=true ;;
-      --lifecycle-only)  RUN_LIFECYCLE=true ;;
-      --ttl-only)        RUN_TTL=true ;;
+      --trigger-only)           RUN_TRIGGER=true ;;
+      --lifecycle-only)         RUN_LIFECYCLE=true ;;
+      --ttl-only)               RUN_TTL=true ;;
+      --scenes-ttl-only)        RUN_SCENES_TTL=true ;;
+      --outputs-lifecycle-only) RUN_OUTPUTS_LIFECYCLE=true ;;
       *) echo "Unknown argument: $arg" >&2
-         echo "Usage: $0 [--trigger-only] [--lifecycle-only] [--ttl-only]" >&2
+         echo "Usage: $0 [--trigger-only] [--lifecycle-only] [--ttl-only] [--scenes-ttl-only] [--outputs-lifecycle-only]" >&2
          exit 1 ;;
     esac
   done
@@ -239,8 +256,71 @@ curl -s -X PATCH \
 echo ""
 fi  # RUN_TTL
 
+if $RUN_SCENES_TTL; then
+echo "=== (4) Firestore TTL on scenes.expire_at (gap F6, decision 0086) ==="
+# The TTL field is expire_at — the field VALUE is the deletion deadline.
+# api-internal stamps it only on terminal-failure transitions and clears it
+# on revival; ready scenes never carry it, so the policy can never sweep a
+# living room. (Do NOT point a TTL policy at created_at here: Firestore
+# deletes when the named field's value is past, which for created_at means
+# immediately.)
+
+echo "Setting TTL on scenes collection (field: expire_at)..."
+curl -s -X PATCH \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/collectionGroups/scenes/fields/expire_at" \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ttlConfig": {}
+  }' | python3 -m json.tool || echo "TTL set request sent (check Firestore console for status)."
+
+echo ""
+fi  # RUN_SCENES_TTL
+
+if $RUN_OUTPUTS_LIFECYCLE; then
+echo "=== (5) Perception-outputs lifecycle: masks.npz intermediates, 180d (gap F5) ==="
+
+# Deliberately NARROW (decision 0086). Under scenes/{scene_id}/ live:
+#   manifest.json, shell.json          — served product (assets endpoint)
+#   frames/*/splats/*.ply (+ .layout.json sidecars)
+#                                      — the fused objects the viewer renders,
+#                                        plus their rotation sidecars
+#   roomplan/room.json                 — geometry source for shell re-derivation
+#   frames/*/objects.json              — small per-frame caches for warm re-drives
+#   frames/*/masks.npz                 — segmentation intermediates (the bulk)
+# Only masks.npz is safely age-deletable: nothing serves it, and a warm
+# re-drive older than the horizon simply recomputes segmentation at GPU cost.
+# An age rule on anything else would delete living rooms' assets — ready-room
+# retention is a product property, so whole-scene GC must be driven by
+# Firestore scene state / user deletion, never by object age (0086).
+
+cat > /tmp/outputs_lifecycle_rule.json <<'EOF'
+{
+  "lifecycle": {
+    "rule": [
+      {
+        "action": {"type": "Delete"},
+        "condition": {
+          "age": 180,
+          "matchesPrefix": ["scenes/"],
+          "matchesSuffix": ["/masks.npz"]
+        }
+      }
+    ]
+  }
+}
+EOF
+
+gsutil lifecycle set /tmp/outputs_lifecycle_rule.json "gs://${GCS_OUTPUTS_BUCKET}"
+echo "Lifecycle rule applied to gs://${GCS_OUTPUTS_BUCKET}."
+rm /tmp/outputs_lifecycle_rule.json
+echo ""
+fi  # RUN_OUTPUTS_LIFECYCLE
+
 echo "=== Done ==="
 echo "Verify in GCP console:"
-$RUN_TRIGGER   && echo "  Eventarc → Triggers → ${TRIGGER_NAME}"
-$RUN_LIFECYCLE && echo "  Cloud Storage → gs://${GCS_CAPTURES_BUCKET} → Lifecycle"
-$RUN_TTL       && echo "  Firestore → upload_sessions → TTL settings"
+$RUN_TRIGGER           && echo "  Eventarc → Triggers → ${TRIGGER_NAME}"
+$RUN_LIFECYCLE         && echo "  Cloud Storage → gs://${GCS_CAPTURES_BUCKET} → Lifecycle"
+$RUN_TTL               && echo "  Firestore → upload_sessions → TTL settings"
+$RUN_SCENES_TTL        && echo "  Firestore → scenes → TTL settings (expire_at)"
+$RUN_OUTPUTS_LIFECYCLE && echo "  Cloud Storage → gs://${GCS_OUTPUTS_BUCKET} → Lifecycle"

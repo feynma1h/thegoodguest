@@ -27,8 +27,9 @@ Consumers: ingest_server.py (Scene persistence + dispatch wiring), tests.
 from __future__ import annotations
 
 import copy
+import os
 from abc import abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from scene import Scene, SceneStatus, validate_transition
@@ -38,6 +39,55 @@ from roomstudio_api_core.scene_read_repo import (
     SceneNotFoundError,  # re-exported; callers may import from here or api-core
     SceneReadRepository,
 )
+
+
+# ---------------------------------------------------------------------------
+# Scene TTL stamping (gap F6, decisions 0018/0086)
+# ---------------------------------------------------------------------------
+
+# Retention for terminal-failure scenes. The Firestore TTL policy on
+# scenes.expire_at (infra/eventarc_setup.sh --scenes-ttl-only) sweeps any doc
+# whose expire_at is past. Read per call so tests can override the env.
+_SCENES_FAILED_TTL_ENV = "SCENES_FAILED_TTL_DAYS"
+_SCENES_FAILED_TTL_DEFAULT_DAYS = 90
+
+# Statuses that schedule expiry. READY is deliberately absent — ready rooms
+# are product data and never age out. QUEUED clears any pending expiry (a
+# revived scene is live again). PROCESSING leaves the field untouched.
+_EXPIRING_STATUSES = frozenset({
+    SceneStatus.FAILED,
+    SceneStatus.FAILED_INVALID,
+    SceneStatus.FAILED_INCOMPLETE,
+})
+
+
+def _failed_ttl_days() -> int:
+    try:
+        return max(1, int(os.environ.get(_SCENES_FAILED_TTL_ENV,
+                                         _SCENES_FAILED_TTL_DEFAULT_DAYS)))
+    except ValueError:
+        return _SCENES_FAILED_TTL_DEFAULT_DAYS
+
+
+def expiry_for_transition(
+    new_status: SceneStatus, now: datetime
+) -> tuple[bool, Optional[datetime]]:
+    """(touch, value) for scene.expire_at on a transition to new_status.
+
+    touch=False → leave the field as it is (processing, ready).
+    touch=True, value=datetime → schedule expiry (terminal failures).
+    touch=True, value=None → clear a pending expiry (revival to queued).
+
+    Only the transitions api-internal itself performs flow through here;
+    perception-obj's release paths (its own receiver_repo) do not stamp, so
+    a perception-side `failed` carries no expire_at until the follow-up
+    recorded in decision 0086.
+    """
+    if new_status in _EXPIRING_STATUSES:
+        return True, now + timedelta(days=_failed_ttl_days())
+    if new_status == SceneStatus.QUEUED:
+        return True, None
+    return False, None
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +172,9 @@ class InMemorySceneRepository(InMemorySceneReadRepository, SceneRepository):
             scene.missing_paths = missing_paths
         if invalid_blobs is not None:
             scene.invalid_blobs = invalid_blobs
+        touch_expiry, expire_at = expiry_for_transition(new_status, scene.updated_at)
+        if touch_expiry:
+            scene.expire_at = expire_at
         self._store[scene_id] = copy.deepcopy(scene)
         return copy.deepcopy(scene)
 
@@ -184,6 +237,14 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
                 updates["missing_paths"] = missing_paths
             if invalid_blobs is not None:
                 updates["invalid_blobs"] = invalid_blobs
+            touch_expiry, expire_at = expiry_for_transition(new_status, now)
+            if touch_expiry:
+                # Clearing uses DELETE_FIELD (not None): the TTL policy on
+                # expire_at ignores absent fields, and an explicit null would
+                # read as a malformed deadline in the console.
+                updates["expire_at"] = (
+                    expire_at if expire_at is not None else _fs.DELETE_FIELD
+                )
             transaction.update(ref, updates)
 
             scene.status = new_status
@@ -196,6 +257,8 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
                 scene.missing_paths = missing_paths
             if invalid_blobs is not None:
                 scene.invalid_blobs = invalid_blobs
+            if touch_expiry:
+                scene.expire_at = expire_at
             return scene
 
         return _run(self._db.transaction(), ref)
@@ -206,7 +269,7 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
 
         scene_id is stored as the document id, not as a field.
         """
-        return {
+        doc = {
             "device_id": scene.device_id,
             "status": scene.status.value,
             "bundle_uri": scene.bundle_uri,
@@ -221,3 +284,9 @@ class FirestoreSceneRepository(FirestoreSceneReadRepository, SceneRepository):
             "missing_paths": scene.missing_paths,
             "invalid_blobs": scene.invalid_blobs,
         }
+        # expire_at is written only when set: the scenes TTL policy treats an
+        # absent field as "no expiry", which is the correct state for every
+        # newly created (queued) scene.
+        if scene.expire_at is not None:
+            doc["expire_at"] = scene.expire_at
+        return doc
