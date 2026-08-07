@@ -370,11 +370,14 @@ def test_legacy_fusion_is_deterministic():
 
 
 # -----------------------------------------------------------------------------
-# Disjoint labels never dedup / merge across labels (structural guarantee:
-# dedup and clustering both operate strictly within a by_label group).
+# Cross-label behaviour after fork (a) (RP-8 walk, always-on): NEAR-IDENTICAL
+# masks collapse regardless of label (the cross-label gate's purpose — one
+# physical object triple-detected under different names); masks that are NOT
+# near-identical never merge across labels (the 0067 same-frame dedup and
+# clustering still operate strictly within a by_label group).
 # -----------------------------------------------------------------------------
 
-def test_dedup_never_crosses_labels():
+def test_near_identical_cross_label_masks_collapse():
     frame_index = 0
     chair = _ray_obs(label="chair", frame_index=frame_index, origin=(0, 0, 0), direction=(0, 0, -1))
     chair["mask_index"] = 0
@@ -382,6 +385,21 @@ def test_dedup_never_crosses_labels():
     table["mask_index"] = 1
     frames = _frames([chair, table])
     masks_by_frame = {frame_index: np.stack([_rect_mask(0, 30, 0, 30), _rect_mask(0, 30, 0, 30)])}
+    ctx = _ctx(masks_by_frame)
+    out = fusion.fuse_scene_objects(frames, ctx)
+    assert len(out) == 1  # identical pixels = one physical object
+
+
+def test_distinct_masks_never_merge_across_labels():
+    frame_index = 0
+    chair = _ray_obs(label="chair", frame_index=frame_index, origin=(0, 0, 0), direction=(0, 0, -1))
+    chair["mask_index"] = 0
+    table = _ray_obs(label="table", frame_index=frame_index, origin=(0, 0, 0), direction=(0, 0, -1))
+    table["mask_index"] = 1
+    frames = _frames([chair, table])
+    masks_by_frame = {
+        frame_index: np.stack([_rect_mask(0, 30, 0, 30), _rect_mask(34, 60, 34, 60)])
+    }
     ctx = _ctx(masks_by_frame)
     out = fusion.fuse_scene_objects(frames, ctx)
     assert len(out) == 2

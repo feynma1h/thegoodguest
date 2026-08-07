@@ -1437,9 +1437,11 @@ def fuse_scene_objects_with_meta(
     observations = _collect_observations(frame_results)
 
     # --- LIDAR_ROOMPLAN census pass (decision 0077) -------------------------
-    # Active only when the scene carries a parsed CapturedRoom. Without one
-    # everything below this block is byte-identical to the pre-0077 pass
-    # (the RP-4 degrade lock, test-pinned).
+    # Box association/placement/suppression run only when the scene carries
+    # a parsed CapturedRoom. The three measured long-tail gates are NOT
+    # census-gated anymore — fork (a), resolved always-on at the RP-8 walk —
+    # so a no-census scene differs from the pre-0077 pass exactly by those
+    # gates' effects (the revised degrade pin covers this).
     room = None
     if ctx.get_roomplan is not None:
         try:
@@ -1457,12 +1459,19 @@ def fuse_scene_objects_with_meta(
     demoted_keys: set = set()
     matched_box_indices: set[int] = set()
 
-    if room is not None:
-        observations, cross_records = _dedup_cross_label(observations, ctx)
-        for rec in cross_records:
-            key = (rec["frame_index"], rec["kept_mask_index"])
-            dedup_counts[key] = dedup_counts.get(key, 0) + 1
-        observations, demoted_keys = _demote_untrusted_depth(observations, ctx)
+    # The three measured long-tail gates (cross-label near-identity dedup,
+    # mirror depth-trust, textile silhouette-span below) run for EVERY
+    # refined scene, census or not — fork (a) resolved always-on by the
+    # operator at the RP-8 walk (they were measured on 247003de, a
+    # LIDAR_ARKIT capture the census keying left unprotected; the walk also
+    # found cross-label duplicates on census scenes, so the gates are the
+    # floor, not the ceiling). Box passes below stay census-gated: they
+    # need boxes.
+    observations, cross_records = _dedup_cross_label(observations, ctx)
+    for rec in cross_records:
+        key = (rec["frame_index"], rec["kept_mask_index"])
+        dedup_counts[key] = dedup_counts.get(key, 0) + 1
+    observations, demoted_keys = _demote_untrusted_depth(observations, ctx)
 
     if boxes:
         assoc_by_box = box_placement.associate_observations(boxes, observations, ctx)
@@ -1566,11 +1575,10 @@ def fuse_scene_objects_with_meta(
             bi = box_placement.find_suppressing_box(obj, boxes, matched_box_indices)
             if bi is not None:
                 fused[i] = _suppress_as_box_duplicate(obj, bi)
-    if room is not None:
-        for i, obj in enumerate(fused):
-            if obj.get("roomplan_box"):
-                continue
-            fused[i] = _apply_silhouette_span(fused[i], ctx)
+    for i, obj in enumerate(fused):
+        if obj.get("roomplan_box"):
+            continue
+        fused[i] = _apply_silhouette_span(fused[i], ctx)
 
     placed_count = sum(1 for f in fused if f["placed"])
     logger.info(
