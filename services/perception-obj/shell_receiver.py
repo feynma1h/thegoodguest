@@ -769,12 +769,31 @@ def run_shell(
     path."""
     shell_blob = f"scenes/{scene_id}/shell.json"
 
-    # Redelivery fast-path: the output is deterministic, so an existing
-    # shell.json (ready OR unavailable — neither changes on re-run: the
-    # bundle is immutable and swept pixels never return) means done.
-    if _gcs_blob_exists_and_get(outputs_bucket, shell_blob) is not None:
-        logger.info("shell: scene %s already has shell.json; noop", scene_id)
-        return {"status": "noop", "reason": "already_present"}
+    # Redelivery fast-path, version-gated. An existing shell.json at the
+    # current MAX output version means done (ready OR unavailable — neither
+    # changes on re-run: the bundle is immutable and swept pixels never
+    # return). An older version regenerates: for a LiDAR-tier scene that is
+    # the v2 -> v3 upgrade this gate exists for (found live at RP-8: the v3
+    # deploy's --shell re-drives nooped against July v2 shells and three
+    # walk rooms kept furniture-slab arkit_planes walls until the blobs
+    # were hand-deleted); for an ARKIT_ONLY scene the regeneration is a
+    # byte-identical v2 rewrite (deterministic, materials Firestore-cached)
+    # — wasted CPU on a rare redelivery, accepted to keep this gate free of
+    # a per-scene tier probe.
+    existing = _gcs_blob_exists_and_get(outputs_bucket, shell_blob)
+    if existing is not None:
+        try:
+            existing_version = int(json.loads(existing).get("shell_version", 0))
+        except (ValueError, TypeError):
+            existing_version = 0  # unparseable → regenerate
+        if existing_version >= SHELL_VERSION_V3:
+            logger.info("shell: scene %s already has shell.json v%s; noop",
+                        scene_id, existing_version)
+            return {"status": "noop", "reason": "already_present"}
+        logger.info(
+            "shell: scene %s has stale shell.json v%s < v%s; regenerating",
+            scene_id, existing_version, SHELL_VERSION_V3,
+        )
 
     def _write(doc: dict[str, Any]) -> dict[str, Any]:
         _gcs_upload_for_scene(

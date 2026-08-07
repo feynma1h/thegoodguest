@@ -20,7 +20,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 
 import RoomViewerPanel from "@/components/RoomViewerPanel";
-import SplatViewer from "@/components/SplatViewer";
+import SplatViewer, { type ViewerLabel } from "@/components/SplatViewer";
 import {
   assembleScene,
   type FusedObject,
@@ -40,7 +40,18 @@ type Result =
       splats: PositionedSplat[];
       shell: ShellPlane[] | null;
       unrenderable: FusedObject[];
+      labels: ViewerLabel[] | null;
     };
+
+/** Dev-only sidecar written into staged fixtures by the RP-8 walk tooling:
+ * wall letters + placed-object numbers, shared with the 2D key maps so the
+ * two surfaces can never disagree. Absent on real API responses. */
+type WalkLabelSidecar = {
+  _walk_labels?: {
+    walls?: ViewerLabel[];
+    objects?: ViewerLabel[];
+  };
+};
 
 function singleSplat(key: string, url: string, label: string): Result {
   return {
@@ -48,6 +59,7 @@ function singleSplat(key: string, url: string, label: string): Result {
     phase: "ready",
     shell: null,
     unrenderable: [],
+    labels: null,
     splats: [
       { url, label, position: [0, 0.5, 0], rotation_xyzw: [0, 0, 0, 1], scale: 1 },
     ],
@@ -57,9 +69,13 @@ function singleSplat(key: string, url: string, label: string): Result {
 function DevViewerContent({
   directUrl,
   fixture,
+  reveal,
+  showLabels,
 }: {
   directUrl: string | null;
   fixture: string | null;
+  reveal: boolean;
+  showLabels: boolean;
 }) {
   const key = directUrl ?? (fixture ? `fixture:${fixture}` : "");
   const [result, setResult] = useState<Result | null>(null);
@@ -82,12 +98,16 @@ function DevViewerContent({
             : "/dev-fixtures/manifest.json",
         );
         if (!resp.ok) throw new Error("no fixture");
-        const assets = (await resp.json()) as SceneAssets;
+        const assets = (await resp.json()) as SceneAssets & WalkLabelSidecar;
         if (cancelled) return;
         const { splats, shell, unrenderable } = assembleScene(assets);
+        const sidecar = assets._walk_labels;
+        const labels = sidecar
+          ? [...(sidecar.walls ?? []), ...(sidecar.objects ?? [])]
+          : null;
         setResult(
           splats.length || shell?.length
-            ? { key, phase: "ready", splats, shell, unrenderable }
+            ? { key, phase: "ready", splats, shell, unrenderable, labels }
             : { key, phase: "idle" },
         );
       } catch {
@@ -132,6 +152,8 @@ function DevViewerContent({
           <SplatViewer
             splats={state.splats}
             shell={state.shell}
+            reveal={reveal}
+            labels={showLabels ? state.labels : null}
             className="mt-8 h-[62vh]"
           />
           {state.unrenderable.length > 0 && (
@@ -153,6 +175,13 @@ function ViewerContent() {
   const sceneId = params.get("scene");
   const directUrl = params.get("url");
   const fixture = params.get("fixture");
+  // ?reveal=1 replays the §4 assembly over the loaded fixture — the RP-8
+  // real-speed reveal watch runs here (13-wall spike shell) rather than in
+  // the throttled preview pane or the hand-authored !v3 mock.
+  const reveal = params.get("reveal") === "1";
+  // ?labels=1 renders the fixture's _walk_labels sidecar as in-scene badges
+  // (wall letters + template piece numbers) for the RP-8 scoring walk.
+  const showLabels = params.get("labels") === "1";
 
   return (
     <div>
@@ -165,7 +194,12 @@ function ViewerContent() {
           <RoomViewerPanel sceneId={sceneId} className="h-[62vh]" />
         </div>
       ) : (
-        <DevViewerContent directUrl={directUrl} fixture={fixture} />
+        <DevViewerContent
+          directUrl={directUrl}
+          fixture={fixture}
+          reveal={reveal}
+          showLabels={showLabels}
+        />
       )}
     </div>
   );

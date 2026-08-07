@@ -292,12 +292,35 @@ class TestHappyPath:
 # ---------------------------------------------------------------------------
 
 class TestNoopPaths:
-    def test_already_present_noops(self, gcs):
+    def test_current_version_present_noops(self, gcs):
+        """Redelivery fast-path holds ONLY for a current-version shell."""
         _seed_ready_scene(gcs)
-        gcs.blobs[f"{_BUCKET}/scenes/{_SCENE}/shell.json"] = b'{"existing": true}'
+        existing = b'{"shell_version": 3, "status": "ready"}'
+        gcs.blobs[f"{_BUCKET}/scenes/{_SCENE}/shell.json"] = existing
         body = _run()
         assert body == {"status": "noop", "reason": "already_present"}
-        assert gcs.blobs[f"{_BUCKET}/scenes/{_SCENE}/shell.json"] == b'{"existing": true}'
+        assert gcs.blobs[f"{_BUCKET}/scenes/{_SCENE}/shell.json"] == existing
+
+    def test_stale_version_regenerates(self, gcs):
+        """A pre-upgrade shell.json must NOT block the rewrite (found live
+        at RP-8: v2 shells nooped the v3 --shell re-drives; the walk rooms
+        kept furniture-slab arkit_planes walls until hand-deleted). The
+        seeded scene is ARKIT_ONLY, so the regenerated doc is the CURRENT
+        v2 closure output (degrade lock) — the pin is that the stale blob
+        no longer gates, and current code's output replaces it."""
+        import json as _json
+
+        _seed_ready_scene(gcs)
+        for stale in (b'{"shell_version": 2, "status": "ready"}',
+                      b'{"existing": true}'):
+            gcs.blobs[f"{_BUCKET}/scenes/{_SCENE}/shell.json"] = stale
+            body = _run()
+            assert body != {"status": "noop", "reason": "already_present"}
+            written = gcs.blobs[f"{_BUCKET}/scenes/{_SCENE}/shell.json"]
+            assert written != stale
+            doc = _json.loads(written)
+            assert doc.get("shell_version") == 2  # ARKIT_ONLY current output
+            assert doc.get("status") in ("ready", "unavailable")
 
     def test_manifest_missing_noops_and_writes_nothing(self, gcs):
         _seed_ready_scene(gcs)
