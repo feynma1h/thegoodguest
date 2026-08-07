@@ -240,7 +240,40 @@ class TestRoomplanDocFromSpikeFixture:
         for w in doc["walls"]:
             assert w["confidence"] in ("high", "medium", "low")
             assert w["classification"] == "wall"
-            assert w["provenance"] == {"source": "roomplan"}
+            assert w["provenance"]["source"] == "roomplan"
+            # Co-planarized segments (decision 0082's kink fix) record their
+            # group; every other wall carries the bare provenance.
+            if "coplanarized_with" not in w["provenance"]:
+                assert w["provenance"] == {"source": "roomplan"}
+
+    def test_coplanarized_groups_pinned(self, doc):
+        """The spike's measured stitching groups, exactly (calibrated on
+        this fixture — decision 0082): {02,10}, {07,08}, {04,11,12}. The
+        rendered polygon slides along the group normal only (<= the
+        measured 5 cm); the measured polygon ships beside it verbatim."""
+        import numpy as np
+
+        by_id = {w["wall_id"]: w for w in doc["walls"]}
+        groups = {
+            "wall_02": {"wall_10"}, "wall_10": {"wall_02"},
+            "wall_07": {"wall_08"}, "wall_08": {"wall_07"},
+            "wall_04": {"wall_11", "wall_12"},
+            "wall_11": {"wall_04", "wall_12"},
+            "wall_12": {"wall_04", "wall_11"},
+        }
+        for wid, w in by_id.items():
+            partners = w["provenance"].get("coplanarized_with")
+            if wid in groups:
+                assert set(partners) == groups[wid], wid
+                assert "measured_polygon" in w
+                slide = np.linalg.norm(
+                    np.asarray(w["polygon"]) - np.asarray(w["measured_polygon"]),
+                    axis=1,
+                ).max()
+                assert slide <= 0.05 + 1e-6
+            else:
+                assert partners is None
+                assert "measured_polygon" not in w
 
     def test_openings_normalized(self, doc):
         walls_with_openings = [w for w in doc["walls"] if w["openings"]]
