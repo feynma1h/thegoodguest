@@ -25,6 +25,13 @@ struct RoomStudioCaptureApp: App {
         } else {
             print("[RoomStudioCaptureApp] GoogleService-Info.plist not found — Firebase auth disabled. Add the plist for production builds.")
         }
+        #if DEBUG
+        // Lifecycle breadcrumb (StagingHooks): distinguishes a background
+        // OS-relaunch (init fires, .task may not) from a foreground open — the
+        // decision-0045 Fork A instrument. File-based on purpose; os_log is
+        // buffered/coalesced under suspension.
+        StagingHooks.breadcrumb("app-init")
+        #endif
     }
 
     var body: some Scene {
@@ -44,7 +51,18 @@ struct RoomStudioCaptureApp: App {
                 .task {
                     // Resume any in-flight bundle uploads from prior sessions.
                     // Covers the swipe-up force-quit path (view appears → .task fires).
+                    #if DEBUG
+                    StagingHooks.breadcrumb("app-task-rehydrate-fired")
+                    #endif
                     await BlobUploadManager.shared.rehydrateAllUnfinishedBundles()
+                }
+                .task {
+                    // Reclaim acknowledged, finished flights from earlier launches
+                    // (record + session dir): .failed directly, .complete only
+                    // after one confirming GET shows a terminal backend state.
+                    // Unacknowledged records are the launch restore's inventory
+                    // and are never touched. Decision 0084.
+                    await CaptureReaper.shared.reapAcknowledgedAtLaunch()
                 }
         }
     }
