@@ -27,12 +27,48 @@ Consumers: process_receiver.py (POST /process orchestration).
 """
 from __future__ import annotations
 
+import os
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# Scene TTL stamping (gap F6, decisions 0086/0089)
+# ---------------------------------------------------------------------------
+#
+# The Firestore TTL policy on scenes.expire_at sweeps any doc whose expire_at
+# is past. api-internal stamps the terminal failures IT performs
+# (services/api-internal/repository.py::expiry_for_transition); the receiver
+# owns processing→failed and processing→queued, so without the mirror below a
+# perception-side `failed` never expires — 0086's recorded follow-up.
+#
+# This is a deliberate DUPLICATE of api-internal's semantics, not an import:
+# perception-obj's image installs packages/schemas only (see its Dockerfile —
+# no api-core, no api-internal), so there is no shared module to import from.
+# The env var name and the 90-day default are part of the mirror; a test pins
+# both against api-internal's constants so the two cannot drift silently.
+
+_SCENES_FAILED_TTL_ENV = "SCENES_FAILED_TTL_DAYS"
+_SCENES_FAILED_TTL_DEFAULT_DAYS = 90
+
+
+def _failed_ttl_days() -> int:
+    """Retention for terminal-failure scenes. Read per call so tests (and a
+    Cloud Run env override) take effect without a re-import."""
+    try:
+        return max(1, int(os.environ.get(_SCENES_FAILED_TTL_ENV,
+                                         _SCENES_FAILED_TTL_DEFAULT_DAYS)))
+    except ValueError:
+        return _SCENES_FAILED_TTL_DEFAULT_DAYS
+
+
+def expiry_for_failed(now: datetime) -> datetime:
+    """The expire_at a processing→failed transition schedules."""
+    return now + timedelta(days=_failed_ttl_days())
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +160,9 @@ class ReceiverRepository(ABC):
         B reclaimed the scene while A was draining). Single transaction —
         non-negotiable (a two-step clear-then-update is unsafe under SIGKILL
         between the steps).
+
+        Also CLEARS any pending expire_at: queued is a live scene again, and
+        api-internal's expiry_for_transition clears on the same transition.
         """
 
     @abstractmethod
@@ -144,6 +183,11 @@ class ReceiverRepository(ABC):
 
         Clears the lease. Raises ValueError if scene is not processing.
         Same holder_id guard semantics as release_ready.
+
+        Stamps expire_at = now + SCENES_FAILED_TTL_DAYS (gap F6): a
+        perception-side terminal failure ages out on the same policy as the
+        ingest-side ones. release_ready deliberately does NOT stamp — ready
+        rooms are product data and never age out.
         """
 
 
@@ -177,6 +221,7 @@ class InMemoryReceiverRepository(ReceiverRepository):
         lease_expires_at: Optional[datetime] = None,
         lease_holder_id: str = "",
         shutdown_release_count: int = 0,
+        expire_at: Optional[datetime] = None,
     ) -> None:
         """Pre-populate a scene for testing. Not part of the production interface."""
         with self._lock:
@@ -190,6 +235,7 @@ class InMemoryReceiverRepository(ReceiverRepository):
                 "lease_expires_at": lease_expires_at,
                 "lease_holder_id": lease_holder_id,
                 "shutdown_release_count": shutdown_release_count,
+                "expire_at": expire_at,
             }
 
     def get_raw(self, scene_id: str) -> Optional[dict]:
@@ -251,6 +297,7 @@ class InMemoryReceiverRepository(ReceiverRepository):
             entry["status"] = "queued"
             entry["lease_expires_at"] = None
             entry["lease_holder_id"] = ""
+            entry["expire_at"] = None  # revived: clear any pending expiry
             entry["shutdown_release_count"] = entry.get("shutdown_release_count", 0) + 1
 
     def release_ready(self, scene_id: str, result_uri: str, *, holder_id: str = "") -> None:
@@ -288,6 +335,7 @@ class InMemoryReceiverRepository(ReceiverRepository):
             entry["last_error"] = last_error
             entry["lease_expires_at"] = None
             entry["lease_holder_id"] = ""
+            entry["expire_at"] = expiry_for_failed(datetime.now(tz=timezone.utc))
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +451,11 @@ class FirestoreReceiverRepository(ReceiverRepository):
                 "status": "queued",
                 "lease_expires_at": None,
                 "lease_holder_id": "",
+                # Revived: clear any pending expiry. DELETE_FIELD, not None —
+                # the TTL policy ignores an absent field, and an explicit null
+                # is a type error against a timestamp field (api-internal's
+                # release path uses the same idiom).
+                "expire_at": self._fs.DELETE_FIELD,
                 "shutdown_release_count": self._fs.Increment(1),
                 "updated_at": now,
             })
@@ -453,12 +506,14 @@ class FirestoreReceiverRepository(ReceiverRepository):
             stored_holder = data.get("lease_holder_id") or ""
             if stored_holder and stored_holder != holder_id:
                 return  # another worker owns the lease now; no-op
+            now = datetime.now(tz=timezone.utc)
             transaction.update(ref, {
                 "status": "failed",
                 "last_error": last_error,
                 "lease_expires_at": None,
                 "lease_holder_id": "",
-                "updated_at": datetime.now(tz=timezone.utc),
+                "expire_at": expiry_for_failed(now),
+                "updated_at": now,
             })
 
         _txn(self._db.transaction(), ref)
