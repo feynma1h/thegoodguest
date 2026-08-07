@@ -134,6 +134,7 @@ if os.environ.get("ENVIRONMENT") != "production":
 from roomstudio_api_core.upload_session_repo import (  # noqa: E402
     UploadSessionRepository,
     InMemoryUploadSessionRepository,
+    CaptureLimitError,
     ForeignBundleError,
     MintRateLimitedError,
     gcs_mint_resumable_uri,
@@ -253,6 +254,19 @@ _GCS_CAPTURES_BUCKET: str = os.environ.get("GCS_CAPTURES_BUCKET", "roomstudio-ca
 # runaway client or a single hostile UID without ever touching real use.
 # Module-level so tests can patch it, mirroring GUEST_DAILY_TURNS.
 UPLOAD_DAILY_MINTS = int(os.environ.get("UPLOAD_SESSION_DAILY_MINTS", "50"))
+
+# Per-UID daily CAPTURE ceiling — the GPU-cost analogue of the mint quota
+# (decision 0097). Charged once per bundle_id, on its first claim.
+#
+# Sizing, from measured production cost: one /process request is capped at
+# PROCESS_REQUEST_BUDGET_SECONDS=900 GPU-seconds (the 504s in the logs are
+# that ceiling binding), 44 long requests over 30 days averaged 728 s, and a
+# capture typically needs two requests to reach `ready` — so ~1,500 GPU-s of
+# L4 + 8 vCPU + 32 GiB per capture, with a cluttered room reaching 4 rounds.
+# 12/day covers scanning a whole home in one sitting with room for re-scans,
+# and bounds one account's worst-case daily GPU spend at roughly an order of
+# magnitude below what an unbounded client could commit.
+UPLOAD_DAILY_CAPTURES = int(os.environ.get("UPLOAD_SESSION_DAILY_CAPTURES", "12"))
 
 
 def _get_token_verifier() -> TokenVerifier:
@@ -791,6 +805,14 @@ def create_upload_session(
       429 rate_limited        — the caller's UTC-day mint quota is exhausted
                                 (gap b); body carries resets_at, and the
                                 Retry-After header the seconds until then
+      429 capture_limit_reached
+                              — the caller has started their UTC-day's
+                                allowance of CAPTURES (decision 0097). A
+                                separate counter from rate_limited because it
+                                bounds a different thing: mints are API
+                                calls, captures are GPU runs. Charged once
+                                per bundle_id, so re-minting a capture
+                                already started today is free.
     """
     # 1. Verify Firebase ID token.
     user_id, err = _verify_bearer(authorization)
@@ -832,6 +854,27 @@ def create_upload_session(
             mint_uri_fn=gcs_mint_resumable_uri,
             bucket=_GCS_CAPTURES_BUCKET,
             daily_mint_quota=UPLOAD_DAILY_MINTS,
+            daily_capture_quota=UPLOAD_DAILY_CAPTURES,
+        )
+    except CaptureLimitError as exc:
+        retry_after_s = max(
+            1, int((exc.resets_at - datetime.now(tz=timezone.utc)).total_seconds())
+        )
+        logger.warning(
+            "capture_limit_reached: uid=%s bundle_id=%s daily_captures=%d",
+            user_id, bundle_id, UPLOAD_DAILY_CAPTURES,
+        )
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "capture_limit_reached",
+                "detail": (
+                    f"this account has started its daily allowance of "
+                    f"{UPLOAD_DAILY_CAPTURES} captures"
+                ),
+                "resets_at": exc.resets_at.isoformat(),
+            },
+            headers={"Retry-After": str(retry_after_s)},
         )
     except ForeignBundleError:
         return JSONResponse(
