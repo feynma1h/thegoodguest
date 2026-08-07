@@ -13,11 +13,13 @@
 /// (FCM) — a local read of the persisted .failed state is the only place the failure
 /// can appear.
 ///
-/// refresh() never clears a surfaced failure: no code path un-fails a record (terminal
-/// is terminal, and record deletion is owned by the unbuilt terminal-state cleanup
-/// design — see the completed-capture disk-accumulation gap). Clearing is dismiss()'s
-/// job, and dismissal is session-local by design: the record persists, so a dismissed
-/// failure reappears on the next launch — the condition still holds.
+/// refresh() never clears a surfaced failure: no code path un-fails a record
+/// (terminal is terminal; record deletion is owned by CaptureReaper, decision
+/// 0084). Clearing is dismiss()'s job, and dismissal is session-local: the
+/// record persists, so a dismissed failure reappears on the next launch — the
+/// condition still holds — UNTIL the flight is acknowledged (endFlight from the
+/// uploadFailed screen), after which the reaper reclaims the record and the
+/// banner finally rests.
 ///
 /// When several bundles have failed, the most recent (by clientMintTimestamp — no
 /// failure timestamp is persisted) is surfaced; dismissing it lets the next one show.

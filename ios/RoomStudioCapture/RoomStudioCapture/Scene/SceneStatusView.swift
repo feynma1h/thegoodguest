@@ -234,7 +234,9 @@ struct SceneStatusView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Text("Re-upload will be handled automatically.")
+            // Honest: no automatic re-upload exists (server-blocked — decision
+            // 0084); a fresh scan is the only path that completes the room.
+            Text("Automatic re-upload isn't available yet — scan the room again to send a complete copy.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)

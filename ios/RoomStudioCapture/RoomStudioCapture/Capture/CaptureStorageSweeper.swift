@@ -4,13 +4,17 @@
 /// That location does NOT auto-purge the way `temporaryDirectory` does. Two mechanisms bound
 /// disk growth:
 ///
-///   1. onBundleComplete (BlobUploadManager) — eager cleanup on successful upload.
-///      Deletes the session dir AND removes the UploadSessionRecord from the store.
+///   1. CaptureReaper (decision 0084) — terminal-state reclaim. Deletes the
+///      UploadSessionRecord and the session dir when a genuinely terminal
+///      outcome has been shown to the user (flight end) or confirmed at the
+///      launch scan. NOT on mere upload success — failed_incomplete keeps its
+///      files. Deletes record FIRST, dir second, so a crash between the two
+///      lands in this sweeper's case below.
 ///
 ///   2. CaptureStorageSweeper.sweep() — startup safety net.
 ///      On app launch, deletes any session dir whose store record is absent. This catches:
 ///        • Abandoned captures (app killed before POST /upload_session returned a record).
-///        • Sessions where onBundleComplete cleaned the record but dir deletion failed.
+///        • Sessions where CaptureReaper deleted the record but crashed before the dir.
 ///
 /// Deletion predicate:
 ///   • Dir name is a valid lowercase UUID (captures by this app).

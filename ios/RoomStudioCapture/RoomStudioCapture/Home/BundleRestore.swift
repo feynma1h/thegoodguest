@@ -10,10 +10,10 @@
 ///   • home's `.task` re-fires every time the flow returns to `.home`, not once per
 ///     launch (verified: one home → capture → review → home round trip runs it
 ///     twice), so `endFlight()` clearing `sentBundleId` was undone on arrival; and
-///   • a `.complete` record is NEVER deleted (onBundleComplete does not reclaim it —
-///     see the completed-capture disk-accumulation gap), so every launch from the
-///     first successful capture onward re-adopted the same finished room and home
-///     permanently claimed it was "on its way".
+///   • a `.complete` record outlives upload success by design (reclaim happens
+///     only on a user-seen terminal outcome — CaptureReaper, decision 0084), so
+///     an unlatched restore re-adopted the same finished room every launch and
+///     home permanently claimed it was "on its way".
 ///
 /// So restoration needs two things the store cannot tell it: run ONCE per launch,
 /// and know which bundles the user has deliberately ended. Acknowledgement is a
@@ -58,7 +58,10 @@ enum BundleRestore {
 /// Bounded so a long-lived install cannot grow it without limit; the cap is far
 /// above any plausible number of live bundles, and evicting the oldest entry can
 /// only ever resurrect a room the user finished with long ago.
-struct DismissedBundles {
+///
+/// nonisolated: read from MainActor (RootFlowView) and from CaptureReaper's
+/// nonisolated acknowledged-set closure; UserDefaults is documented thread-safe.
+nonisolated struct DismissedBundles {
 
     static let maxRetained = 50
     private static let key = "RootFlow.dismissedBundleIds"
