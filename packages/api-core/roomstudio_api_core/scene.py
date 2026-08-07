@@ -136,6 +136,13 @@ class Scene:
     last_error:
         Last error message received from perception. Server-side only —
         never included in client-facing API responses.
+    expire_at:
+        Firestore TTL deadline (gap F6, decisions 0018/0086). Set by
+        api-internal's update_status when a scene enters a terminal-failure
+        state (failed / failed_invalid / failed_incomplete), cleared on
+        revival to queued, and NEVER set on ready scenes — ready rooms are
+        product data and must not age out. None = no scheduled expiry.
+        Server-side only; never serialized to clients.
     """
     scene_id: str
     device_id: str
@@ -151,6 +158,7 @@ class Scene:
     fcm_token: Optional[str] = None       # FCM registration token from /upload_session; None if the client sent none
     missing_paths: Optional[list] = None  # relative paths absent at existence-check time
     invalid_blobs: Optional[list] = None  # [{relative_path, reason}] for FAILED_INVALID scenes
+    expire_at: Optional[datetime] = None  # TTL deadline for terminal-failure scenes (gap F6); server-side only
 
     def __post_init__(self) -> None:
         if not self.scene_id:

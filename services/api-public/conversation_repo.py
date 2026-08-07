@@ -51,9 +51,18 @@ Implementations:
   lazily per service convention.
 
 Consumers: services/api-public/public_server.py (conversation routes).
-F6 note (CLAUDE.md): Firestore never cascades deletes — when scene TTL
-ships, plan per-collection-group TTL on turns.created_at + conversations,
-or the sweep orphans this collection.
+
+F6 cascade note (decision 0086): the scenes TTL policy sweeps ONLY
+terminal-failure scenes (failed / failed_invalid / failed_incomplete —
+api-internal stamps expire_at on exactly those), and conversations exist
+only for scenes that reached `ready` (every conversation route gates on
+_load_owned_ready_scene). A swept scene therefore has no conversation to
+orphan — the cascade holds by construction, not by a second TTL. If expiry
+stamping ever extends to ready scenes (user deletion, full-lifecycle TTL),
+these docs need their own expire_at + collection-group TTL policies (NOT a
+TTL on created_at — Firestore deletes when the named field's VALUE is past,
+so created_at-as-TTL-field deletes live turns immediately) or a recursive
+delete in the sweep.
 """
 from __future__ import annotations
 

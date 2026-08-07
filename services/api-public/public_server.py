@@ -119,9 +119,11 @@ if os.environ.get("ENVIRONMENT") != "production":
 from roomstudio_api_core.upload_session_repo import (  # noqa: E402
     UploadSessionRepository,
     InMemoryUploadSessionRepository,
-    validate_manifest_path,
+    ForeignBundleError,
+    MintRateLimitedError,
     gcs_mint_resumable_uri,
 )
+from roomstudio_api_core.manifest_validation import validate_manifest  # noqa: E402
 from roomstudio_api_core.scene_read_repo import (  # noqa: E402
     SceneReadRepository,
     InMemorySceneReadRepository,
@@ -212,6 +214,14 @@ _upload_session_repo: Optional[UploadSessionRepository] = None
 _scene_read_repo: Optional[SceneReadRepository] = None
 
 _GCS_CAPTURES_BUCKET: str = os.environ.get("GCS_CAPTURES_BUCKET", "roomstudio-captures")
+
+# Per-UID daily mint quota for /upload_session (gap b, decisions 0015/0018).
+# One unit = one call that actually mints GCS session URIs; idempotent
+# replays are free. Sizing: the heaviest observed developer day (full smoke
+# run + several real captures + retries) stays under ~25 mints; 50 bounds a
+# runaway client or a single hostile UID without ever touching real use.
+# Module-level so tests can patch it, mirroring GUEST_DAILY_TURNS.
+UPLOAD_DAILY_MINTS = int(os.environ.get("UPLOAD_SESSION_DAILY_MINTS", "50"))
 
 
 def _get_token_verifier() -> TokenVerifier:
@@ -693,15 +703,28 @@ def create_upload_session(
     Response (200): [{relative_path, session_uri}]
 
     Idempotent: repeated calls with the same {bundle_id, manifest paths}
-    return the stored URIs without minting new ones.
+    return the stored URIs without minting new ones (and without consuming
+    rate-limit quota).
+
+    Manifest rules (gaps c + F3, decisions 0015/0018): every entry carries a
+    real expected_size_bytes (>= 1, capped), paths match the capture clients'
+    known shapes, exactly one bundle.pb — see
+    roomstudio_api_core.manifest_validation for the grammar and caps.
 
     Errors:
       400 invalid_bundle_id   — bundle_id is not a UUIDv4
-      400 invalid_manifest    — a manifest entry has a bad path
+      400 invalid_manifest    — a manifest entry has a bad path, a missing/
+                                invalid/oversized expected_size_bytes, a
+                                duplicate path, or bundle.pb is absent
       400 manifest_empty      — manifest has no entries
       401 missing_token       — Authorization header absent or malformed
       403 forbidden           — JWT uid does not match the stored user_id for
-                                this bundle_id (another user's upload)
+                                this bundle_id (another user's upload); the
+                                claim is transactional (gap a), so two
+                                concurrent first-mints can never both own it
+      429 rate_limited        — the caller's UTC-day mint quota is exhausted
+                                (gap b); body carries resets_at, and the
+                                Retry-After header the seconds until then
     """
     # 1. Verify Firebase ID token.
     user_id, err = _verify_bearer(authorization)
@@ -719,25 +742,32 @@ def create_upload_session(
             content={"error": "invalid_bundle_id", "detail": f"{bundle_id!r} is not a UUIDv4"},
         )
 
-    # 3. Validate manifest.
+    # 3. Validate manifest (structure, sizes, path grammar, caps).
     if not req.manifest:
         return JSONResponse(
             status_code=400,
             content={"error": "manifest_empty", "detail": "manifest must have at least one entry"},
         )
-    for entry in req.manifest:
-        path = entry.get("relative_path", "")
-        err = validate_manifest_path(path)
-        if err:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "invalid_manifest", "detail": err},
-            )
+    manifest_err = validate_manifest(req.manifest)
+    if manifest_err:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_manifest", "detail": manifest_err},
+        )
 
-    # 4. Check user_id ownership — 403 if another user already claimed this bundle_id.
-    upload_repo = _get_upload_session_repo()
-    stored_uid = upload_repo.get_user_id(bundle_id)
-    if stored_uid is not None and stored_uid != user_id:
+    # 4. Mint (or retrieve stored) session URIs. Ownership and the per-UID
+    # daily quota are enforced atomically inside the repository (gaps a + b).
+    try:
+        session_entries = _get_upload_session_repo().create_or_get(
+            bundle_id=bundle_id,
+            user_id=user_id,
+            manifest=req.manifest,
+            fcm_token=req.fcm_token,
+            mint_uri_fn=gcs_mint_resumable_uri,
+            bucket=_GCS_CAPTURES_BUCKET,
+            daily_mint_quota=UPLOAD_DAILY_MINTS,
+        )
+    except ForeignBundleError:
         return JSONResponse(
             status_code=403,
             content={
@@ -745,17 +775,25 @@ def create_upload_session(
                 "detail": "bundle_id is owned by a different user",
             },
         )
-
-    # 5. Mint (or retrieve stored) session URIs.
-    try:
-        bucket = _GCS_CAPTURES_BUCKET
-        session_entries = upload_repo.create_or_get(
-            bundle_id=bundle_id,
-            user_id=user_id,
-            manifest=req.manifest,
-            fcm_token=req.fcm_token,
-            mint_uri_fn=gcs_mint_resumable_uri,
-            bucket=bucket,
+    except MintRateLimitedError as exc:
+        retry_after_s = max(
+            1, int((exc.resets_at - datetime.now(tz=timezone.utc)).total_seconds())
+        )
+        logger.warning(
+            "rate_limited: uid=%s bundle_id=%s daily_mints=%d",
+            user_id, bundle_id, UPLOAD_DAILY_MINTS,
+        )
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limited",
+                "detail": (
+                    f"daily upload-session mint quota ({UPLOAD_DAILY_MINTS}) "
+                    "exhausted for this account"
+                ),
+                "resets_at": exc.resets_at.isoformat(),
+            },
+            headers={"Retry-After": str(retry_after_s)},
         )
     except Exception as exc:
         logger.exception("Failed to mint upload session for bundle_id=%s", bundle_id)
