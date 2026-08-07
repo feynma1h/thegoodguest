@@ -154,6 +154,19 @@ class TestMasksNpz:
         expected[6:7, :] = True
         assert np.array_equal(union, expected)
 
+    def test_a_frame_containing_only_a_person_still_writes_a_valid_npz(self):
+        """A close-up of someone: zero shippable objects, one suppressed mask.
+        The empty-stack shape must stay the one shell_receiver expects, or the
+        frame poisons the shell instead of just contributing nothing."""
+        raw = masks_npz_bytes([], [_det("person", _mask())])
+        with np.load(io.BytesIO(raw)) as npz:
+            masks = npz["masks"]
+            union = read_suppressed(npz)
+
+        assert masks.shape == (0,)  # the pre-0089 empty shape, unchanged
+        assert masks.ndim != 3  # shell_receiver's exclusion branch condition
+        assert np.array_equal(union, _mask())
+
     def test_a_pre_0089_masks_npz_reads_as_no_suppression(self):
         legacy = io.BytesIO()
         np.savez_compressed(legacy, masks=np.zeros((1, 4, 4), dtype=bool))
