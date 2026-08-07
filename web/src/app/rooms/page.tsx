@@ -10,7 +10,7 @@
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
-import AppleSignInButton from "@/components/AppleSignInButton";
+import SignInPanel from "@/components/SignInPanel";
 import RoomCard from "@/components/RoomCard";
 import { openNewRoomSheet } from "@/components/NewRoomSheet";
 import { PillLink } from "@/components/ui/spring";
@@ -85,10 +85,10 @@ export default function RoomsPage() {
         <div className="mt-28 flex flex-col items-center text-center">
           <GuestLine className="max-w-md text-[19px]">
             Your rooms are signed in on your iPhone. Sign in here with the
-            same Apple ID, and the house follows.
+            same account, and the house follows.
           </GuestLine>
           <div className="mt-9">
-            <AppleSignInButton />
+            <SignInPanel />
           </div>
         </div>
       )}

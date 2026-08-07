@@ -15,7 +15,7 @@ import { motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import AppleSignInButton from "@/components/AppleSignInButton";
+import SignInPanel from "@/components/SignInPanel";
 import { SPRING } from "@/components/ui/spring";
 import { Eyebrow, GuestLine } from "@/components/ui/voice";
 import { getApiClient } from "@/lib/api";
@@ -141,10 +141,10 @@ export default function BridgePage() {
               <>
                 <p className="text-[13.5px] font-medium">
                   The desk listens for the rooms of an account — sign in with
-                  the Apple ID from your iPhone.
+                  the one from your iPhone.
                 </p>
                 <div className="mt-3">
-                  <AppleSignInButton compact />
+                  <SignInPanel compact />
                 </div>
               </>
             ) : (

@@ -15,7 +15,7 @@ import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import AppleSignInButton from "@/components/AppleSignInButton";
+import SignInPanel from "@/components/SignInPanel";
 import { SPRING } from "@/components/ui/spring";
 import { apiMode } from "@/lib/api";
 
@@ -144,10 +144,10 @@ export default function AccountMenu() {
             {mode === "live" && liveAuth.phase === "signedOut" && (
               <div className="px-4 py-4">
                 <p className="mb-3 text-xs leading-relaxed text-ink/55">
-                  Sign in with the Apple ID from your iPhone — the rooms you
+                  Sign in with the account from your iPhone — the rooms you
                   scanned there follow it here.
                 </p>
-                <AppleSignInButton compact />
+                <SignInPanel compact />
               </div>
             )}
 
