@@ -295,8 +295,10 @@ def main(argv: list[str] | None = None) -> int:
                          "/process: no Firestore reset, no lease, no bundle "
                          "existence gate (a swept bundle IS the "
                          "capture_expired case the handler must record). "
-                         "NOTE: /shell noops if shell.json already exists — "
-                         "delete it from the outputs bucket first to re-bake.")
+                         "NOTE: the /shell noop is VERSION-GATED (0d67608): an "
+                         "existing shell.json at the current max output "
+                         "version noops, an older one regenerates. Delete the "
+                         "blob only to force a same-version re-bake.")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the decision and planned actions; change nothing")
     args = ap.parse_args(argv)
