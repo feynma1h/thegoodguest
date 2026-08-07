@@ -51,6 +51,11 @@ enum UploadSessionError: LocalizedError {
     case clientError(Int, String)
     /// 5xx or network error — potentially transient; retried with backoff.
     case serverError(Int, String)
+    /// 429 — the caller's per-UID UTC-day mint quota is exhausted (decision 0087).
+    /// NOT terminal: it lifts on its own at `resetsAt` (the next UTC midnight).
+    /// Thrown only once the stated wait exceeds what is sane to hold in-process;
+    /// short waits are slept through inside the client and never surface.
+    case rateLimited(retryAfter: TimeInterval?, resetsAt: Date?, detail: String)
     /// Unexpected HTTP status.
     case unexpectedStatus(Int, String)
 
@@ -64,9 +69,26 @@ enum UploadSessionError: LocalizedError {
             return "Upload session: \(code) client error — \(body)"
         case .serverError(let code, let body):
             return "Upload session: \(code) server error — \(body)"
+        case .rateLimited(let retryAfter, let resetsAt, let detail):
+            let wait = retryAfter.map { "\(Int($0))s" } ?? "unstated"
+            return "Upload session: 429 rate limited (retry after \(wait), resets \(resetsAt.map(String.init(describing:)) ?? "unknown")) — \(detail)"
         case .unexpectedStatus(let code, let body):
             return "Upload session: unexpected \(code) — \(body)"
         }
+    }
+}
+
+/// The 429 body api-public sends on the daily mint quota (decision 0087):
+/// `{"error": "rate_limited", "detail": "…", "resets_at": "<iso8601>"}`.
+/// Decoded leniently — a missing or unparseable `resets_at` degrades to "no
+/// stated time", never to a failure to recognise the rate limit itself.
+private nonisolated struct RateLimitBody: Decodable {
+    let detail: String?
+    let resetsAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case detail
+        case resetsAt = "resets_at"
     }
 }
 
@@ -101,6 +123,24 @@ actor UploadSessionClient {
     private let baseDelaySec    = 1.0
     private let maxDelaySec     = 30.0
 
+    /// Longest server-directed wait this client will sleep through in-process on a
+    /// 429, mirroring BlobUploadManager.maxRetryAfterHoldSec exactly — one number,
+    /// one meaning, on both paths that honor Retry-After.
+    ///
+    /// It matters more here than it does for blobs: api-public's quota resets at
+    /// the next UTC MIDNIGHT, so the stated wait is normally hours. Sleeping that
+    /// is not an option (the app would be long dead), and retrying sooner than the
+    /// server asked is not either — so anything past this cap is surfaced to the
+    /// user with the time it lifts, and nothing is retried behind their back. The
+    /// cap is not dead code: a mint attempted just before midnight gets a wait of
+    /// a few seconds, and that one is worth simply waiting out.
+    static let maxRetryAfterHoldSec: TimeInterval = 60.0
+
+    /// How many times a single mint may sleep out a short 429 before giving up and
+    /// surfacing it. Bounded for the same reason the 5xx ladder is: a server stuck
+    /// answering "one more second" must not hold the send forever.
+    static let maxRateLimitHolds = 2
+
     /// Per-request timeout for the mint POST. MUST exceed api-public's Cloud
     /// Run request ceiling (120 s): a local timeout below the server's own
     /// limit manufactures a failure for a mint the server may still complete.
@@ -112,12 +152,26 @@ actor UploadSessionClient {
     /// env-only revision recorded for RP-8.
     static let mintTimeoutSec: TimeInterval = 180
 
+    /// Returns "now". Injected in tests so a 429's stated wait can be evaluated
+    /// against a fixed clock (the HTTP-date form is relative to it).
+    private var clock: () -> Date = { Date() }
+
+    /// Suspends between attempts. Injected in tests to assert the schedule —
+    /// including which 429 waits are slept through — without real waiting.
+    private var sleeper: @Sendable (TimeInterval) async -> Void = { seconds in
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    }
+
     init(
         baseURL: URL = NetworkConfig.apiPublicBaseURL,
-        urlSession: URLSession = .shared
+        urlSession: URLSession = .shared,
+        clock: @escaping () -> Date = { Date() },
+        sleeper: (@Sendable (TimeInterval) async -> Void)? = nil
     ) {
         self.baseURL    = baseURL
         self.urlSession = urlSession
+        self.clock      = clock
+        if let sleeper { self.sleeper = sleeper }
     }
 
     // MARK: - Public API
@@ -170,7 +224,8 @@ actor UploadSessionClient {
         manifest: [UploadManifestEntry],
         idToken: String,
         fcmToken: String?,
-        attempt: Int
+        attempt: Int,
+        rateLimitHolds: Int = 0
     ) async throws -> [UploadSessionEntry] {
         do {
             return try await executeOnce(
@@ -182,13 +237,37 @@ actor UploadSessionClient {
         } catch UploadSessionError.serverError where attempt < maxRetries {
             let jitter = Double.random(in: 0..<1.0)
             let delay  = min(baseDelaySec * pow(2.0, Double(attempt)) + jitter, maxDelaySec)
-            try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            await sleeper(delay)
             return try await requestWithBackoff(
                 bundleId: bundleId,
                 manifest: manifest,
                 idToken: idToken,
                 fcmToken: fcmToken,
-                attempt: attempt + 1
+                attempt: attempt + 1,
+                rateLimitHolds: rateLimitHolds
+            )
+        } catch UploadSessionError.rateLimited(let retryAfter, let resetsAt, let detail) {
+            // Honor the server's stated wait the way the blob PUTs do — but only
+            // when it is short enough to be worth holding. The quota rolls at UTC
+            // midnight, so the normal answer is hours: that one is surfaced with
+            // its reset time rather than slept on or retried early.
+            guard let retryAfter,
+                  retryAfter <= Self.maxRetryAfterHoldSec,
+                  rateLimitHolds < Self.maxRateLimitHolds
+            else {
+                throw UploadSessionError.rateLimited(
+                    retryAfter: retryAfter, resetsAt: resetsAt, detail: detail)
+            }
+            // Jitter on top: Retry-After is a minimum, not an appointment, and
+            // several devices told the same second must not return in lockstep.
+            await sleeper(retryAfter + Double.random(in: 0..<1.0))
+            return try await requestWithBackoff(
+                bundleId: bundleId,
+                manifest: manifest,
+                idToken: idToken,
+                fcmToken: fcmToken,
+                attempt: attempt,
+                rateLimitHolds: rateLimitHolds + 1
             )
         }
         // All other errors propagate immediately.
@@ -236,6 +315,24 @@ actor UploadSessionClient {
             throw UploadSessionError.forbidden(body_str)
         case 400, 422:
             throw UploadSessionError.clientError(http.statusCode, body_str)
+        case 429:
+            // Decision 0087's per-UID daily mint quota. The header is authoritative
+            // for HOW LONG (it is what the retry ladder honors); `resets_at` is what
+            // the user is told, so a missing header still yields a usable state.
+            let parsed = try? JSONDecoder().decode(RateLimitBody.self, from: data)
+            let resetsAt = RetryAfter.parseISO8601(parsed?.resetsAt)
+            var retryAfter = RetryAfter.parse(
+                http.value(forHTTPHeaderField: "Retry-After"), now: clock())
+            if retryAfter == nil, let resetsAt {
+                // Fall back to the body: an intermediary that strips headers must
+                // not turn a bounded wait into an unbounded one.
+                retryAfter = max(0, resetsAt.timeIntervalSince(clock()))
+            }
+            throw UploadSessionError.rateLimited(
+                retryAfter: retryAfter,
+                resetsAt: resetsAt,
+                detail: parsed?.detail ?? body_str
+            )
         case 500...599:
             throw UploadSessionError.serverError(http.statusCode, body_str)
         default:

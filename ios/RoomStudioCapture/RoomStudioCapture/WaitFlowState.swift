@@ -36,6 +36,12 @@ nonisolated enum WaitScreen: Equatable {
     case incompleteUpload
     /// Could not send it up. `terminal` = retrying provably cannot help.
     case sendFailed(terminal: Bool)
+    /// The account's daily upload-session quota is spent (429, decision 0087).
+    /// Neither a retry-now nor a dead end: it lifts by itself at `resetsAt`, and
+    /// the capture is safe on disk until then. Its own screen because both of the
+    /// existing failure treatments would lie — one invites a retry that provably
+    /// fails, the other implies the capture is lost.
+    case sendRateLimited(resetsAt: Date?)
     /// The upload PAUSED (retries exhausted this launch, or the process lost its
     /// context). It resumes on the next launch — not in this one — so the screen
     /// must stop implying that waiting here will do anything.
@@ -71,7 +77,12 @@ nonisolated enum WaitFlowState {
         deferredForThisBundle: Bool = false,
         poll: PollSnapshot
     ) -> WaitScreen {
-        if let sessionFailure { return .sendFailed(terminal: sessionFailure.terminal) }
+        if let sessionFailure {
+            switch sessionFailure {
+            case .refused(let terminal):       return .sendFailed(terminal: terminal)
+            case .rateLimited(let resetsAt):   return .sendRateLimited(resetsAt: resetsAt)
+            }
+        }
         if terminalBlobFailureForThisBundle { return .uploadFailed }
 
         switch poll {
@@ -116,20 +127,31 @@ nonisolated enum WaitFlowState {
     }
 
     /// The upload-session half of the input, reduced to WHAT ROUTING ACTUALLY USES:
-    /// only failure changes the screen. Modelling .pending/.ready as distinct cases
+    /// only refusal changes the screen. Modelling .pending/.ready as distinct cases
     /// implied a routing input that did not exist — it read as coverage in a table
     /// test without being any.
-    struct SessionFailure: Equatable {
-        /// Retrying provably cannot fix it (a 4xx, a 403, a broken invariant).
-        let terminal: Bool
+    ///
+    /// An enum rather than a struct of flags since the rate limit arrived: it is
+    /// not a degree of `terminal`, it is a different kind of "no" — one that answers
+    /// differently tomorrow — and expressing it as a third boolean state would have
+    /// made two of the four combinations unreachable.
+    enum SessionFailure: Equatable {
+        /// The server (or a local invariant) refused the send. `terminal` = retrying
+        /// provably cannot fix it (a 4xx, a 403, a broken invariant).
+        case refused(terminal: Bool)
+        /// The daily mint quota is spent; it lifts at `resetsAt` on its own.
+        case rateLimited(resetsAt: Date?)
     }
 
     /// Adapt the real coordinator state. Lives here, beside the table it feeds, so
     /// the adapter is testable too: a correct table fed a wrong snapshot is still
     /// the wrong screen.
     static func sessionFailure(from state: UploadCoordinator.SessionState) -> SessionFailure? {
-        if case .failed(_, let terminal) = state { return SessionFailure(terminal: terminal) }
-        return nil
+        switch state {
+        case .failed(_, let terminal):    return .refused(terminal: terminal)
+        case .rateLimited(let resetsAt):  return .rateLimited(resetsAt: resetsAt)
+        default:                          return nil
+        }
     }
 
     /// Adapt the real poll state. `fallbackAnchor` supplies the server anchor for
