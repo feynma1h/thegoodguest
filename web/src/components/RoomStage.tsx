@@ -4,10 +4,12 @@
  * The immersive stage for a ready room (design §4/§5): fetches the
  * scene's assets, holds at the threshold until invited (the reveal
  * never auto-plays; the hold survives per-browser via lib/seen), plays
- * the objects-first assembly — each piece named as it lands — and then
- * settles into stage 1: the room full-bleed, one guest line grounded in
- * real counts, the disabled composer holding the conversation's place,
- * and the ledger-style inventory floating at the edge.
+ * the reveal — the room's measured boundary drawing itself, its surfaces
+ * materializing in place, then the pieces settling, the leading few named
+ * aloud (decision 0097) — and then settles into stage 1: the room
+ * full-bleed, one guest line grounded in real counts, the disabled
+ * composer holding the conversation's place, and the ledger-style
+ * inventory floating at the edge.
  *
  * Mount with key={sceneId} so a different room resets the choreography.
  * All three.js stays behind SplatViewer's PositionedSplat contract.
@@ -153,6 +155,7 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
           frameless
           reveal={phase === "assembling"}
           onRevealStep={(_, label) => setArrival(label)}
+          onRevealCaptionsDone={() => setArrival(null)}
           onRevealDone={onRevealDone}
           className="h-full"
         />
