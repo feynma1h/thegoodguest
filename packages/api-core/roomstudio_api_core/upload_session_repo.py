@@ -27,6 +27,12 @@ caller's mint-quota document before any GCS mint happens:
     MintRateLimitedError (429 at the endpoint) before any claim or mint.
     Quota is charged at admission, so a subsequent GCS mint failure burns
     the slot — accepted: mint failures are rare and the cap is generous.
+  - A FIRST claim of a bundle_id additionally charges one CAPTURE against the
+    same day-rolled document (decision 0097). The two counters answer
+    different questions: mints bound API calls, captures bound GPU spend, and
+    a capture is charged once however many times its bundle is re-minted. The
+    capture cap is evaluated FIRST so a refused capture never burns mint
+    quota, and it raises CaptureLimitError (429, distinct error code).
   - Same-UID concurrent mints for one bundle_id remain last-write-wins on
     the stored record (both responses' URIs are real GCS sessions and both
     work); serializing them would need a lease with client-visible 409s the
@@ -94,6 +100,21 @@ class MintRateLimitedError(Exception):
 
     def __init__(self, resets_at: datetime) -> None:
         super().__init__(f"mint quota exhausted; resets at {resets_at.isoformat()}")
+        self.resets_at = resets_at
+
+
+class CaptureLimitError(Exception):
+    """The caller has started their UTC-day's allowance of CAPTURES (429).
+
+    Distinct from MintRateLimitedError, and the distinction is the point: the
+    mint quota bounds API calls, this bounds GPU spend. One capture commits a
+    reconstruction run — measured at up to 900 GPU-seconds per request and
+    typically two requests to completion (decision 0097) — so it is the unit
+    that actually costs money, and it is charged once per bundle_id however
+    many times that bundle is minted or re-minted."""
+
+    def __init__(self, resets_at: datetime) -> None:
+        super().__init__(f"capture limit reached; resets at {resets_at.isoformat()}")
         self.resets_at = resets_at
 
 
@@ -213,6 +234,7 @@ class UploadSessionRepository(ABC):
         mint_uri_fn: UriMintFn,
         bucket: str,
         daily_mint_quota: Optional[int] = None,
+        daily_capture_quota: Optional[int] = None,
         now: Optional[datetime] = None,
     ) -> list[SessionEntry]:
         """Return session URIs for each manifest entry.
@@ -264,6 +286,7 @@ class InMemoryUploadSessionRepository(UploadSessionRepository):
         mint_uri_fn: UriMintFn,
         bucket: str,
         daily_mint_quota: Optional[int] = None,
+        daily_capture_quota: Optional[int] = None,
         now: Optional[datetime] = None,
     ) -> list[SessionEntry]:
         now = now or datetime.now(tz=timezone.utc)
@@ -281,12 +304,30 @@ class InMemoryUploadSessionRepository(UploadSessionRepository):
                 if existing_paths == new_paths and existing["session_entries"]:
                     return existing["session_entries"]
 
+            q = self._quota.get(user_id)
+            same_day = bool(q and q["day"] == _utc_day(now))
+            mints = q["count"] if same_day else 0
+            captures = q.get("captures", 0) if same_day else 0
+
+            # Capture cap first: a refused capture must not burn mint quota.
+            # Charged only on a FIRST claim — re-mints of a bundle already
+            # started today are the same capture and cost no new GPU.
+            if daily_capture_quota is not None and not existing:
+                if captures >= daily_capture_quota:
+                    raise CaptureLimitError(_next_utc_midnight(now))
+                captures += 1
+
             if daily_mint_quota is not None:
-                q = self._quota.get(user_id)
-                count = q["count"] if q and q["day"] == _utc_day(now) else 0
-                if count >= daily_mint_quota:
+                if mints >= daily_mint_quota:
                     raise MintRateLimitedError(_next_utc_midnight(now))
-                self._quota[user_id] = {"day": _utc_day(now), "count": count + 1}
+                mints += 1
+
+            if daily_mint_quota is not None or daily_capture_quota is not None:
+                self._quota[user_id] = {
+                    "day": _utc_day(now),
+                    "count": mints,
+                    "captures": captures,
+                }
 
             if not existing:
                 # Claim ownership before minting: a concurrent foreign caller
@@ -382,6 +423,7 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
         mint_uri_fn: UriMintFn,
         bucket: str,
         daily_mint_quota: Optional[int] = None,
+        daily_capture_quota: Optional[int] = None,
         now: Optional[datetime] = None,
     ) -> list[SessionEntry]:
         now = now or datetime.now(tz=timezone.utc)
@@ -395,7 +437,7 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
             snap = ref.get(transaction=txn)
             quota_snap = (
                 quota_ref.get(transaction=txn)
-                if daily_mint_quota is not None
+                if daily_mint_quota is not None or daily_capture_quota is not None
                 else None
             )
 
@@ -409,18 +451,33 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
                 if stored_paths == new_paths and data.get("session_entries"):
                     return ("replay", data["session_entries"])
 
+            qdoc = (
+                quota_snap.to_dict()
+                if quota_snap is not None and quota_snap.exists
+                else None
+            )
+            same_day = bool(qdoc and qdoc.get("day") == _utc_day(now))
+            mints = int(qdoc.get("count", 0)) if same_day else 0
+            captures = int(qdoc.get("captures", 0)) if same_day else 0
+
+            # Capture cap first: a refused capture must not burn mint quota.
+            # Charged only on a FIRST claim — re-mints of a bundle already
+            # started today are the same capture and cost no new GPU.
+            if daily_capture_quota is not None and not snap.exists:
+                if captures >= daily_capture_quota:
+                    return ("capture_limited", _next_utc_midnight(now))
+                captures += 1
+
             if daily_mint_quota is not None:
-                qdoc = quota_snap.to_dict() if quota_snap.exists else None
-                count = (
-                    int(qdoc.get("count", 0))
-                    if qdoc and qdoc.get("day") == _utc_day(now)
-                    else 0
-                )
-                if count >= daily_mint_quota:
+                if mints >= daily_mint_quota:
                     return ("rate_limited", _next_utc_midnight(now))
+                mints += 1
+
+            if daily_mint_quota is not None or daily_capture_quota is not None:
                 txn.set(quota_ref, {
                     "day": _utc_day(now),
-                    "count": count + 1,
+                    "count": mints,
+                    "captures": captures,
                     "updated_at": now,
                 })
 
@@ -442,6 +499,8 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
             raise ForeignBundleError(
                 f"bundle_id {bundle_id!r} is owned by a different user"
             )
+        if kind == "capture_limited":
+            raise CaptureLimitError(payload)
         if kind == "rate_limited":
             raise MintRateLimitedError(payload)
         if kind == "replay":
