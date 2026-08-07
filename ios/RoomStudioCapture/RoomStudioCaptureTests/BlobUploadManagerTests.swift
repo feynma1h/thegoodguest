@@ -1929,44 +1929,9 @@ final class BlobUploadManagerTests: XCTestCase {
         XCTAssertLessThan(recorded[0], 41)
     }
 
-    // MARK: parseRetryAfter (pure function)
-
-    func test_parseRetryAfter_deltaSeconds() {
-        let now = Date()
-        XCTAssertEqual(BlobUploadManager.parseRetryAfter("120", now: now), 120)
-        XCTAssertEqual(BlobUploadManager.parseRetryAfter("0", now: now), 0,
-                       "Zero is a valid stated wait (retry immediately)")
-        XCTAssertEqual(BlobUploadManager.parseRetryAfter(" 15 ", now: now), 15,
-                       "Surrounding whitespace must be tolerated")
-    }
-
-    func test_parseRetryAfter_httpDate() {
-        // RFC 7231's own example date, pinned against a fixed epoch:
-        // "Wed, 21 Oct 2015 07:28:00 GMT" == 1445412480.
-        let now = Date(timeIntervalSince1970: 1_445_412_420)  // 60s before the date
-        XCTAssertEqual(
-            BlobUploadManager.parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", now: now), 60
-        )
-    }
-
-    func test_parseRetryAfter_pastHTTPDate_clampsToZero() {
-        let now = Date(timeIntervalSince1970: 1_445_412_580)  // 100s after the date
-        XCTAssertEqual(
-            BlobUploadManager.parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT", now: now), 0,
-            "A date already in the past means the wait has elapsed"
-        )
-    }
-
-    func test_parseRetryAfter_malformed_returnsNil() {
-        let now = Date()
-        XCTAssertNil(BlobUploadManager.parseRetryAfter(nil, now: now))
-        XCTAssertNil(BlobUploadManager.parseRetryAfter("", now: now))
-        XCTAssertNil(BlobUploadManager.parseRetryAfter("soon", now: now))
-        XCTAssertNil(BlobUploadManager.parseRetryAfter("-5", now: now),
-                     "Negative delta-seconds is malformed, not a zero wait")
-        XCTAssertNil(BlobUploadManager.parseRetryAfter("inf", now: now),
-                     "Non-finite values must not produce an unbounded sleep")
-    }
+    // Retry-After parsing moved to RetryAfterTests when the mint path became its
+    // second consumer (decision 0038's follow-up). The blob manager's HONORING of
+    // a parsed value is still pinned above; only the parser itself relocated.
 
     func test_networkExhausted_deferredTransient_bumpsCounter_notFatal() async throws {
         // network_exhausted (in-process maxRetries exhausted) → DEFERRED-TRANSIENT.

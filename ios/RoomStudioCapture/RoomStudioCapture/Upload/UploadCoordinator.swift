@@ -39,6 +39,13 @@ final class UploadCoordinator: ObservableObject {
         /// client error — the "do not retry" case below). UI must not offer an
         /// endless "Try again" for these; transient/unknown failures stay false.
         case failed(String, terminal: Bool = false)
+        /// The account's daily upload-session quota is spent (429, decision 0087).
+        /// Its own case, not a flavour of `.failed`: retrying now provably fails
+        /// (so it is not `terminal: false`), and it lifts on its own at `resetsAt`
+        /// (so it is not `terminal: true` either). The capture stays on disk and
+        /// the send works once the day rolls. `resetsAt` is nil when the server
+        /// named no time — the copy then says so rather than inventing one.
+        case rateLimited(resetsAt: Date?)
     }
 
     @Published private(set) var sessionState: SessionState = .idle
@@ -216,6 +223,14 @@ final class UploadCoordinator: ObservableObject {
             // Terminal: a 403 (e.g. bundle_id ownership) will answer identically on
             // every retry, so the UI must offer an off-ramp, not "Try again".
             publish(.failed("Forbidden: \(msg)", terminal: true))
+            return
+        } catch UploadSessionError.rateLimited(_, let resetsAt, let detail) {
+            // Short waits were already slept out inside the client; reaching here
+            // means the server asked for longer than it is honest to hold (the
+            // quota rolls at UTC midnight). Nothing is retried behind the user's
+            // back — the wait is stated and the capture stays on disk.
+            logger.info("[UploadCoordinator] rate limited — \(detail)")
+            publish(.rateLimited(resetsAt: resetsAt))
             return
         } catch UploadSessionError.clientError(let code, let body) {
             // Client bug — log loudly; do not retry. Marked terminal so the UI

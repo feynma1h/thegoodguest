@@ -48,18 +48,18 @@ final class WaitFlowStateTests: XCTestCase {
     /// A failed upload session outranks everything, including a stale poll state
     /// left over from a previous capture.
     func testFailedSessionOutranksEverything() {
-        XCTAssertEqual(screen(sessionFailure: .init(terminal: false), poll: .succeeded),
+        XCTAssertEqual(screen(sessionFailure: .refused(terminal: false), poll: .succeeded),
                        .sendFailed(terminal: false))
-        XCTAssertEqual(screen(sessionFailure: .init(terminal: true), blobFailed: true, poll: .succeeded),
+        XCTAssertEqual(screen(sessionFailure: .refused(terminal: true), blobFailed: true, poll: .succeeded),
                        .sendFailed(terminal: true))
     }
 
     /// A permanent 4xx is distinguishable from a retryable failure, so the UI can
     /// stop offering a retry that provably cannot work.
     func testTerminalSendFailureIsDistinguishable() {
-        XCTAssertEqual(screen(sessionFailure: .init(terminal: true), poll: .idle),
+        XCTAssertEqual(screen(sessionFailure: .refused(terminal: true), poll: .idle),
                        .sendFailed(terminal: true))
-        XCTAssertNotEqual(screen(sessionFailure: .init(terminal: true), poll: .idle),
+        XCTAssertNotEqual(screen(sessionFailure: .refused(terminal: true), poll: .idle),
                           .sendFailed(terminal: false))
     }
 
@@ -101,7 +101,7 @@ final class WaitFlowStateTests: XCTestCase {
     /// A real terminal failure still outranks a deferral.
     func testTerminalOutranksDeferral() {
         XCTAssertEqual(screen(blobFailed: true, deferred: true, poll: .idle), .uploadFailed)
-        XCTAssertEqual(screen(sessionFailure: .init(terminal: false), deferred: true, poll: .idle),
+        XCTAssertEqual(screen(sessionFailure: .refused(terminal: false), deferred: true, poll: .idle),
                        .sendFailed(terminal: false))
     }
 
@@ -153,7 +153,7 @@ final class WaitFlowStateTests: XCTestCase {
     /// Upload-side failures still outrank the poll: a terminal blob failure means
     /// bundle.pb never landed, so its screen owns the story whatever the poll says.
     func testUploadFailuresOutrankNotOwned() {
-        XCTAssertEqual(screen(sessionFailure: .init(terminal: true), poll: .notOwned),
+        XCTAssertEqual(screen(sessionFailure: .refused(terminal: true), poll: .notOwned),
                        .sendFailed(terminal: true))
         XCTAssertEqual(screen(blobFailed: true, poll: .notOwned), .uploadFailed)
     }
@@ -211,9 +211,9 @@ final class WaitFlowStateTests: XCTestCase {
         XCTAssertNil(WaitFlowState.sessionFailure(from: .idle))
         XCTAssertNil(WaitFlowState.sessionFailure(from: .creatingSession))
         XCTAssertEqual(WaitFlowState.sessionFailure(from: .failed("net")),
-                       .init(terminal: false))
+                       .refused(terminal: false))
         XCTAssertEqual(WaitFlowState.sessionFailure(from: .failed("403", terminal: true)),
-                       .init(terminal: true))
+                       .refused(terminal: true))
     }
 
     func testPollSnapshotAdapterMapsEveryState() {
