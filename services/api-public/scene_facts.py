@@ -6,14 +6,15 @@ ENTIRE world. The raw manifest never enters the prompt: no quaternions, no
 float triples, nothing the model could do 3D arithmetic on. Grounding is
 enforced by construction, not discipline.
 
-Five fact classes (decision 0058 "Grounding"):
+Fact classes (decision 0058 "Grounding", extended by 0096):
   - inventory with confidence tiers (from quality.frames_observed /
-    cluster_spread_m)
+    cluster_spread_m), each optionally carrying a measured size
   - pairwise center-to-center distances. Epistemics live INSIDE the strings:
     comparative/ordinal claims are freely speakable; absolute quantities are
     speakable only as server-formatted strings carrying their own framing
     ("about 1.3 m between their centers"), pre-rounded to honest precision.
-    No gap/clearance phrasing exists anywhere — extents are not in the data.
+  - sizes and size comparisons — see SIZES below
+  - clearances, as rigorous LOWER BOUNDS — see CLEARANCES below
   - vertical relations between centers (relative only — no floor exists)
   - provenance (where the facts came from)
   - a machine-generated limits list (what THIS scene's data cannot answer;
@@ -21,6 +22,38 @@ Five fact classes (decision 0058 "Grounding"):
 
 NO orientation-derived facts: SAM 3D layout conventions are runtime-unverified
 (CLAUDE.md); position-derived facts don't share that exposure.
+
+SIZES (facts_version 2). Only `roomplan_box.dims` is spoken as a size, and
+only at box confidence high/medium. Two measured reasons:
+
+  - Splat-derived extents are not size truth. In the reference manifest a real
+    meter-scale rug ships `extent_m_sorted` of 0.46 x 0.29 x 0.005 (the
+    textile scale collapse, decision 0075), and every splat extent is exposed
+    to visible-region truncation — the open class-6 defect from the RP-8 walk.
+    A confident wrong size is worse than no size, so splat extents are size-
+    silent. RoomPlan box dims own measurement truth for covered categories.
+  - Low box confidence is where the labels are wrong too (the spike room's
+    wardrobe arrives as a low-confidence "refrigerator"). RP-7 already
+    withholds the NAME there; withholding the authoritative-sounding size
+    that would attach to that wrong name follows the same rule.
+
+Only the LARGEST dimension is spoken, never a height or a footprint. The
+shipped `dims` triple carries no recoverable axis semantics: it is descending-
+sorted in all six real boxes examined, so the bed's 2.16 is a length while the
+wardrobe's 1.91 is a height, and nothing in the manifest distinguishes them.
+"About 2.2 m at its longest" is true under either reading; "2.2 m wide" is a
+coin flip. Unlocking height/footprint talk needs perception to ship the up-
+axis extent explicitly (box_placement already knows it as `i_up`) — until
+then this is not a hedge, it is the whole of what the data supports.
+
+CLEARANCES. Never a restated center distance — the charter forbids exactly
+that, and it stays forbidden. What IS derivable is a rigorous lower bound:
+for two boxes at center distance d with circumradii r = |dims|/2, no point of
+one is closer than d - (r_a + r_b) to the other, whatever their yaw. Emitted
+only when that bound is positive, rounded DOWN, and phrased "at least". Both
+objects must be RoomPlan boxes: a truncated splat extent understates the
+object, which would make the bound overstate the gap — the one direction the
+error must never go.
 
 Everything here is pure and deterministic — same manifest, same facts, byte
 for byte (this also keeps the rendered facts block prompt-cacheable). The
@@ -40,7 +73,16 @@ from dataclasses import dataclass
 
 # Bump when the derivation or rendering logic changes meaning — recorded per
 # turn (reproducibility triple: facts_version, prompt_version, model).
-FACTS_VERSION = 1
+# 2: sizes, size comparisons and clearance lower bounds (decision 0096).
+FACTS_VERSION = 2
+
+# Box confidence tiers whose dimensions may be spoken as a size. RoomPlan's
+# own grading; "low" is where the label is also unreliable (see SIZES above).
+_SIZE_TRUSTED_BOX_CONFIDENCE = frozenset({"high", "medium"})
+
+# Below this, a clearance bound is not worth saying — it is inside the
+# fusion pipeline's own position error and reads as false precision.
+_MIN_QUOTABLE_CLEARANCE_M = 0.1
 
 # Placed objects observed in >= this many frames with cluster spread <= the
 # threshold are "well observed"; other placed objects are "provisional".
@@ -67,6 +109,11 @@ class InventoryItem:
     name: str
     placed: bool
     confidence: str  # "well_observed" | "provisional" | "glimpsed"
+    # Server-formatted, verbatim-only size string, or None when this object
+    # has no trustworthy measurement (see SIZES in the module docstring).
+    # Present independently of `placed` — a RoomPlan box that failed placement
+    # still measured the thing.
+    size_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +132,8 @@ class SceneFacts:
     scene_id: str
     inventory: tuple[InventoryItem, ...]
     distances: tuple[DistanceFact, ...]
+    size_comparisons: tuple[str, ...]
+    clearances: tuple[str, ...]
     vertical_relations: tuple[str, ...]
     provenance: str
     limits: tuple[str, ...]
@@ -136,6 +185,43 @@ def _confidence(obj: dict) -> str:
     return "well_observed" if well else "provisional"
 
 
+def _trusted_box_dims(obj: dict) -> tuple[float, float, float] | None:
+    """The object's RoomPlan box dimensions when they may be spoken as a size,
+    else None. See SIZES in the module docstring for both gates."""
+    box = obj.get("roomplan_box")
+    if not isinstance(box, dict):
+        return None
+    if str(box.get("confidence") or "").lower() not in _SIZE_TRUSTED_BOX_CONFIDENCE:
+        return None
+    dims = box.get("dims")
+    if not isinstance(dims, (list, tuple)) or len(dims) != 3:
+        return None
+    try:
+        d = tuple(float(v) for v in dims)
+    except (TypeError, ValueError):
+        return None
+    if any(math.isnan(v) or math.isinf(v) or v <= 0 for v in d):
+        return None
+    return d  # type: ignore[return-value]
+
+
+def _longest_extent_text(dims: tuple[float, float, float]) -> str:
+    """"about 2.2 m at its longest" — the only size claim the shipped dims
+    triple supports (module docstring, SIZES)."""
+    return f"about {_format_m(max(dims))} m at its longest"
+
+
+def _circumradius(dims: tuple[float, float, float]) -> float:
+    """Half the box diagonal: no point of the box is farther than this from
+    its center, under any rotation. The whole clearance bound rests on it."""
+    return math.dist((0.0, 0.0, 0.0), dims) / 2.0
+
+
+def _floor_to_tenth(value: float) -> str:
+    """Round DOWN to 0.1 m. A clearance bound may only ever understate."""
+    return f"{math.floor(value * 10) / 10:.1f}"
+
+
 def _position(obj: dict) -> tuple[float, float, float] | None:
     wt = obj.get("world_transform")
     if not isinstance(wt, dict):
@@ -163,12 +249,17 @@ def derive_scene_facts(manifest: dict) -> SceneFacts:
     )
     names = _spoken_names(objects)
 
+    box_dims = [_trusted_box_dims(obj) for obj in objects]
+
     inventory = tuple(
         InventoryItem(
             object_id=str(obj.get("object_id") or f"obj_{i}"),
             name=names[i],
             placed=bool(obj.get("placed")),
             confidence=_confidence(obj),
+            size_text=(
+                _longest_extent_text(box_dims[i]) if box_dims[i] else None
+            ),
         )
         for i, obj in enumerate(objects)
     )
@@ -225,6 +316,44 @@ def derive_scene_facts(manifest: dict) -> SceneFacts:
                      f"is the {nearest[1]}",
             ))
 
+    # Size comparisons: ordinal, so freely speakable. Only over objects with a
+    # trustworthy measurement — ranking a truncated splat against a measured
+    # box would be a comparison between a fact and an artifact.
+    sized = [(names[i], d) for i, d in enumerate(box_dims) if d]
+    size_comparisons: list[str] = []
+    if len(sized) >= 2:
+        ranked = sorted(sized, key=lambda t: (-max(t[1]), t[0]))
+        size_comparisons.append(
+            f"of the measured pieces, the {ranked[0][0]} is the largest and "
+            f"the {ranked[-1][0]} is the smallest"
+        )
+        size_comparisons.append(
+            "largest to smallest, the measured pieces run: "
+            + ", ".join(name for name, _ in ranked)
+        )
+
+    # Clearance LOWER BOUNDS between measured boxes (module docstring).
+    clearances: list[str] = []
+    boxed_positioned = [
+        (names[i], pos, d)
+        for i, (obj, d) in enumerate(zip(objects, box_dims, strict=True))
+        if d and obj.get("placed") and (pos := _position(obj)) is not None
+    ]
+    for a in range(len(boxed_positioned)):
+        for b in range(a + 1, len(boxed_positioned)):
+            (name_a, pos_a, dims_a) = boxed_positioned[a]
+            (name_b, pos_b, dims_b) = boxed_positioned[b]
+            bound = (
+                math.dist(pos_a, pos_b)
+                - _circumradius(dims_a)
+                - _circumradius(dims_b)
+            )
+            if bound >= _MIN_QUOTABLE_CLEARANCE_M:
+                clearances.append(
+                    f"at least {_floor_to_tenth(bound)} m of clear space "
+                    f"separates the {name_a} from the {name_b}"
+                )
+
     placed_count = sum(1 for item in inventory if item.placed)
     glimpsed = [item for item in inventory if not item.placed]
 
@@ -262,11 +391,32 @@ def derive_scene_facts(manifest: dict) -> SceneFacts:
             "distances"
         )
 
+    unsized = [item.name for item in inventory if item.size_text is None]
+    if unsized and sized:
+        limits.append(
+            "nothing is measured for the size of: "
+            + ", ".join(f"the {n}" for n in unsized)
+            + " — no size, and no clearance involving them, can be given"
+        )
+    elif not sized:
+        limits.append(
+            "no piece in this room was measured well enough to give a size, "
+            "so there are no sizes and no clearances at all"
+        )
+    if sized:
+        limits.append(
+            "for a measured piece only its LONGEST dimension is known — "
+            "which way that length runs is not, so its height, width, depth "
+            "and footprint are all unavailable"
+        )
+
     return SceneFacts(
         facts_version=FACTS_VERSION,
         scene_id=scene_id,
         inventory=inventory,
         distances=tuple(distances),
+        size_comparisons=tuple(size_comparisons),
+        clearances=tuple(clearances),
         vertical_relations=tuple(vertical),
         provenance=provenance,
         limits=tuple(limits),
@@ -296,6 +446,7 @@ def render_facts_block(facts: SceneFacts) -> str:
     if facts.inventory:
         lines += [
             f"- the {item.name} — {_CONFIDENCE_PHRASE[item.confidence]}"
+            + (f"; {item.size_text}" if item.size_text else "")
             for item in facts.inventory
         ]
     else:
@@ -313,6 +464,17 @@ def render_facts_block(facts: SceneFacts) -> str:
     if comparatives:
         lines += ["", "Which is nearest (safe to say freely):"]
         lines += [f"- {t}" for t in comparatives]
+    if facts.size_comparisons:
+        lines += ["", "Which is bigger (safe to say freely):"]
+        lines += [f"- {t}" for t in facts.size_comparisons]
+    if facts.clearances:
+        lines += [
+            "",
+            "Clear space between pieces. These are floors, not measurements: "
+            "say them only as 'at least', never as an exact gap, and never "
+            "turn one into a width, a fit, or a walkway measurement:",
+        ]
+        lines += [f"- {t}" for t in facts.clearances]
     if facts.vertical_relations:
         lines += [
             "",
