@@ -476,3 +476,68 @@ class TestDispatch:
         assert man["roomplan"]["parse_ok"] is False
         assert man["roomplan"]["parse_failed"] == "room_json_missing"
         assert sam3d.calls == 8
+
+
+# ---------------------------------------------------------------------------
+# Privacy suppression through the census path (decision 0089)
+# ---------------------------------------------------------------------------
+
+class _PersonMask:
+    @staticmethod
+    def mask() -> np.ndarray:
+        m = np.zeros((64, 64), dtype=bool)
+        m[20:44, 4:20] = True
+        return m
+
+
+class _FakeSam3WithPerson:
+    """Segmentation as it looks once 'person' is in the prompt: a person
+    detected between the two real objects."""
+
+    def __init__(self):
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    def segment(self, pil, prompt):
+        self.calls += 1
+        self.prompts.append(prompt)
+        bed, lamp = _detections()
+        return [
+            bed,
+            {"label": "person", "instance_idx": 0, "bbox": [4, 20, 20, 44],
+             "score": 0.85, "mask": _PersonMask.mask()},
+            lamp,
+        ]
+
+
+class TestPrivacySuppression:
+    """The census two-pass path must partition suppressed detections out
+    before the plan is built — a person that survived into the plan would be
+    reconstructed, box-associated, and inventoried."""
+
+    def test_person_never_reaches_the_manifest_or_sam3d(self):
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        sam3 = _FakeSam3WithPerson()
+        sam3d = _FakeSam3D()
+
+        _uri, _s3, _s3d = _run(gcs, sam3=sam3, sam3d=sam3d)
+
+        assert "person" in sam3.prompts[0]  # it WAS segmented
+        man = _manifest(gcs)
+        # Scanned as text: a leak into ANY manifest field is a leak into
+        # api-public's scene_facts, whose world is this document.
+        assert "person" not in json.dumps(man).lower()
+        assert all("person" not in str(o.get("label", "")) for o in man["objects"])
+        # Reconstruction count is unchanged from the person-free run: the
+        # suppressed mask never entered the plan.
+        assert sam3d.calls == 6
+
+    def test_suppressed_union_lands_in_masks_npz_for_the_shell(self):
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        _run(gcs, sam3=_FakeSam3WithPerson())
+
+        raw = gcs.blobs[f"{_OUT}/scenes/{_SCENE}/frames/0000/masks.npz"]
+        with np.load(io.BytesIO(raw)) as npz:
+            assert npz["masks"].shape[0] == 2  # bed + lamp, person absent
+            union = npz["suppressed"]
+        assert np.array_equal(union, _PersonMask.mask())

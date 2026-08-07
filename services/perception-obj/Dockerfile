@@ -183,6 +183,7 @@ COPY services/perception-obj/process_receiver.py /app/process_receiver.py
 COPY services/perception-obj/oidc.py /app/oidc.py
 COPY services/perception-obj/receiver_repo.py /app/receiver_repo.py
 COPY services/perception-obj/fcm.py /app/fcm.py
+COPY services/perception-obj/privacy.py /app/privacy.py
 COPY services/perception-obj/placement.py /app/placement.py
 COPY services/perception-obj/fusion.py /app/fusion.py
 COPY services/perception-obj/reproject.py /app/reproject.py
@@ -209,9 +210,19 @@ COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 # a missing pip install would not crash — the 0069 fallback rule would
 # silently null every family forever, which the build must catch instead.
 RUN python -c "import placement, fusion, reproject, sampling, census_sampling, \
-budget, room_planes, roomplan_room, contact_priors, box_placement, \
+budget, room_planes, roomplan_room, contact_priors, box_placement, privacy, \
 shell_geometry, shell_envelope, shell_observation, shell_material, \
 shell_receiver, shell_enqueue, anthropic"
+
+# Privacy suppression must be ARMED in the image (decision 0089). privacy.py
+# is a deferred import inside /process, so a missing COPY passes every probe
+# and then silently ships people again — worse than a crash, because the
+# pipeline keeps working. Assert the default concept is live at build time.
+RUN python -c "\
+import privacy; \
+assert 'person' in privacy.SUPPRESSED_CONCEPTS, privacy.SUPPRESSED_CONCEPTS; \
+assert 'person' in privacy.segmentation_prompt('chair,bed'); \
+print('privacy suppression armed:', privacy.SUPPRESSED_CONCEPTS)"
 
 ENV PORT=8080
 EXPOSE 8080

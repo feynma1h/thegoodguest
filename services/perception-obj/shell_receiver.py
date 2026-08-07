@@ -62,6 +62,7 @@ from typing import Any
 import numpy as np
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from privacy import read_suppressed
 from process_receiver import (
     EnvironmentalError,
     PoisonError,
@@ -575,6 +576,7 @@ def _load_frame_samples(
             masks_bytes = _download_gcs_uri(masks_uri)
             with np.load(io.BytesIO(masks_bytes)) as npz:
                 masks = npz["masks"]
+                suppressed = read_suppressed(npz)
         except PoisonError:
             logger.warning("shell: frame %s masks.npz missing; skipping frame", idx)
             continue
@@ -588,6 +590,22 @@ def _load_frame_samples(
         else:
             exclusion = np.zeros(rgb.shape[:2], dtype=bool)
 
+        # Suppressed pixels (decision 0089) join the exclusion union — the
+        # 0066 mechanism, unchanged — AND travel separately, because evidence
+        # crops must additionally REJECT a tile a person stood in rather than
+        # merely leave those pixels unsampled. None on every pre-0089
+        # masks.npz, which degrades to exactly the old behaviour.
+        if suppressed is not None:
+            if suppressed.shape != rgb.shape[:2]:
+                suppressed = resize_mask_to(
+                    suppressed, (rgb.shape[1], rgb.shape[0])
+                )
+            exclusion = exclusion | suppressed
+            logger.info(
+                "privacy: shell frame %s suppressed pixels=%d",
+                idx, int(suppressed.sum()),
+            )
+
         samples.append(
             FrameSample(
                 frame_index=idx,
@@ -595,6 +613,7 @@ def _load_frame_samples(
                 exclusion_mask=exclusion,
                 pose=frame.camera_pose,
                 intrinsics=frame.intrinsics,
+                suppressed_mask=suppressed,
             )
         )
     return samples, rgb_missing
@@ -631,9 +650,9 @@ def _observe_planes(
         plane_results[key] = (obs, mat)
         logger.info(
             "shell: scene %s plane %s observed=%.3f texels=%d crops=%d "
-            "family=%s albedo=%s",
+            "suppressed_texels=%d family=%s albedo=%s",
             scene_id, key, obs.observed_fraction, obs.texel_count,
-            len(obs.crops), mat.family, mat.albedo_hex,
+            len(obs.crops), obs.suppressed_texels, mat.family, mat.albedo_hex,
         )
     return plane_results
 
