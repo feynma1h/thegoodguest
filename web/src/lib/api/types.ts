@@ -131,6 +131,13 @@ export interface ShellWallEntryV3 {
   wall_id: string;
   polygon: [number, number, number][]; // N>=3, interior-fronting winding
   measured_quad?: [number, number, number][]; // anchor_envelope only
+  // roomplan only, and only on a wall the server co-planarized with its
+  // neighbours (decision 0082's kink fix): the CapturedRoom polygon as
+  // MEASURED, beside the rendered one, which is projected onto the
+  // group's mean plane. provenance.coplanarized_with names the group.
+  // Same honesty invariant as measured_quad — never a substitute for
+  // `polygon`, which is always what renders.
+  measured_polygon?: [number, number, number][];
   classification: string | null;
   confidence: string | null; // "high" | "medium" | "low" (roomplan); null (envelope)
   openings: ShellOpeningEntry[];
