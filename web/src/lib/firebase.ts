@@ -3,19 +3,28 @@
  * lib/api/index.ts so mock/live-local bundles never pull the SDK).
  *
  * Decision 0051: identity is the iOS capture app's Firebase user, upgraded
- * THERE from anonymous to a linked Sign in with Apple credential (linking
- * preserves the UID). The browser signs in with the same Apple ID and reads
- * that UID's scenes. The web is a READER of identity, never a creator:
+ * THERE from anonymous to a linked federated credential (linking preserves
+ * the UID). The browser signs in with the same identity and reads that UID's
+ * scenes. The web is a READER of identity, never a creator:
  *
  *   - No anonymous sign-in here anymore. A browser-minted anonymous UID owns
  *     nothing and can never own anything (capture is iOS-only); it existed
  *     solely as the pre-0051 dev identity.
- *   - signInWithApple() refuses to create a Firebase user. If the sign-in
- *     comes back isNewUser, the fresh user is deleted on the spot and
- *     AppleIdNotLinkedError is thrown. An empty web-born account would
- *     permanently claim the Apple ID, and the LATER iOS link attempt — from
- *     the phone whose UID owns the actual rooms — would then hit a conflict
- *     with an account that owns nothing. Identity roots on the phone.
+ *   - Every sign-in here refuses to CREATE a Firebase user. If the popup
+ *     comes back isNewUser, the fresh user is deleted on the spot and a
+ *     typed IdentityNotLinkedError is thrown. An empty web-born account
+ *     would permanently claim that identity, and the LATER iOS link attempt
+ *     — from the phone whose UID owns the actual rooms — would then hit
+ *     credential-already-in-use against an account that owns nothing.
+ *     Identity roots on the phone.
+ *
+ * Decision 0094 adds Google alongside Apple. The never-create rule is
+ * PROVIDER-AGNOSTIC — the failure it prevents is identical for Google — so
+ * signInWithGoogle runs the same guard through the same code path. Apple
+ * stays the primary: it is the credential iOS links, and the only one whose
+ * refusal branch resolves by doing the iOS link. See 0094 for the recorded
+ * asymmetry (iOS links Apple only today, so a Google sign-in succeeds only
+ * for an account that already carries a google.com credential).
  *
  * Config comes from NEXT_PUBLIC_FIREBASE_* (see .env.example; the committed
  * .env.production carries the deploy build's values). The registered app is
@@ -27,22 +36,53 @@ import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import {
   getAdditionalUserInfo,
   getAuth,
+  GoogleAuthProvider,
   OAuthProvider,
   signInWithPopup,
   signOut,
   type Auth,
+  type AuthProvider,
   type User,
 } from "firebase/auth";
 
-/** The Apple ID has no roomstudio account yet — sign in on iOS first.
- * `message` is display-ready product copy. */
-export class AppleIdNotLinkedError extends Error {
+/**
+ * This identity has no roomstudio account yet, and the web refuses to make
+ * one. `message` is display-ready product copy; `providerId` is the raw
+ * Firebase id for logs and tests.
+ */
+export class IdentityNotLinkedError extends Error {
+  constructor(readonly providerId: string, message: string) {
+    super(message);
+    this.name = "IdentityNotLinkedError";
+  }
+}
+
+/** Apple ID with no account behind it — sign in on iOS first. */
+export class AppleIdNotLinkedError extends IdentityNotLinkedError {
   constructor() {
     super(
+      "apple.com",
       "That Apple ID isn’t holding any rooms yet. Open the capture app on " +
         "your iPhone and sign in there first — your rooms follow it here.",
     );
     this.name = "AppleIdNotLinkedError";
+  }
+}
+
+/**
+ * Google account with no account behind it. The copy deliberately does NOT
+ * promise that signing in on the iPhone will fix it: iOS links Apple only
+ * (0094), and Google reaches an iOS-rooted account only when that account
+ * already carries a matching google.com credential.
+ */
+export class GoogleAccountNotLinkedError extends IdentityNotLinkedError {
+  constructor() {
+    super(
+      "google.com",
+      "That Google account isn’t holding any rooms yet. Rooms live with the " +
+        "account you signed into on your iPhone — sign in with that one.",
+    );
+    this.name = "GoogleAccountNotLinkedError";
   }
 }
 
@@ -102,16 +142,19 @@ export async function getFirebaseIdToken(): Promise<string | null> {
 }
 
 /**
- * Sign in with the Apple ID that was linked on iOS. Throws
- * AppleIdNotLinkedError — after deleting the just-created user — when this
- * Apple ID has no account yet (see module docstring for why the web must
- * never keep one). Popup-flow errors (closed popup etc.) propagate to the
- * caller untouched.
+ * The one sign-in path. Runs the popup, then the never-create guard: a
+ * sign-in that CREATED a user is undone (delete, or sign-out if the delete
+ * fails) and refused with `makeError()`. Popup-flow errors (closed popup
+ * etc.) propagate to the caller untouched — the button decides what to show.
+ *
+ * Both providers share this body on purpose: the guard is the security
+ * property, and a second copy of it is a second place for it to rot.
  */
-export async function signInWithApple(): Promise<User> {
+async function signInAsReader(
+  provider: AuthProvider,
+  makeError: () => IdentityNotLinkedError,
+): Promise<User> {
   const a = getFirebaseAuth();
-  const provider = new OAuthProvider("apple.com");
-  provider.addScope("email");
   const credential = await signInWithPopup(a, provider);
   if (getAdditionalUserInfo(credential)?.isNewUser) {
     try {
@@ -123,9 +166,31 @@ export async function signInWithApple(): Promise<User> {
       // is the lesser evil and the retry copy points at iOS anyway.
       await signOut(a);
     }
-    throw new AppleIdNotLinkedError();
+    throw makeError();
   }
   return credential.user;
+}
+
+/**
+ * Sign in with the Apple ID that was linked on iOS. Throws
+ * AppleIdNotLinkedError — after deleting the just-created user — when this
+ * Apple ID has no account yet (see module docstring for why the web must
+ * never keep one).
+ */
+export async function signInWithApple(): Promise<User> {
+  const provider = new OAuthProvider("apple.com");
+  provider.addScope("email");
+  return signInAsReader(provider, () => new AppleIdNotLinkedError());
+}
+
+/**
+ * Sign in with Google (decision 0094). Same guard, same reason: refuses to
+ * create, throws GoogleAccountNotLinkedError after undoing the sign-in.
+ */
+export async function signInWithGoogle(): Promise<User> {
+  const provider = new GoogleAuthProvider();
+  provider.addScope("email");
+  return signInAsReader(provider, () => new GoogleAccountNotLinkedError());
 }
 
 /** Sign out — a real account operation since decision 0051 landed; the
