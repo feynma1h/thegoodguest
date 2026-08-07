@@ -335,11 +335,14 @@ class TestCrossLabelDedup:
         assert out[0]["label"] == "artwork"  # best score wins, label kept
         assert out[0]["deduped_observations"] == 2
 
-    def test_without_census_all_three_ship(self):
+    def test_without_census_still_collapses(self):
+        """Fork (a), resolved always-on at the RP-8 walk: the cross-label
+        gate protects no-census scenes too (it was measured on 247003de, a
+        LIDAR_ARKIT capture the census keying left unprotected)."""
         ctx, frames = self._triple_scene()
         ctx.room = None
         out = fusion.fuse_scene_objects(frames, ctx)
-        assert len(out) == 3  # today's behaviour: labels never merge
+        assert len(out) == 1
 
     def test_nested_parent_not_absorbed(self):
         """A small mask genuinely inside a larger different-label mask is
@@ -400,13 +403,14 @@ class TestDepthTrust:
         assert out[0]["method"] == "depth_fit"
         assert "depth_trust_demoted" not in out[0]["quality"]
 
-    def test_without_census_bad_rms_still_ships(self):
-        """Today's behaviour preserved on non-roomplan scenes."""
+    def test_without_census_bad_rms_also_demotes(self):
+        """Fork (a): specular depth is untrustworthy on every tier, not
+        just census scenes — the no-census mirror demotes identically."""
         ctx, frames = self._mirror_scene(nn_rms=0.1959)
         ctx.room = None
         out = fusion.fuse_scene_objects(frames, ctx)
-        assert out[0]["placed"] is True
-        assert out[0]["method"] == "depth_fit"
+        assert out[0]["method"] != "depth_fit"
+        assert out[0]["quality"].get("depth_trust_demoted") is True
 
 
 # ---------------------------------------------------------------------------
@@ -449,11 +453,12 @@ class TestSilhouetteSpan:
         assert "scale_suspect" not in obj
         assert obj["quality"]["silhouette_span_ratio"] >= 0.5
 
-    def test_without_census_no_ratio_computed(self):
+    def test_without_census_ratio_also_computed(self):
+        """Fork (a): the span instrument reads on every refined scene."""
         ctx, frames = self._rug_scene(splat_scale=0.3)
         ctx.room = None
         out = fusion.fuse_scene_objects(frames, ctx)
-        assert "silhouette_span_ratio" not in out[0]["quality"]
+        assert "silhouette_span_ratio" in out[0]["quality"]
 
 
 # ---------------------------------------------------------------------------

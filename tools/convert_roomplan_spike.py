@@ -78,6 +78,18 @@ QUAT_NORM_TOLERANCE = 1e-3  # mirrors services/api-internal/validation.py
 _ID_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # uuid.NAMESPACE_DNS
 
 
+def _stable_v4_uuid(name: str) -> str:
+    """Deterministic id carrying the UUIDv4 version/variant layout.
+
+    The live mint contract rejects any bundle_id whose version nibble isn't 4
+    (api-public _validate_uuid4 — iOS mints real UUIDv4s; found live at RP-8:
+    the plain uuid5 default 400'd with invalid_bundle_id before this fix).
+    Derive from uuid5 for run-id stability, then stamp the v4 version/variant
+    bits the way uuid.UUID(int=..., version=4) canonicalizes them.
+    """
+    return str(uuid.UUID(int=uuid.uuid5(_ID_NAMESPACE, name).int, version=4))
+
+
 def _fail(msg: str) -> None:
     print(f"ERROR: {msg}")
     sys.exit(1)
@@ -138,9 +150,9 @@ def main() -> None:
     run_id = run_start["run_id"]
     wall_dt = _dt.datetime.fromisoformat(run_start["wall"].replace("Z", "+00:00"))
 
-    bundle_id = (args.bundle_id or str(uuid.uuid5(_ID_NAMESPACE, f"roomstudio-spike:{run_id}"))).lower()
+    bundle_id = (args.bundle_id or _stable_v4_uuid(f"roomstudio-spike:{run_id}")).lower()
     user_id = args.user_id or f"spike:{run_id}"
-    device_id = str(uuid.uuid5(_ID_NAMESPACE, f"roomstudio-spike-device:{run_id}")).lower()
+    device_id = _stable_v4_uuid(f"roomstudio-spike-device:{run_id}").lower()
 
     keyframes = [json.loads(line) for line in (run / "keyframes.ndjson").open()]
     if not keyframes:
