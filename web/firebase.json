@@ -2,7 +2,14 @@
   "hosting": {
     "public": "out",
     "cleanUrls": true,
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "dev-fixtures/**"],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "dev-fixtures/**",
+      "hero/piece.json",
+      "hero/*.ply"
+    ],
     "headers": [
       {
         "source": "**",
