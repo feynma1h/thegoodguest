@@ -31,6 +31,10 @@ RUNTIME_SA_NAME="api-public-runtime"
 RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 BUNDLE_BUCKET="roomstudio-captures"
+# Account deletion (decision 0095) erases a user's rendered rooms as well as
+# their raw captures, so the runtime SA needs delete on BOTH buckets. Must
+# match PERCEPTION_OUTPUTS_BUCKET in infra/api-public.env.yaml.
+OUTPUTS_BUCKET="roomstudio-perception-outputs"
 
 # Secret Manager secret holding the Anthropic API key for the conversation
 # guest model (decision 0058). The secret VALUE is operator-managed; this
@@ -96,6 +100,47 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUNDLE_BUCKET}" \
     --project="${PROJECT_ID}" 2>/dev/null || {
     echo "  Note: bucket ${BUNDLE_BUCKET} may not exist yet — re-run after bucket creation."
 }
+
+# api-public-runtime: outputs bucket. Two distinct needs, and the second is why
+# this is objectAdmin rather than objectViewer:
+#   READ  — /scenes/{id}/assets fetches the manifest and shell to return them
+#           verbatim, and signs splat URLs (decision 0054).
+#   DELETE — DELETE /account erases scenes/{scene_id}/** for the caller
+#           (decision 0095). Without delete the endpoint cannot finish: it
+#           returns 202 "call again" forever while the blobs stay put, which
+#           looks like progress and is not.
+# Granted here rather than as a one-off so a fresh project gets a working
+# deletion path, not one that silently no-ops.
+gcloud storage buckets add-iam-policy-binding "gs://${OUTPUTS_BUCKET}" \
+    --member="serviceAccount:${RUNTIME_SA}" \
+    --role="roles/storage.objectAdmin" \
+    --project="${PROJECT_ID}" 2>/dev/null || {
+    echo "  Note: bucket ${OUTPUTS_BUCKET} may not exist yet — re-run after bucket creation."
+}
+
+# api-public-runtime: delete the Firebase Auth user, the LAST step of
+# DELETE /account (decision 0095). A CUSTOM role holding exactly
+# firebaseauth.users.delete: the predefined roles/firebaseauth.admin would also
+# grant users.create/update/get/sendEmail and the whole auth-config surface,
+# none of which this service touches — it only ever removes the caller's own
+# identity, after their data is already gone.
+#
+# Found by probing the deployed endpoint 2026-08-08: without this the data half
+# succeeds in full and then delete_user() raises INSUFFICIENT_PERMISSION, so the
+# route returns 500 with the user's rooms erased and their login still working,
+# and every retry fails the same way. Unit tests cannot catch it — they inject a
+# fake auth client. See decision 0103.
+gcloud iam roles describe apiPublicIdentityDeleter --project="${PROJECT_ID}" \
+    >/dev/null 2>&1 \
+  || gcloud iam roles create apiPublicIdentityDeleter --project="${PROJECT_ID}" \
+        --title="api-public identity deleter" \
+        --description="Delete a Firebase Auth user; DELETE /account only (0095)." \
+        --permissions=firebaseauth.users.delete --stage=GA >/dev/null
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${RUNTIME_SA}" \
+    --role="projects/${PROJECT_ID}/roles/apiPublicIdentityDeleter" \
+    --condition=None --quiet >/dev/null
+echo "  apiPublicIdentityDeleter granted to api-public-runtime."
 
 # api-public-runtime: read the Anthropic API key at runtime (conversation
 # stage 1, decision 0058). The grant is SECRET-scoped, not project-scoped.
