@@ -51,6 +51,15 @@ export interface FusedObject {
   reason?: string; // present when placed is false
   splat_gcs_uri: string | null;
   world_transform: WorldTransform | null;
+  /** Present only when the splat overshoots its measured box (0104). */
+  splat_clip?: {
+    kind: string;
+    margin_m: number;
+    center_world: [number, number, number];
+    half_extents_m: [number, number, number];
+    yaw_rad: number;
+    removed_fraction: number;
+  } | null;
   quality?: Record<string, number | string | null>;
 }
 
@@ -274,6 +283,30 @@ export interface PositionedSplat {
    * server-side; if it ever ships, this union is its landing shape.
    */
   scale: number | [number, number, number];
+  /**
+   * Optional clip volume (decision 0104): an oriented box, in world
+   * coordinates, outside which this splat's points are not rendered.
+   *
+   * Box-anchored objects take their position and extent from a RoomPlan
+   * box the operator verified 9/9, but their appearance from a splat
+   * reconstructed off one view — so a mis-proportioned splat can reach
+   * well past the measurement it is dressed in. The 0085 walk found a bed
+   * overhanging its own footprint by 0.44 m, into the table and the chair,
+   * in two independent rooms. That mass is known-false, and the server
+   * declines to render it rather than moving or rescaling the object to
+   * hide it.
+   *
+   * Optional by design: a renderer that ignores this draws exactly what it
+   * drew before.
+   */
+  clip?: SplatClip;
+}
+
+/** An oriented world-space box; yaw-only, matching RoomPlan boxes. */
+export interface SplatClip {
+  center_world: [number, number, number];
+  half_extents_m: [number, number, number];
+  yaw_rad: number;
 }
 
 /**
@@ -336,6 +369,15 @@ export function assembleScene(assets: SceneAssets): AssembledScene {
         position: obj.world_transform.position,
         rotation_xyzw: obj.world_transform.rotation_xyzw,
         scale: obj.world_transform.scale,
+        ...(obj.splat_clip && obj.splat_clip.kind === "roomplan_box"
+          ? {
+              clip: {
+                center_world: obj.splat_clip.center_world,
+                half_extents_m: obj.splat_clip.half_extents_m,
+                yaw_rad: obj.splat_clip.yaw_rad,
+              },
+            }
+          : {}),
       });
     } else {
       unrenderable.push(obj);

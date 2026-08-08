@@ -238,12 +238,19 @@ _SPAN_MIN = float(os.environ.get("PLACEMENT_SPAN_MIN", "0.5"))
 _CROSS_LABEL_3D_MIN = float(os.environ.get("PLACEMENT_CROSS_LABEL_3D_MIN", "0.5"))
 # Labels that SAM confuses for one physical object, beyond exact equality.
 # "|"-separated groups; same-label pairs always qualify.
+#
+# These must span BOTH vocabularies. A box-anchored object is labelled with
+# its RoomPlan CATEGORY, not a SAM label, so a category missing here can
+# never dedup against the SAM detections of the same physical thing.
+# `storage` was the one gap (decision 0104): rp7's nightstand shipped both
+# as a storage box and as a free `desk` splat 0.3 m away, and nothing could
+# collapse them. `television` is the same alias for the tv/monitor group.
 _CROSS_LABEL_3D_GROUPS = [
     frozenset(x.strip().lower() for x in grp.split(",") if x.strip())
     for grp in os.environ.get(
         "PLACEMENT_CROSS_LABEL_3D_GROUPS",
         "tv,television,monitor"
-        "|desk,table,nightstand,cabinet,dresser,stool,bench,shelf,bookshelf"
+        "|desk,table,nightstand,cabinet,dresser,stool,bench,shelf,bookshelf,storage"
         "|artwork,painting,poster,frame,mirror"
         "|bed,sofa,couch",
     ).split("|")
@@ -291,6 +298,82 @@ _SUPPORT_CLASSES = frozenset(
 )
 _SUPPORT_SNAP_M = float(os.environ.get("PLACEMENT_SUPPORT_SNAP_M", "0.35"))
 _SUPPORT_XZ_PAD_M = float(os.environ.get("PLACEMENT_SUPPORT_XZ_PAD_M", "0.15"))
+
+# Support snap v2 (decision 0104): the surfaces a small object may rest on
+# when NO RoomPlan box covers it. 0082 deferred these deliberately — "an
+# unmeasured support surface would move one estimate onto another" — and
+# the 0085 walk collected the bill: the lamp and the TV never rest, because
+# the nightstand beneath them is a depth_fit object with no box, so v1 had
+# nothing to snap to. Measured on the walked rooms: the monitor floats
+# 0.221 m above the table it belongs on, the lamp sinks 0.058 m into the
+# nightstand.
+#
+# The v1 objection stands and is answered by ORDERING, not by ignoring it:
+# a measured box top always wins over a splat top when both are in reach,
+# so a splat surface is consulted only where measurement is silent. The
+# supporter must itself be a furniture class that HAS a top surface — a
+# lamp never supports a TV.
+# Deliberately just the one class the walk measured. Floors for bed, sofa,
+# door and wardrobe were drafted and CUT: no walked room produced a
+# collapsed one, and the drafted values demoted legitimate small-geometry
+# test fixtures — i.e. the only evidence they generated was evidence
+# against themselves. Add a class when a walk produces a collapse in it.
+_LABEL_SCALE_FLOOR_DEFAULT = "tv:0.35|television:0.35"
+
+
+def _parse_scale_floors(raw: str) -> dict[str, float]:
+    """"tv:0.35|bed:1.4" -> {label: minimum longest extent in metres}."""
+    out: dict[str, float] = {}
+    for part in raw.split("|"):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        label, value = part.split(":", 1)
+        try:
+            out[label.strip().lower()] = float(value)
+        except ValueError:
+            continue
+    return out
+
+
+# Label-aware scale floor (walk class 4, decision 0104). The textile
+# silhouette-span gate FLAGS collapse-into-cloud degeneracy but never acts
+# on it (0082, flag-only) — and on the walked rooms it did not even fire
+# for the 0.245 m "television" the operator found hanging in the air where
+# a monitor should be. Flagging is not fixing: a 24 cm television is not a
+# small television, it is a failed reconstruction, and shipping it as
+# placed asserts a measurement nobody made.
+#
+# So: for labels whose real-world size has an unambiguous floor, an object
+# whose LONGEST extent falls below it is demoted to honest inventory
+# rather than rendered. Never a rescale — there is no measurement to
+# rescale TO; the house rule is that a guessed transform is never emitted.
+# Box-anchored objects are exempt: their extents are RoomPlan measurement.
+# The map is deliberately short — only classes where the floor cannot be
+# argued with. A doll's-house prop of any of these is a mislabel anyway.
+_LABEL_SCALE_FLOOR_M = _parse_scale_floors(
+    os.environ.get("PLACEMENT_LABEL_SCALE_FLOOR_M", _LABEL_SCALE_FLOOR_DEFAULT)
+)
+
+_SUPPORT_SURFACE_CLASSES = frozenset(
+    s.strip().lower()
+    for s in os.environ.get(
+        "PLACEMENT_SUPPORT_SURFACE_CLASSES",
+        "table,desk,nightstand,cabinet,dresser,bookshelf,shelf,sideboard,console,stand",
+    ).split(",")
+    if s.strip()
+)
+# Percentile for a splat's top surface — the extreme max is a stray
+# gaussian, the same reason extents are percentile-clipped everywhere else.
+_SUPPORT_SPLAT_TOP_PCTL = float(
+    os.environ.get("PLACEMENT_SUPPORT_SPLAT_TOP_PCTL", "98")
+)
+# How far a box-anchored splat's rendered top may stand proud of the
+# measured box top before the measurement is trusted instead. Matches the
+# splat-clip margin: past it nothing is rendered anyway.
+_SUPPORT_TOP_MAX_PROUD_M = float(
+    os.environ.get("PLACEMENT_SUPPORT_TOP_MAX_PROUD_M", "0.10")
+)
 
 
 def _refinement_enabled() -> bool:
@@ -1178,40 +1261,190 @@ def _demote_on_opening_geometry(obj: dict, room) -> dict:
     return obj
 
 
-def _snap_onto_support(obj: dict, boxes: list, ctx: RefinementContext) -> dict:
-    """Walk class 5 (v1): rest a small-class object ON the nearest RoomPlan
-    box top when its bottom hovers or sinks within reach over that box's
-    footprint. Box tops are measured geometry; vertical shift only,
-    bounded by construction."""
+def _apply_label_scale_floor(obj: dict) -> dict:
+    """Walk class 4: demote a placed object whose longest extent is below
+    the unambiguous floor for its label — a collapsed reconstruction, not a
+    small object. Pure (no ctx, no IO); box-anchored objects are exempt
+    because their extents are RoomPlan measurement."""
+    if not obj.get("placed") or obj.get("roomplan_box"):
+        return obj
+    floor = _LABEL_SCALE_FLOOR_M.get((obj.get("label") or "").strip().lower())
+    if floor is None:
+        return obj
+    extents = obj.get("extent_m_sorted") or []
+    if not extents:
+        return obj
+    longest = float(extents[0])
+    if longest >= floor:
+        return obj
+    logger.info(
+        "fusion: demoting %s (%s) -> implausible_scale_for_label "
+        "longest=%.3f floor=%.2f",
+        obj.get("object_id"), obj.get("label"), longest, floor,
+    )
+    out = _demote_object(obj, "implausible_scale_for_label")
+    quality = dict(out.get("quality") or {})
+    quality["longest_extent_m"] = round(longest, 4)
+    quality["label_scale_floor_m"] = floor
+    out["quality"] = quality
+    if "deduped_observations" in obj:
+        out["deduped_observations"] = obj["deduped_observations"]
+    return out
+
+
+def _clipped_world_points(obj: dict, ctx: RefinementContext):
+    """An object's world points as RENDERED — i.e. with its declared
+    `splat_clip` volume applied (decision 0104). Consumers that care what
+    the user actually sees must use this; the raw points remain right for
+    anything reasoning about the reconstruction itself."""
+    pts = _sampled_world_points(obj, ctx)
+    clip = obj.get("splat_clip")
+    if pts is None or not clip:
+        return pts
+    try:
+        center = np.asarray(clip["center_world"], dtype=np.float64)
+        half = np.asarray(clip["half_extents_m"], dtype=np.float64)
+        yaw = float(clip["yaw_rad"])
+    except (KeyError, TypeError, ValueError):
+        return pts
+    c, s = np.cos(yaw), np.sin(yaw)
+    R = np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+    local = (pts - center) @ R
+    inside = np.all(np.abs(local) <= half, axis=1)
+    return pts[inside] if int(inside.sum()) >= 8 else pts
+
+
+def _support_surfaces(
+    fused: list[dict], boxes: list, ctx: RefinementContext
+) -> list[dict]:
+    """Every surface a small object may come to rest on, built ONCE from
+    the pre-snap state so the pass is order-independent (a snap can never
+    change what another object rests on).
+
+    The contact height is the top of what is RENDERED, not the top of the
+    measurement. The 0085 walk is unambiguous that this is the quantity in
+    question: the lamp sat exactly on its nightstand's measured box top and
+    the operator still saw it sunk into the nightstand, because the splat
+    stands 0.058 m proud of the box. Position and footprint stay measured —
+    only the height the object lands at follows the render, which is the
+    only thing the complaint was ever about.
+
+    Box-anchored surfaces are listed first and win ties: their footprint
+    and centre are RoomPlan measurement, so a splat surface is consulted
+    only where measurement is silent (0082's objection, answered by
+    ordering rather than ignored)."""
+    box_surfaces: list[dict] = []
+    splat_surfaces: list[dict] = []
+    by_box: dict[str, dict] = {}
+    for obj in fused:
+        rb = obj.get("roomplan_box")
+        if rb and obj.get("placed"):
+            by_box[rb["box_id"]] = obj
+
+    for bi, box in enumerate(boxes or []):
+        dims = np.asarray(box.dimensions, dtype=np.float64)
+        box_top = float(box.center_world[1]) + dims[1] / 2.0
+        top = box_top
+        obj = by_box.get(f"box_{bi:02d}")
+        if obj is not None:
+            pts = _clipped_world_points(obj, ctx)
+            if pts is not None and pts.shape[0] >= 8:
+                rendered = float(np.percentile(pts[:, 1], _SUPPORT_SPLAT_TOP_PCTL))
+                # The measured top is the floor of the estimate and the clip
+                # margin its ceiling: a splat that under-reaches its box must
+                # not drag the surface down below the measurement.
+                top = max(box_top, min(rendered, box_top + _SUPPORT_TOP_MAX_PROUD_M))
+        box_surfaces.append({"kind": "box", "id": f"box_{bi:02d}", "top": top, "box": box})
+
+    for obj in fused:
+        if not obj.get("placed") or obj.get("roomplan_box"):
+            continue
+        if (obj.get("label") or "").strip().lower() not in _SUPPORT_SURFACE_CLASSES:
+            continue
+        pts = _clipped_world_points(obj, ctx)
+        if pts is None or pts.shape[0] < 8:
+            continue
+        splat_surfaces.append({
+            "kind": "splat",
+            "id": str(obj.get("object_id")),
+            "top": float(np.percentile(pts[:, 1], _SUPPORT_SPLAT_TOP_PCTL)),
+            "lo": pts[:, [0, 2]].min(axis=0),
+            "hi": pts[:, [0, 2]].max(axis=0),
+        })
+    splat_surfaces.sort(key=lambda s: s["id"])
+    return box_surfaces + splat_surfaces
+
+
+def _snap_onto_support(
+    obj: dict,
+    boxes: list,
+    ctx: RefinementContext,
+    surfaces: list[dict] | None = None,
+) -> dict:
+    """Walk class 5: rest a small-class object ON the surface beneath it
+    when its bottom hovers or sinks within reach over that surface's
+    footprint. Vertical shift only, bounded by construction.
+
+    v1 considered RoomPlan box tops alone. v2 (decision 0104) takes its
+    contact heights from `_support_surfaces` — the RENDERED tops — and
+    adds the splat tops of placed support-class objects, consulted only
+    when no box surface is in reach."""
     label = (obj.get("label") or "").strip().lower()
     if label not in _SUPPORT_CLASSES:
         return obj
     if obj.get("roomplan_box") or not obj.get("placed"):
         return obj
     wt = dict(obj.get("world_transform") or {})
-    if not wt or not boxes:
+    if not wt:
         return obj
-    pts = _sampled_world_points(obj, ctx)
+    pts = _clipped_world_points(obj, ctx)
     if pts is None:
         return obj
     bottom = float(pts[:, 1].min())
     center = np.asarray(wt["position"], dtype=np.float64)
-    best = None
-    for bi, box in enumerate(boxes):
-        dims = np.asarray(box.dimensions, dtype=np.float64)
-        top = float(box.center_world[1]) + dims[1] / 2.0
-        dy = top - bottom
+
+    if surfaces is None:
+        # Callers that only have boxes (and the v1 tests) still get v1
+        # behaviour: measured box tops, no rendered-top adjustment.
+        surfaces = [
+            {"kind": "box", "id": f"box_{bi:02d}",
+             "top": float(b.center_world[1]) + float(b.dimensions[1]) / 2.0,
+             "box": b}
+            for bi, b in enumerate(boxes or [])
+        ]
+
+    best_box = best_splat = None  # (|dy|, dy, source_id)
+    for surf in surfaces:
+        if surf["kind"] == "box":
+            box = surf["box"]
+            dims = np.asarray(box.dimensions, dtype=np.float64)
+            R = box.transform[:3, :3]
+            local = R.T @ (center - np.asarray(box.center_world, dtype=np.float64))
+            if (abs(local[0]) > dims[0] / 2.0 + _SUPPORT_XZ_PAD_M
+                    or abs(local[2]) > dims[2] / 2.0 + _SUPPORT_XZ_PAD_M):
+                continue
+        else:
+            if surf["id"] == str(obj.get("object_id")):
+                continue
+            lo, hi = surf["lo"] - _SUPPORT_XZ_PAD_M, surf["hi"] + _SUPPORT_XZ_PAD_M
+            if not (lo[0] <= center[0] <= hi[0] and lo[1] <= center[2] <= hi[1]):
+                continue
+        dy = surf["top"] - bottom
         if abs(dy) > _SUPPORT_SNAP_M:
             continue
-        R = box.transform[:3, :3]
-        local = R.T @ (center - np.asarray(box.center_world, dtype=np.float64))
-        if abs(local[0]) > dims[0] / 2.0 + _SUPPORT_XZ_PAD_M or abs(local[2]) > dims[2] / 2.0 + _SUPPORT_XZ_PAD_M:
-            continue
-        if best is None or abs(dy) < abs(best[0]):
-            best = (dy, bi)
+        slot = best_box if surf["kind"] == "box" else best_splat
+        if slot is None or abs(dy) < slot[0]:
+            if surf["kind"] == "box":
+                best_box = (abs(dy), dy, surf["id"])
+            else:
+                best_splat = (abs(dy), dy, surf["id"])
+
+    # A measured box surface wins outright; splat surfaces only where
+    # measurement is silent.
+    best = best_box or best_splat
     if best is None:
         return obj
-    dy, bi = best
+    _mag, dy, source = best
     if abs(dy) < 0.005:
         return obj
     out = dict(obj)
@@ -1220,14 +1453,14 @@ def _snap_onto_support(obj: dict, boxes: list, ctx: RefinementContext) -> dict:
     out["world_transform"] = wt
     quality = dict(out.get("quality") or {})
     quality["support_snap_m"] = round(dy, 4)
-    quality["support_box"] = f"box_{bi:02d}"
+    quality["support_box"] = source
     out["quality"] = quality
     constraints = list(out.get("constraints_applied") or [])
     constraints.append("on_top_of")
     out["constraints_applied"] = constraints
     logger.info(
-        "fusion: support snap %s (%s) onto box_%02d dy=%.3f",
-        obj.get("object_id"), obj.get("label"), bi, dy,
+        "fusion: support snap %s (%s) onto %s dy=%.3f",
+        obj.get("object_id"), obj.get("label"), source, dy,
     )
     return out
 
@@ -2023,6 +2256,12 @@ def fuse_scene_objects_with_meta(
     # snapping), then the 3D duplicate gate over raw placements, then the
     # geometric snaps (wall back-face / declip / support). All bounded
     # numpy; one budget check for the block keeps the honesty contract.
+    # Pure and IO-free, so it runs always-on beside the other long-tail
+    # gates (the fork-(a) precedent) and BEFORE the budget-gated block —
+    # a demoted object must not then be snapped onto a support.
+    for i in range(len(fused)):
+        fused[i] = _apply_label_scale_floor(fused[i])
+
     if _budget_allows(ctx):
         if room is not None:
             for i in range(len(fused)):
@@ -2035,10 +2274,11 @@ def fuse_scene_objects_with_meta(
                     continue
                 fused[i] = _snap_wall_class_object(fused[i], walls, ctx)
                 fused[i] = _declip_floor_class_object(fused[i], walls, ctx)
-        if boxes:
+        surfaces = _support_surfaces(fused, boxes, ctx)
+        if surfaces:
             for i in range(len(fused)):
                 if fused[i].get("placed"):
-                    fused[i] = _snap_onto_support(fused[i], boxes, ctx)
+                    fused[i] = _snap_onto_support(fused[i], boxes, ctx, surfaces)
     else:
         refinement_skipped = True
 
