@@ -39,6 +39,7 @@ from fastapi.testclient import TestClient
 import public_server as server
 from auth import NullTokenVerifier
 from conversation_repo import InMemoryConversationRepository
+from design_spec import InMemoryDesignSpecRepository
 from public_server import GuestModelError, InMemoryManifestFetcher
 from roomstudio_api_core.scene import Scene, SceneStatus
 from roomstudio_api_core.scene_read_repo import InMemorySceneReadRepository
@@ -165,6 +166,7 @@ def _wired(
     repo: InMemoryConversationRepository | None = None,
     manifest: dict | None = None,
     daily_quota: int = 100,
+    spec_repo=None,
 ):
     fetcher = InMemoryManifestFetcher()
     if manifest is not None:
@@ -183,6 +185,13 @@ def _wired(
         patch.object(
             server, "_guest_streamer",
             streamer if streamer is not None else FakeGuestStreamer(),
+        ),
+        # A fresh spec repo per test: the module-level one is process-wide,
+        # and an arrangement leaking between tests would change the facts a
+        # later test asserts on.
+        patch.object(
+            server, "_design_spec_repo",
+            spec_repo if spec_repo is not None else InMemoryDesignSpecRepository(),
         ),
         patch.object(server, "GUEST_DAILY_TURNS", daily_quota),
     ):
