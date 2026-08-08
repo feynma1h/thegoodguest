@@ -238,7 +238,18 @@ export default function SplatViewer({
 
     (async () => {
       try {
-        const [THREE, { OrbitControls }, { SparkRenderer, SplatMesh }] =
+        const [
+          THREE,
+          { OrbitControls },
+          {
+            SparkRenderer,
+            SplatMesh,
+            SplatEdit,
+            SplatEditSdf,
+            SplatEditSdfType,
+            SplatEditRgbaBlendMode,
+          },
+        ] =
           await Promise.all([
             import("three"),
             import("three/addons/controls/OrbitControls.js"),
@@ -427,6 +438,40 @@ export default function SplatViewer({
           if (typeof s.scale === "number") mesh.scale.setScalar(s.scale);
           else mesh.scale.set(...s.scale);
           scene.add(mesh);
+          // Clip volume (decision 0104): a box-anchored splat may reach
+          // past the measured box it is dressed in, and that mass is
+          // known-false — the server declares it rather than moving or
+          // rescaling the object to hide it. An inverted box SDF at zero
+          // opacity deletes everything outside; Spark scopes an edit to
+          // one mesh by parenting, so the SDF's LOCAL transform has to be
+          // the box expressed in the mesh's frame.
+          if (s.clip) {
+            mesh.updateMatrixWorld(true);
+            const boxWorld = new THREE.Matrix4().compose(
+              new THREE.Vector3(...s.clip.center_world),
+              new THREE.Quaternion().setFromAxisAngle(
+                new THREE.Vector3(0, 1, 0),
+                s.clip.yaw_rad,
+              ),
+              new THREE.Vector3(...s.clip.half_extents_m),
+            );
+            const local = new THREE.Matrix4()
+              .copy(mesh.matrixWorld)
+              .invert()
+              .multiply(boxWorld);
+            const sdf = new SplatEditSdf({
+              type: SplatEditSdfType.BOX,
+              invert: true, // the region is everything OUTSIDE the box
+              opacity: 0, // multiplied into alpha: outside disappears
+            });
+            local.decompose(sdf.position, sdf.quaternion, sdf.scale);
+            const edit = new SplatEdit({
+              rgbaBlendMode: SplatEditRgbaBlendMode.MULTIPLY,
+              sdfs: [sdf],
+            });
+            edit.add(sdf);
+            mesh.add(edit);
+          }
           return mesh;
         });
 

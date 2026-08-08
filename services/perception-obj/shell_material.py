@@ -69,7 +69,18 @@ WALL_FAMILIES = ("painted", "wallpaper", "tile", "exposed")
 # ---------------------------------------------------------------------------
 
 SHELL_MATERIAL_MODEL = os.environ.get("SHELL_MATERIAL_MODEL", "claude-sonnet-5")
-SHELL_MATERIAL_MIN_CONF = float(os.environ.get("SHELL_MATERIAL_MIN_CONF", "0.6"))
+# Raised 0.6 -> 0.75 on decision 0100's measurement. Across every preserved
+# real shell the admitted families are BIMODAL — six at 0.85-0.98 and one at
+# exactly 0.60, with the interval (0.60, 0.85) empty — and the floor answers
+# are the unstable ones: byte-identical evidence re-baked to a different
+# family (None -> "tile", "stone" -> "tile"), both returning exactly 0.60.
+# The gate is the default rather than a deploy-env override so offline
+# re-drives and production agree on what a shell says.
+#
+# Direction of error is safe: a raised gate can only yield family = None,
+# which is this module's own load-bearing fallback (a clean matte in the
+# MEASURED albedo, which this gate does not touch).
+SHELL_MATERIAL_MIN_CONF = float(os.environ.get("SHELL_MATERIAL_MIN_CONF", "0.75"))
 SHELL_MATERIAL_MIN_TEXELS = int(os.environ.get("SHELL_MATERIAL_MIN_TEXELS", "100"))
 
 # Albedo lightness band around the weighted 75th-percentile luminance:

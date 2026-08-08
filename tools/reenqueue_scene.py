@@ -303,7 +303,18 @@ def main(argv: list[str] | None = None) -> int:
                     help="print the decision and planned actions; change nothing")
     args = ap.parse_args(argv)
 
+    # The default is repo-relative, so a caller invoking this tool from
+    # anywhere but the repo root would silently lose every default and exit
+    # 3 with "misconfig" — which reads like a broken deploy config rather
+    # than a wrong working directory. Fall back to resolving a RELATIVE
+    # path against the repo root (this file's parent's parent). An explicit
+    # --env-file that the caller gave as a relative path still wins from
+    # cwd first, so nothing about a deliberate override changes.
     env_path = Path(args.env_file)
+    if not env_path.exists() and not env_path.is_absolute():
+        repo_relative = Path(__file__).resolve().parent.parent / args.env_file
+        if repo_relative.exists():
+            env_path = repo_relative
     env = {}
     if env_path.exists():
         env = parse_env_file(env_path)
