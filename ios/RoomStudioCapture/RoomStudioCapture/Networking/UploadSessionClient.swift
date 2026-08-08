@@ -100,10 +100,23 @@ private nonisolated struct RateLimitBody: Decodable {
 private nonisolated struct UploadSessionRequestBody: Encodable {
     let manifest: [UploadManifestEntry]
     let fcmToken: String?
+    /// Decision 0116's second input. The manifest says WHAT the client intends to
+    /// upload; this says WHETHER the URIs it already holds still work — one input
+    /// could not carry both questions, which is why a POST retry and a retry of a
+    /// dead session were indistinguishable.
+    ///
+    /// nil, NOT false, on the ordinary path: the synthesized encoder uses
+    /// encodeIfPresent for an Optional, so an ordinary mint puts the key nowhere
+    /// on the wire and its request stays byte-identical to the deployed 0035
+    /// shape. (The server reads absent and null the same way; this is about not
+    /// changing a request that already works.) Pinned by
+    /// UploadSessionForceRemintTests.
+    let forceRemint: Bool?
 
     enum CodingKeys: String, CodingKey {
         case manifest
-        case fcmToken = "fcm_token"
+        case fcmToken    = "fcm_token"
+        case forceRemint = "force_remint"
     }
 }
 
@@ -185,6 +198,13 @@ actor UploadSessionClient {
     ///     Pass `{ try await AuthManager.shared.currentIDToken() }`.
     ///   - fcmToken: FCM registration token for terminal-state push
     ///     notifications.
+    ///   - forceRemint: Decision 0116. Declares that the session URIs the caller
+    ///     already holds are dead, so the server must mint fresh ones for the
+    ///     same paths instead of replaying the stored ones. Set it ONLY on
+    ///     evidence — a 410, or a `failed_incomplete` scene naming missing paths
+    ///     — never on an ordinary POST retry: each forced mint spends a unit of
+    ///     the caller's daily mint quota, and the replay it suppresses is what
+    ///     makes an ordinary retry free.
     ///
     /// - Returns: Array of UploadSessionEntry. Map by relativePath — server
     ///   gives no ordering guarantee.
@@ -192,7 +212,8 @@ actor UploadSessionClient {
         bundleId: String,
         manifest: [UploadManifestEntry],
         tokenProvider: @Sendable () async throws -> String,
-        fcmToken: String? = nil
+        fcmToken: String? = nil,
+        forceRemint: Bool = false
     ) async throws -> [UploadSessionEntry] {
         var idToken = try await tokenProvider()
 
@@ -202,6 +223,7 @@ actor UploadSessionClient {
                 manifest: manifest,
                 idToken: idToken,
                 fcmToken: fcmToken,
+                forceRemint: forceRemint,
                 attempt: 0
             )
         } catch UploadSessionError.unauthorized {
@@ -212,9 +234,31 @@ actor UploadSessionClient {
                 manifest: manifest,
                 idToken: idToken,
                 fcmToken: fcmToken,
+                forceRemint: forceRemint,
                 attempt: 0
             )
         }
+    }
+
+    // MARK: - Wire body
+
+    /// The POST body, encoded.
+    ///
+    /// Factored out and left INTERNAL (not private) so the wire shape can be
+    /// pinned directly instead of inferred from an observed request — the whole
+    /// point of `forceRemint` being Optional is what it does to the bytes, and a
+    /// test that cannot see the bytes cannot pin it.
+    static func encodedRequestBody(
+        manifest: [UploadManifestEntry],
+        fcmToken: String?,
+        forceRemint: Bool
+    ) throws -> Data {
+        try JSONEncoder().encode(UploadSessionRequestBody(
+            manifest: manifest,
+            fcmToken: fcmToken,
+            // false → nil → the key is absent. See UploadSessionRequestBody.
+            forceRemint: forceRemint ? true : nil
+        ))
     }
 
     // MARK: - Private
@@ -224,6 +268,7 @@ actor UploadSessionClient {
         manifest: [UploadManifestEntry],
         idToken: String,
         fcmToken: String?,
+        forceRemint: Bool,
         attempt: Int,
         rateLimitHolds: Int = 0
     ) async throws -> [UploadSessionEntry] {
@@ -232,7 +277,8 @@ actor UploadSessionClient {
                 bundleId: bundleId,
                 manifest: manifest,
                 idToken: idToken,
-                fcmToken: fcmToken
+                fcmToken: fcmToken,
+                forceRemint: forceRemint
             )
         } catch UploadSessionError.serverError where attempt < maxRetries {
             let jitter = Double.random(in: 0..<1.0)
@@ -243,6 +289,7 @@ actor UploadSessionClient {
                 manifest: manifest,
                 idToken: idToken,
                 fcmToken: fcmToken,
+                forceRemint: forceRemint,
                 attempt: attempt + 1,
                 rateLimitHolds: rateLimitHolds
             )
@@ -266,6 +313,7 @@ actor UploadSessionClient {
                 manifest: manifest,
                 idToken: idToken,
                 fcmToken: fcmToken,
+                forceRemint: forceRemint,
                 attempt: attempt,
                 rateLimitHolds: rateLimitHolds + 1
             )
@@ -277,7 +325,8 @@ actor UploadSessionClient {
         bundleId: String,
         manifest: [UploadManifestEntry],
         idToken: String,
-        fcmToken: String?
+        fcmToken: String?,
+        forceRemint: Bool
     ) async throws -> [UploadSessionEntry] {
         let url = baseURL
             .appendingPathComponent("captures")
@@ -290,8 +339,9 @@ actor UploadSessionClient {
         request.setValue("application/json",    forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(idToken)",   forHTTPHeaderField: "Authorization")
 
-        let body = UploadSessionRequestBody(manifest: manifest, fcmToken: fcmToken)
-        request.httpBody = try JSONEncoder().encode(body)
+        request.httpBody = try Self.encodedRequestBody(
+            manifest: manifest, fcmToken: fcmToken, forceRemint: forceRemint
+        )
 
         let (data, response): (Data, URLResponse)
         do {
