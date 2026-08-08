@@ -5,7 +5,7 @@
 
 ## Context
 
-Executing decision 0067's chunks A–C (branch `placement-quality-build`, merged as `e72a256`). The build brief pinned verify-first probes V1–V3 with concrete pass criteria against the recorded scene-`25a14caf` observations. Three of those criteria met reality in ways worth recording: two brief contracts were amended by measured counterexamples, and one gate failed honestly, re-opening a fork 0067 had provisionally closed.
+Executing decision 0067's chunks A–C (branch `placement-quality-build`, merged as `3f26fcc`). The build brief pinned verify-first probes V1–V3 with concrete pass criteria against the recorded scene-`25a14caf` observations. Three of those criteria met reality in ways worth recording: two brief contracts were amended by measured counterexamples, and one gate failed honestly, re-opening a fork 0067 had provisionally closed.
 
 ## What we tried
 

@@ -23,7 +23,7 @@ ValueError: 'failed_invalid' is not a valid SceneStatus
 The api-public image was built from an older HEAD where the member did not yet exist in
 `packages/api-core/roomstudio_api_core/scene.py`. The deserialization call
 `SceneStatus(data["status"])` raises `ValueError` on any unknown member. The new member and
-the gate handler were introduced together in the same commit (`dea1b77`), so rebuilding
+the gate handler were introduced together in the same commit (`f1edf4a`), so rebuilding
 api-public from current HEAD was sufficient to fix both images in one step.
 
 ## What we chose

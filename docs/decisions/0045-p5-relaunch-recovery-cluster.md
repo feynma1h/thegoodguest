@@ -19,7 +19,7 @@ prerequisite for (a): without idempotent enqueue, the rehydration trigger would
 double-enqueue blobs and bundle.pb, corrupting retry state.
 
 This decision records the full cluster design so units (b) and (a) don't re-derive
-it. Unit (c) shipped in commit 5bb07c9.
+it. Unit (c) shipped in commit 7143de0.
 
 ## What we tried
 
@@ -158,7 +158,7 @@ forward here. The 12h staleness re-mint + the age=1day GCS lifecycle rule backst
 bounded retry: a zombie capture that exhausts all 10 cross-launch retries is poisoned to
 `.failed` and swept on the next launch.
 
-**Unit (c) shipped (commit 5bb07c9):**
+**Unit (c) shipped (commit 7143de0):**
 - `UploadPhase` enum on `UploadSessionRecord` — Codable legacy-safe; conservative
   decode default never yields `.complete`; `.complete` written on bundle.pb 200/201.
 - In-process one-shot latch (`bundlePbEnqueueInFlight`) — synchronous check-and-set
@@ -174,12 +174,12 @@ bounded retry: a zombie capture that exhausts all 10 cross-launch retries is poi
   `getAllTasks` await; existing call sites already used `try await` so no callers
   changed.
 
-**Unit (b) shipped (commit cc7aba5):** `onFatalBlobError` reclassification into
+**Unit (b) shipped (commit b793307):** `onFatalBlobError` reclassification into
 TERMINAL / DEFERRED-INTERRUPTED / DEFERRED-TRANSIENT; `.failed` + `failureReason`
 written to the persisted record on terminal paths; sibling-task cancellation on
 terminal; `crossLaunchRetryCount` persisted and bounded.
 
-**Unit (a) built + verified in suite (commits 658cc4a + test-pin bd8b86f):**
+**Unit (a) built + verified in suite (commits 27672d0 + test-pin 5da5784):**
 `rehydrateAllUnfinishedBundles()` + `rehydrateBundle(bundleId:record:)` on
 `BlobUploadManager`; trigger = a `.task` modifier in `RoomStudioCaptureApp`
 (foreground/swipe-up path); record-driven (no live `CaptureManager`). On every
@@ -210,12 +210,12 @@ separate disk-accumulation unit (CLAUDE.md "completed-capture disk accumulation"
 gap). It must not be conflated with (a)/(b)/(c).
 
 **Cluster status: code-complete, 162-green in suite.**
-(c) `5bb07c9`, (b) `cc7aba5`, (a) `658cc4a`, test-pin `bd8b86f`.
+(c) `7143de0`, (b) `b793307`, (a) `27672d0`, test-pin `5da5784`.
 The one remaining close item is the on-device OS-kill hardware gate: stage a
 force-quit after all blobs are uploaded and `bundle.pb` PUT is enqueued; reopen;
 confirm `bundle.pb` reaches GCS with no user interaction, GCS-authoritative,
 verified from Mac during the locked interval. Also verify `.task` fires on background
-OS-relaunch. `diag-bundlepb-reason-public` (`5bdd12f`) is the parked tool for
+OS-relaunch. `diag-bundlepb-reason-public` (`dc552ab`) is the parked tool for
 reading the redacted `reason=` on that route — do not delete.
 
 **Code-complete ≠ Gate-2b closed. The hardware gate is the close.**

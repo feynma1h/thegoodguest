@@ -10,7 +10,7 @@ built independently of the relaunch-recovery cluster (the other front). It
 polls `GET /scenes/by-bundle/{bundle_id}` against the frozen, smoke-verified
 `api-public-00006-quw` (asia-southeast1), single-sided per the 0035 pattern
 (read side is frozen, so single-siding is safe; client still compensates for
-known gaps). Landed at commit `4556e44`, suite 191-green (was 162).
+known gaps). Landed at commit `dbe3188`, suite 191-green (was 162).
 
 This note captures three design calls that are non-obvious enough that a future
 session would otherwise re-derive them — or, worse, "fix" them in the wrong

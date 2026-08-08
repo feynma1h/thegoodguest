@@ -10,7 +10,7 @@ Pro-only, assembly-first) had two documented risks parked against a hardware
 spike: a `sceneDepth`-strip caveat under `RoomCaptureSession(arSession:)`
 co-run, and an ARFrame-retention memory issue. The adjudication brief
 (decision 0075) added yaw-fidelity and census questions. A throwaway
-instrumented app (`ios/RoomPlanSpike/`, commit `db46eb6`) ran four runs on
+instrumented app (`ios/RoomPlanSpike/`, commit `46c2910`) ran four runs on
 the iPhone 16 Pro (iOS 26.5.2), sharing an ARSession configured exactly like
 production `CaptureManager`; the operator walked the resulting room against
 the real furniture. Artifacts + full instrument streams:

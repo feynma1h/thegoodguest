@@ -165,5 +165,5 @@ run D's suspend somehow races (bundle.pb lands before the force-quit), GCS
 shows it — degrade to repeating with force-quit DURING Phase-1 (kill while
 frames are still uploading; recovery machinery is the same, only the
 enqueued-not-landed precondition is weaker; record honestly which variant
-ran). `diag-bundlepb-reason-public` (`5bdd12f`) stays parked for reading a
+ran). `diag-bundlepb-reason-public` (`dc552ab`) stays parked for reading a
 redacted `reason=` if run E surfaces one.

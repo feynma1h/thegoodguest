@@ -33,7 +33,7 @@ applies there.
 
 **Checked whether the fix from 0005 was already present:** Yes — both new
 Dockerfiles already had the `--no-deps --force-reinstall "protobuf>=7.35.0"`
-step from the moment of the two-service split (commit `79e2e5e`). The workaround
+step from the moment of the two-service split (commit `b0c8629`). The workaround
 was not missing; it was in the wrong position.
 
 **Traced which layer undid the pin:** `packages/schemas/pyproject.toml` declares

@@ -14,7 +14,7 @@ REHEARSED BUT NOT YET EXECUTED** — it must run before the repo's first push
 ## Context
 
 `test_data/photos/` held nine HEIC photographs of a real bedroom, added in the
-repo's first commit (`6f19946`) and present in every tree since. They fed
+repo's first commit (`84b6cf7`) and present in every tree since. They fed
 `tools/build_test_bundle.py`, which synthesizes a `CaptureBundle` for
 contract-level backend testing without a phone.
 
