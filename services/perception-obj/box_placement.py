@@ -27,6 +27,11 @@ verified regime:
     not decisively enough to ship, `facing_flag: true` records the
     disagreement and RoomPlan's conventional mapping ships.
 
+Scale stays UNIFORM (the RP-8 A/B: per-axis stretch amplified truncation),
+so a mis-proportioned splat necessarily overshoots its box on some axis.
+That overshoot is declared as a `splat_clip` volume rather than hidden by
+moving or rescaling the object — see `splat_clip_block` and decision 0104.
+
 Association projects each box's footprint into each sampled frame (poses +
 intrinsics) and matches SAM masks by footprint overlap + a RoomPlan↔SAM
 label-family map; greedy best-match, deterministic. Every associated
@@ -110,6 +115,35 @@ _BOX_SUPPRESS_MARGIN_M = float(os.environ.get("PLACEMENT_BOX_SUPPRESS_MARGIN_M",
 # stride — association needs a stable fraction, not an exact count).
 _OVERLAP_MAX_PIXELS = int(os.environ.get("PLACEMENT_BOX_OVERLAP_MAX_PIXELS", "20000"))
 
+# Splat-clip margin (decision 0104). A box-anchored splat is scaled by ONE
+# uniform factor — the median of the three box-dim/splat-extent ratios —
+# because per-axis stretch amplifies truncation (the RP-8 A/B). When the
+# splat's PROPORTIONS are wrong (visible-region truncation: class-6
+# residue), a uniform factor that fits one axis necessarily overshoots
+# another, and the overshoot leaves the measured box entirely: the 0085
+# walk saw a bed reach 0.44 m past its own footprint into the table and
+# the chair, in two independent rooms.
+#
+# The overshoot is KNOWN-FALSE mass: the box is RoomPlan measurement the
+# operator verified 9/9 (0076), so splat points outside it are model
+# error, not evidence. Declining to render them is not falsifying the
+# measurement — moving or rescaling the object to hide them would be
+# (0082's reasoning, which this respects: position, extent and scale are
+# untouched).
+#
+# The margin is measured, not guessed: at 0.10 m the clip removes nothing
+# from 8 of the 14 walked box objects and trims exactly the four gross
+# overhangs the operator named (bed 0.46 m, storage 0.25 m, chair 0.21 m,
+# table 0.18 m). Tighter margins start gutting well-proportioned shells —
+# at 0.0 m a table with a 3 cm overhang loses 60% of its points.
+_SPLAT_CLIP_MARGIN_M = float(os.environ.get("PLACEMENT_SPLAT_CLIP_MARGIN_M", "0.10"))
+
+# Below this removed fraction the clip is not worth declaring — the object
+# is already inside its box and the field would be noise in every manifest.
+_SPLAT_CLIP_MIN_FRACTION = float(
+    os.environ.get("PLACEMENT_SPLAT_CLIP_MIN_FRACTION", "0.005")
+)
+
 # Percentile clip for splat extents along its LOCAL COORDINATE axes (the P1
 # probe's convention — candidates map coordinate axes onto box axes, so the
 # extents must be measured along the same axes, not PCA axes).
@@ -134,11 +168,21 @@ def _parse_family_map(raw: str) -> dict[str, frozenset[str]]:
 # families, verbatim; env-overridable so vocabulary growth needs no code
 # edit). An unmapped category never associates — the box ships as honest
 # inventory instead of grabbing a wrong mask.
+#
+# `nightstand` appears under BOTH table and storage: RoomPlan files a
+# bedside cabinet as `storage`/StorageType cabinet while SAM calls it
+# `nightstand`, so the 0077 map could never associate the two. Measured on
+# rp7 (decision 0104): box_05 — a 0.58 x 0.64 x 0.48 storage box that IS
+# the nightstand — shipped as no_appearance inventory while the same
+# object also shipped as a free depth_fit splat, and the lamp and TV that
+# rest on it inherited the disagreement. Association is greedy on overlap
+# and each observation joins at most one box, so listing a label in two
+# families costs nothing but lets the right box win.
 _DEFAULT_FAMILIES = (
     "bed:bed"
     "|table:table,desk,nightstand"
     "|chair:chair,stool,bench"
-    "|storage:cabinet,dresser,wardrobe,bookshelf,shelf"
+    "|storage:cabinet,dresser,wardrobe,bookshelf,shelf,nightstand"
     "|sofa:sofa,couch"
     "|television:tv,television,monitor"
 )
@@ -780,9 +824,13 @@ def build_box_object(
     quality["axis_scored_views"] = len(scoreable_views)
 
     cand = candidates[chosen]
+    clip = splat_clip_block(box, splat, cand.rotation_xyzw, cand.scale)
+    if clip is not None:
+        quality["splat_clip_removed"] = clip["removed_fraction"]
     return {
         **entry_base,
         "sam_label": best_view.obs.get("label"),
+        **({"splat_clip": clip} if clip is not None else {}),
         "placed": True,
         "method": "roomplan_box",
         "position_source": "roomplan_box",
@@ -808,6 +856,47 @@ def build_box_object(
 # ---------------------------------------------------------------------------
 # Box-duplicate suppression
 # ---------------------------------------------------------------------------
+
+def splat_clip_block(
+    box, local_points: np.ndarray, rotation_xyzw, scale: float
+) -> dict | None:
+    """The `splat_clip` manifest block for a box-anchored object, or None
+    when the splat already sits inside its measured box (decision 0104).
+
+    The clip volume IS the RoomPlan box, grown by _SPLAT_CLIP_MARGIN_M. It
+    is declared, never applied here: the splat asset ships untouched and a
+    renderer that ignores the block reproduces today's picture exactly (the
+    degrade lock). `removed_fraction` is measured on the real point set so
+    the cost of the clip is recorded beside it rather than inferred.
+
+    RoomPlan boxes are pure-yaw by construction (0076), so centre + dims +
+    yaw fully determine the volume for any consumer; the block repeats them
+    rather than making the renderer re-derive them from `roomplan_box`.
+    """
+    from roomstudio_schemas.pose_math import quat_to_rotmat
+
+    if local_points is None or local_points.shape[0] == 0:
+        return None
+    R = quat_to_rotmat(tuple(rotation_xyzw))
+    world = (float(scale) * (local_points @ R.T)) + np.asarray(
+        box.center_world, dtype=np.float64
+    )
+    Rb = np.asarray(box.transform[:3, :3], dtype=np.float64)
+    local = (world - np.asarray(box.transform[:3, 3], dtype=np.float64)) @ Rb
+    half = np.asarray(box.dimensions, dtype=np.float64) / 2.0 + _SPLAT_CLIP_MARGIN_M
+    outside = ~np.all(np.abs(local) <= half, axis=1)
+    fraction = float(outside.mean())
+    if fraction < _SPLAT_CLIP_MIN_FRACTION:
+        return None
+    return {
+        "kind": "roomplan_box",
+        "margin_m": round(_SPLAT_CLIP_MARGIN_M, 4),
+        "center_world": [round(float(c), 4) for c in box.center_world],
+        "half_extents_m": [round(float(h), 4) for h in half],
+        "yaw_rad": round(float(box.yaw_rad), 4),
+        "removed_fraction": round(fraction, 4),
+    }
+
 
 def center_inside_box(position, box, margin_m: float | None = None) -> bool:
     m = _BOX_SUPPRESS_MARGIN_M if margin_m is None else margin_m
