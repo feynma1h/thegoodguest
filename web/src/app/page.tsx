@@ -5,7 +5,7 @@
  * serif, "Scan your first room" as the action, and — as the only image —
  * a real room measuring itself.
  *
- * THE HERO IS THE REVEAL, NOT A ROOM (decision 0126). What plays here is
+ * THE HERO IS THE REVEAL, NOT A ROOM (decision 0122). What plays here is
  * the first two movements of the reveal choreography against a real
  * capture's GEOMETRY: the measured boundary drawing itself, then the
  * surfaces materializing in place. No object splats — the reasoning, and

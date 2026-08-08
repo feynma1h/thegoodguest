@@ -3,7 +3,7 @@
 /**
  * The landing hero's stage: a real room measuring itself.
  *
- * This is the hero image (decision 0126) — not a picture of a room, but
+ * This is the hero image (decision 0122) — not a picture of a room, but
  * the first two movements of the reveal (decision 0097) played against a
  * real capture's geometry: the measured boundary drawing itself, then the
  * surfaces materializing in place. No object splats, by design — see
