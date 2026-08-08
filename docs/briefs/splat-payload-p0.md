@@ -160,12 +160,27 @@ if the measurement says otherwise, say so.
 
 ## Decisions that are the operator's, not the session's
 
-Bring these back rather than picking:
+**Two of the three are now DECIDED (operator, 2026-08-09):**
 
-- **Does a compressed tier replace the PLY, or sit beside it?** Storage cost
-  and fidelity, and it determines whether every existing scene needs a
-  re-bake or just new ones.
-- **Ship fewer objects per room?** Product call, not an optimization.
+- **The compressed tier SITS BESIDE the PLY — additive.** The viewer prefers
+  the compressed file when present and falls back to the PLY, so no existing
+  scene needs a re-bake to stay correct; the nine real rooms keep their
+  byte-identical originals, and decision 0070's re-adjudication rule is not
+  triggered for rooms nobody re-bakes. Costs roughly 25% more storage. Old
+  rooms stay slow until converted — that is accepted, not overlooked.
+- **Rooms keep every placed object.** No cap, no dropping the large pieces.
+  The room stays complete; compression carries the fix. A 16-object room
+  lands near 90 MB rather than 390 MB.
+
+Still open, and NOT decided here — it was offered and not chosen, so treat it
+as live rather than rejected:
+
+- **Progressive loading.** Orthogonal to both decisions above: ship everything,
+  but drive load order from `lib/reveal`'s existing largest-first score. This
+  is the change that makes "time to first object" the number that matters
+  instead of time to last byte, and decision 0123 notes it reorders the terms.
+
+Still the operator's, unchanged:
 - **Re-baking existing scenes.** Nine real rooms exist, several of them
   regression fixtures and one the hero. Decision 0070's rule — re-adjudicate
   on the reference room before changing what ships — applies to any bake
