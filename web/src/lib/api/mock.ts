@@ -536,7 +536,25 @@ export class MockApiClient implements ApiClient {
         ? target.world_transform.scale
         : target.world_transform.scale[0],
     };
+    // The measured footprint the outline draws. Production reads it off the
+    // object's RoomPlan box; these fixtures carry no boxes, so it is derived
+    // from the object's own scale — synthetic, like the whole mock room, but
+    // CONSISTENT with what is rendered, which is the property that matters.
+    // Getting this wrong once already produced a guest line promising a
+    // footprint that was never drawn.
     const clip = target.splat_clip;
+    const half = Math.max(0.25, measured.scale * 0.5);
+    const footprint = clip
+      ? {
+          center_world: clip.center_world,
+          half_extents_m: clip.half_extents_m,
+          yaw_rad: clip.yaw_rad,
+        }
+      : {
+          center_world: measured.position,
+          half_extents_m: [half, half * 0.5, half * 0.7] as [number, number, number],
+          yaw_rad: 0,
+        };
     const description = action === "remove"
       ? `the ${target.label} is out of the room`
       : `the ${target.label} is back against the wall`;
@@ -553,13 +571,7 @@ export class MockApiClient implements ApiClient {
           measured.position[2] + 0.7,
         ],
       },
-      measured_footprint: clip
-        ? {
-            center_world: clip.center_world,
-            half_extents_m: clip.half_extents_m,
-            yaw_rad: clip.yaw_rad,
-          }
-        : null,
+      measured_footprint: footprint,
       solver: action === "remove" ? null : {
         relation: "against_wall",
         anchor_resolved_to: "wall_00",
