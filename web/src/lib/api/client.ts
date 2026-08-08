@@ -14,6 +14,7 @@
 
 import type {
   AccountDeletionResult,
+  DesignSpecDoc,
   ConversationSnapshot,
   ConversationTurn,
   GuestEvent,
@@ -70,6 +71,13 @@ export interface ApiClient {
   /** Throws SceneNotReadyError until ready; 200-empty otherwise. */
   getConversation(sceneId: string): Promise<ConversationSnapshot>;
   /**
+   * The caller's proposed arrangement (decision 0131). 200-empty when the
+   * room has never been rearranged — never 404.
+   */
+  getDesignSpec(sceneId: string): Promise<DesignSpecDoc>;
+  /** Back to measured, one action (decision 0133). Idempotent. */
+  clearDesignSpec(sceneId: string): Promise<{ cleared: number }>;
+  /**
    * One conversation turn. Resolves once the stream is OPEN; pre-stream
    * failures throw typed errors (BudgetExhaustedError, TurnInFlightError,
    * SceneNotReadyError, ApiError) before any iterable exists. The iterable
@@ -109,6 +117,12 @@ function parseSseBlock(block: string): GuestEvent | null {
     }
     if (name === "done" && payload.turn) {
       return { type: "done", turn: payload.turn as ConversationTurn };
+    }
+    if (name === "arrangement") {
+      // Payload-free by design (0131): the room changed, refetch the spec.
+      // Pushing transforms down this stream would make the composer a
+      // second source of scene state.
+      return { type: "arrangement" };
     }
     if (name === "error") {
       return { type: "error", code: String(payload.code ?? "unknown") };
@@ -187,8 +201,9 @@ export class LiveApiClient implements ApiClient {
     throw new ApiError(status, body.error ?? `http_${status}`, body.detail);
   }
 
-  private async request(path: string): Promise<unknown> {
+  private async request(path: string, init: RequestInit = {}): Promise<unknown> {
     const resp = await fetch(`${this.baseUrl}${path}`, {
+      ...init,
       headers: { Authorization: await this.authHeader() },
     });
     const body = await resp.json().catch(() => ({}));
@@ -211,6 +226,18 @@ export class LiveApiClient implements ApiClient {
 
   async getSceneAssets(sceneId: string): Promise<SceneAssets> {
     return (await this.request(`/scenes/${sceneId}/assets`)) as SceneAssets;
+  }
+
+  async getDesignSpec(sceneId: string): Promise<DesignSpecDoc> {
+    return (await this.request(
+      `/scenes/${sceneId}/design_spec`,
+    )) as DesignSpecDoc;
+  }
+
+  async clearDesignSpec(sceneId: string): Promise<{ cleared: number }> {
+    return (await this.request(`/scenes/${sceneId}/design_spec`, {
+      method: "DELETE",
+    })) as { cleared: number };
   }
 
   async getConversation(sceneId: string): Promise<ConversationSnapshot> {
