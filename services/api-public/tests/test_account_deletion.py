@@ -364,6 +364,53 @@ def test_is_idempotent(world):
     assert second.conversations_deleted == 0
 
 
+class UserNotFoundError(Exception):
+    """Stands in for firebase_admin.auth.UserNotFoundError.
+
+    THE CLASS NAME IS LOAD-BEARING. firebase_admin is not installed in the test
+    environment (auth.py carries the same "deferred: not installed in tests"
+    note), so the deleter cannot isinstance-check the real class and matches on
+    __name__ instead. This double must therefore be named exactly as Firebase
+    names it, or it tests nothing.
+    """
+
+
+def test_second_pass_survives_an_already_deleted_identity(world):
+    """The regression that test_is_idempotent could not see.
+
+    Its FakeAuth never raises, so idempotency passed in unit tests while the
+    deployed endpoint 500'd on every second call: Firebase raises
+    UserNotFoundError once the user is gone. Reachable in ordinary use — an ID
+    token stays valid for up to an hour after its user is deleted, so any retry
+    inside that window (exactly what the 202 "call again" contract asks for)
+    hit it. Measured against the live service 2026-08-08; decision 0103.
+    """
+    class GoneAuth:
+        def delete_user(self, uid):
+            raise UserNotFoundError("No user record found for the given identifier")
+
+    world["deleter"]._auth = GoneAuth()
+
+    report = world["deleter"].delete(UID)
+
+    assert report.complete
+    assert report.identity_deleted, "an absent identity IS the desired end state"
+
+
+def test_an_unexpected_auth_error_still_propagates(world):
+    """The narrow catch must not become a blanket one — a permissions failure
+    (the INSUFFICIENT_PERMISSION that shipped without the identity-deleter
+    role) has to stay loud, not be reported as a completed deletion."""
+    class BrokenAuth:
+        def delete_user(self, uid):
+            raise PermissionError("INSUFFICIENT_PERMISSION")
+
+    world["deleter"]._auth = BrokenAuth()
+
+    with pytest.raises(PermissionError):
+        world["deleter"].delete(UID)
+
+
 def test_missing_blob_between_list_and_delete_is_not_an_error(world):
     """The captures lifecycle rule (age=1d) races every deletion. A blob that
     vanished under us is the expected case, not a failure."""

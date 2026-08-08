@@ -280,8 +280,24 @@ class AccountDeleter:
         report.mint_quota_deleted = True
 
         # 3. Identity last, and only now that nothing else is left.
+        #
+        # An ALREADY-ABSENT user is success, not failure: gone is the state we
+        # are trying to reach. Firebase raises UserNotFoundError here, and
+        # without this the second call of an idempotent endpoint 500s on an
+        # account that was deleted perfectly — measured against the deployed
+        # service 2026-08-08 (decision 0103). It is reachable in ordinary use:
+        # an ID token stays cryptographically valid for up to an hour after
+        # its user is deleted, so any client retry inside that window — which
+        # is exactly what the 202 "call again" contract asks for — hits it.
         if delete_identity:
-            self._auth.delete_user(user_id)
+            try:
+                self._auth.delete_user(user_id)
+            except Exception as exc:  # noqa: BLE001 — narrowed by name below
+                if type(exc).__name__ != "UserNotFoundError":
+                    raise
+                logger.info(
+                    "account_deletion: identity already absent uid=%s", user_id
+                )
             report.identity_deleted = True
 
         report.complete = True
