@@ -31,6 +31,10 @@ nonisolated enum RoomActivityVoice {
         switch stage {
         case .preparing:        return "Getting your room ready"
         case .sending:          return "Sending your room"
+        // Deliberately NOT "Almost there": that is a claim about time, and the
+        // OS can hold the finalize for many minutes (decision 0110). This says
+        // where the room is, which stays true however long the hold lasts.
+        case .finalizing:       return "Signing it in"
         case .queued:           return "Getting in line"
         case .analyzing:        return "Making sense of your room"
         case .ready:            return "Your room is ready."
@@ -50,6 +54,13 @@ nonisolated enum RoomActivityVoice {
             // Matches WaitingView.sending: leaving is safe, the background session
             // carries it. No "keep the app open" — that would be false.
             return "On its way up. You can put the phone down."
+        case .finalizing:
+            // Names the action that resets the OS's background-launch delay to
+            // zero (decision 0110) WITHOUT claiming the transfer has stopped —
+            // it may well land on its own. "if this sits for a while" is the
+            // honest hedge in both branches; a flat "open me" would be the
+            // `.paused` promise, which is a different and stronger claim.
+            return "The whole room is up. Open me if it sits a while."
         case .queued:
             return "I'll start the moment there's room."
         case .analyzing:
@@ -78,6 +89,7 @@ nonisolated enum RoomActivityVoice {
         switch stage {
         case .preparing:  return "···"
         case .sending:    return "···"    // total not known yet
+        case .finalizing: return "···"
         case .queued:     return "···"
         case .analyzing:  return "···"
         case .ready:      return "✓"
@@ -102,6 +114,8 @@ nonisolated enum RoomActivityVoice {
         switch stage {
         case .preparing:  return "shippingbox"
         case .sending:    return "arrow.up.circle"
+        // Filled sibling of `.sending`'s mark: the same journey, further along.
+        case .finalizing: return "arrow.up.circle.fill"
         case .queued:     return "clock"
         case .analyzing:  return "sparkles"
         case .ready:      return "door.left.hand.open"
@@ -116,7 +130,7 @@ nonisolated enum RoomActivityVoice {
         switch stage {
         case .ready:                    return .rsGold
         case .failed:                   return .rsInk
-        case .preparing, .sending, .queued, .analyzing, .paused:
+        case .preparing, .sending, .finalizing, .queued, .analyzing, .paused:
             return .rsAction
         }
     }
