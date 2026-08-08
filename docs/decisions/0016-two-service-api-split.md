@@ -5,7 +5,7 @@
 
 ## Context
 
-The auth flip from the previous deploy-prep session (commit `824a862`) put
+The auth flip from the previous deploy-prep session (commit `830b76c`) put
 `--no-allow-unauthenticated` on the API service. That gates `/ingest/eventarc`
 correctly — Cloud Run IAM validates the Eventarc service account's OIDC token
 at the platform boundary — but it also breaks Firebase-authenticated iOS

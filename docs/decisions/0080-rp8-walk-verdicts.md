@@ -74,7 +74,7 @@ old depth_fit objects still "oriented wrongly apart from the door".
   looks much bigger, probably because its top portion isn't rendered").
   The per-axis knob stays unbuilt; `PositionedSplat.scale`'s union type is
   its landing shape if ever revisited. Box dims remain measurement truth.
-- **Fork (a): long-tail gates ALWAYS-ON** (commit `f442ef7`): the three
+- **Fork (a): long-tail gates ALWAYS-ON** (commit `5e3807e`): the three
   measured gates now run for every refined scene, not just census scenes;
   pins revised (543 green). Box passes stay census-gated.
 - **Fork (b): facing_flag flag-only BLESSED.** Both flagged chairs read

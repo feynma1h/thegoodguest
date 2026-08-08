@@ -9,7 +9,7 @@
 
 The consolidated walk (0085) found that the deployed web app rendered zero
 splats and traced it to `connect-src`: Spark fetches its WASM from a `data:`
-URI, and that fetch is governed by `connect-src`. Commit `81431cf` added
+URI, and that fetch is governed by `connect-src`. Commit `bfa7eb5` added
 `data:` and recorded "deploy + on-origin verification still owed."
 
 Verification found the fix was **necessary but not sufficient**. There were
@@ -22,7 +22,7 @@ another walk with the same symptom and no new information.
 Measured on the preview channel with a direct probe (minimal valid WASM module,
 `securitypolicyviolation` listener attached), then re-measured after each fix.
 
-**Gate 1 — `connect-src` blocks the WASM fetch.** Real, and `81431cf` fixes it.
+**Gate 1 — `connect-src` blocks the WASM fetch.** Real, and `bfa7eb5` fixes it.
 After the fix the probe fetched the data: URI (8 bytes), and the network log
 shows Spark's actual 217 KB base64 WASM at `200 OK`.
 
@@ -54,7 +54,7 @@ nor the asset.
 
 ## What we chose
 
-1. Keep `data:` in `connect-src` (`81431cf`).
+1. Keep `data:` in `connect-src` (`bfa7eb5`).
 2. Add `'wasm-unsafe-eval'` to `script-src` — **not** `'unsafe-eval'`.
 3. Add a CORS policy to `gs://roomstudio-perception-outputs`, as a new
    idempotent section (6) of `infra/eventarc_setup.sh` with the reasoning
@@ -90,7 +90,7 @@ then renders nothing, which is exactly the failure this note is about.
 are worth naming because they will recur:
 
 - `next dev` does not apply hosting headers, so no amount of local verification
-  can see a CSP defect. Already recorded in `81431cf`.
+  can see a CSP defect. Already recorded in `bfa7eb5`.
 - **CORS is enforced by browsers only.** Every prior verification of the asset
   path — including Gate B's "signed URL fetches 34 MB at 200" (0094) — used
   curl or a server-side client. Those send no `Origin` and check for no ACAO,

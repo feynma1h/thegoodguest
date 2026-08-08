@@ -31,7 +31,7 @@ re-derive them.
 
 ### ARKit→proto contract findings
 
-Verified against `packages/schemas/capture_bundle.proto` at HEAD `6251cbc`.
+Verified against `packages/schemas/capture_bundle.proto` at HEAD `2222ab0`.
 All mappings confirmed correct:
 
 | Proto field | ARKit source | Notes |
