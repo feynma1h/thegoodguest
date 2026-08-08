@@ -92,17 +92,26 @@ jobs:
             --exclude einops --exclude safetensors)
           python -m pip install -e packages/schemas
       - name: Run perception suite
-        # KNOWN ENVIRONMENT-SENSITIVE TEST — read before "fixing" a red run.
+        # SETTLED 2026-08-08 — this job WAS the arbiter, and it ruled.
         # test_shell_observation.py::TestMedianSelect::test_closer_frame_outweighs_far
-        # passes on numpy 2.x and raised IndexError on numpy 1.26.4 during
-        # local verification. That local environment was macOS arm64, where
-        # numpy 1.26 links Apple Accelerate and emits spurious
-        # divide-by-zero/overflow/invalid matmul warnings (the matmul RESULT
-        # was verified finite and correct, so the warnings are not the cause).
-        # Linux wheels use OpenBLAS, so this may simply not reproduce here.
-        # If it does reproduce, it is a real numpy-1.x defect on the shipping
-        # configuration and worth a decision note; if it does not, the failure
-        # was macOS-only. This run is the arbiter either way.
+        # raises IndexError ONLY on macOS arm64 with numpy 1.26.4, where numpy
+        # links Apple Accelerate. It passes here (Linux/OpenBLAS, same numpy
+        # 1.26.4) and on numpy 2.x. The shipping configuration is this one, so
+        # there is no production exposure and no code defect to fix.
+        #
+        # The evidence, because "environment-sensitive" is otherwise a shrug:
+        # the failing call's exact inputs were captured and its guard logic
+        # replayed line for line 50 times — every replay yields a maximum
+        # index of 99 into a 100-row mask, comfortably in bounds, while the
+        # real call on those same inputs indexes 100. Same inputs, same code,
+        # different outcome. The bounds guard (v <= img_h - 1.001) is provably
+        # correct and is not what is wrong. The divide-by-zero/overflow/invalid
+        # matmul warnings are misattributed sticky FPU flags, not the cause.
+        #
+        # Do NOT "fix" this by clamping the indices. Clamping would convert
+        # intermittently corrupt numerics into silently corrupt pixels; the
+        # crash is the better failure mode. If it ever goes red HERE, that is
+        # new information and worth a decision note.
         run: python -m pytest services/perception-obj/tests -q
 
   reenqueue:
