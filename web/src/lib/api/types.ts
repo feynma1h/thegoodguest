@@ -268,6 +268,10 @@ export interface ConversationSnapshot {
  */
 export type GuestEvent =
   | { type: "delta"; text: string }
+  /** The room changed: refetch the design spec (decision 0131). Carries no
+   * payload on purpose — the client stays a reader of the spec document
+   * rather than a second place scene state is assembled. */
+  | { type: "arrangement" }
   | { type: "done"; turn: ConversationTurn }
   | { type: "error"; code: string };
 
@@ -350,6 +354,68 @@ export interface ShellPlane {
   /** Per-surface RoomPlan confidence ("high" | "medium" | "low"), carried
    * for treatments; null where the source has none (v2, envelope walls). */
   confidence: string | null;
+}
+
+/**
+ * The Design Specification (decision 0131): a proposal sitting BESIDE the
+ * measurement, never over it. A sibling of the manifest, like the shell —
+ * every object it does not name is exactly where perception measured it.
+ *
+ * The invariant, and it is the whole reason this shape exists: every entry
+ * carries `measured_transform` beside `proposed_transform`. The proposal is
+ * renderable and the truth is one field away, in the same object, at every
+ * layer. That makes the lie structurally unavailable rather than prohibited
+ * by discipline — the house pattern from `measured_quad` (0069) and the
+ * declared clip volume (0104).
+ */
+export interface SpecTransform {
+  position: [number, number, number];
+  rotation_xyzw: [number, number, number, number];
+  scale: number;
+}
+
+/** The measured box's floor rectangle — what the outline draws. Server-sent
+ * because the client cannot derive it: `PositionedSplat` carries no box and
+ * `splat_clip` exists only where a splat overshoots. */
+export interface SpecFootprint {
+  center_world: [number, number, number];
+  half_extents_m: [number, number, number];
+  yaw_rad: number;
+}
+
+/** Why the piece is where it is — produced by the solver, never the model
+ * (decision 0055 lists the reasoning trace as durable architecture). Absent
+ * on a `remove`, which needs no geometry. */
+export interface SpecSolverTrace {
+  relation: string;
+  anchor_resolved_to: string;
+  constraints_applied: string[];
+  reasoning: string;
+}
+
+export interface SpecEntry {
+  key: string;
+  action: "move" | "remove";
+  label: string;
+  measured_transform: SpecTransform;
+  proposed_transform: SpecTransform | null; // null for "remove"
+  measured_footprint: SpecFootprint | null;
+  solver: SpecSolverTrace | null;
+  description: string;
+  origin: { turn_index: number | null; client_msg_id: string | null };
+  /** The key no longer resolves in the current manifest — a re-drive dropped
+   * the object. Reported, never silently dropped and NEVER re-pointed: a spec
+   * aimed at the wrong object would move the wrong furniture and nothing in
+   * the system would notice. */
+  orphaned: boolean;
+}
+
+/** GET /scenes/{scene_id}/design_spec response. */
+export interface DesignSpecDoc {
+  spec_version: number;
+  scene_id: string;
+  entries: SpecEntry[];
+  updated_at: string | null;
 }
 
 export interface AssembledScene {

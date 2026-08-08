@@ -85,17 +85,29 @@ export default function Conversation({
   greeting,
   countsNote,
   onUnavailable,
+  onArrangementChanged,
 }: {
   sceneId: string;
   greeting: string;
   countsNote: string | null;
   onUnavailable: () => void;
+  /** The guest changed the room (decision 0131). Fires mid-stream, before
+   * the speech describing it, so the piece moves while the sentence about
+   * it is still arriving — which is the right order: the room is the
+   * subject, the guest is narrating it. */
+  onArrangementChanged?: () => void;
 }) {
   const [state, dispatch] = useReducer(composerReducer, COMPOSER_IDLE);
   const [turns, setTurns] = useState<ConversationTurn[] | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const mounted = useRef(true);
   const stateRef = useRef<ComposerState>(COMPOSER_IDLE);
+  // Read at call time so a changing callback identity never re-creates the
+  // turn runner (the same pattern SplatViewer uses for its reveal hooks).
+  const onArrangementRef = useRef(onArrangementChanged);
+  useEffect(() => {
+    onArrangementRef.current = onArrangementChanged;
+  });
 
   useEffect(() => {
     stateRef.current = state;
@@ -173,6 +185,11 @@ export default function Conversation({
           if (!mounted.current) return;
           if (event.type === "delta") {
             buffer.current += event.text;
+          } else if (event.type === "arrangement") {
+            // Deliberately outside the composer reducer: the arrangement is
+            // the ROOM's state, not the composer's, and giving the reducer
+            // an opinion about it would make two components own one fact.
+            onArrangementRef.current?.();
           } else if (event.type === "done") {
             flush(true);
             mergeTurns([event.turn]);

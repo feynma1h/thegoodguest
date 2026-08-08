@@ -18,11 +18,14 @@ import {
 import type {
   ConversationSnapshot,
   ConversationTurn,
+  DesignSpecDoc,
   GuestEvent,
   SceneAssets,
   SceneStatus,
   SceneSummary,
+  SpecEntry,
 } from "./types";
+import { specKey } from "@/lib/designSpec";
 
 /** Fixed UUIDs so deep links are stable across reloads. */
 export const MOCK_READY_SCENE_ID = "11111111-1111-4111-8111-111111111111";
@@ -469,6 +472,119 @@ export class MockApiClient implements ApiClient {
     );
   }
 
+  /**
+   * Mock arrangements (decisions 0131/0133). Stage 2 offline: "!move" and
+   * "!remove" in a message make the guest propose, so the whole loop — the
+   * room changing, the outline appearing, the note under the composer, the
+   * one-step revert — is walkable with no backend at all. That parity is
+   * what the reveal and the composer states were built against, and it is
+   * how this flow gets looked at before it is deployed.
+   *
+   * The mock is a REAL solver in one respect that matters: it never invents
+   * a proposed transform for a piece it has no measurement for, and every
+   * entry it writes carries the measurement it departs from.
+   */
+  private specs = new Map<string, DesignSpecDoc>();
+
+  private spec(sceneId: string): DesignSpecDoc {
+    const existing = this.specs.get(sceneId);
+    if (existing) return existing;
+    const fresh: DesignSpecDoc = {
+      spec_version: 1,
+      scene_id: sceneId,
+      entries: [],
+      updated_at: null,
+    };
+    this.specs.set(sceneId, fresh);
+    return fresh;
+  }
+
+  async getDesignSpec(sceneId: string): Promise<DesignSpecDoc> {
+    this.requireReady(sceneId);
+    return delay(structuredClone(this.spec(sceneId)));
+  }
+
+  async clearDesignSpec(sceneId: string): Promise<{ cleared: number }> {
+    this.requireReady(sceneId);
+    const cleared = this.spec(sceneId).entries.length;
+    this.specs.set(sceneId, {
+      spec_version: 1, scene_id: sceneId, entries: [], updated_at: null,
+    });
+    return delay({ cleared });
+  }
+
+  /** Propose against whatever the scene's assets actually contain, so the
+   * mock cannot drift from the fixture it renders. */
+  private async proposeInMock(
+    sceneId: string,
+    action: "move" | "remove",
+  ): Promise<string | null> {
+    let assets: SceneAssets;
+    try {
+      assets = await this.getSceneAssets(sceneId);
+    } catch {
+      return null;
+    }
+    const target = (assets.manifest.objects ?? []).find(
+      (o) => o.placed && o.world_transform && o.splat_gcs_uri,
+    );
+    if (!target?.world_transform) return null;
+    const measured = {
+      position: target.world_transform.position,
+      rotation_xyzw: target.world_transform.rotation_xyzw,
+      scale: typeof target.world_transform.scale === "number"
+        ? target.world_transform.scale
+        : target.world_transform.scale[0],
+    };
+    const clip = target.splat_clip;
+    const description = action === "remove"
+      ? `the ${target.label} is out of the room`
+      : `the ${target.label} is back against the wall`;
+    const entry: SpecEntry = {
+      key: specKey(target),
+      action,
+      label: target.label,
+      measured_transform: measured,
+      proposed_transform: action === "remove" ? null : {
+        ...measured,
+        position: [
+          measured.position[0] + 1.1,
+          measured.position[1],
+          measured.position[2] + 0.7,
+        ],
+      },
+      measured_footprint: clip
+        ? {
+            center_world: clip.center_world,
+            half_extents_m: clip.half_extents_m,
+            yaw_rad: clip.yaw_rad,
+          }
+        : null,
+      solver: action === "remove" ? null : {
+        relation: "against_wall",
+        anchor_resolved_to: "wall_00",
+        constraints_applied: [
+          "keeps_height", "inside_measured_floor",
+          "clear_of_pieces_it_was_clear_of",
+        ],
+        reasoning:
+          `Stood the ${target.label} flush against wall_00, against the ` +
+          "wall, 1.30 m from where it was measured — the nearest spot on " +
+          "any wall that satisfies every constraint.",
+      },
+      description,
+      origin: { turn_index: this.conversation.length, client_msg_id: null },
+      orphaned: false,
+    };
+    const spec = this.spec(sceneId);
+    this.specs.set(sceneId, {
+      ...spec,
+      entries: [...spec.entries.filter((e) => e.key !== entry.key), entry],
+      updated_at: new Date().toISOString(),
+    });
+    return description;
+  }
+
   async listScenes(limit = 50): Promise<SceneSummary[]> {
     const sorted = [...this.scenes].sort((a, b) =>
       b.created_at.localeCompare(a.created_at),
@@ -581,8 +697,20 @@ export class MockApiClient implements ApiClient {
     const existing = this.conversation.find((t) => t.client_msg_id === clientMsgId);
     const slow = text.includes("!slow");
     const errorMid = text.includes("!error");
+    const action: "move" | "remove" | null = text.includes("!remove")
+      ? "remove"
+      : text.includes("!move")
+        ? "move"
+        : text.includes("!revert")
+          ? null
+          : null;
+    const reverting = text.includes("!revert");
+    const propose = action
+      ? () => this.proposeInMock(sceneId, action)
+      : null;
+    const revert = reverting ? () => this.clearDesignSpec(sceneId) : null;
     const reply = existing?.assistant_text ?? mockGuestReply(text);
-    const appendTurn = () => this.appendTurn(text, reply, clientMsgId);
+    const appendTurn = (final: string) => this.appendTurn(text, final, clientMsgId);
 
     async function* stream(): AsyncGenerator<GuestEvent> {
       if (existing) {
@@ -590,7 +718,25 @@ export class MockApiClient implements ApiClient {
         yield { type: "done", turn: existing };
         return;
       }
-      const words = reply.split(" ");
+      // Tool rounds land BEFORE the speech that describes them, as they do
+      // on the server: the room moves, then the guest tells you about it.
+      let spoken = reply;
+      if (propose) {
+        const description = await propose();
+        if (description) {
+          spoken =
+            `Done — ${description}. Its old footprint is still drawn on the ` +
+            "floor. Say the word and I'll put it straight back.";
+          yield { type: "arrangement" };
+        }
+      } else if (revert) {
+        const { cleared } = await revert();
+        if (cleared > 0) {
+          spoken = "Back as measured. Want to try something else?";
+          yield { type: "arrangement" };
+        }
+      }
+      const words = spoken.split(" ");
       for (let i = 0; i < words.length; i++) {
         await sleep(slow ? 500 : 45);
         if (errorMid && i === Math.min(5, words.length - 1)) {
@@ -599,7 +745,7 @@ export class MockApiClient implements ApiClient {
         }
         yield { type: "delta", text: (i > 0 ? " " : "") + words[i] };
       }
-      yield { type: "done", turn: appendTurn() };
+      yield { type: "done", turn: appendTurn(spoken) };
     }
     return stream();
   }
