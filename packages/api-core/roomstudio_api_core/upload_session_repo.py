@@ -39,6 +39,39 @@ caller's mint-quota document before any GCS mint happens:
     deployed iOS retry policy (0038) does not know. Cross-UID exclusion is
     the security property; same-UID overlap is benign duplication.
 
+Re-minting a consumed session (force_remint, decision 0116):
+The path-set answers "WHAT do I intend to upload". It cannot also answer
+"ARE the URIs I already hold still usable" — one input cannot carry two
+independent questions, which is exactly why a POST retry and a retry of a
+dead session were indistinguishable here. force_remint is the second input.
+
+  - force_remint=False (the default, and what every deployed client sends by
+    omitting it) reproduces the replay semantics above byte for byte.
+  - force_remint=True skips the replay branch: fresh GCS sessions are minted
+    for the requested manifest and REPLACE the stored entries. Ownership is
+    still checked first (a foreign UID gets ForeignBundleError before any
+    mint), it charges mint quota like any real mint, and it charges a CAPTURE
+    only if this is also a first claim — re-minting to finish a capture that
+    already exists commits no new GPU.
+
+Why an explicit flag rather than inferring it: a caller can already obtain
+fresh URIs today by sending a DIFFERENT path-set (a subset falls through the
+replay branch and mints). That accident does not cover the case that
+actually matters. The captures bucket sweeps at age=1 day, so a capture
+retried the next day has ALL of its blobs gone and the client's recovery
+manifest is the FULL path-set — which matches the stored one and replays
+dead URIs. Getting fresh URIs by shrinking the manifest would mean lying
+about what is being uploaded to work around an idempotency check.
+
+The server trusts the flag rather than verifying deadness. Verification was
+rejected: probing each stored session costs one HTTP round trip per path
+(2,170 on a real LiDAR manifest — the shape that already OOM-killed this
+service once), and it answers the wrong question anyway, because a session
+can report "complete" while the lifecycle rule has swept the object out from
+under it. The blast radius of a client that sets the flag when it did not
+need to is one mint-quota unit and a set of fresh, working URIs — bounded by
+the same daily cap as every other mint, and it corrupts nothing.
+
 UploadSessionRepository interface:
   create_or_get(bundle_id, user_id, manifest, fcm_token, *, mint_uri_fn,
                 bucket, daily_mint_quota=None, now=None)
@@ -235,6 +268,7 @@ class UploadSessionRepository(ABC):
         bucket: str,
         daily_mint_quota: Optional[int] = None,
         daily_capture_quota: Optional[int] = None,
+        force_remint: bool = False,
         now: Optional[datetime] = None,
     ) -> list[SessionEntry]:
         """Return session URIs for each manifest entry.
@@ -243,10 +277,18 @@ class UploadSessionRepository(ABC):
         mint-quota document (module docstring has the full semantics):
 
           - existing record owned by another UID → ForeignBundleError
-          - same UID + same path set + stored entries → replay (no quota)
+          - same UID + same path set + stored entries → replay (no quota),
+            UNLESS force_remint
           - otherwise, with daily_mint_quota set: at the UTC-day cap →
             MintRateLimitedError; else the quota is charged and new session
             URIs are minted via mint_uri_fn and stored.
+
+        force_remint=True declares that the URIs the caller already holds are
+        dead (finalized, expired, or pointing at objects the lifecycle rule
+        swept) and that fresh ones are required. It suppresses the replay
+        branch ONLY — ownership, quota and capture accounting are unchanged.
+        Default False keeps every existing caller, including the deployed iOS
+        build that never sends it, on exactly the old behaviour.
 
         daily_mint_quota=None disables quota accounting (dev/tests).
         now is injectable for tests; defaults to the current UTC time.
@@ -287,6 +329,7 @@ class InMemoryUploadSessionRepository(UploadSessionRepository):
         bucket: str,
         daily_mint_quota: Optional[int] = None,
         daily_capture_quota: Optional[int] = None,
+        force_remint: bool = False,
         now: Optional[datetime] = None,
     ) -> list[SessionEntry]:
         now = now or datetime.now(tz=timezone.utc)
@@ -300,8 +343,14 @@ class InMemoryUploadSessionRepository(UploadSessionRepository):
                     raise ForeignBundleError(
                         f"bundle_id {bundle_id!r} is owned by a different user"
                     )
+                # Ownership is checked before force_remint is consulted: the
+                # flag must never become a way to reach another user's bundle.
                 existing_paths = {e["relative_path"] for e in existing["manifest"]}
-                if existing_paths == new_paths and existing["session_entries"]:
+                if (
+                    not force_remint
+                    and existing_paths == new_paths
+                    and existing["session_entries"]
+                ):
                     return existing["session_entries"]
 
             q = self._quota.get(user_id)
@@ -424,6 +473,7 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
         bucket: str,
         daily_mint_quota: Optional[int] = None,
         daily_capture_quota: Optional[int] = None,
+        force_remint: bool = False,
         now: Optional[datetime] = None,
     ) -> list[SessionEntry]:
         now = now or datetime.now(tz=timezone.utc)
@@ -445,10 +495,16 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
                 data = snap.to_dict()
                 if data.get("user_id") != user_id:
                     return ("foreign", None)
+                # Ownership is checked before force_remint is consulted: the
+                # flag must never become a way to reach another user's bundle.
                 stored_paths = {
                     e["relative_path"] for e in data.get("manifest", [])
                 }
-                if stored_paths == new_paths and data.get("session_entries"):
+                if (
+                    not force_remint
+                    and stored_paths == new_paths
+                    and data.get("session_entries")
+                ):
                     return ("replay", data["session_entries"])
 
             qdoc = (

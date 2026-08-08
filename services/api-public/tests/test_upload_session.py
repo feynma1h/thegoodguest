@@ -16,6 +16,9 @@ Covers:
   - 429 rate_limited with resets_at + Retry-After at the per-UID daily mint
     quota (gap b); idempotent replays never consume quota
   - fcm_token stored and retrievable from the upload session record
+  - force_remint (decision 0116): the 0035 body with no such field still
+    replays, true → fresh URIs for the same paths, explicit null means false,
+    ownership still 403s, and the response shape did not grow
 
 NullTokenVerifier is used for all tests (accepts "test-uid:<uid>" tokens).
 The GCS URI minter is injected through public_server's `_mint_uri_fn` seam —
@@ -29,6 +32,7 @@ Run from repo root:
 """
 from __future__ import annotations
 
+import itertools
 import threading
 import uuid
 from unittest.mock import patch
@@ -60,6 +64,19 @@ def _auth_header(uid: str = "user-abc") -> str:
 
 def _fake_mint(bucket: str, blob_path: str, size_bytes: int) -> str:
     return f"https://storage.googleapis.com/fake-resumable/{blob_path}"
+
+
+_mint_serial = itertools.count()
+
+
+def _unique_mint(bucket: str, blob_path: str, size_bytes: int) -> str:
+    """A minter whose every call is distinguishable.
+
+    _fake_mint is a pure function of the path, so it cannot tell a replay of
+    stored URIs apart from a fresh mint that produced the same string — the
+    distinction the force_remint tests exist to make.
+    """
+    return f"https://storage.googleapis.com/fake-resumable/{next(_mint_serial)}/{blob_path}"
 
 
 def _post_upload_session(
@@ -533,6 +550,131 @@ class TestUploadSessionCaptureCeiling:
             uid="user-d", upload_repo=repo,
         )
         assert again.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# force_remint at the wire (decision 0116)
+# ---------------------------------------------------------------------------
+
+class TestForceRemintWire:
+    """The re-mint affordance as a client actually sees it.
+
+    api-core owns the semantics and pins them; what is verified here is the
+    part only the HTTP layer can answer — that the field is optional in the
+    frozen 0035 body, that omitting it is the old behaviour, and that the
+    response shape did not grow.
+    """
+
+    def _post(self, client, bundle_id, repo, body, uid="user-fr"):
+        with (
+            patch.object(server, "_token_verifier", NullTokenVerifier()),
+            patch.object(server, "_upload_session_repo", repo),
+            patch.object(server, "_mint_uri_fn", _unique_mint),
+        ):
+            return client.post(
+                f"/captures/{bundle_id}/upload_session",
+                json=body,
+                headers={"Authorization": _auth_header(uid)},
+            )
+
+    def test_body_without_the_field_is_accepted_and_replays(
+        self, client: TestClient
+    ) -> None:
+        """THE deployed-client pin.
+
+        This body is byte-for-byte what the shipped iOS build sends — the
+        0035 shape, with no force_remint key anywhere. It must still be
+        valid, and it must still replay.
+        """
+        repo = InMemoryUploadSessionRepository()
+        bundle_id = _make_bundle_id()
+        body = {
+            "manifest": [{"relative_path": "bundle.pb", "expected_size_bytes": 64}],
+            "fcm_token": None,
+        }
+        first = self._post(client, bundle_id, repo, body)
+        again = self._post(client, bundle_id, repo, body)
+
+        assert first.status_code == 200
+        assert again.status_code == 200
+        assert again.json() == first.json()
+
+    def test_force_remint_true_returns_fresh_uris_for_the_same_paths(
+        self, client: TestClient
+    ) -> None:
+        repo = InMemoryUploadSessionRepository()
+        bundle_id = _make_bundle_id()
+        manifest = [
+            {"relative_path": "frames/000000.jpg", "expected_size_bytes": 512},
+            {"relative_path": "bundle.pb", "expected_size_bytes": 64},
+        ]
+        first = self._post(client, bundle_id, repo,
+                           {"manifest": manifest, "fcm_token": None})
+        forced = self._post(client, bundle_id, repo,
+                            {"manifest": manifest, "force_remint": True})
+
+        assert first.status_code == 200
+        assert forced.status_code == 200
+        assert {e["relative_path"] for e in forced.json()} == \
+               {e["relative_path"] for e in first.json()}
+        assert not (
+            {e["session_uri"] for e in forced.json()}
+            & {e["session_uri"] for e in first.json()}
+        )
+
+    def test_force_remint_does_not_bypass_ownership(
+        self, client: TestClient
+    ) -> None:
+        """403 still wins. The flag is recovery, not a skeleton key."""
+        repo = InMemoryUploadSessionRepository()
+        bundle_id = _make_bundle_id()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 64}]
+
+        owner = self._post(client, bundle_id, repo,
+                           {"manifest": manifest}, uid="owner")
+        assert owner.status_code == 200
+
+        intruder = self._post(client, bundle_id, repo,
+                              {"manifest": manifest, "force_remint": True},
+                              uid="intruder")
+        assert intruder.status_code == 403
+        assert intruder.json()["error"] == "forbidden"
+
+    def test_explicit_null_is_accepted_and_means_false(
+        self, client: TestClient
+    ) -> None:
+        """Swift's JSONEncoder emits null for a nil `Bool?`.
+
+        Modelling the field as optional client-side is the obvious spelling,
+        and under a strict `bool` this body 422s — which the client's 0038
+        policy treats as a FATAL clientError, killing the upload. Absent and
+        null both mean "I claim nothing about my URIs".
+        """
+        repo = InMemoryUploadSessionRepository()
+        bundle_id = _make_bundle_id()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 64}]
+
+        first = self._post(client, bundle_id, repo,
+                           {"manifest": manifest, "force_remint": None})
+        assert first.status_code == 200
+
+        # null must behave as false — i.e. still replay.
+        again = self._post(client, bundle_id, repo,
+                           {"manifest": manifest, "force_remint": None})
+        assert again.json() == first.json()
+
+    def test_response_shape_is_unchanged(self, client: TestClient) -> None:
+        """0035 freeze: the response gained nothing the client must parse."""
+        repo = InMemoryUploadSessionRepository()
+        resp = self._post(
+            client, _make_bundle_id(), repo,
+            {"manifest": [{"relative_path": "bundle.pb",
+                           "expected_size_bytes": 64}],
+             "force_remint": True},
+        )
+        assert resp.status_code == 200
+        for entry in resp.json():
+            assert set(entry) == {"relative_path", "session_uri"}
 
 
 # ---------------------------------------------------------------------------

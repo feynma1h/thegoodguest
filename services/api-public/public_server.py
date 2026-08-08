@@ -219,6 +219,24 @@ class UploadSessionRequest(BaseModel):
     manifest: list[dict]         # [{relative_path, expected_size_bytes}]
     fcm_token: Optional[str] = None
 
+    # Decision 0116. "The URIs I already hold are dead — mint me new ones."
+    #
+    # ADDITIVE and defaulted, which is what keeps the frozen 0035 wire shape
+    # intact: the deployed iOS build omits the field entirely and gets the
+    # old replay semantics unchanged. Only a client that has evidence its
+    # sessions are consumed (a 410, or a failed_incomplete scene naming
+    # missing paths) should set it — see the repository module docstring for
+    # why the server trusts the claim instead of probing for it.
+    #
+    # Optional, and null means false, DELIBERATELY. A strict `bool` 422s on
+    # an explicit null, and Swift's JSONEncoder emits exactly that for a nil
+    # `Bool?` — which the client's 0038 policy classifies as a fatal
+    # clientError. Modelling the field as optional on the Swift side is the
+    # obvious way to write it, so the strict version would have turned a
+    # natural client spelling into a dead upload. Absent and null both mean
+    # "I am not claiming anything about my URIs", which is the same thing.
+    force_remint: Optional[bool] = False
+
 
 class UploadSessionEntry(BaseModel):
     """One entry in the upload_session response."""
@@ -805,12 +823,32 @@ def create_upload_session(
     Request body:
       manifest: [{relative_path: str, expected_size_bytes: int}]
       fcm_token: str | null   (FCM registration token for upload-incomplete push)
+      force_remint: bool      (optional, default false — see below)
 
     Response (200): [{relative_path, session_uri}]
 
     Idempotent: repeated calls with the same {bundle_id, manifest paths}
     return the stored URIs without minting new ones (and without consuming
     rate-limit quota).
+
+    Re-minting a dead session (decision 0116). That idempotency is keyed on
+    the path-set, which says what the client intends to upload and cannot
+    also say whether the URIs it holds still work. A client recovering from
+    `failed_incomplete` needs fresh URIs for the SAME paths — a GCS resumable
+    session is single-use, so re-PUTting a finalized one is read as a status
+    query of the finished upload and silently fails to re-create an object
+    the captures lifecycle rule swept. Sending `force_remint: true` suppresses
+    the replay and mints fresh URIs, replacing the stored ones. It changes
+    nothing else: ownership is still checked first (403 for a foreign UID),
+    it charges mint quota like any real mint, and it charges no second
+    capture for a bundle already claimed.
+
+    The recovery loop this completes: ingest answers `failed_incomplete` with
+    `missing_paths` → client force-re-mints those paths (manifest validation
+    requires exactly one bundle.pb, so the recovery manifest necessarily
+    carries the blob whose finalize event re-triggers ingest) → client
+    re-uploads, bundle.pb last → Eventarc → ingest transitions the existing
+    FAILED_INCOMPLETE scene back to QUEUED with the same scene_id.
 
     Manifest rules (gaps c + F3, decisions 0015/0018): every entry carries a
     real expected_size_bytes (>= 1, capped), paths match the capture clients'
@@ -881,7 +919,15 @@ def create_upload_session(
             bucket=_GCS_CAPTURES_BUCKET,
             daily_mint_quota=UPLOAD_DAILY_MINTS,
             daily_capture_quota=UPLOAD_DAILY_CAPTURES,
+            force_remint=bool(req.force_remint),
         )
+        if req.force_remint:
+            # Rare and recovery-shaped: worth a line so a support question
+            # ("why did this account burn mints?") is answerable from logs.
+            logger.info(
+                "force_remint: uid=%s bundle_id=%s paths=%d",
+                user_id, bundle_id, len(req.manifest),
+            )
     except CaptureLimitError as exc:
         retry_after_s = max(
             1, int((exc.resets_at - datetime.now(tz=timezone.utc)).total_seconds())
