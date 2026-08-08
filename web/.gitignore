@@ -52,6 +52,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# variant-B hero probe: a real object splat is a possession — never shipped
+# variant-B hero probe: a real object splat is a possession — never shipped.
+# .spz joins .ply here (decision 0126): the compressed tier makes a room's
+# pieces small enough to be tempting to stage, and small is not the test —
+# a compressed possession is still a possession.
 /public/hero/piece.json
 /public/hero/*.ply
+/public/hero/*.spz
