@@ -276,3 +276,85 @@ class TestAxisCloudPins:
         assert obj["splat_axis_resolved"] is False
         assert "axis_cloud_points" not in obj["quality"]
         assert obj["quality"]["axis_up_filtered"] is True
+
+
+# ---------------------------------------------------------------------------
+# Decision 0104 — splat clipping, pinned on the same real box objects.
+# ---------------------------------------------------------------------------
+
+# (clip emitted?, removed_fraction) at achieved values, measured through
+# build_box_object on the spike scene's real splats. The bed is the walk's
+# headline: its splat reaches 0.46 m past the measured box and intersects
+# the table and the chair, in a room whose boxes the operator verified 9/9.
+CLIP_PINS = {
+    "obj_000": (False, 0.0),
+    "obj_003": (True, 0.3080),   # bed — the phantom length
+    "obj_004": (True, 0.0224),   # table — a real but mild overhang
+    "obj_005": (False, 0.0),
+    "obj_006": (False, 0.0),
+    "obj_007": (False, 0.0),
+}
+
+
+@_needs_splats
+class TestSplatClipRealData:
+    @pytest.fixture(scope="class")
+    def built(self):
+        ctx = FixtureCtx()
+        room = _room()
+        return {
+            oid: box_placement.build_box_object(
+                box=room.objects[rec["box_index"]], box_index=rec["box_index"],
+                object_id=oid, associations=_associations(ctx, oid),
+                ctx=ctx, allow_scoring=True,
+            )
+            for oid, rec in sorted(ctx.observations.items())
+        }
+
+    def test_clip_emitted_only_where_the_splat_leaves_its_box(self, built):
+        for oid, (emitted, fraction) in CLIP_PINS.items():
+            clip = built[oid].get("splat_clip")
+            assert (clip is not None) is emitted, oid
+            if emitted:
+                assert clip["removed_fraction"] == pytest.approx(fraction, abs=0.02), oid
+                assert clip["kind"] == "roomplan_box"
+
+    def test_clip_volume_is_the_measured_box_grown_by_the_margin(self, built):
+        room = _room()
+        for oid, (emitted, _f) in CLIP_PINS.items():
+            if not emitted:
+                continue
+            clip = built[oid]["splat_clip"]
+            box = room.objects[
+                int(built[oid]["roomplan_box"]["box_id"].split("_")[1])
+            ]
+            margin = clip["margin_m"]
+            assert clip["half_extents_m"] == pytest.approx(
+                [float(d) / 2.0 + margin for d in box.dimensions], abs=1e-3
+            ), oid
+            assert clip["center_world"] == pytest.approx(
+                [float(c) for c in box.center_world], abs=1e-3
+            ), oid
+
+    def test_clip_never_moves_or_rescales_the_object(self, built):
+        """The honesty invariant: a clip declines to render known-false
+        mass, it does not falsify the measurement that proves it false.
+        Position, rotation and scale must be byte-identical to the values
+        the axis pins above already assert."""
+        for oid, (emitted, _f) in CLIP_PINS.items():
+            if not emitted:
+                continue
+            wt = built[oid]["world_transform"]
+            room = _room()
+            box = room.objects[
+                int(built[oid]["roomplan_box"]["box_id"].split("_")[1])
+            ]
+            assert wt["position"] == pytest.approx(
+                [float(c) for c in box.center_world], abs=1e-9
+            ), oid
+
+    def test_bed_clip_removes_the_phantom_length_not_the_bed(self, built):
+        """The bed keeps most of itself: a clip that gutted the object
+        would be the wrong instrument, and the measured sweep is what
+        chose the 0.10 m margin over tighter ones."""
+        assert built["obj_003"]["splat_clip"]["removed_fraction"] < 0.40

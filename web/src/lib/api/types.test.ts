@@ -456,3 +456,51 @@ describe("assembleScene shell mapping (v3)", () => {
     expect(shell!.filter((p) => p.kind === "wall")).toHaveLength(1);
   });
 });
+
+describe("assembleScene splat clip (decision 0104)", () => {
+  const clip = {
+    kind: "roomplan_box",
+    margin_m: 0.1,
+    center_world: [1, 2, 3] as [number, number, number],
+    half_extents_m: [0.6, 0.4, 1.2] as [number, number, number],
+    yaw_rad: 0.5,
+    removed_fraction: 0.31,
+  };
+
+  it("carries a declared clip volume through to the viewer", () => {
+    const { splats } = assembleScene(assets({
+      objects: [{ ...assets().manifest.objects![0], splat_clip: clip }],
+    }));
+    expect(splats).toHaveLength(1);
+    expect(splats[0].clip).toEqual({
+      center_world: [1, 2, 3],
+      half_extents_m: [0.6, 0.4, 1.2],
+      yaw_rad: 0.5,
+    });
+  });
+
+  it("leaves clip undefined when the splat fits its box", () => {
+    const { splats } = assembleScene(assets());
+    expect(splats[0].clip).toBeUndefined();
+  });
+
+  it("ignores a clip of an unknown kind rather than guessing a volume", () => {
+    const { splats } = assembleScene(assets({
+      objects: [{
+        ...assets().manifest.objects![0],
+        splat_clip: { ...clip, kind: "something_else" },
+      }],
+    }));
+    expect(splats[0].clip).toBeUndefined();
+  });
+
+  it("never lets a clip change the transform it accompanies", () => {
+    const plain = assembleScene(assets()).splats[0];
+    const clipped = assembleScene(assets({
+      objects: [{ ...assets().manifest.objects![0], splat_clip: clip }],
+    })).splats[0];
+    expect(clipped.position).toEqual(plain.position);
+    expect(clipped.rotation_xyzw).toEqual(plain.rotation_xyzw);
+    expect(clipped.scale).toEqual(plain.scale);
+  });
+});
