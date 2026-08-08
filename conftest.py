@@ -3,7 +3,14 @@
 When pytest is invoked from a subdirectory, testpaths in pyproject.toml is
 bypassed — pytest treats the invocation directory as the collection root
 instead.  The pytest_configure hook below restores full-suite collection so
-that ``pytest`` from any working directory yields the same 234 tests.
+that ``pytest`` from any working directory yields the same set of tests.
+
+The path list is READ FROM pyproject.toml at run time via config.getini,
+never restated here.  It used to be a hand-maintained copy, and the copy
+drifted: tools/test_backfill_scene_expiry.py was added to testpaths but not
+to the duplicate, so `pytest` from repo root collected 630 tests and the
+same command from any subdirectory collected 626 — silently, while this
+docstring promised they were equal.  A derived list cannot drift again.
 
 tools/claim1_test.py is a manual one-off script that happens to match the
 *_test.py pattern; it is not part of the automated suite.
@@ -14,15 +21,6 @@ from pathlib import Path
 _ROOTDIR = Path(__file__).resolve().parent
 
 collect_ignore = [str(_ROOTDIR / "tools" / "claim1_test.py")]
-
-_TESTPATHS = [
-    str(_ROOTDIR / "packages/schemas/tests"),
-    str(_ROOTDIR / "packages/api-core/tests"),
-    str(_ROOTDIR / "services/api-internal/tests"),
-    str(_ROOTDIR / "services/api-public/tests"),
-    str(_ROOTDIR / "tools/test_upload_test_bundle.py"),
-    str(_ROOTDIR / "tools/test_smoke_test_e2e.py"),
-]
 
 
 def pytest_configure(config):
@@ -44,4 +42,8 @@ def pytest_configure(config):
     args_resolved = {Path(a).resolve() for a in config.args}
     if args_resolved and args_resolved != {invdir}:
         return
-    config.args = _TESTPATHS
+    # testpaths is relative to rootdir; resolve it there, not against invdir.
+    testpaths = config.getini("testpaths")
+    if not testpaths:
+        return
+    config.args = [str(rootdir / p) for p in testpaths]
