@@ -513,7 +513,10 @@ class UnsignedDevUrlSigner:
 # Bounded and order-preserving, the precedent being 0074's _mint_all pool.
 # Modest by default on purpose -- 0080's mint OOM came from per-call session
 # construction, which the signer does not do (it reuses one storage.Client),
-# but a 512 MiB service earns a conservative ceiling anyway.
+# but a 512 MiB service earns a conservative ceiling anyway. The pool is
+# per-request and capped at the number of URIs, so a small room spends fewer
+# threads than the ceiling; the worst case is this number times however many
+# /assets calls are in flight, which is one per room view.
 _ASSET_SIGN_CONCURRENCY = int(os.environ.get("ASSET_SIGN_CONCURRENCY", "8"))
 
 
