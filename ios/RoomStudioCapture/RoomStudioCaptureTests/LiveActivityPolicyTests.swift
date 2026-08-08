@@ -44,6 +44,55 @@ final class LiveActivityPolicyTests: XCTestCase {
                        .failed(.incomplete))
     }
 
+    // MARK: - merge: the no-reopening rule (decision 0111)
+
+    /// The stale-card defect, one stage earlier than the sticky rule guards.
+    /// Blob completions keep arriving after the Phase-1 gate fires — cancelled
+    /// siblings, redelivered events — and `.finalizing` and `.queued` are NOT
+    /// terminal, so nothing stopped a late `.sending(N, N)` from putting the card
+    /// back to a completed count labelled in progress.
+    func test_merge_lateSendingDoesNotReopenTheFinalize() {
+        XCTAssertEqual(
+            LiveActivityPolicy.merge(current: .finalizing, incoming: .sending(sent: 127, total: 127)),
+            .finalizing,
+            "a straggler completion must not undo the finalize"
+        )
+        XCTAssertEqual(
+            LiveActivityPolicy.merge(current: .queued, incoming: .sending(sent: 127, total: 127)),
+            .queued
+        )
+        XCTAssertEqual(
+            LiveActivityPolicy.merge(current: .analyzing, incoming: .sending(sent: 5, total: 127)),
+            .analyzing
+        )
+    }
+
+    /// The rule is scoped to `.sending` as the INCOMING stage. Real forward
+    /// movement past the finalize must still land.
+    func test_merge_finalizeStillAdvances() {
+        XCTAssertEqual(LiveActivityPolicy.merge(current: .finalizing, incoming: .queued), .queued)
+        XCTAssertEqual(LiveActivityPolicy.merge(current: .finalizing, incoming: .ready), .ready)
+        XCTAssertEqual(LiveActivityPolicy.merge(current: .finalizing, incoming: .failed(.upload)),
+                       .failed(.upload))
+        XCTAssertEqual(LiveActivityPolicy.merge(current: .sending(sent: 9, total: 9),
+                                                incoming: .finalizing),
+                       .finalizing)
+    }
+
+    /// `.paused` is deliberately NOT past the upload: it means blobs stopped and
+    /// will resume, so the `.sending` that follows is the recovery it predicted,
+    /// not a straggler. Blocking it would freeze the card on "Paused for now"
+    /// through a working retry.
+    func test_merge_pausedStillRecoversOnProgress() {
+        XCTAssertEqual(
+            LiveActivityPolicy.merge(current: .paused, incoming: .sending(sent: 4, total: 10)),
+            .sending(sent: 4, total: 10)
+        )
+        XCTAssertFalse(LiveActivityPolicy.isPastUpload(.paused))
+        XCTAssertFalse(LiveActivityPolicy.isPastUpload(.preparing))
+        XCTAssertTrue(LiveActivityPolicy.isPastUpload(.finalizing))
+    }
+
     func test_merge_nonTerminalProgressesFreely() {
         XCTAssertEqual(
             LiveActivityPolicy.merge(current: .sending(sent: 3, total: 10), incoming: .queued),
@@ -129,7 +178,12 @@ final class LiveActivityPolicyTests: XCTestCase {
         XCTAssertEqual(LiveActivityPolicy.stage(for: .waiting(phase: .longRunning, anchor: nil)), .analyzing)
         XCTAssertEqual(LiveActivityPolicy.stage(for: .doorway), .ready)
         XCTAssertEqual(LiveActivityPolicy.stage(for: .processingFailed), .failed(.processing))
-        XCTAssertEqual(LiveActivityPolicy.stage(for: .incompleteUpload), .failed(.incomplete))
+        // The count reaches the in-app screen, never the Lock Screen: a card a
+        // stranger can read over a shoulder says what happened, not how much.
+        XCTAssertEqual(LiveActivityPolicy.stage(for: .incompleteUpload(missingCount: 1)),
+                       .failed(.incomplete))
+        XCTAssertEqual(LiveActivityPolicy.stage(for: .incompleteUpload(missingCount: 40)),
+                       .failed(.incomplete))
         XCTAssertEqual(LiveActivityPolicy.stage(for: .uploadFailed), .failed(.upload))
         XCTAssertEqual(LiveActivityPolicy.stage(for: .sendFailed(terminal: false)), .failed(.upload))
         XCTAssertEqual(LiveActivityPolicy.stage(for: .sendFailed(terminal: true)), .failed(.upload))
