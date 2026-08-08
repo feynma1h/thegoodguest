@@ -5,8 +5,8 @@ consumes, replacing the nine real HEICs that used to live in
 WHY THESE EXIST: the originals were nine photographs of a real bedroom,
 committed in the repo's first commit and carried in every tree since. They
 also carried GPS EXIF pinning a precise home location. That is not something
-to hand to a git remote, so they were purged from history (decision 0101) and
-these took their place.
+to hand to a git remote, so they were removed and purged from git history
+before the repo's first push, and these took their place (decision 0101).
 
 WHY THEY ARE BETTER THAN WHAT THEY REPLACE, not merely safer: the originals
 were photographs of one room paired with a completely unrelated synthetic
