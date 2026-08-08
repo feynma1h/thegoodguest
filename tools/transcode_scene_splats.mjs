@@ -18,7 +18,9 @@
  *
  * The encoder is Spark's own SpzWriter, resolved out of web/node_modules --
  * deliberately the SAME build the browser decodes with, so the writer and the
- * reader can never drift apart.
+ * reader can never drift apart. It lives in tools/spz_encode.mjs, shared with
+ * the /compress stage that runs this same transcode automatically for new
+ * captures; this tool remains the backfill and re-drive path.
  *
  * What it writes, both additive and both ignored by every existing reader:
  *   scenes/{id}/frames/NNNN/splats/NN_label.spz   beside the .ply
@@ -46,27 +48,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { encodePly, loadSpark } from "./spz_encode.mjs";
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BUCKET = "roomstudio-perception-outputs";
 const INDEX_VERSION = 1;
-
-const SPARK_PATH = join(
-  ROOT,
-  "web/node_modules/@sparkjsdev/spark/dist/spark.module.js",
-);
-
-async function loadSpark() {
-  try {
-    return await import(`file://${SPARK_PATH}`);
-  } catch (e) {
-    console.error(
-      `Cannot load Spark from ${SPARK_PATH}\n` +
-        `The encoder must be the same build the browser decodes with.\n` +
-        `Run: npm install --prefix web\n\n${e?.message ?? e}`,
-    );
-    process.exit(2);
-  }
-}
 
 // --- GCS via the gcloud CLI: no new npm dependency, and the tool inherits the
 // operator's own credentials rather than minting any.
@@ -152,7 +138,7 @@ function spzUriFor(plyUri) {
   return plyUri.slice(0, -4) + ".spz";
 }
 
-async function transcodeScene(spark, sceneId, { apply, force }) {
+async function transcodeScene(sceneId, { apply, force }) {
   const base = `gs://${BUCKET}/scenes/${sceneId}`;
   const manifestRaw = readTextOptional(`${base}/manifest.json`);
   if (!manifestRaw) {
@@ -213,11 +199,7 @@ async function transcodeScene(spark, sceneId, { apply, force }) {
       download(w.plyUri, local);
       const fileBytes = new Uint8Array(readFileSync(local));
       const t0 = Date.now();
-      const out = await spark.transcodeSpz({
-        inputs: [{ fileBytes, pathOrUrl: w.plyUri }],
-      });
-      const reader = new spark.SpzReader({ fileBytes: out.fileBytes });
-      await reader.parseHeader();
+      const out = await encodePly(fileBytes, w.plyUri);
 
       const outLocal = join(tmp, "out.spz");
       writeFileSync(outLocal, out.fileBytes);
@@ -226,13 +208,13 @@ async function transcodeScene(spark, sceneId, { apply, force }) {
       entries[w.plyUri] = {
         uri: spzUri,
         bytes: out.fileBytes.byteLength,
-        gaussians: reader.numSplats,
+        gaussians: out.gaussians,
         source_bytes: w.src.size,
         source_generation: w.src.generation,
       };
       console.log(
         `      ${(w.src.size / 1e6).toFixed(1)} MB -> ${(out.fileBytes.byteLength / 1e6).toFixed(2)} MB ` +
-          `(${(w.src.size / out.fileBytes.byteLength).toFixed(2)}x, ${reader.numSplats} gaussians, ` +
+          `(${(w.src.size / out.fileBytes.byteLength).toFixed(2)}x, ${out.gaussians} gaussians, ` +
           `${((Date.now() - t0) / 1000).toFixed(1)}s)`,
       );
       rmSync(local, { force: true });
@@ -269,7 +251,7 @@ async function main() {
     process.exit(2);
   }
 
-  const spark = await loadSpark();
+  await loadSpark();  // fail fast on a missing encoder, before any GCS work
   const scenes = all ? listScenes() : [resolveScene(positional[0])];
 
   if (!apply) {
@@ -280,7 +262,7 @@ async function main() {
   let inTotal = 0;
   let outTotal = 0;
   for (const s of scenes) {
-    const r = await transcodeScene(spark, s, { apply, force });
+    const r = await transcodeScene(s, { apply, force });
     if (!r) continue;
     for (const e of Object.values(r.entries)) {
       inTotal += e.source_bytes;

@@ -1726,6 +1726,20 @@ async def handle_process(
             "shell enqueue failed (scene %s stays ready): %s", scene_id, exc
         )
 
+    # Third stage: enqueue the compressed-splat tier (decisions 0125/0126).
+    # Same fire-and-forget posture, and independent of the shell enqueue
+    # above — one failing must not cost the other. A missing compressed
+    # tier is invisible to the client: the room renders from PLY, which is
+    # what every room did before the tier existed.
+    try:
+        from compress_enqueue import enqueue_compress_task  # deferred
+
+        enqueue_compress_task(scene_id=scene_id)
+    except Exception as exc:
+        logger.warning(
+            "compress enqueue failed (scene %s stays ready): %s", scene_id, exc
+        )
+
     if fcm_token:
         try:
             fcm_notifier.notify_ready(fcm_token=fcm_token, scene_id=scene_id)
