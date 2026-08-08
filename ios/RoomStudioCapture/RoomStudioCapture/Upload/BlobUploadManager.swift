@@ -34,7 +34,10 @@
 /// Decisions: 0040 (blob-then-bundle.pb ordering, staleness guard), 0041 (retry/backoff
 /// shape, clock injection for deterministic tests), 0044 (background-task assertion +
 /// drain gate), 0045 (relaunch recovery: rehydration, cross-launch retry, terminal fatal
-/// handling), 0049 (re-mint failure semantics: loop-guard fatal, persist-failure deferral).
+/// handling), 0049 (re-mint failure semantics: persist-failure deferral; its loop-guard
+/// fatal is now one forced re-mint, per that note's own un-defer trigger), 0116
+/// (force_remint — the second input that says "the grant you gave me is dead"), 0084 +
+/// 0116 (resendMissingBlobs: the failed_incomplete recovery re-send).
 /// Retry/backoff constants mirror UploadSessionClient's own decision 0038.
 ///
 /// Retry-After (GCS side): 408/429 blob PUT responses are retried in-process on the
@@ -147,13 +150,23 @@ actor BlobUploadManager {
         try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
     }
 
-    /// Called by onSessionExpired to re-POST /upload_session.
-    /// Receives (bundleId, manifestEntries) and returns fresh [UploadSessionEntry].
-    /// The production init wires this to UploadSessionClient.shared +
-    /// AuthManager.shared (reusing the full retry/backoff + 401 token-refresh
-    /// policy). Tests inject a stub that returns predetermined entries or
-    /// throws. Nil means "not wired" — routes to onFatalBlobError.
-    var remintProvider: (@Sendable (String, [UploadManifestEntry]) async throws -> [UploadSessionEntry])?
+    /// Called by onSessionExpired (and the recovery re-send) to re-POST
+    /// /upload_session.
+    ///
+    /// Receives (bundleId, manifestEntries, forceRemint) and returns fresh
+    /// [UploadSessionEntry]. The production init wires this to
+    /// UploadSessionClient.shared + AuthManager.shared (reusing the full 0038
+    /// retry/backoff + 401 token-refresh policy). Tests inject a stub that
+    /// returns predetermined entries or throws. Nil means "not wired" — routes
+    /// to onFatalBlobError.
+    ///
+    /// `forceRemint` is decision 0116's second input and is passed true on
+    /// exactly two evidence-backed paths: the loop guard below (the server
+    /// replayed URIs GCS has already declared dead) and `resendMissingBlobs`
+    /// (a `failed_incomplete` scene named paths that must be sent again). It is
+    /// never set on an ordinary retry — that is what keeps retries free of the
+    /// daily mint quota.
+    var remintProvider: (@Sendable (String, [UploadManifestEntry], Bool) async throws -> [UploadSessionEntry])?
 
     /// Returns all tasks in the background URLSession.
     /// Production: nil (uses session.getAllTasks). Tests: inject a stub for reconciliation tests.
@@ -202,11 +215,12 @@ actor BlobUploadManager {
         cfg.allowsCellularAccess     = true
         self.store   = .shared
         self.session = URLSession(configuration: cfg, delegate: del, delegateQueue: nil)
-        self.remintProvider = { bundleId, manifestEntries in
+        self.remintProvider = { bundleId, manifestEntries, forceRemint in
             try await UploadSessionClient.shared.createUploadSession(
                 bundleId: bundleId,
                 manifest: manifestEntries,
-                tokenProvider: { try await AuthManager.shared.currentIDToken() }
+                tokenProvider: { try await AuthManager.shared.currentIDToken() },
+                forceRemint: forceRemint
             )
         }
     }
@@ -868,8 +882,8 @@ actor BlobUploadManager {
     ///
     ///   • 410-triggered (loopGuardEnabled: true, default):
     ///       handleTaskCompletion routes here on a blob PUT returning 410 Gone.
-    ///       Identical returned URIs = Firestore doc still alive after 7-day TTL batch lag,
-    ///       still-dead GCS URIs stored → silent loop risk → fatal.
+    ///       Identical returned URIs = the server replayed the stored (dead) entries
+    ///       → re-mint ONCE more with force_remint (0116); still identical → fatal.
     ///       Different URIs → persist fresh record, re-enqueue pending blobs.
     ///       After blobs complete, the Phase-1 gate fires → onAllBlobsUploaded → bundle.pb.
     ///
@@ -891,7 +905,8 @@ actor BlobUploadManager {
     ///      routes to onFatalBlobError before any network call. Call remintProvider
     ///      with that manifest — reuses the full 0038 retry/backoff + 401
     ///      token-refresh policy implemented in UploadSessionClient.
-    ///   3. Loop guard (410 path only): if returned URIs == persisted URIs → fatal.
+    ///   3. Loop guard (410 path only): if returned URIs == persisted URIs, mint
+    ///      once more with force_remint; if THAT still matches → fatal.
     ///   4. Persist fresh record (new sessionEntries + fresh clientMintTimestamp).
     ///   5. Re-enqueue blobs against the fresh URIs.
     ///      Staleness: reset ALL non-bundle.pb statuses to .pending + re-enqueue all
@@ -938,9 +953,9 @@ actor BlobUploadManager {
             }
             manifestEntries.append(UploadManifestEntry(relativePath: path, expectedSizeBytes: size))
         }
-        let freshEntries: [UploadSessionEntry]
+        var freshEntries: [UploadSessionEntry]
         do {
-            freshEntries = try await mintFn(bundleId, manifestEntries)
+            freshEntries = try await mintFn(bundleId, manifestEntries, false)
         } catch {
             logger.info("[BlobUploadManager] ⚠ re-mint failed for \(bundleId, privacy: .public): \(error.localizedDescription)")
             // DEFERRED-TRANSIENT: transient network/server failure from /upload_session.
@@ -951,27 +966,50 @@ actor BlobUploadManager {
         }
 
         // 3. Loop guard (410-triggered path only).
-        //    Identical URIs = server returned stored dead URIs (Firestore batch lag after
-        //    7-day TTL). Re-enqueuing with dead URIs would loop on 410 immediately.
+        //    Identical URIs = the server replayed the stored entries. GCS has
+        //    already declared this session dead (that is what the 410 was), so
+        //    re-enqueuing against them would 410 again immediately.
         //    Not applied on the staleness path: at 12 h, stored URIs are still valid and
         //    identical == correct server behaviour, not a dead-URI condition.
         //
-        //    Fatal (not wait-and-retry) is deliberate: GCS has declared the session
-        //    dead, so identical URIs are guaranteed to 410 again; the only thing a
-        //    bounded wait could buy is the Firestore TTL firing (up to ~72 h of lag).
-        //    Reaching this branch at all means the bundle has been unfinished for
-        //    at least a week (both the GCS URI and the Firestore TTL run ~7 days),
-        //    so days more of silent background churn isn't a reasonable ask. A
-        //    terminal .failed surfaces the problem instead. See decision 0049.
+        //    ONE FORCED RE-MINT, THEN FATAL (decision 0049's named un-defer
+        //    trigger, taken by decision 0116). The replay happens because the
+        //    path-set is the server's idempotency key and cannot also express
+        //    "the grant you gave me is dead" — so we say it with the second
+        //    input the contract now has. force_remint suppresses the replay and
+        //    mints genuinely fresh sessions for the same paths.
+        //
+        //    Exactly once, not a ladder: the flag's effect is deterministic. If
+        //    the server still answers with the same URIs after being told the
+        //    old ones are dead, repeating the request cannot change that answer,
+        //    and it would spend a unit of the daily mint quota per attempt. The
+        //    terminal `.failed` (reason unchanged — the condition is the same
+        //    one 0049 named) surfaces the problem instead of hiding it in
+        //    background churn.
         let oldUriMap = record.sessionUriMap
-        let newUriMap = Dictionary(
-            uniqueKeysWithValues: freshEntries.map { ($0.relativePath, $0.sessionUri) }
-        )
-        if loopGuardEnabled && newUriMap == oldUriMap {
-            logger.info("[BlobUploadManager] ⚠ re-mint returned identical URIs for \(bundleId, privacy: .public) — stale doc still in Firestore")
-            await onFatalBlobError(bundleId: bundleId, relativePath: "*",
-                                   reason: "remint_returned_stale_uris")
-            return
+        func uriMap(_ entries: [UploadSessionEntry]) -> [String: String] {
+            Dictionary(uniqueKeysWithValues: entries.map { ($0.relativePath, $0.sessionUri) })
+        }
+        if loopGuardEnabled && uriMap(freshEntries) == oldUriMap {
+            logger.info("[BlobUploadManager] ⚠ re-mint replayed stored URIs for \(bundleId, privacy: .public) — retrying with force_remint")
+            do {
+                freshEntries = try await mintFn(bundleId, manifestEntries, true)
+            } catch {
+                // The forced mint is a network call like any other: a transient
+                // failure here defers, exactly as the first mint's does. Fatal is
+                // reserved for the server answering and still replaying.
+                logger.info("[BlobUploadManager] ⚠ forced re-mint failed for \(bundleId, privacy: .public): \(error.localizedDescription)")
+                await deferTransientBlobError(bundleId: bundleId, relativePath: "*",
+                                              reason: "forced_remint_failed: \(error)", record: record)
+                return
+            }
+            if uriMap(freshEntries) == oldUriMap {
+                logger.info("[BlobUploadManager] ⚠ forced re-mint STILL returned identical URIs for \(bundleId, privacy: .public)")
+                await onFatalBlobError(bundleId: bundleId, relativePath: "*",
+                                       reason: "remint_returned_stale_uris")
+                return
+            }
+            logger.info("[BlobUploadManager] ✓ forced re-mint vended fresh URIs for \(bundleId, privacy: .public)")
         }
 
         // 4. Persist fresh record: new URIs + fresh mint timestamp.

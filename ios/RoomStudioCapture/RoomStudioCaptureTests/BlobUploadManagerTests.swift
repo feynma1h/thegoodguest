@@ -2441,8 +2441,21 @@ final class BlobUploadManagerTests: XCTestCase {
 
 extension BlobUploadManager {
     /// Convenience for tests: set remintProvider from a @MainActor context.
+    ///
+    /// Two-argument shim over the real three-argument seam. Kept deliberately:
+    /// every pre-0116 test here asserts something that has nothing to do with
+    /// force_remint, and rewriting ~20 call sites to add an ignored `_` would
+    /// have churned pins whose meaning must not change. Tests that care about
+    /// the flag use setRemintProviderObservingForce below.
     func setRemintProvider(
         _ provider: @escaping @Sendable (String, [UploadManifestEntry]) async throws -> [UploadSessionEntry]
+    ) {
+        remintProvider = { bundleId, manifest, _ in try await provider(bundleId, manifest) }
+    }
+
+    /// Convenience for tests that assert WHETHER force_remint was set.
+    func setRemintProviderObservingForce(
+        _ provider: @escaping @Sendable (String, [UploadManifestEntry], Bool) async throws -> [UploadSessionEntry]
     ) {
         remintProvider = provider
     }
