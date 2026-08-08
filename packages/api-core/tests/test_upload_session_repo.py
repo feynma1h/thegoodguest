@@ -18,12 +18,19 @@ Covers:
     - get_fcm_token: None for unknown, stored token after create_or_get
     - parallel minting: manifest order preserved, real overlap, first error
       aborts without storing, UPLOAD_SESSION_MINT_CONCURRENCY=1 serial path
+    - force_remint (decision 0116): absent → replay unchanged (the deployed
+      client's behaviour), true → fresh URIs for the SAME path-set, stored
+      entries replaced, mint quota charged, no second capture charged,
+      ownership still fatal first, a refused re-mint leaves the stored URIs
+      intact; plus the two parity pins that catch the Firestore mirror
+      drifting away from the in-memory oracle
 
 Run from repo root:
   pytest packages/api-core/tests/ -v
 """
 from __future__ import annotations
 
+import itertools
 import threading
 import time
 
@@ -502,6 +509,201 @@ class TestCaptureCeiling:
             _capture(repo, f"n{i}", "u", captures=5, mints=5, now=next_day)
         with pytest.raises(CaptureLimitError):
             _capture(repo, "n9", "u", captures=5, mints=5, now=next_day)
+
+
+# ---------------------------------------------------------------------------
+# force_remint — vending fresh URIs for a consumed session (decision 0116)
+#
+# The boundary under test: the path-set says WHAT the caller intends to
+# upload, force_remint says WHETHER the URIs it already holds still work.
+# Before this flag those were one input, so "I am retrying my POST" and "the
+# session you gave me is dead" were the same request.
+#
+# The case that matters is same-path-set. A caller can already get fresh URIs
+# by sending a DIFFERENT path-set (a subset falls through the replay branch),
+# but a capture whose blobs the age=1d lifecycle rule swept needs the FULL
+# path-set back, which is exactly the one that replays.
+# ---------------------------------------------------------------------------
+
+def _remint(repo, bundle_id: str, uid: str, *, force: bool,
+            paths=("frames/000000.jpg", "bundle.pb"),
+            mints=None, captures=None, now=_NOW):
+    manifest = [{"relative_path": p, "expected_size_bytes": 128} for p in paths]
+    return repo.create_or_get(
+        bundle_id, uid, manifest, None,
+        mint_uri_fn=_unique_mint, bucket="bkt",
+        daily_mint_quota=mints, daily_capture_quota=captures,
+        force_remint=force, now=now,
+    )
+
+
+_mint_serial = itertools.count()
+
+
+def _unique_mint(bucket: str, blob_path: str, size_bytes: int) -> str:
+    """A minter whose every call is distinguishable.
+
+    _fake_mint is a pure function of the path, so it cannot tell a replay of
+    stored URIs apart from a genuine re-mint that happened to produce the
+    same string — the exact distinction these tests exist to make.
+    """
+    return f"https://fake/{next(_mint_serial)}/{blob_path}"
+
+
+class TestForceRemint:
+    def test_absent_flag_replays_exactly_as_before(self) -> None:
+        """The deployed-client compatibility pin.
+
+        Every shipped client omits this field, so the default must reproduce
+        the old semantics: same path-set → the STORED URIs, byte for byte.
+        """
+        repo = InMemoryUploadSessionRepository()
+        first = _remint(repo, "b1", "u", force=False)
+        again = _remint(repo, "b1", "u", force=False)
+        assert again == first
+
+    def test_force_remint_same_pathset_returns_fresh_uris(self) -> None:
+        """The gap being closed: same paths, genuinely new sessions."""
+        repo = InMemoryUploadSessionRepository()
+        first = _remint(repo, "b1", "u", force=False)
+        forced = _remint(repo, "b1", "u", force=True)
+
+        assert [e["relative_path"] for e in forced] == \
+               [e["relative_path"] for e in first]
+        first_uris = {e["session_uri"] for e in first}
+        forced_uris = {e["session_uri"] for e in forced}
+        assert not (first_uris & forced_uris), "no stored URI may survive"
+
+    def test_stored_entries_are_replaced_so_the_dead_ones_never_come_back(
+        self,
+    ) -> None:
+        """A later ordinary replay must serve the NEW URIs.
+
+        If the re-mint did not overwrite the record, the next replay would
+        hand the client back the dead sessions it just escaped.
+        """
+        repo = InMemoryUploadSessionRepository()
+        dead = _remint(repo, "b1", "u", force=False)
+        forced = _remint(repo, "b1", "u", force=True)
+        replay = _remint(repo, "b1", "u", force=False)
+
+        assert replay == forced
+        assert replay != dead
+
+    def test_force_remint_charges_mint_quota(self) -> None:
+        """It is a real mint, so it is bounded like one.
+
+        This is what makes trusting the client's claim safe: a client that
+        sets the flag when it did not need to spends its own allowance.
+        """
+        repo = InMemoryUploadSessionRepository()
+        _remint(repo, "b1", "u", force=False, mints=2)   # 1st
+        _remint(repo, "b1", "u", force=True, mints=2)    # 2nd
+        with pytest.raises(MintRateLimitedError):
+            _remint(repo, "b1", "u", force=True, mints=2)
+
+    def test_replay_stays_free_when_the_flag_is_absent(self) -> None:
+        """Charging the quota must not leak into the ordinary replay path."""
+        repo = InMemoryUploadSessionRepository()
+        _remint(repo, "b1", "u", force=False, mints=1)
+        for _ in range(5):
+            _remint(repo, "b1", "u", force=False, mints=1)
+
+    def test_force_remint_does_not_charge_a_second_capture(self) -> None:
+        """Finishing an existing capture commits no new GPU.
+
+        The whole point of the recovery loop is to complete a capture that
+        already exists; charging it again would make recovery cost the user
+        a scan they never took.
+        """
+        repo = InMemoryUploadSessionRepository()
+        _remint(repo, "b1", "u", force=False, captures=1)
+        forced = _remint(repo, "b1", "u", force=True, captures=1)
+        assert len(forced) == 2
+
+    def test_force_remint_of_an_unclaimed_bundle_is_a_first_claim(self) -> None:
+        """No existing record → ordinary first claim, capture charged.
+
+        The flag suppresses a replay; it does not exempt anyone from the
+        ceiling. Otherwise it would be a free way past the GPU budget.
+        """
+        repo = InMemoryUploadSessionRepository()
+        _remint(repo, "b1", "u", force=True, captures=1)
+        with pytest.raises(CaptureLimitError):
+            _remint(repo, "b2", "u", force=True, captures=1)
+
+    def test_force_remint_cannot_reach_a_foreign_bundle(self) -> None:
+        """Ownership is evaluated BEFORE the flag, and stays fatal.
+
+        The security property: the flag is a recovery affordance, never a
+        route to someone else's capture.
+        """
+        repo = InMemoryUploadSessionRepository()
+        _remint(repo, "b1", "owner", force=False)
+        with pytest.raises(ForeignBundleError):
+            _remint(repo, "b1", "attacker", force=True)
+
+    def test_a_refused_force_remint_leaves_the_stored_uris_intact(self) -> None:
+        """A 429'd re-mint must not destroy what the client still holds."""
+        repo = InMemoryUploadSessionRepository()
+        first = _remint(repo, "b1", "u", force=False, mints=1)
+        with pytest.raises(MintRateLimitedError):
+            _remint(repo, "b1", "u", force=True, mints=1)
+        assert _remint(repo, "b1", "u", force=False, mints=None) == first
+
+
+class TestForceRemintImplementationParity:
+    """The Firestore impl mirrors the in-memory oracle BY HAND.
+
+    Nothing in this suite executes FirestoreUploadSessionRepository (it needs
+    a live Firestore), so the mirroring is only as good as the next person's
+    care. These two pins catch the drift that would actually hurt: a
+    force_remint that silently does nothing in production while every
+    in-memory test above stays green.
+    """
+
+    def test_both_implementations_accept_the_same_arguments(self) -> None:
+        import inspect
+
+        from roomstudio_api_core.upload_session_repo import (
+            FirestoreUploadSessionRepository,
+            UploadSessionRepository,
+        )
+
+        abc_sig = inspect.signature(UploadSessionRepository.create_or_get)
+        for impl in (InMemoryUploadSessionRepository,
+                     FirestoreUploadSessionRepository):
+            assert inspect.signature(impl.create_or_get) == abc_sig, impl.__name__
+
+    def test_the_firestore_replay_branch_is_gated_on_force_remint(self) -> None:
+        """Source-level, because behaviour is not reachable offline here.
+
+        Pins the one line that matters: if the transaction's replay return is
+        not guarded by the flag, production replays dead URIs forever.
+        """
+        import ast
+        import inspect
+        import textwrap
+
+        from roomstudio_api_core.upload_session_repo import (
+            FirestoreUploadSessionRepository,
+        )
+
+        src = textwrap.dedent(
+            inspect.getsource(FirestoreUploadSessionRepository.create_or_get)
+        )
+        guarded = [
+            node
+            for node in ast.walk(ast.parse(src))
+            if isinstance(node, ast.If)
+            and "force_remint" in ast.dump(node.test)
+            and any(
+                isinstance(inner, ast.Return)
+                and "replay" in ast.dump(inner)
+                for inner in ast.walk(node)
+            )
+        ]
+        assert guarded, "the 'replay' return must sit under a force_remint guard"
 
 
 # ---------------------------------------------------------------------------
