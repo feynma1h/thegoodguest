@@ -1,0 +1,83 @@
+# iOS suite — MANUAL ONLY, and deliberately so.
+#
+# ============================================================================
+# THIS WORKFLOW HAS NEVER EXECUTED. It is committed as a ready-to-enable path
+# and an explicit record of a decision, not as a working gate. Treat its exact
+# commands as unverified until someone runs it once.
+# ============================================================================
+#
+# WHY IT DOES NOT RUN ON PUSH (decision 0099):
+#
+#   1. THE LIVE TESTS WOULD SPEND THE OPERATOR'S PRODUCTION QUOTA. The only
+#      scheme in this project, RoomStudioCapture-Integration, bakes
+#      RUN_INTEGRATION_TESTS=1, so the four UploadSessionClientTests execute
+#      live against deployed api-public on every run. Since decisions
+#      0087/0098 that endpoint charges a per-UID daily mint quota (50) and a
+#      per-UID daily CAPTURE ceiling (12). A handful of pushes a day would
+#      burn the ceiling and lock the operator out of scanning their own
+#      rooms. A test suite must not be able to do that.
+#
+#   2. THE SOURCE ALREADY SAYS SO. UploadSessionClientTests.swift's own header
+#      reads "Do not enable in CI (no network / plist)". This workflow honours
+#      that rather than quietly overriding it.
+#
+#   3. GoogleService-Info.plist IS GITIGNORED. A runner has no Firebase
+#      config, and the failure mode is a Firebase configure error that looks
+#      exactly like a backend outage — the trap already documented in
+#      CLAUDE.md's parallel-worktree note. Enabling this needs the plist as a
+#      base64 repo secret, which is an operator decision about putting
+#      Firebase config into GitHub.
+#
+#   4. macOS RUNNERS ARE EXPENSIVE. On a private repo they bill at a large
+#      multiple of Linux minutes, for a suite that is currently run by hand
+#      before every commit anyway.
+#
+# WHAT THIS RUNS WHEN INVOKED: the unit suite only. `-skip-testing` drops the
+# one class holding the live tests, which is the clean way to get the offline
+# subset out of a scheme that hardcodes the flag — no source change, and the
+# device build stays pinned to exactly what is on the phone.
+#
+# TO MAKE THIS A REAL GATE, in order:
+#   a. Add GOOGLE_SERVICE_INFO_PLIST_BASE64 as a repo secret and uncomment
+#      the decode step below.
+#   b. Run it once via workflow_dispatch and fix whatever the runner's Xcode
+#      and simulator names actually are (the values below are guesses).
+#   c. Only then consider adding a push trigger — and keep -skip-testing, for
+#      reason 1 above, unless a dedicated CI-only backend project exists.
+
+name: ios
+
+# Manual only. See the header before adding push/pull_request.
+on:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    name: unit suite (live integration tests skipped)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # - name: Restore Firebase config
+      #   env:
+      #     PLIST_B64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
+      #   run: |
+      #     test -n "$PLIST_B64" || { echo "secret not set"; exit 1; }
+      #     echo "$PLIST_B64" | base64 --decode \
+      #       > ios/RoomStudioCapture/RoomStudioCapture/GoogleService-Info.plist
+
+      - name: Show toolchain
+        run: xcodebuild -version && xcrun simctl list devicetypes | tail -20
+
+      - name: Build and test
+        working-directory: ios/RoomStudioCapture
+        # CODE_SIGNING_ALLOWED=NO: simulator tests need no signing, and the
+        # project carries an entitlements workaround that is deliberately
+        # never committed (see CLAUDE.md on the personal-team constraint).
+        run: |
+          xcodebuild test \
+            -project RoomStudioCapture.xcodeproj \
+            -scheme RoomStudioCapture-Integration \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+            -skip-testing:RoomStudioCaptureTests/UploadSessionClientTests \
+            CODE_SIGNING_ALLOWED=NO
