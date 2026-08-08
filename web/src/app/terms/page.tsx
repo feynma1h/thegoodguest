@@ -7,19 +7,29 @@
  * pipeline, and it should be re-read whenever those limitations change.
  *
  * OPERATOR REVIEW NOTES — resolve before publishing:
- *   1. Fill the four <Blank> slots (entity, jurisdiction, contact, address).
+ *   1. FILLED 2026-08-08. Operator is Utkarsh Singh, an individual (not a
+ *      company); governing law India, forum Kanpur; liability cap ₹10,000.
+ *      No postal address is published — see the matching note in
+ *      app/privacy/page.tsx for the reasoning and the one trigger (German
+ *      users) that would require adding one.
+ *   1a. THE CAP IS THE WHOLE CLAUSE WHILE THE SERVICE IS FREE. §11 reads
+ *      "the greater of the amount you paid us ... or ₹10,000", and there is
+ *      no payment path in the codebase, so the first limb is always zero.
+ *      If the service starts charging, re-read §11 — it stops being nominal.
  *   2. §13 is the Apple App Store rider. Apple requires either its standard
  *      EULA or a custom one containing at least these terms; keep the
  *      third-party-beneficiary clause if you ship a custom EULA.
- *   3. Have a lawyer in your chosen jurisdiction read §9-§11 before launch.
- *      Liability caps and warranty disclaimers are the clauses whose
- *      enforceability is most jurisdiction-dependent, and consumer-protection
- *      law in some places overrides them outright.
+ *   3. STILL OWED: have an Indian lawyer read §9-§11 before launch. Now that
+ *      the forum is fixed, this is specific rather than general — India's
+ *      Consumer Protection Act 2019 s.2(46) defines an "unfair contract" to
+ *      include terms imposing unreasonable limits on liability, which is
+ *      exactly what §11 is. Filling the cap in did not settle whether it is
+ *      enforceable against an Indian consumer. Nothing here is legal advice.
  */
 
 import type { Metadata } from "next";
 
-import LegalPage, { Blank, M, Section } from "@/components/LegalPage";
+import LegalPage, { M, Section } from "@/components/LegalPage";
 
 export const metadata: Metadata = {
   title: "Terms of Service — roomstudio",
@@ -31,7 +41,7 @@ export default function TermsPage() {
   return (
     <LegalPage
       title="Terms of Service"
-      updated={<Blank>[EFFECTIVE DATE]</Blank>}
+      updated="8 August 2026"
       summary={
         <>
           Scan rooms you have the right to scan. What we build is an
@@ -43,8 +53,8 @@ export default function TermsPage() {
     >
       <Section n="1" title="The agreement">
         <p>
-          These terms are between you and <Blank>[LEGAL ENTITY NAME]</Blank> of{" "}
-          <Blank>[REGISTERED ADDRESS]</Blank> (“we”), and they
+          These terms are between you and Utkarsh Singh (“we”), an
+          individual, and they
           govern your use of the roomstudio iPhone app and web app
           (“the service”). Using the service means you accept them.
           If you do not, do not use it.
@@ -254,7 +264,7 @@ export default function TermsPage() {
         <p>
           Our total liability for any claim relating to the service is limited
           to the greater of the amount you paid us in the twelve months before
-          the claim, or <Blank>[LIABILITY CAP — e.g. USD 100]</Blank>.
+          the claim, or ₹10,000.
         </p>
         <p>
           Nothing here limits liability that cannot be limited by law —
@@ -298,9 +308,8 @@ export default function TermsPage() {
 
       <Section n="14" title="Law and disputes">
         <p>
-          These terms are governed by the laws of{" "}
-          <Blank>[JURISDICTION]</Blank>, and the courts of{" "}
-          <Blank>[JURISDICTION]</Blank> have exclusive jurisdiction — except
+          These terms are governed by the laws of India, and the courts at
+          Kanpur, Uttar Pradesh have exclusive jurisdiction — except
           that if you are a consumer, you keep the protection of the mandatory
           laws of the country you live in, and may bring proceedings there.
         </p>
@@ -309,7 +318,7 @@ export default function TermsPage() {
           enforcing something is not a waiver of it.
         </p>
         <p>
-          Contact: <Blank>[CONTACT EMAIL]</Blank>.
+          Contact: 23singhutkarsh@gmail.com.
         </p>
       </Section>
     </LegalPage>
