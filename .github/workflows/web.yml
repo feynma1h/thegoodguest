@@ -1,0 +1,63 @@
+# Web app: tests, types, lint, and the static-export build.
+#
+# All four run because they catch different things and the project has been
+# bitten by each: vitest covers the pure libs (voice, seen, reveal, shell3d,
+# account, the composer reducer), tsc catches type drift the tests miss,
+# eslint has caught a real react-hooks/set-state-in-effect defect more than
+# once, and `next build` is the only step that proves the STATIC EXPORT still
+# works — which is what Firebase Hosting actually serves.
+#
+# One thing none of them catch, recorded here because it has bitten twice:
+# the SWC/JSX entity quirk in web/AGENTS.md silently drops a leading space in
+# rendered text. It is invisible to every check in this file. Rendered text
+# has to be verified in a browser.
+#
+# VERIFICATION STATUS: every command below was run locally against this commit
+# on Node 22 (143 vitest passing, tsc clean, eslint clean, build green with
+# /privacy and /terms prerendered). What is unverified is only the GitHub
+# Actions plumbing itself, since the repo had no remote when this landed.
+
+name: web
+
+on:
+  push:
+    branches: ["**"]
+    paths: ["web/**", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["web/**", ".github/workflows/web.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  check:
+    name: vitest + tsc + eslint + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the local toolchain (Node 22 via homebrew, keg-only).
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Unit tests
+        run: npx vitest run
+      - name: Types
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npx eslint .
+      - name: Static-export build
+        # Reads the committed .env.production, so this builds the same
+        # artifact Firebase Hosting serves — live mode against deployed
+        # api-public. No secrets: every NEXT_PUBLIC_* value is a public
+        # identifier (see web/.env.example).
+        run: npm run build

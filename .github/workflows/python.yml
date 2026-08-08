@@ -1,0 +1,147 @@
+# Python suites.
+#
+# THREE JOBS, NOT ONE, and the split is not cosmetic:
+#
+#   - The root suite's collection set is pinned by `pyproject.toml` testpaths
+#     plus the root `conftest.py`, which deliberately EXCLUDE
+#     `services/perception-obj/tests` and `tools/test_reenqueue_scene.py`.
+#     Those two therefore have to be invoked by path, which is exactly what
+#     CLAUDE.md's testpaths note says.
+#   - perception-obj declares `numpy<2` (its production base image is
+#     pytorch/pytorch:2.3.1, which pins numpy 1.x) while packages/schemas
+#     declares `numpy>=1.24` and resolves to 2.x in practice. Installing both
+#     in one environment would force one of them off its production version
+#     and test a configuration nothing ships.
+#
+# Dependencies come from `tools/ci_deps.py`, which reads each component's own
+# pyproject. The services are flat modules and NOT pip-installable (their
+# pyprojects say so); only packages/schemas and packages/api-core are real
+# packages and get installed editable.
+#
+# VERIFICATION STATUS at the time this was written: the root (600 passed,
+# 10 skipped) and re-enqueue (18 passed) jobs were reproduced end to end in a
+# clean venv on macOS/Python 3.14 using exactly these install commands. The
+# perception job installed cleanly and ran 611/612 there, with one failure
+# discussed in that job's comment. Nothing has run on Linux or on 3.11,
+# because the repo had no remote when this landed — the first push is the
+# first real execution.
+
+name: python
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: python-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Production parity: services/api-*/Dockerfile are python:3.11-slim.
+  # (Local dev runs 3.14 and the suites pass there too.)
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  root:
+    name: root suite (schemas, api-core, api-internal, api-public, tools)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install declared dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install $(python tools/ci_deps.py \
+            packages/schemas/pyproject.toml \
+            packages/api-core/pyproject.toml \
+            services/api-internal/pyproject.toml \
+            services/api-public/pyproject.toml \
+            --extra dev)
+      - name: Install local packages (editable)
+        run: python -m pip install -e packages/schemas -e packages/api-core
+      - name: Run root suite
+        # testpaths + conftest.py decide collection; no path argument.
+        run: python -m pytest -q
+
+  perception:
+    name: perception-obj suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install declared dependencies
+        # transformers / huggingface_hub / einops / safetensors are declared
+        # runtime deps but are DEFERRED imports reached only on the GPU path,
+        # which no offline test executes. torch is not declared here at all —
+        # it comes from the pytorch base image. Excluding them keeps this job
+        # to seconds instead of minutes. If a test ever needs one, this job
+        # fails with a plain ImportError, which is the right way to find out.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install $(python tools/ci_deps.py \
+            services/perception-obj/pyproject.toml --extra dev \
+            --exclude transformers --exclude huggingface_hub \
+            --exclude einops --exclude safetensors)
+          python -m pip install -e packages/schemas
+      - name: Run perception suite
+        # KNOWN ENVIRONMENT-SENSITIVE TEST — read before "fixing" a red run.
+        # test_shell_observation.py::TestMedianSelect::test_closer_frame_outweighs_far
+        # passes on numpy 2.x and raised IndexError on numpy 1.26.4 during
+        # local verification. That local environment was macOS arm64, where
+        # numpy 1.26 links Apple Accelerate and emits spurious
+        # divide-by-zero/overflow/invalid matmul warnings (the matmul RESULT
+        # was verified finite and correct, so the warnings are not the cause).
+        # Linux wheels use OpenBLAS, so this may simply not reproduce here.
+        # If it does reproduce, it is a real numpy-1.x defect on the shipping
+        # configuration and worth a decision note; if it does not, the failure
+        # was macOS-only. This run is the arbiter either way.
+        run: python -m pytest services/perception-obj/tests -q
+
+  reenqueue:
+    name: re-enqueue tool suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install declared dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install $(python tools/ci_deps.py \
+            packages/api-core/pyproject.toml \
+            services/api-internal/pyproject.toml --extra dev)
+          python -m pip install -e packages/schemas -e packages/api-core
+      - name: Run re-enqueue suite
+        run: python -m pytest tools/test_reenqueue_scene.py -q
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: python -m pip install ruff
+      # NON-GATING, and the number is the reason: `ruff check .` reports 389
+      # errors repo-wide as of 2026-08-08 (343 auto-fixable, mostly `UP`
+      # modernisations like `Optional[X]` -> `X | None`, plus two deliberate
+      # `assert False` in perception's test_receiver_repo.py). The house rule
+      # has been "ruff clean on TOUCHED files", not repo-wide, so gating here
+      # would be permanently red and would train everyone to ignore it.
+      #
+      # To make this gate: run `ruff check --fix .`, review the diff, land it
+      # as its own commit, then drop the `|| echo` below. Scoping to changed
+      # files instead needs a merge base and is the other reasonable option.
+      - run: ruff check . || echo "::warning::ruff reported findings (non-gating; see workflow comment)"
