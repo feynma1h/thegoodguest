@@ -188,6 +188,60 @@ final class LiveActivityControllerTests: XCTestCase {
 
     // MARK: - Launch reconciliation
 
+    // MARK: - The terminal narration (decision 0111)
+
+    /// THE STALE-CARD REGRESSION. Before this, the background session could only
+    /// ever publish `.sending`, so a capture that finished with the app closed
+    /// left the card reading "Sending your room N of N" — a completed count still
+    /// labelled in progress — with nothing able to move it. This test fails on
+    /// the pre-fix controller: `noteFinalizing`/`noteUploadComplete` did not
+    /// exist, and `onBundleComplete` published nothing at all.
+    func test_theSendIsNarratedToItsEndWithoutTheForeground() {
+        controller.begin(bundleId: "A")
+        controller.noteUploadProgress(bundleId: "A", sent: 127, total: 127)
+        controller.noteFinalizing(bundleId: "A")
+        controller.noteUploadComplete(bundleId: "A")
+
+        XCTAssertEqual(host.stageUpdates,
+                       [.sending(sent: 127, total: 127), .finalizing, .queued],
+                       "the card must reach a stage that is not 'sending' on the background path alone")
+        XCTAssertEqual(controller.currentStage, .queued)
+    }
+
+    /// `.queued` is where a closed phone's knowledge honestly ends — it is not
+    /// terminal, so the card stays live for the poller to advance later.
+    func test_completionDoesNotEndTheCard() {
+        controller.begin(bundleId: "A")
+        controller.noteFinalizing(bundleId: "A")
+        controller.noteUploadComplete(bundleId: "A")
+        XCTAssertFalse(host.calls.contains { if case .end = $0 { return true } else { return false } },
+                       "the pipeline has not finished — ending here would drop the analyzing/ready news")
+
+        controller.noteWaitScreen(.doorway, bundleId: "A")
+        XCTAssertEqual(host.calls.last, .end(.ready))
+    }
+
+    /// Straggler blob completions arrive after the finalize on the real session.
+    /// They must not put the card back to a completed count.
+    func test_lateProgressAfterFinalizeDoesNotReopenTheCard() {
+        controller.begin(bundleId: "A")
+        controller.noteFinalizing(bundleId: "A")
+        advance(60)
+        controller.noteUploadProgress(bundleId: "A", sent: 127, total: 127)
+        XCTAssertEqual(controller.currentStage, .finalizing)
+        XCTAssertEqual(host.stageUpdates, [.finalizing])
+    }
+
+    /// Same bundle-scoping rule as every other entry point: a finalize for a
+    /// capture this card is not about is dropped, not adopted.
+    func test_finalizeAndCompleteRespectBundleScoping() {
+        controller.begin(bundleId: "A")
+        controller.noteFinalizing(bundleId: "B")
+        controller.noteUploadComplete(bundleId: "B")
+        XCTAssertEqual(host.stageUpdates, [])
+        XCTAssertEqual(controller.currentStage, .preparing)
+    }
+
     func test_reconcileAdoptsTheRestoredFlight() {
         // The background session outlived the process, so the card is still live
         // and still correct — this process must be able to keep feeding it.

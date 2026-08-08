@@ -32,8 +32,12 @@ nonisolated enum WaitScreen: Equatable {
     case doorway
     /// The pipeline finished in a hard-failed state.
     case processingFailed
-    /// The upload was incomplete (failed_incomplete).
-    case incompleteUpload
+    /// The upload was incomplete (failed_incomplete). `missingCount` is how many
+    /// blob paths the server reported absent — a fact about the room worth
+    /// stating, and separable from the re-upload that does NOT exist yet
+    /// (decision 0084). 0 means the server named none, which the copy degrades
+    /// to the unquantified wording rather than announcing "0 files".
+    case incompleteUpload(missingCount: Int)
     /// Could not send it up. `terminal` = retrying provably cannot help.
     case sendFailed(terminal: Bool)
     /// The account's daily upload-session quota is spent (429, decision 0087).
@@ -98,8 +102,8 @@ nonisolated enum WaitFlowState {
             return .doorway
         case .failedTerminal:
             return .processingFailed
-        case .recoverable:
-            return .incompleteUpload
+        case .recoverable(let missingCount):
+            return .incompleteUpload(missingCount: missingCount)
         case .notOwned:
             return .notOurs
         case .pollError(let anchor):
@@ -167,7 +171,10 @@ nonisolated enum WaitFlowState {
                             anchor: sceneCreatedAt)
         case .succeeded:      return .succeeded
         case .failedTerminal: return .failedTerminal
-        case .recoverable:    return .recoverable
+        // Only the COUNT crosses into routing. The paths themselves are plumbing
+        // ("frames/000005.jpg") — the same category as the raw `http_404` the
+        // walk called out as leaking, and not something a user can act on.
+        case .recoverable(let paths): return .recoverable(missingCount: paths.count)
         case .notOwned:       return .notOwned
         case .pollError:      return .pollError(anchor: fallbackAnchor)
         }
@@ -180,7 +187,7 @@ nonisolated enum WaitFlowState {
         case polling(queued: Bool, longRunning: Bool, connectionTrouble: Bool, anchor: Date?)
         case succeeded
         case failedTerminal
-        case recoverable
+        case recoverable(missingCount: Int)
         case notOwned
         case pollError(anchor: Date?)
     }

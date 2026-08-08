@@ -9,6 +9,10 @@
 ///     path is a full rescan. NO specific bad region is named: the missing items
 ///     are upload blobs, not a known corner of the room. When the re-upload
 ///     coordinator lands, this becomes "send the rest" against `missingPaths`.
+///     It DOES name how many files are missing (`FailureCopy.incompleteBody`) —
+///     the server sends `missing_paths` and the count is a fact about the room,
+///     separable from the re-upload promise the copy still must not make. The
+///     0072 redesign dropped it silently; decision 0085's walk caught that.
 ///   • terminal — nothing survived; the deepest ink surface, one path: try again.
 ///     No specific cause is named — the pipeline surfaces no honest per-object
 ///     reason, so the copy stays general rather than inventing one.
@@ -18,9 +22,48 @@
 
 import SwiftUI
 
+/// What the failure screens SAY, as pure functions — the house treatment for a
+/// decision that would otherwise be reviewable only by reading a SwiftUI body
+/// (WaitFlowState, BundleRestore, CaptureReclaim, RoomActivityVoice all got it).
+///
+/// Only the incomplete-upload body needs it today: it is the one failure line
+/// that varies with server data, and getting the singular/plural or the
+/// zero-degrade wrong is exactly the class of defect a table test catches and an
+/// eye does not.
+///
+/// Read by: FailureView. Pinned by: FailureCopyTests.
+nonisolated enum FailureCopy {
+
+    /// The `failed_incomplete` body. `missingCount` is the number of blob paths
+    /// the server reported absent.
+    ///
+    /// THE HONESTY CONSTRAINT (decision 0084): naming the count must not imply
+    /// that those files can be re-sent. There is no re-upload — it is blocked on
+    /// a mint-contract change, not on client work — so the count is stated as a
+    /// FACT and the only offered path stays a full rescan. "N files need
+    /// re-uploading" (the wording the superseded SceneStatusView used) is exactly
+    /// the sentence that would promise one.
+    ///
+    /// A count of 0 degrades to the unquantified wording: the server can omit
+    /// `missing_paths`, and "0 files didn't make it" is both false and absurd.
+    static func incompleteBody(missingCount: Int) -> String {
+        let opening: String
+        switch missingCount {
+        case ..<1:  opening = "Some of your room's data didn't finish its trip to the desk"
+        case 1:     opening = "One file didn't finish its trip to the desk"
+        default:    opening = "\(missingCount) files didn't finish their trip to the desk"
+        }
+        return opening
+            + ", so I can't show you a partial version honestly. "
+            + "Nothing's wrong with the room itself — one more full pass and I'll have all of it."
+    }
+}
+
 struct FailureView: View {
     enum Kind: Equatable {
-        case recoverable
+        /// `missingCount` — how many blob paths the server reported absent. See
+        /// FailureCopy.incompleteBody for the honesty constraint on stating it.
+        case recoverable(missingCount: Int)
         case terminal
         /// The upload itself failed terminally (http_4xx, 308_persistent,
         /// empty_bundle_pb, blob_unreadable_at_remint_manifest…). NOT a capture
@@ -29,13 +72,13 @@ struct FailureView: View {
         case uploadFailed(reason: String?)
     }
 
-    var kind: Kind = .recoverable
+    var kind: Kind = .recoverable(missingCount: 0)
     var onPrimary: () -> Void = {}
     var onSecondary: () -> Void = {}
 
     var body: some View {
         switch kind {
-        case .recoverable: recoverable
+        case .recoverable(let missingCount): recoverable(missingCount: missingCount)
         case .terminal:    terminal
         case .uploadFailed(let reason): uploadFailed(reason: reason)
         }
@@ -43,7 +86,7 @@ struct FailureView: View {
 
     // MARK: Recoverable (incomplete upload → full rescan)
 
-    private var recoverable: some View {
+    private func recoverable(missingCount: Int) -> some View {
         VStack(spacing: 0) {
             Spacer(minLength: 12)
 
@@ -63,7 +106,7 @@ struct FailureView: View {
                     Text("The room didn't all make it up")
                         .font(RSFont.ui(.callout, weight: .semibold))
                         .foregroundStyle(Color.rsInk)
-                    Text("Some of your room's data didn't finish its trip to the desk, so I can't show you a partial version honestly. Nothing's wrong with the room itself — one more full pass and I'll have all of it.")
+                    Text(FailureCopy.incompleteBody(missingCount: missingCount))
                         .rsFont(.guest, size: 14.5)
                         .foregroundStyle(Color.rsInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -167,8 +210,16 @@ struct FailureView: View {
     }
 }
 
-#Preview("Recoverable") {
-    FailureView(kind: .recoverable)
+#Preview("Recoverable — one file") {
+    FailureView(kind: .recoverable(missingCount: 1))
+}
+
+#Preview("Recoverable — several files") {
+    FailureView(kind: .recoverable(missingCount: 14))
+}
+
+#Preview("Recoverable — count unknown") {
+    FailureView(kind: .recoverable(missingCount: 0))
 }
 
 #Preview("Terminal") {

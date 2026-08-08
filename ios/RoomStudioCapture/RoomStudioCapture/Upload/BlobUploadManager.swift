@@ -189,7 +189,16 @@ actor BlobUploadManager {
             withIdentifier: Self.backgroundSessionIdentifier
         )
         cfg.sessionSendsLaunchEvents = true   // relaunch app to deliver completions
-        cfg.isDiscretionary          = false  // upload promptly, not in low-power window
+        // Buys prompt upload for tasks created while the app is in the FOREGROUND
+        // — which is the ~2,170 blob PUTs `sendItHome` enqueues, i.e. nearly all
+        // the bytes. It buys nothing for a task created while the app is in the
+        // background: iOS treats such transfers as discretionary regardless of
+        // this flag, and additionally holds them behind an escalating
+        // background-launch delay. That is why bundle.pb — which by decision
+        // 0040 is enqueued last, often by a background-relaunched process — was
+        // measured stalling 20 minutes. Diagnosis and evidence in decision 0110;
+        // there is no flag that turns that off, so the fix is on the Lock Screen.
+        cfg.isDiscretionary          = false
         cfg.allowsCellularAccess     = true
         self.store   = .shared
         self.session = URLSession(configuration: cfg, delegate: del, delegateQueue: nil)
@@ -825,6 +834,17 @@ actor BlobUploadManager {
 
             _bundlePbTasksCreatedCount += 1
             logger.info("[BlobUploadManager] → enqueued bundle.pb PUT for bundle \(bundleId, privacy: .public)")
+
+            // Every blob is up; only this ~51 KB finalize is outstanding. The
+            // Lock Screen must stop saying "sending N of N" HERE — that is a
+            // completed count still labelled in progress, and it is what the
+            // decision-0085 walk read off a real card. It matters most on
+            // exactly the path that hurts: when this task was created by a
+            // background-relaunched process the OS can hold it for many minutes
+            // (decision 0110), and the card is the only surface the user has.
+            await MainActor.run {
+                LiveActivityController.shared.noteFinalizing(bundleId: bundleId)
+            }
             #if DEBUG
             StagingHooks.breadcrumb("bundlepb-enqueued \(bundleId)")
             if stagedHold {
@@ -1116,6 +1136,13 @@ actor BlobUploadManager {
         // so SceneStatusView.onAppear can find it independently if the app is backgrounded.
         Task { await MainActor.run {
             UploadFailureMonitor.shared.clearDeferral(bundleId: bundleId)
+            // The send is genuinely over: bundle.pb has landed, so the capture
+            // exists server-side and is waiting for the pipeline. This call is
+            // the one the Lock Screen never had — without it the card's last
+            // word stayed `.sending(N, N)` forever on a closed phone, which is
+            // decision 0085's stale card. `.queued` is also the honest END of
+            // what a dead process can know: everything past it needs the poller.
+            LiveActivityController.shared.noteUploadComplete(bundleId: bundleId)
             ScenePoller.shared.notifyBundleComplete(bundleId: bundleId)
         } }
     }

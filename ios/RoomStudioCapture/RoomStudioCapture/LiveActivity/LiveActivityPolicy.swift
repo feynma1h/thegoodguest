@@ -43,7 +43,29 @@ nonisolated enum LiveActivityPolicy {
     static func merge(current: RoomActivityStage?, incoming: RoomActivityStage) -> RoomActivityStage {
         guard let current else { return incoming }
         if current.isTerminal && !incoming.isTerminal { return current }
+        // THE NO-REOPENING RULE: `.sending` never lands on a stage that is
+        // already past the upload. Blob completions keep arriving on the
+        // background session after the Phase-1 gate fires — cancelled siblings
+        // and redelivered events both do it — and a late `.sending(N, N)`
+        // arriving after `.finalizing` would put the card back to a completed
+        // count labelled in progress, which IS the decision-0085 stale card.
+        //
+        // Same reasoning as the sticky rule above, one stage earlier: that rule
+        // only guards terminals, and neither `.finalizing` nor `.queued` is one.
+        if case .sending = incoming, isPastUpload(current) { return current }
         return incoming
+    }
+
+    /// Whether the capture has moved beyond blob upload. Everything here is
+    /// reached only after the Phase-1 gate has fired, so a `.sending` arriving
+    /// afterwards is a straggler by construction, never news.
+    static func isPastUpload(_ stage: RoomActivityStage) -> Bool {
+        switch stage {
+        case .finalizing, .queued, .analyzing, .ready, .failed: return true
+        // `.paused` is NOT past the upload: it means blobs stopped and will
+        // resume, so a later `.sending` is exactly the recovery it predicts.
+        case .preparing, .sending, .paused: return false
+        }
     }
 
     // MARK: - Publish throttle
@@ -86,8 +108,9 @@ nonisolated enum LiveActivityPolicy {
     /// `.sending` and a `.queued` are not.
     static func sameKind(_ a: RoomActivityStage, _ b: RoomActivityStage) -> Bool {
         switch (a, b) {
-        case (.preparing, .preparing), (.sending, .sending), (.queued, .queued),
-             (.analyzing, .analyzing), (.ready, .ready), (.paused, .paused):
+        case (.preparing, .preparing), (.sending, .sending), (.finalizing, .finalizing),
+             (.queued, .queued), (.analyzing, .analyzing), (.ready, .ready),
+             (.paused, .paused):
             return true
         case (.failed(let x), .failed(let y)):
             return x == y
