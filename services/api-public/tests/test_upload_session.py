@@ -18,13 +18,18 @@ Covers:
   - fcm_token stored and retrievable from the upload session record
 
 NullTokenVerifier is used for all tests (accepts "test-uid:<uid>" tokens).
-The GCS URI minter is injected as a lambda — no google-cloud-storage needed.
+The GCS URI minter is injected through public_server's `_mint_uri_fn` seam —
+no google-cloud-storage, and no cloud credentials of any kind. That last part
+is a property this file is REQUIRED to hold and now pins explicitly
+(TestUploadSessionNeedsNoCredentials): these tests must pass on a machine that
+has never run `gcloud auth application-default login`.
 
 Run from repo root:
   pytest services/api-public/tests/test_upload_session.py -v
 """
 from __future__ import annotations
 
+import threading
 import uuid
 from unittest.mock import patch
 
@@ -70,7 +75,14 @@ def _post_upload_session(
     with (
         patch.object(server, "_token_verifier", NullTokenVerifier()),
         patch.object(server, "_upload_session_repo", repo),
-        patch("roomstudio_api_core.upload_session_repo.gcs_mint_resumable_uri", side_effect=_fake_mint),
+        # The endpoint's mint seam. Patching
+        # roomstudio_api_core.upload_session_repo.gcs_mint_resumable_uri here
+        # did NOT work and was the CI defect: public_server binds the function
+        # by from-import at module load, so rebinding the api-core module
+        # attribute leaves the handler's own global pointing at the real
+        # minter, which resolves ADC and 500s wherever there are no ambient
+        # credentials. Patch the seam the handler actually reads.
+        patch.object(server, "_mint_uri_fn", _fake_mint),
     ):
         return client.post(
             f"/captures/{bundle_id}/upload_session",
@@ -315,6 +327,10 @@ class TestUploadSessionSemanticValidation:
         with (
             patch.object(server, "_token_verifier", NullTokenVerifier()),
             patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+            # Most tests here assert a 400 and never reach the minter, but the
+            # valid-manifest case does — and without this seam it resolved ADC
+            # and 500'd on any uncredentialed machine.
+            patch.object(server, "_mint_uri_fn", _fake_mint),
         ):
             return client.post(
                 f"/captures/{_make_bundle_id()}/upload_session",
@@ -517,3 +533,64 @@ class TestUploadSessionCaptureCeiling:
             uid="user-d", upload_repo=repo,
         )
         assert again.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Hermeticity — the endpoint must not need cloud credentials to be tested
+# ---------------------------------------------------------------------------
+
+class TestUploadSessionNeedsNoCredentials:
+    """These tests are the CI defect's regression pins.
+
+    The first CI run this repo ever executed failed 12 tests in this file with
+    `DefaultCredentialsError` -> 500. They had been green on the operator's
+    machine for months because `gcloud auth application-default login` leaves
+    ambient ADC lying around: the suite was silently testing against a real
+    credential resolution path and nobody could tell.
+
+    The fix is the `_mint_uri_fn` seam in public_server. These two tests pin
+    both halves of it, and they are deliberately a matched pair — each one
+    alone can be satisfied by a change that breaks the other.
+    """
+
+    def test_handler_succeeds_with_no_ambient_credentials(
+        self, client: TestClient
+    ) -> None:
+        """A machine with NO credentials at all must still get 200.
+
+        Simulates the CI runner directly rather than trusting the seam by
+        inspection: google.auth.default is made to raise exactly what an
+        uncredentialed environment raises. Before the seam this asserted
+        500 == 200, which is the CI failure verbatim.
+        """
+        import google.auth
+        from google.auth.exceptions import DefaultCredentialsError
+        from roomstudio_api_core import upload_session_repo as usr
+
+        def _no_credentials_anywhere(scopes=None):
+            raise DefaultCredentialsError("no ADC (simulated CI runner)")
+
+        bundle_id = _make_bundle_id()
+        manifest = [{"relative_path": "bundle.pb", "expected_size_bytes": 128}]
+
+        with (
+            patch.object(google.auth, "default", _no_credentials_anywhere),
+            # Drop any AuthorizedSession a previous test cached on this
+            # thread, so the credential path is genuinely reached.
+            patch.object(usr, "_mint_thread_local", threading.local()),
+        ):
+            resp, _ = _post_upload_session(client, bundle_id, manifest)
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["relative_path"] == "bundle.pb"
+
+    def test_seam_defaults_to_the_real_minter(self) -> None:
+        """Unpatched, the seam MUST vend the production minter.
+
+        The pin that stops the previous test from being satisfied the wrong
+        way. Defaulting `_mint_uri_fn` to a fake would turn CI green and ship
+        an api-public that hands clients fabricated session URIs — every
+        upload would fail in the field while the suite stayed green.
+        """
+        assert server._mint_uri_fn is None, "production default must be unset"
+        assert server._get_mint_uri_fn() is server.gcs_mint_resumable_uri
