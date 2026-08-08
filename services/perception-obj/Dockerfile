@@ -200,6 +200,8 @@ COPY services/perception-obj/shell_observation.py /app/shell_observation.py
 COPY services/perception-obj/shell_material.py /app/shell_material.py
 COPY services/perception-obj/shell_receiver.py /app/shell_receiver.py
 COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
+COPY services/perception-obj/compress_receiver.py /app/compress_receiver.py
+COPY services/perception-obj/compress_enqueue.py /app/compress_enqueue.py
 
 # Deferred-import smoke: placement/fusion/sampling/budget and the shell_*
 # modules are imported lazily inside /process and /shell, so a missing COPY
@@ -212,7 +214,53 @@ COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 RUN python -c "import placement, fusion, reproject, sampling, census_sampling, \
 budget, room_planes, roomplan_room, contact_priors, box_placement, privacy, \
 shell_geometry, shell_envelope, shell_observation, shell_material, \
-shell_receiver, shell_enqueue, anthropic"
+shell_receiver, shell_enqueue, compress_receiver, compress_enqueue, anthropic"
+
+# ── The SPZ encoder: Node + Spark, for the /compress stage ───────────────────
+# The compressed splat tier (decisions 0125/0126) must be written by Spark's
+# OWN SpzWriter — the same build the browser decodes with — so the encoder is
+# JavaScript and this CUDA image needs a Node runtime. It is CPU-only work and
+# never touches a model; see compress_receiver.py for why the stage rides this
+# service rather than a fourth one.
+#
+# Pinned versions, not a lockfile-free "npm install @sparkjsdev/spark": the
+# encoder and the browser's decoder drifting apart is the exact failure 0126
+# exists to prevent, so both sides move deliberately. Keep the spark and three
+# versions in step with web/package.json.
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /opt/spz && cd /opt/spz \
+    && npm init -y >/dev/null \
+    && npm install --no-audit --no-fund --omit=dev \
+        "@sparkjsdev/spark@2.1.0" "three@0.185.1"
+COPY tools/spz_encode.mjs /app/tools/spz_encode.mjs
+ENV SPARK_MODULE_PATH=/opt/spz/node_modules/@sparkjsdev/spark/dist/spark.module.js \
+    SPZ_ENCODER_PATH=/app/tools/spz_encode.mjs
+
+# The encoder must be ARMED in the image, for the same reason privacy is
+# below: compress_receiver imports nothing from Node at module scope, so a
+# missing runtime, a missing Spark, or a bad COPY would pass /health and
+# every probe, and only surface as "no compressed tier, ever" — silently
+# slow rooms, not a crash. Prove the real encode path end to end at BUILD
+# time on a synthetic 2-Gaussian PLY: node runs, Spark loads from
+# SPARK_MODULE_PATH, transcodeSpz produces bytes, and Spark's own reader
+# parses them back with the count preserved.
+RUN python -c "\
+import struct, subprocess, os, json, tempfile; \
+hdr = b'ply\nformat binary_little_endian 1.0\nelement vertex 2\n' \
+      + b''.join(('property float ' + p + '\n').encode() for p in \
+        ['x','y','z','nx','ny','nz','f_dc_0','f_dc_1','f_dc_2','opacity', \
+         'scale_0','scale_1','scale_2','rot_0','rot_1','rot_2','rot_3']) \
+      + b'end_header\n'; \
+body = struct.pack('<34f', *([0.1] * 34)); \
+d = tempfile.mkdtemp(); p = os.path.join(d, 'a.ply'); q = os.path.join(d, 'a.spz'); \
+open(p, 'wb').write(hdr + body); \
+out = subprocess.run(['node', os.environ['SPZ_ENCODER_PATH'], p, q], \
+                     capture_output=True, check=True); \
+stats = json.loads(out.stdout.decode().strip().splitlines()[-1]); \
+assert stats['gaussians'] == 2, stats; \
+assert os.path.getsize(q) > 0; \
+print('spz encoder armed:', stats)"
 
 # Privacy suppression must be ARMED in the image (decision 0089). privacy.py
 # is a deferred import inside /process, so a missing COPY passes every probe
