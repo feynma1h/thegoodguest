@@ -281,6 +281,52 @@ export function splatSize(scale: number | [number, number, number]): number {
   return typeof scale === "number" ? scale : Math.max(...scale);
 }
 
+/**
+ * How long the object wave has been held back waiting for bytes.
+ *
+ * The score is written on a clock, but a piece cannot be shown before it
+ * exists — that would be the reveal narrating a room that has not arrived,
+ * which is a guessed transform wearing a different costume. So the wave
+ * stretches: when a cue comes due and its splat has not loaded, the whole
+ * remaining wave holds until it does, preserving the spacing the score asked
+ * for instead of firing a burst to catch up.
+ *
+ * Holding the WHOLE wave (rather than letting a ready piece overtake a late
+ * one) is deliberate: the order is the narrative — largest first, the leading
+ * pieces named — and reordering it to fill time would break the thing the
+ * order is for.
+ *
+ * Pure and monotonic: the returned delay never decreases, so a cue that has
+ * fired can never be un-fired by a later frame.
+ *
+ * @param objects  cues, any order (walked by `seq`)
+ * @param isReady  has this splat index finished loading?
+ * @param t        ms since the reveal began
+ * @param delayMs  the delay accumulated so far
+ */
+export function revealHoldMs({
+  objects,
+  isReady,
+  t,
+  delayMs,
+}: {
+  objects: ObjectCue[];
+  isReady: (index: number) => boolean;
+  t: number;
+  delayMs: number;
+}): number {
+  let held = delayMs;
+  for (const cue of [...objects].sort((a, b) => a.seq - b.seq)) {
+    // Not due yet under the current delay: nothing after it can be due either.
+    if (t < cue.startMs + held) break;
+    if (isReady(cue.index)) continue; // already on stage, or free to start now
+    // Due but absent — hold the wave here, starting it the moment it lands.
+    held = t - cue.startMs;
+    break;
+  }
+  return held;
+}
+
 /** How many of the arriving pieces the guest introduces by name. */
 export function namedCount(total: number): number {
   if (total <= 0) return 0;

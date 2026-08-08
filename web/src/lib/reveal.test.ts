@@ -12,10 +12,12 @@ import {
   pathLengths,
   pathPointAt,
   planReveal,
+  revealHoldMs,
   settleEase,
   splatSize,
   wallSweepOrder,
   windowProgress,
+  type ObjectCue,
   type Vec3,
 } from "@/lib/reveal";
 
@@ -401,5 +403,76 @@ describe("planReveal", () => {
     expect(plan.objects.map((o) => o.index).sort((a, b) => a - b)).toEqual([
       0, 1, 2, 3, 4, 5, 6,
     ]);
+  });
+});
+
+describe("revealHoldMs — the wave stretches for bytes (decision 0127)", () => {
+  const cues = (n: number, step = 100): ObjectCue[] =>
+    Array.from({ length: n }, (_, i) => ({
+      index: i,
+      seq: i,
+      startMs: 1000 + i * step,
+      durationMs: 900,
+      named: i < 3,
+    }));
+
+  const all = () => true;
+  const none = () => false;
+
+  it("does not hold when every piece has arrived", () => {
+    expect(revealHoldMs({ objects: cues(4), isReady: all, t: 5000, delayMs: 0 })).toBe(0);
+  });
+
+  it("does not hold before the first cue is even due", () => {
+    expect(revealHoldMs({ objects: cues(4), isReady: none, t: 500, delayMs: 0 })).toBe(0);
+  });
+
+  it("holds from the moment a due piece is missing", () => {
+    // cue 0 is due at 1000; at t=1300 it still has not landed.
+    expect(revealHoldMs({ objects: cues(4), isReady: none, t: 1300, delayMs: 0 })).toBe(300);
+  });
+
+  it("starts a held cue exactly when it lands, not later", () => {
+    // Held to 300 at t=1300; the piece arrives, so at t=1300 the effective
+    // start (1000+300) is now — it begins on this very frame.
+    const delay = revealHoldMs({ objects: cues(4), isReady: none, t: 1300, delayMs: 0 });
+    expect(cues(4)[0].startMs + delay).toBe(1300);
+  });
+
+  it("holds the whole wave behind one late piece, preserving spacing", () => {
+    // Piece 1 is missing; pieces 2..3 have arrived but must not overtake it.
+    const ready = (i: number) => i !== 1;
+    const delay = revealHoldMs({ objects: cues(4), isReady: ready, t: 2000, delayMs: 0 });
+    expect(delay).toBe(2000 - 1100); // cue 1's own start, not cue 3's
+    const starts = cues(4).map((c) => c.startMs + delay);
+    expect(starts[2] - starts[1]).toBe(100); // spacing intact, no burst
+  });
+
+  it("never decreases — a fired cue cannot be un-fired", () => {
+    const held = revealHoldMs({ objects: cues(4), isReady: all, t: 9000, delayMs: 700 });
+    expect(held).toBe(700);
+  });
+
+  it("grows monotonically as a piece stays missing", () => {
+    let d = 0;
+    for (const t of [1100, 1400, 1900, 2600]) {
+      const next = revealHoldMs({ objects: cues(4), isReady: none, t, delayMs: d });
+      expect(next).toBeGreaterThanOrEqual(d);
+      d = next;
+    }
+    expect(d).toBe(1600);
+  });
+
+  it("is inert on an empty object list (a shell-only room)", () => {
+    expect(revealHoldMs({ objects: [], isReady: none, t: 9999, delayMs: 0 })).toBe(0);
+  });
+
+  it("walks by seq, not by array position", () => {
+    const shuffled = [...cues(3)].reverse();
+    const ready = (i: number) => i === 0;
+    // seq 1 is the first missing one, so the hold is measured from ITS start.
+    expect(revealHoldMs({ objects: shuffled, isReady: ready, t: 2000, delayMs: 0 })).toBe(
+      2000 - 1100,
+    );
   });
 });
