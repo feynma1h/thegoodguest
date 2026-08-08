@@ -6,8 +6,8 @@ left), **0125** (SPZ is a transcode, not a re-bake), **0126** (the tier sits
 beside the PLY), **0127** (the reveal waits for bytes). 0128 unused.
 
 **Outcome:** 275.8 MB → 47.2 MB (5.84×) with Gaussian counts preserved
-exactly; 87–93 s → 14–19 s measured on the live bucket. All nine scenes
-converted. The reveal now plays its first two movements before any splat
+exactly; 87–93 s → 14–19 s measured on the live bucket. All 12 scene dirs converted
+(2,695 MB → 463.8 MB, 5.81×) — the table below lists nine, but there are 12. The reveal now plays its first two movements before any splat
 exists and gates the object wave per piece. **Remaining: deploy api-public**
 (the tier is inert until `asset_urls_compressed` serves) and **wire the
 converter into the pipeline** so new captures are not born slow.
