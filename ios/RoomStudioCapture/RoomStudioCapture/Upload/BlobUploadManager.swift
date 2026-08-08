@@ -802,19 +802,35 @@ actor BlobUploadManager {
 
             let task = session.uploadTask(with: req, fromFile: fileURL)
             task.taskDescription = bundlePbDesc
-            task.resume()
+
+            // Gate 2b staging: hold the PUT by NEVER STARTING IT.
+            //
+            // The previous form called resume() and then suspend(). That does not
+            // work on a BACKGROUND session: the transfer is performed out of
+            // process by nsurlsessiond, which ignores an in-process suspend.
+            // Measured on device 2026-08-08 — `bundle-complete` fired in the SAME
+            // SECOND as the `staging suspended` breadcrumb, so the gate's
+            // precondition never existed and the run scored nothing.
+            //
+            // Withholding resume() leaves the task created but never transferring,
+            // which IS "enqueued, not landed", and holds for as long as the
+            // staging needs rather than for a sub-second window no human can hit.
+            // One-shot: the relaunch re-enqueues and resumes normally.
+            #if DEBUG
+            let stagedHold = StagingHooks.suspendBundlePb()
+            #else
+            let stagedHold = false
+            #endif
+            if !stagedHold { task.resume() }
+
             _bundlePbTasksCreatedCount += 1
             logger.info("[BlobUploadManager] → enqueued bundle.pb PUT for bundle \(bundleId, privacy: .public)")
             #if DEBUG
             StagingHooks.breadcrumb("bundlepb-enqueued \(bundleId)")
-            // Gate 2b staging: freeze the enqueued PUT so the on-disk state is
-            // exactly "bundle.pb enqueued, not landed" for a force-quit at
-            // leisure. One-shot — the relaunch re-enqueues without suspending.
-            if StagingHooks.suspendBundlePb() {
-                task.suspend()
-                StagingHooks.breadcrumb("staging suspended bundle.pb PUT \(bundleId)")
+            if stagedHold {
+                StagingHooks.breadcrumb("staging held bundle.pb PUT unstarted \(bundleId)")
                 StagingHooks.consume()
-                logger.info("[BlobUploadManager] ⏸ staging: bundle.pb PUT suspended for \(bundleId, privacy: .public)")
+                logger.info("[BlobUploadManager] ⏸ staging: bundle.pb PUT held unstarted for \(bundleId, privacy: .public)")
             }
             #endif
         } catch {
