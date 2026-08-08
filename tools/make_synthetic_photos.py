@@ -5,8 +5,13 @@ consumes, replacing the nine real HEICs that used to live in
 WHY THESE EXIST: the originals were nine photographs of a real bedroom,
 committed in the repo's first commit and carried in every tree since. They
 also carried GPS EXIF pinning a precise home location. That is not something
-to hand to a git remote, so they were removed and purged from git history
-before the repo's first push, and these took their place (decision 0101).
+to hand to a git remote, so they were removed from the working tree and these
+took their place (decision 0101).
+
+NOTE — the HISTORY half is prepared and rehearsed but NOT yet executed: the
+nine HEIC blobs are still reachable in this repo's git history. Decision 0101
+carries the two-command procedure and its verification. It must run before the
+repo is pushed anywhere.
 
 WHY THEY ARE BETTER THAN WHAT THEY REPLACE, not merely safer: the originals
 were photographs of one room paired with a completely unrelated synthetic

@@ -1,7 +1,15 @@
 # 0101 — Purging the real room photos from git history
 
 **Date:** 2026-08-08
-**Status:** Decided and executed, before the repo's first push
+**Status:** Decided; working-tree half shipped; **history purge PREPARED AND
+REHEARSED BUT NOT YET EXECUTED** — it must run before the repo's first push
+
+> **OPEN — the nine HEIC blobs are still reachable in this repo's history.**
+> The purge command below was blocked by a tooling permission guard on
+> history-rewriting operations and needs the operator to run it (or to grant
+> the permission). Everything it depends on is done and verified; the two
+> commands in "What we chose" are the whole remaining operation. **Do not push
+> this repo to any remote until they have run.**
 
 ## Context
 

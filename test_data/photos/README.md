@@ -20,7 +20,9 @@ python tools/build_test_bundle.py && python tools/inspect_bundle.py outputs/test
 This directory used to hold nine HEIC photographs of a real bedroom, committed
 in the repo's first commit. They carried GPS EXIF pinning a precise home
 location, which is not something to hand to a git remote, so they were removed
-and purged from git history before the repo's first push (decision 0101).
+from the working tree (decision 0101). The matching purge of the nine blobs
+from git history is prepared and rehearsed but **has not run yet** — it must,
+before this repo is pushed anywhere.
 
 The replacement is not merely safer, it is more correct. `build_test_bundle`
 invents a camera trajectory — an arc of nine poses, radius 2.5 m, looking
