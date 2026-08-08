@@ -7,7 +7,7 @@ beside the PLY), **0127** (the reveal waits for bytes). 0128 unused.
 
 **Outcome:** 275.8 MB → 47.2 MB (5.84×) with Gaussian counts preserved
 exactly; 87–93 s → 14–19 s measured on the live bucket. All 12 scene dirs converted
-(2,695 MB → 463.8 MB, 5.81×) — the table below lists nine, but there are 12. The reveal now plays its first two movements before any splat
+(2,695 MB → 463.8 MB, 5.81×) — the table below is now the complete set of 12. The reveal now plays its first two movements before any splat
 exists and gates the object wave per piece. **Remaining: deploy api-public**
 (the tier is inert until `asset_urls_compressed` serves) and **wire the
 converter into the pipeline** so new captures are not born slow.
@@ -35,9 +35,12 @@ references. **Trust these numbers; re-derive nothing here.**
 
 | scene | splats | total | median splat | largest splat |
 |---|---:|---:|---:|---:|
+| `25a14caf` | 5 | 94.8 MB | 21.6 MB | 27.6 MB |
 | `b12538fa` | 3 | 106.0 MB | 36.3 MB | 39.4 MB |
 | `e2bbc1b2` | 6 | 109.6 MB | 17.0 MB | 25.6 MB |
 | `972fc0a8` | 8 | 153.4 MB | 17.7 MB | 40.0 MB |
+| `13bae607` | 6 | 178.5 MB | 32.2 MB | 49.8 MB |
+| `f3d70236` | 8 | 207.6 MB | 28.3 MB | 43.3 MB |
 | `09684dde` | 11 | 212.3 MB | 14.8 MB | 49.7 MB |
 | `a71d125f` | 10 | 214.1 MB | 18.2 MB | 46.1 MB |
 | `a7e073ae` | 10 | 263.0 MB | 27.6 MB | 49.4 MB |
@@ -52,6 +55,12 @@ operator actually opened — get that from them. `b667f891` read across *all*
 its signed URLs is 816 MB / 40, which brackets it from above; several scenes
 have been re-driven since, which changes object counts. Do not carry 684.5/31
 forward as fact.
+
+All 12 rows are byte-exact. (The table originally listed nine; the three
+added later are `25a14caf`, `13bae607` and `f3d70236` — not the set named in
+the build session's chat report, which mis-identified two rows that were
+present all along. Its *count* was right, and the record only ever carried
+the count.)
 
 **The dominant term is per-splat size, not splat count.** A single cabinet in
 `a7e073ae` is 44 MB. Rooms are 3–16 objects; that is not the problem.
