@@ -1,7 +1,7 @@
 /**
  * The landing hero's room — what it is, and what it deliberately isn't.
  *
- * THE HERO IS THE REVEAL, NOT A ROOM (decision 0126). The landing page
+ * THE HERO IS THE REVEAL, NOT A ROOM (decision 0122). The landing page
  * plays the first two movements of the reveal choreography (lib/reveal,
  * decision 0097) — the measured boundary drawing itself, then the
  * surfaces materializing in place — against a REAL captured room's
