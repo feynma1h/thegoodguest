@@ -1,8 +1,29 @@
 # Conversational redesign — design session scoping brief
 
-**Status:** scoping brief, written by the coordinator 2026-08-09. Nothing here
-is designed and nothing is built. The session that picks this up owns
-decisions **0129–0134**.
+**Status:** EXECUTED 2026-08-09. The design lives in decisions **0129–0133**
+(0134 unused); this file is kept for the build session and is now history, not
+instruction. Where the two disagree, the decisions win — they were measured.
+
+> **Two claims in the spine below were REFUTED by Probe 1 (see 0129). Read that
+> note before using this brief as a design input.**
+>
+> - *"Removing an object exposes surface that was never observed"* is
+>   materially wrong for the shipped shell. 0069 replaced the photographic bake
+>   with per-plane measured albedo, so removal leaves clean floor and clean
+>   wall. Removal is visually free.
+> - *"A moved object exposes exactly the defects its original placement hid"* is
+>   true but names the wrong culprit. Class-6 truncation makes the splat
+>   *smaller* than its box and stays hidden; what actually shears is the 0104
+>   `splat_clip` cross-section, measured cutting 16–31% of the Gaussians off
+>   three of five clipped objects. That is known geometry the product owns, not
+>   a perception limit.
+>
+> The brief's central instinct was right and load-bearing: it demanded the probe
+> first, and the probe changed the feature's shape.
+
+**Original status:** scoping brief, written by the coordinator 2026-08-09.
+Nothing here is designed and nothing is built. The session that picks this up
+owns decisions **0129–0134**.
 
 **This is not a new feature request.** It is the product's own definition,
 recovered from a record that had let it drift. CLAUDE.md line 3 defines
