@@ -14,7 +14,7 @@ final class LiveActivityVoiceTests: XCTestCase {
 
     private let allStages: [RoomActivityStage] = [
         .preparing, .sending(sent: 3, total: 10), .sending(sent: 0, total: 0),
-        .queued, .analyzing, .ready, .paused,
+        .finalizing, .queued, .analyzing, .ready, .paused,
         .failed(.upload), .failed(.processing), .failed(.incomplete),
     ]
 
@@ -32,6 +32,11 @@ final class LiveActivityVoiceTests: XCTestCase {
     func test_glanceCopyStaysShort() {
         // The Dynamic Island's compact slot is a handful of points wide and the
         // Lock Screen card is two lines. Copy that outgrows them truncates.
+        //
+        // The 70 below is the bound the design set; the longest line actually
+        // shipped is ~49. A new line near 70 is unverified territory — the
+        // shipped set was screenshot-checked, that bound was not — so treat a
+        // near-miss here as a prompt to re-screenshot, not as a pass.
         for stage in allStages {
             XCTAssertLessThanOrEqual(RoomActivityVoice.compact(stage).count, 4,
                                      "compact too long for \(stage)")
@@ -84,6 +89,43 @@ final class LiveActivityVoiceTests: XCTestCase {
         // Waiting on the Lock Screen does nothing; opening the app is what moves it.
         XCTAssertTrue(RoomActivityVoice.line(.paused).lowercased().contains("open me"),
                       "paused must name the action that actually resumes the upload")
+    }
+
+    // MARK: - Finalizing (decisions 0110 / 0111)
+
+    /// The stage exists to stop the card claiming "sending" once the count is
+    /// complete, so it must not itself read as an upload still in flight, and it
+    /// must carry no count — `counter` is nil here, which is the point.
+    func test_finalizingDoesNotReadAsStillSending() {
+        XCTAssertEqual(RoomActivityVoice.title(.finalizing), "Signing it in")
+        XCTAssertNil(RoomActivityVoice.counter(.finalizing),
+                     "a count here would be the completed-count-labelled-in-progress bug again")
+        XCTAssertNil(RoomActivityStage.finalizing.fraction,
+                     "no progress bar: there is one file left and no honest fraction of it")
+    }
+
+    /// THE 0110 CONSTRAINT: the OS can hold the finalize for many minutes, and we
+    /// cannot read the delay. So the copy must name the action that releases it
+    /// (opening the app resets the delay to 0) without claiming a time.
+    func test_finalizingNamesTheActionAndClaimsNoTime() {
+        let line = RoomActivityVoice.line(.finalizing).lowercased()
+        XCTAssertTrue(line.contains("open me"),
+                      "must name the action that resets the background-launch delay")
+        for timeClaim in ["almost", "any moment", "nearly done", "soon", "a few seconds"] {
+            XCTAssertFalse(line.contains(timeClaim), "time claim: \(timeClaim)")
+            XCTAssertFalse(RoomActivityVoice.title(.finalizing).lowercased().contains(timeClaim),
+                           "time claim in title: \(timeClaim)")
+        }
+    }
+
+    /// It is NOT `.paused`: that stage promises the upload has stopped and will
+    /// resume on open. The finalize may well land on its own, so the weaker hedge
+    /// is the honest one.
+    func test_finalizingDoesNotClaimTheUploadStopped() {
+        let text = (RoomActivityVoice.title(.finalizing) + " " + RoomActivityVoice.line(.finalizing)).lowercased()
+        XCTAssertFalse(text.contains("paused"))
+        XCTAssertFalse(text.contains("stopped"))
+        XCTAssertFalse(text.contains("i'll pick it up"))
     }
 
     func test_sendingDoesNotTellTheUserToStayInTheApp() {

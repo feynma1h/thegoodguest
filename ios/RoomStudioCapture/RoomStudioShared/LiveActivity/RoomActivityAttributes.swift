@@ -58,6 +58,18 @@ nonisolated enum RoomActivityStage: Codable, Hashable, Sendable {
     /// Blobs in flight. `total` counts the non-bundle.pb blobs — bundle.pb goes
     /// last, after the gate, and counting it would show 99% for the whole upload.
     case sending(sent: Int, total: Int)
+    /// Every blob is up and the `bundle.pb` finalize (~51 KB) is enqueued. Its
+    /// arrival in GCS is what makes the capture exist server-side, so until it
+    /// lands there is genuinely no room up there yet.
+    ///
+    /// ITS OWN STAGE for two reasons, both from the decision-0085 walk:
+    /// `.sending(N, N)` is a completed count still labelled in progress — the
+    /// stale card that read "Sending your room 331 of 331" — and this one task
+    /// can be held by the OS for many minutes when it was enqueued by a
+    /// background-relaunched process (decision 0110). The copy therefore states
+    /// what is KNOWN and names the action that releases the hold, rather than
+    /// predicting which branch we are in.
+    case finalizing
     /// Uploaded; the pipeline hasn't picked it up yet.
     case queued
     /// The pipeline is working on it.
@@ -91,7 +103,7 @@ extension RoomActivityStage {
     var isTerminal: Bool {
         switch self {
         case .ready, .failed: return true
-        case .preparing, .sending, .queued, .analyzing, .paused: return false
+        case .preparing, .sending, .finalizing, .queued, .analyzing, .paused: return false
         }
     }
 

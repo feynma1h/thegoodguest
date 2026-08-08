@@ -70,6 +70,12 @@ final class LiveActivityController {
     private(set) var currentStage: RoomActivityStage?
     private var lastPublishedAt: Date?
 
+    #if DEBUG
+    /// Last (incoming -> adopted) pair recorded by the drop breadcrumb, so a
+    /// card that is not adopted writes one line instead of thousands.
+    private var lastDropSignature: String?
+    #endif
+
     init(host: LiveActivityHost) { self.host = host }
 
     // MARK: - Constants
@@ -125,6 +131,25 @@ final class LiveActivityController {
         apply(.sending(sent: sent, total: total), for: bundleId)
     }
 
+    /// Every blob is up and the `bundle.pb` finalize is enqueued.
+    ///
+    /// THIS IS THE HALF THAT WAS MISSING. Without it the last thing the
+    /// background session could ever publish was `.sending(N, N)`, so a card on
+    /// a closed phone sat at a completed count labelled in progress forever —
+    /// decision 0085's stale "Sending your room 331 of 331". Reached from
+    /// `enqueueBundlePb`, which is on the background path, so it lands with the
+    /// app closed.
+    func noteFinalizing(bundleId: String) {
+        apply(.finalizing, for: bundleId)
+    }
+
+    /// `bundle.pb` landed: the capture now exists server-side and is waiting for
+    /// the pipeline. The honest end of what a closed phone can know — past here
+    /// the poller is required, and that boundary is the `pushTokenSeam` above.
+    func noteUploadComplete(bundleId: String) {
+        apply(.queued, for: bundleId)
+    }
+
     /// The upload stopped for this launch and resumes on the next app open.
     func noteUploadPaused(bundleId: String) {
         apply(.paused, for: bundleId)
@@ -148,6 +173,9 @@ final class LiveActivityController {
         guard let bundleId, bundleId == currentBundleId else { return }
         let state = RoomActivityState(stage: currentStage ?? .ready)
         host.end(state: state, dismissAfter: clock().addingTimeInterval(Self.terminalDwell))
+        #if DEBUG
+        StagingHooks.breadcrumb("liveactivity-end \(bundleId) showing=\(stageName(state.stage))")
+        #endif
         clearLocalState()
         logger.info("[LiveActivity] ended for \(bundleId, privacy: .public)")
     }
@@ -165,10 +193,16 @@ final class LiveActivityController {
     /// unconditionally (shouldPublish returns true on a nil previous), which is
     /// the correct outcome — one redundant update beats a wrong throttle.
     func reconcileOnLaunch(restoredBundleId: String?) {
+        #if DEBUG
+        StagingHooks.breadcrumb("liveactivity-reconcile keep=\(restoredBundleId ?? "nil")")
+        #endif
         endOrphans(keeping: restoredBundleId)
         currentBundleId = restoredBundleId
         currentStage    = nil
         lastPublishedAt = nil
+        #if DEBUG
+        lastDropSignature = nil
+        #endif
     }
 
     // MARK: - Internals
@@ -176,6 +210,20 @@ final class LiveActivityController {
     private func apply(_ incoming: RoomActivityStage, for bundleId: String) {
         guard bundleId == currentBundleId else {
             logger.debug("[LiveActivity] dropped update for \(bundleId, privacy: .public) — not the active bundle")
+            #if DEBUG
+            // THE BREADCRUMB THAT MATTERS (decision 0111). This guard is the
+            // invariant that stops a card narrating the wrong capture (0074, and
+            // the stale doorway before it) — but it is also the one path that can
+            // silently swallow the finalize/complete publishes, if a background
+            // relaunch enqueues bundle.pb before reconcileOnLaunch has adopted
+            // the card. De-duplicated by signature: an unadopted card would
+            // otherwise write one line per blob completion, ~2,170 on a long walk.
+            let signature = "\(bundleId)->\(currentBundleId ?? "nil")"
+            if signature != lastDropSignature {
+                lastDropSignature = signature
+                StagingHooks.breadcrumb("liveactivity-drop \(bundleId) cur=\(currentBundleId ?? "nil")")
+            }
+            #endif
             return
         }
         let merged = LiveActivityPolicy.merge(current: currentStage, incoming: incoming)
@@ -190,6 +238,13 @@ final class LiveActivityController {
             currentStage = merged
             return
         }
+        #if DEBUG
+        // Stage-KIND changes only: the progress ticks inside `.sending` are the
+        // throttle's business, and a line each would bury the transitions.
+        if !LiveActivityPolicy.sameKind(currentStage ?? .preparing, merged) || currentStage == nil {
+            StagingHooks.breadcrumb("liveactivity-publish \(stageName(merged)) \(bundleId)")
+        }
+        #endif
         currentStage    = merged
         lastPublishedAt = now
 
@@ -209,10 +264,30 @@ final class LiveActivityController {
         host.endAllOrphans(keeping: bundleId)
     }
 
+    #if DEBUG
+    /// Stable short name for the breadcrumb file. `String(describing:)` on a
+    /// stage with a payload prints the whole case, which is noise here.
+    private func stageName(_ stage: RoomActivityStage) -> String {
+        switch stage {
+        case .preparing:  return "preparing"
+        case .sending:    return "sending"
+        case .finalizing: return "finalizing"
+        case .queued:     return "queued"
+        case .analyzing:  return "analyzing"
+        case .ready:      return "ready"
+        case .paused:     return "paused"
+        case .failed(let which): return "failed-\(which.rawValue)"
+        }
+    }
+    #endif
+
     private func clearLocalState() {
         currentBundleId = nil
         currentStage    = nil
         lastPublishedAt = nil
+        #if DEBUG
+        lastDropSignature = nil
+        #endif
     }
 }
 
