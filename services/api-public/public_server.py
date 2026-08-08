@@ -1627,7 +1627,11 @@ async def _tool_session(scene, user_id: str, client_msg_id: str, turn_index: int
     finds its room rearranged (the 0058 shield covers the spec too).
     """
     repo = _get_design_spec_repo()
-    state: dict = {"spec": None, "geometry": None, "measured": {}, "results": []}
+    # `revision` counts REAL changes, not tool calls: a refused proposal must
+    # not tell the client the room moved.
+    state: dict = {
+        "spec": None, "geometry": None, "measured": {}, "results": [], "revision": 0,
+    }
 
     def _load() -> None:
         if state["geometry"] is not None:
@@ -1658,6 +1662,7 @@ async def _tool_session(scene, user_id: str, client_msg_id: str, turn_index: int
         )
         if outcome.changed:
             state["spec"] = repo.put(outcome.spec, now=datetime.now(tz=timezone.utc))
+            state["revision"] += 1
         else:
             state["spec"] = outcome.spec
         state["results"].append(outcome.result)
@@ -1735,6 +1740,7 @@ async def _run_guest_turn(
         run_tool, tool_state = await _tool_session(
             scene, user_id, client_msg_id, turn_index
         )
+        announced = 0
         async with asyncio.timeout(GUEST_MODEL_TIMEOUT_S):
             async for event in _get_guest_streamer().stream_turn(
                 model=GUEST_MODEL,
@@ -1751,7 +1757,11 @@ async def _run_guest_turn(
                     # The room changes on screen the moment it changes on the
                     # server: the client refetches its spec rather than being
                     # told the new transforms, which keeps it a reader (0131).
-                    await queue.put(("arrangement", None))
+                    # Only on a REAL change — a refused proposal must not send
+                    # the client after a room that did not move.
+                    if tool_state["revision"] > announced:
+                        announced = tool_state["revision"]
+                        await queue.put(("arrangement", None))
                 elif event["type"] == "final":
                     usage = event["usage"]
                     stop_reason = event["stop_reason"]
