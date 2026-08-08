@@ -9,7 +9,16 @@
  * the same commit.
  *
  * OPERATOR REVIEW NOTES — resolve before publishing:
- *   1. Fill the four <Blank> slots (entity, jurisdiction, contact, address).
+ *   1. FILLED 2026-08-08. Operator is Utkarsh Singh, an individual (not a
+ *      company); contact is the operator's personal address. If an entity is
+ *      later incorporated, §1 changes here AND in Terms §1, and Terms §12
+ *      arguably makes that a material change requiring notice.
+ *   1a. NO POSTAL ADDRESS IS PUBLISHED, deliberately. GDPR Art. 13(1)(a) and
+ *      India's DPDP require the controller's identity and CONTACT DETAILS;
+ *      the published email satisfies both. Germany's Impressum rule is the
+ *      known exception — if the service acquires German users, a postal
+ *      address must be added here and in Terms §1. Do not "restore" the
+ *      address slot without that trigger; it would publish a home address.
  *   2. Confirm your processors' current terms say what §5 says they say —
  *      in particular that Anthropic's commercial API terms exclude API
  *      inputs/outputs from model training, and Google Cloud's DPA covers
@@ -24,7 +33,7 @@
 
 import type { Metadata } from "next";
 
-import LegalPage, { Blank, M, Section } from "@/components/LegalPage";
+import LegalPage, { M, Section } from "@/components/LegalPage";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — roomstudio",
@@ -36,7 +45,7 @@ export default function PrivacyPage() {
   return (
     <LegalPage
       title="Privacy Policy"
-      updated={<Blank>[EFFECTIVE DATE]</Blank>}
+      updated="8 August 2026"
       summary={
         <>
           You point a phone at a room and we turn it into a 3D model of that
@@ -51,11 +60,10 @@ export default function PrivacyPage() {
         <p>
           This policy covers the roomstudio iPhone capture app and the
           roomstudio web app (together, “the service”). The service
-          is operated by <Blank>[LEGAL ENTITY NAME]</Blank>, of{" "}
-          <Blank>[REGISTERED ADDRESS]</Blank> (“we”).
+          is operated by Utkarsh Singh (“we”), an individual.
         </p>
         <p>
-          Questions, requests, and complaints: <Blank>[CONTACT EMAIL]</Blank>.
+          Questions, requests, and complaints: 23singhutkarsh@gmail.com.
         </p>
       </Section>
 
@@ -266,7 +274,7 @@ export default function PrivacyPage() {
         </p>
         <p>
           To delete a single room rather than everything, or to ask what we
-          hold about you, write to <Blank>[CONTACT EMAIL]</Blank>. Depending on
+          hold about you, write to 23singhutkarsh@gmail.com. Depending on
           where you live you may have rights to access, correct, export, or
           restrict the processing of your data, and to complain to a data
           protection authority; we will honour those requests through that
@@ -339,7 +347,7 @@ export default function PrivacyPage() {
           The service is not directed at children under 13 (or the equivalent
           minimum age where you live), and we do not knowingly collect their
           data. If you believe a child has used the service, write to{" "}
-          <Blank>[CONTACT EMAIL]</Blank> and we will delete the account.
+          23singhutkarsh@gmail.com and we will delete the account.
         </p>
       </Section>
 
