@@ -137,6 +137,7 @@ from roomstudio_api_core.upload_session_repo import (  # noqa: E402
     CaptureLimitError,
     ForeignBundleError,
     MintRateLimitedError,
+    UriMintFn,
     gcs_mint_resumable_uri,
 )
 from roomstudio_api_core.manifest_validation import validate_manifest  # noqa: E402
@@ -244,6 +245,8 @@ class AccountDeleteRequest(BaseModel):
 _token_verifier: Optional[TokenVerifier] = None
 _upload_session_repo: Optional[UploadSessionRepository] = None
 _scene_read_repo: Optional[SceneReadRepository] = None
+# None → the production minter (see _get_mint_uri_fn). Tests patch this.
+_mint_uri_fn: Optional[UriMintFn] = None
 
 _GCS_CAPTURES_BUCKET: str = os.environ.get("GCS_CAPTURES_BUCKET", "roomstudio-captures")
 
@@ -297,6 +300,29 @@ def _get_upload_session_repo() -> UploadSessionRepository:
             _upload_session_repo = InMemoryUploadSessionRepository()
             logger.info("FIRESTORE_PROJECT unset — using in-memory UploadSessionRepository")
     return _upload_session_repo
+
+
+def _get_mint_uri_fn() -> UriMintFn:
+    """The GCS resumable-URI minter passed to the repository, as a SEAM.
+
+    This is a dependency for exactly the same reason UploadSessionRepository
+    is an ABC with an in-memory implementation: the endpoint's tests must be
+    able to exercise the whole handler without reaching a cloud.
+
+    The seam is load-bearing, not decorative. `gcs_mint_resumable_uri`
+    resolves Application Default Credentials on first use, so a test that
+    cannot substitute it 500s on any machine without ambient ADC while
+    passing on a developer laptop that has run
+    `gcloud auth application-default login`. That is precisely what happened:
+    the first CI run this repo ever executed failed 12 tests here with
+    `DefaultCredentialsError`, and they had been green locally for months.
+
+    Tests override by patching the module global (the house pattern, same as
+    `_token_verifier` / `_upload_session_repo`). Substituting real credentials
+    in CI would turn those 12 tests green while leaving them non-hermetic,
+    which is the actual defect, so don't.
+    """
+    return _mint_uri_fn if _mint_uri_fn is not None else gcs_mint_resumable_uri
 
 
 _account_deleter = None
@@ -851,7 +877,7 @@ def create_upload_session(
             user_id=user_id,
             manifest=req.manifest,
             fcm_token=req.fcm_token,
-            mint_uri_fn=gcs_mint_resumable_uri,
+            mint_uri_fn=_get_mint_uri_fn(),
             bucket=_GCS_CAPTURES_BUCKET,
             daily_mint_quota=UPLOAD_DAILY_MINTS,
             daily_capture_quota=UPLOAD_DAILY_CAPTURES,

@@ -194,6 +194,45 @@ outputs/                          gitignored; generated artifacts
 - **KNOWN GAP — no automatic re-upload for `.recoverable`: SERVER-BLOCKED, client half honest (decision 0084).** The coordinator cannot be built client-side: `create_or_get` (`upload_session_repo.py:256`) returns the stored session URIs for a matching path-set while the `upload_sessions` doc lives (7-day TTL), and a finalized GCS resumable session is single-use — so re-driving a swept blob either silently no-ops into a retry loop or 410s into the `remint_returned_stale_uris` fatal. The ingest half is ready (`FAILED_INCOMPLETE → QUEUED`); the missing piece is a MINT-CONTRACT change vending fresh URIs for consumed sessions — **board 4 / the `/upload_session` surface, not an iOS gap**. Shipped meanwhile: both surfaces' copy is honest (no false automation promise) and 0084's reaper RETAINS record + files on `incompleteUpload` so a future coordinator has its inputs. **Un-defer trigger:** the mint-contract change.
 - **`bundle.pb` relaunch-recovery: code-complete, OS-kill gate unverified (Gate 2b).** Root cause (decision 0044): recovery path was unreachable on relaunch — wired only to `ContentView.onChange(of: capture.bundlePath)`, not a bare reopen. **Fixed in code by the P5 cluster** ((c) `7143de0`, (b) `b793307`, (a) `27672d0`): `rehydrateAllUnfinishedBundles()` fires on every launch from `.task` in `RoomStudioCaptureApp`; the OS-kill secondary route (`contexts[bundleId] == nil` → `onFatalBlobError`) now routes to the real terminal handler which sets `uploadPhase = .failed` and cancels siblings. **NOT VERIFIED ON HARDWARE:** the OS-kill route (background URLSession relaunch, `.task` fires without entering foreground) has not been staged on-device. The AppDelegate fallback is deferred pending the hardware gate — see decision 0045 Fork A ordering constraint. `diag-bundlepb-reason-public` (`dc552ab`) is the parked tool for reading the redacted `reason=` on the OS-kill route — do not delete. Code-complete ≠ Gate-2b closed; the hardware gate is the close.
 
+## Python test policy
+
+**The suites must pass with NO cloud credentials available.** This is a hard
+property, not an aspiration, and it was violated silently until the first CI
+run this repo ever executed (run 31259471685, 2026-08-08) failed 12 tests in
+`services/api-public/tests/test_upload_session.py` with
+`DefaultCredentialsError` → the endpoint 500s → `assert 500 == 200`. They had
+been green locally for months only because the operator's machine carries
+ambient ADC from `gcloud auth application-default login`. Every count recorded
+in this file before that date is therefore "passed **with ADC present**" — the
+root suite's 602 included 12 tests that were quietly resolving real Google
+credentials and taking ~4 s each to do it.
+
+Cause and fix (2026-08-08): `public_server.py` binds `gcs_mint_resumable_uri`
+by from-import, so the test's `patch("roomstudio_api_core.upload_session_repo.
+gcs_mint_resumable_uri", …)` rebound a different name and never took effect —
+the handler kept calling the real minter. Fixed by injection, the same seam
+pattern `UploadSessionRepository` already uses: `public_server._mint_uri_fn`
+(None → the production minter; tests patch the global). **Do not "fix" a
+credential failure in CI by supplying credentials** — that turns the tests
+green while leaving them non-hermetic, which is the actual defect.
+
+Current: **root 604 passed + 10 skipped**, verified BOTH with ADC present and
+with ADC made unavailable (`GOOGLE_APPLICATION_CREDENTIALS` unset,
+`CLOUDSDK_CONFIG` → empty dir, `GCE_METADATA_HOST` → unroutable). The
+credential-free run is also 25× faster (1.3 s vs 33 s), which is itself the
+tell that the old suite was doing real auth work. Two pins hold the property
+(`TestUploadSessionNeedsNoCredentials`): one asserts the handler returns 200
+when `google.auth.default` raises, the other asserts the unpatched seam still
+vends the REAL minter — the matched pair, because either alone can be
+satisfied by a change that breaks the other (defaulting the seam to a fake
+would turn CI green and ship an api-public handing clients fabricated URIs).
+
+Other Python jobs at that CI run: perception-obj **passed on Linux** — the
+`test_shell_observation.py::TestMedianSelect::test_closer_frame_outweighs_far`
+failure recorded under numpy 1.26.4 did NOT reproduce, so it was macOS/
+Accelerate-specific as the workflow comment's second hypothesis predicted.
+re-enqueue (18) and ruff (non-gating) passed.
+
 ## iOS test policy
 
 The iOS suite is **463 tests total** (was 391; the Live Activity / 429 / guidance pass added 76 and relocated 4. Before that, 352 → 391 from the release-residue pass; the release-residue pass added 39 — `CaptureReclaimTests` 15, `CaptureReaperTests` 12, `StagingHooksTests` 7, `ScenePollExpectationTests` 5. Before that, 302 → 352 from RP-6/RP-7; RP-6 added 11 — 9 co-run/wire pins + 2 envelope-edge pins — and RP-7 added 39 — `FloorPlanMathTests` 18, `FloorPlanVoiceTests` 13, `FloorPlanFixtureTests` 8. Before that, 288 → 302 from the 0074 phantom-room pass), run manually via `xcodebuild … -scheme RoomStudioCapture-Integration` — the only scheme in this project (no separate default scheme, no CI gate). That scheme bakes `RUN_INTEGRATION_TESTS=1`, so the 4 `UploadSessionClientTests` **execute live on every run**; they are NOT skipped in practice. They last ran live 2026-08-08 (the Live Activity run, 463/463) against `api-public-00025-xaj`, 1.4–1.9 s round trips.
