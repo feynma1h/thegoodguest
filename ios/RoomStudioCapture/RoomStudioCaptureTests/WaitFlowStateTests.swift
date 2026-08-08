@@ -135,7 +135,21 @@ final class WaitFlowStateTests: XCTestCase {
     func testTerminalPollStates() {
         XCTAssertEqual(screen(poll: .succeeded), .doorway)
         XCTAssertEqual(screen(poll: .failedTerminal), .processingFailed)
-        XCTAssertEqual(screen(poll: .recoverable), .incompleteUpload)
+        XCTAssertEqual(screen(poll: .recoverable(missingCount: 3)),
+                       .incompleteUpload(missingCount: 3))
+    }
+
+    /// The missing-file count must survive routing. It reached the poller and then
+    /// died at this table — the screen could not render what the server had already
+    /// said (decision 0085 finding 1).
+    func testIncompleteUploadCarriesTheMissingCount() {
+        XCTAssertEqual(screen(poll: .recoverable(missingCount: 1)),
+                       .incompleteUpload(missingCount: 1))
+        XCTAssertEqual(screen(poll: .recoverable(missingCount: 127)),
+                       .incompleteUpload(missingCount: 127))
+        XCTAssertEqual(screen(poll: .recoverable(missingCount: 0)),
+                       .incompleteUpload(missingCount: 0),
+                       "a server that names no paths still routes here — the copy degrades, the route does not")
     }
 
     // MARK: - Terminal-not-ours (decision 0074)
@@ -221,7 +235,13 @@ final class WaitFlowStateTests: XCTestCase {
         XCTAssertEqual(WaitFlowState.snapshot(from: .failedTerminal(.failed), fallbackAnchor: nil),
                        .failedTerminal)
         XCTAssertEqual(WaitFlowState.snapshot(from: .recoverable(missingPaths: ["a"]), fallbackAnchor: nil),
-                       .recoverable)
+                       .recoverable(missingCount: 1))
+        XCTAssertEqual(WaitFlowState.snapshot(from: .recoverable(missingPaths: ["a", "b", "c"]),
+                                              fallbackAnchor: nil),
+                       .recoverable(missingCount: 3),
+                       "the adapter counts the paths; the paths themselves stay out of routing")
+        XCTAssertEqual(WaitFlowState.snapshot(from: .recoverable(missingPaths: []), fallbackAnchor: nil),
+                       .recoverable(missingCount: 0))
         XCTAssertEqual(WaitFlowState.snapshot(from: .notOwned, fallbackAnchor: anchor), .notOwned,
                        "notOwned carries no anchor — there is no honest clock for a foreign room")
     }

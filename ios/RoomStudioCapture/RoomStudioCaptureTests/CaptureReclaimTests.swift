@@ -47,7 +47,9 @@ final class CaptureReclaimTests: XCTestCase {
     }
 
     func test_flightEnd_incompleteUpload_retains() {
-        XCTAssertFalse(CaptureReclaim.reclaimsAtFlightEnd(.incompleteUpload))
+        XCTAssertFalse(CaptureReclaim.reclaimsAtFlightEnd(.incompleteUpload(missingCount: 1)))
+        XCTAssertFalse(CaptureReclaim.reclaimsAtFlightEnd(.incompleteUpload(missingCount: 0)),
+                       "retention is about the outcome, not about how many files the server named")
     }
 
     func test_flightEnd_everyNonTerminalScreen_retains() {

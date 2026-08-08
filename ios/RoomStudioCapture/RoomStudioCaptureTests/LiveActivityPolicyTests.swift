@@ -129,7 +129,12 @@ final class LiveActivityPolicyTests: XCTestCase {
         XCTAssertEqual(LiveActivityPolicy.stage(for: .waiting(phase: .longRunning, anchor: nil)), .analyzing)
         XCTAssertEqual(LiveActivityPolicy.stage(for: .doorway), .ready)
         XCTAssertEqual(LiveActivityPolicy.stage(for: .processingFailed), .failed(.processing))
-        XCTAssertEqual(LiveActivityPolicy.stage(for: .incompleteUpload), .failed(.incomplete))
+        // The count reaches the in-app screen, never the Lock Screen: a card a
+        // stranger can read over a shoulder says what happened, not how much.
+        XCTAssertEqual(LiveActivityPolicy.stage(for: .incompleteUpload(missingCount: 1)),
+                       .failed(.incomplete))
+        XCTAssertEqual(LiveActivityPolicy.stage(for: .incompleteUpload(missingCount: 40)),
+                       .failed(.incomplete))
         XCTAssertEqual(LiveActivityPolicy.stage(for: .uploadFailed), .failed(.upload))
         XCTAssertEqual(LiveActivityPolicy.stage(for: .sendFailed(terminal: false)), .failed(.upload))
         XCTAssertEqual(LiveActivityPolicy.stage(for: .sendFailed(terminal: true)), .failed(.upload))
