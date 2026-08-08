@@ -49,10 +49,19 @@ class FakeBox:
 class Ctx:
     """RefinementContext stand-in: splats by uri, nothing else."""
 
+    budget = None
+    min_remaining_s = 0.0
+
     def __init__(self, splats=None):
         self.splats = splats or {}
         self.get_appearance = None
         self.get_rgb = None
+
+    def get_roomplan(self):
+        return None
+
+    def get_room_planes(self):
+        return None
 
     def get_splat(self, uri):
         return self.splats.get(uri)
@@ -326,3 +335,50 @@ class TestVocabularyGaps:
     def test_unrelated_labels_stay_unconfusable(self):
         assert not fusion._labels_confusable("storage", "bed")
         assert not fusion._labels_confusable("chair", "table")
+
+
+# ---------------------------------------------------------------------------
+# Degrade locks
+# ---------------------------------------------------------------------------
+
+class TestDegradeLocks:
+    """PLACEMENT_REFINE=0 must reproduce the pre-0104 picture exactly. It
+    does so by construction (the flag takes an early return to the legacy
+    fuser), but 'true by reading' is what a pin is for — the always-on
+    scale floor in particular sits OUTSIDE the budget gate and would be a
+    behaviour change for every scene if it ever escaped the refined path."""
+
+    def _frames(self):
+        return [{
+            "frame_index": 0,
+            "objects": [{
+                "ok": True, "label": "tv", "score": 0.9, "mask_index": 0,
+                "splat_gcs_uri": "gs://o/s.ply",
+                "placement": {
+                    "placed": True, "method": "depth_fit",
+                    "world_transform": {
+                        "position": [0.0, 0.0, 0.0],
+                        "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
+                        "scale": 1.0,
+                    },
+                },
+            }],
+        }]
+
+    def test_refine_off_emits_no_clip_and_no_scale_floor_demotion(self, monkeypatch):
+        monkeypatch.setenv("PLACEMENT_REFINE", "0")
+        out = fusion.fuse_scene_objects(self._frames(), Ctx({"gs://o/s.ply": _grid()}))
+        assert all(o.get("splat_clip") is None for o in out)
+        assert all(o.get("reason") != "implausible_scale_for_label" for o in out)
+
+    def test_refine_off_emits_no_support_snap(self, monkeypatch):
+        monkeypatch.setenv("PLACEMENT_REFINE", "0")
+        out = fusion.fuse_scene_objects(self._frames(), Ctx({"gs://o/s.ply": _grid()}))
+        assert all((o.get("quality") or {}).get("support_snap_m") is None for o in out)
+
+    def test_no_roomplan_scene_gets_no_box_derived_fields(self):
+        """Without a parsed CapturedRoom there are no boxes, so nothing can
+        carry a box-derived clip — the census-gated half of the lock."""
+        out = fusion.fuse_scene_objects(self._frames(), Ctx({"gs://o/s.ply": _grid()}))
+        assert all(o.get("splat_clip") is None for o in out)
+        assert all(o.get("roomplan_box") is None for o in out)
