@@ -16,6 +16,11 @@
 #       everything else under scenes/ is either the served product (splats, manifest,
 #       shell) or its warm-re-drive substrate; an age rule on those would delete living
 #       rooms' assets. See decision 0086 for the full retention design.
+#   (6) Perception-outputs CORS: permit the hosting origins to read signed splat
+#       URLs from a browser. Without it the web viewer renders nothing at all —
+#       CORS is browser-only, so every server-side verification of this path
+#       passed while the product was broken. Not an access grant; signatures are
+#       still required. See decision 0102.
 #
 # Section (1) also:
 #   - Enables the Eventarc API if not already enabled.
@@ -40,6 +45,7 @@
 #   ./infra/eventarc_setup.sh --trigger-only    # section (1) only
 #   ./infra/eventarc_setup.sh --scenes-ttl-only # section (4) only
 #   ./infra/eventarc_setup.sh --outputs-lifecycle-only # section (5) only
+#   ./infra/eventarc_setup.sh --outputs-cors-only      # section (6) only
 #   Flags can be combined: --lifecycle-only --ttl-only
 #
 # Re-running is safe: all operations are idempotent.
@@ -60,6 +66,7 @@ RUN_LIFECYCLE=true
 RUN_TTL=true
 RUN_SCENES_TTL=true
 RUN_OUTPUTS_LIFECYCLE=true
+RUN_OUTPUTS_CORS=true
 
 if [[ "$#" -gt 0 ]]; then
   RUN_TRIGGER=false
@@ -67,6 +74,7 @@ if [[ "$#" -gt 0 ]]; then
   RUN_TTL=false
   RUN_SCENES_TTL=false
   RUN_OUTPUTS_LIFECYCLE=false
+  RUN_OUTPUTS_CORS=false
   for arg in "$@"; do
     case "$arg" in
       --trigger-only)           RUN_TRIGGER=true ;;
@@ -74,8 +82,10 @@ if [[ "$#" -gt 0 ]]; then
       --ttl-only)               RUN_TTL=true ;;
       --scenes-ttl-only)        RUN_SCENES_TTL=true ;;
       --outputs-lifecycle-only) RUN_OUTPUTS_LIFECYCLE=true ;;
+      --outputs-cors-only)      RUN_OUTPUTS_CORS=true ;;
       *) echo "Unknown argument: $arg" >&2
-         echo "Usage: $0 [--trigger-only] [--lifecycle-only] [--ttl-only] [--scenes-ttl-only] [--outputs-lifecycle-only]" >&2
+         echo "Usage: $0 [--trigger-only] [--lifecycle-only] [--ttl-only] [--scenes-ttl-only]" >&2
+         echo "          [--outputs-lifecycle-only] [--outputs-cors-only]" >&2
          exit 1 ;;
     esac
   done
@@ -317,6 +327,64 @@ rm /tmp/outputs_lifecycle_rule.json
 echo ""
 fi  # RUN_OUTPUTS_LIFECYCLE
 
+if $RUN_OUTPUTS_CORS; then
+echo "=== (6) Perception-outputs CORS: let browsers read signed splat URLs ==="
+
+# WITHOUT this the web product cannot render a single room. The viewer fetches
+# splat/texture assets straight from GCS over the V4-signed URLs the assets
+# endpoint returns; a cross-origin fetch with no Access-Control-Allow-Origin on
+# the response is blocked by the browser BEFORE any bytes reach the page.
+# Measured on the preview channel 2026-08-08: every .ply fetch died with
+# "No 'Access-Control-Allow-Origin' header is present", and Spark's loader
+# worker surfaced it only as "Worker error: TypeError: Failed to fetch".
+#
+# This was invisible until then for a specific reason worth remembering: CORS is
+# enforced by browsers ONLY. Every prior verification of this path — Gate B's
+# "signed URL fetches 34 MB at 200" included — used curl or a server-side
+# client, which never sends an Origin header and never checks for one back.
+#
+# CORS IS NOT AN ACCESS GRANT. Objects stay private: the signature is still
+# required and an unsigned request still 403s. All this does is permit the
+# browser to hand an already-authorized response to a listed origin.
+#
+# The origin list intentionally mirrors api-public's CORS_ALLOWED_ORIGINS
+# (infra/api-public.env.yaml) — one trusted-origin set, two enforcement points
+# (the API for JSON, the bucket for assets). Keep them in step: adding a hosting
+# origin means editing BOTH, or rooms load their manifest and then render
+# nothing.
+#
+# GET + HEAD only — the viewer reads assets and never writes them.
+# responseHeader covers Range/Content-Range so partial reads keep working, and
+# exposes Content-Length/ETag to page JS for progress and caching.
+
+cat > /tmp/outputs_cors.json <<'EOF'
+[
+  {
+    "origin": [
+      "http://localhost:3000",
+      "https://roomstudio.web.app",
+      "https://roomstudio.firebaseapp.com",
+      "https://roomstudio--preview-cydkerk6.web.app"
+    ],
+    "method": ["GET", "HEAD"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "Content-Range",
+      "Range",
+      "ETag"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
+EOF
+
+gsutil cors set /tmp/outputs_cors.json "gs://${GCS_OUTPUTS_BUCKET}"
+echo "CORS policy applied to gs://${GCS_OUTPUTS_BUCKET}."
+rm /tmp/outputs_cors.json
+echo ""
+fi  # RUN_OUTPUTS_CORS
+
 echo "=== Done ==="
 echo "Verify in GCP console:"
 $RUN_TRIGGER           && echo "  Eventarc → Triggers → ${TRIGGER_NAME}"
@@ -324,3 +392,4 @@ $RUN_LIFECYCLE         && echo "  Cloud Storage → gs://${GCS_CAPTURES_BUCKET} 
 $RUN_TTL               && echo "  Firestore → upload_sessions → TTL settings"
 $RUN_SCENES_TTL        && echo "  Firestore → scenes → TTL settings (expire_at)"
 $RUN_OUTPUTS_LIFECYCLE && echo "  Cloud Storage → gs://${GCS_OUTPUTS_BUCKET} → Lifecycle"
+$RUN_OUTPUTS_CORS      && echo "  Cloud Storage → gs://${GCS_OUTPUTS_BUCKET} → CORS (gsutil cors get)"
