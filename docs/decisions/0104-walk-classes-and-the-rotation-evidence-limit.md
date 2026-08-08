@@ -105,7 +105,15 @@ chair the operator approved.
   both vocabularies.
 * **`SHELL_MATERIAL_MIN_CONF` 0.6 → 0.75** (0100's recommendation), as the
   default rather than a deploy-env override so offline re-drives and
-  production agree on what a shell says.
+  production agree on what a shell says. **It does not retro-apply, by
+  design:** all four walked rooms already carry shell.json v3, so the
+  `--shell` re-drive takes the version-gated redelivery noop and their
+  families are whatever was baked before. The raise governs the next shell
+  BAKE — a new capture, or a deliberate blob delete. Forcing a re-bake was
+  declined rather than overlooked: 0070 requires reference-room
+  re-adjudication before material families change, which is the operator's
+  call, and leaving materials fixed also isolates this session's placement
+  changes for the coming walk.
 
 ## Why
 
