@@ -91,6 +91,7 @@ def _manifest(objects: list[dict] | None = None) -> dict:
 
 
 _SHELL_URI = "gs://outputs/scenes/s1/shell.json"
+_COMPRESSED_URI = "gs://outputs/scenes/s1/compressed.json"
 
 
 def _material(family: str | None = "painted") -> dict:
@@ -155,6 +156,7 @@ def _get_assets(
     scene_id: str | None = None,
     headers: dict | None = None,
     shell_bytes: bytes | None = None,
+    compressed_bytes: bytes | None = None,
     fetcher: InMemoryManifestFetcher | None = None,
 ):
     repo = InMemorySceneReadRepository({scene.scene_id: scene})
@@ -163,6 +165,8 @@ def _get_assets(
         fetcher.store[_MANIFEST_URI] = manifest_bytes
     if shell_bytes is not None:
         fetcher.store[_SHELL_URI] = shell_bytes
+    if compressed_bytes is not None:
+        fetcher.store[_COMPRESSED_URI] = compressed_bytes
     if headers is None:
         headers = {"Authorization": f"Bearer test-uid:{uid}"}
     with (
@@ -412,3 +416,139 @@ class TestAssetsUpstreamFailures:
         )
         assert resp.status_code == 502
         assert resp.json()["detail"] == "asset URL signing failed"
+
+
+class TestAssetsCompressedTier:
+    """The compressed tier (decision 0126): an additive sibling index.
+
+    The load-bearing property is that the PLY keeps its entry no matter what,
+    so `asset_urls` never narrows and the client's fallback is a real URL
+    rather than a nominal one. A scene with no index must be byte-identical
+    to the pre-0126 response apart from an empty map.
+    """
+
+    _CHAIR = "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply"
+    _CHAIR_SPZ = "gs://outputs/scenes/s1/frames/0000/splats/00_chair.spz"
+    _LAMP = "gs://outputs/scenes/s1/frames/0001/splats/00_lamp.ply"
+
+    def _index(self, entries: dict) -> bytes:
+        return json.dumps(
+            {"compressed_version": 1, "format": "spz", "entries": entries}
+        ).encode()
+
+    def test_absent_index_yields_empty_map_and_untouched_asset_urls(self, client) -> None:
+        resp = _get_assets(
+            client, _scene(), manifest_bytes=json.dumps(_manifest()).encode()
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["asset_urls_compressed"] == {}
+        assert set(body["asset_urls"]) == {self._CHAIR, self._LAMP}
+
+    def test_indexed_splat_is_signed_under_its_manifest_key(self, client) -> None:
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            compressed_bytes=self._index(
+                {self._CHAIR: {"uri": self._CHAIR_SPZ, "bytes": 7076212}}
+            ),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        # Keyed by the MANIFEST uri: the client looks up one key, picks a format.
+        assert set(body["asset_urls_compressed"]) == {self._CHAIR}
+        assert "00_chair.spz" in body["asset_urls_compressed"][self._CHAIR]
+        # ...and the PLY is still signed, so falling back is real.
+        assert "00_chair.ply" in body["asset_urls"][self._CHAIR]
+        assert set(body["asset_urls"]) == {self._CHAIR, self._LAMP}
+
+    def test_partial_index_leaves_the_rest_on_ply(self, client) -> None:
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            compressed_bytes=self._index(
+                {self._CHAIR: {"uri": self._CHAIR_SPZ, "bytes": 1}}
+            ),
+        )
+        body = resp.json()
+        assert self._LAMP not in body["asset_urls_compressed"]
+        assert self._LAMP in body["asset_urls"]
+
+    def test_stale_index_entry_for_an_absent_object_is_ignored(self, client) -> None:
+        """A re-drive can move a splat to a new frame path. The index is keyed
+        by the old path, matches nothing, and the room falls back -- the whole
+        reason the index is keyed by URI rather than by object id."""
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            compressed_bytes=self._index(
+                {"gs://outputs/scenes/s1/frames/9999/splats/00_gone.ply":
+                    {"uri": "gs://outputs/scenes/s1/frames/9999/splats/00_gone.spz"}}
+            ),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["asset_urls_compressed"] == {}
+
+    @pytest.mark.parametrize("doc", [
+        b"not json {",
+        b'{"entries": "nope"}',
+        b'{"no_entries": true}',
+        b'{"entries": {"gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply": {}}}',
+        b'{"entries": {"gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply": 7}}',
+    ])
+    def test_malformed_index_degrades_to_ply_never_500s(self, client, doc) -> None:
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            compressed_bytes=doc,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["asset_urls_compressed"] == {}
+        assert set(resp.json()["asset_urls"]) == {self._CHAIR, self._LAMP}
+
+    def test_index_fetch_error_degrades_to_ply(self, client) -> None:
+        class ExplodingIndexFetcher(InMemoryManifestFetcher):
+            def fetch_optional(self, gs_uri: str):
+                if gs_uri.endswith("compressed.json"):
+                    raise server.ManifestFetchError("boom")
+                return super().fetch_optional(gs_uri)
+
+        fetcher = ExplodingIndexFetcher()
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            fetcher=fetcher,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["asset_urls_compressed"] == {}
+
+    def test_every_uri_signed_exactly_once(self, client) -> None:
+        signer = FakeSigner()
+        _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            compressed_bytes=self._index(
+                {self._CHAIR: {"uri": self._CHAIR_SPZ, "bytes": 1}}
+            ),
+            signer=signer,
+        )
+        assert sorted(signer.calls) == sorted([self._CHAIR, self._LAMP, self._CHAIR_SPZ])
+        assert len(signer.calls) == len(set(signer.calls))
+
+    def test_compressed_signing_failure_502s_rather_than_shipping_half(self, client) -> None:
+        resp = _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            compressed_bytes=self._index(
+                {self._CHAIR: {"uri": self._CHAIR_SPZ, "bytes": 1}}
+            ),
+            signer=FakeSigner(fail=True),
+        )
+        assert resp.status_code == 502

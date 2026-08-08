@@ -504,3 +504,47 @@ describe("assembleScene splat clip (decision 0104)", () => {
     expect(clipped.scale).toEqual(plain.scale);
   });
 });
+
+describe("assembleScene compressed tier (decision 0126)", () => {
+  it("prefers the compressed URL when one exists for that splat", () => {
+    const a = assets();
+    a.asset_urls_compressed = { [GS]: "https://signed.example/chair.spz" };
+    const { splats } = assembleScene(a);
+    expect(splats).toHaveLength(1);
+    expect(splats[0].url).toBe("https://signed.example/chair.spz");
+  });
+
+  it("falls back to the PLY when the map is absent", () => {
+    const { splats } = assembleScene(assets());
+    expect(splats[0].url).toBe("https://signed.example/chair.ply");
+  });
+
+  it("falls back to the PLY when the map exists but omits this splat", () => {
+    const a = assets();
+    a.asset_urls_compressed = { "gs://outputs/scenes/s1/splats/99_other.ply": "x" };
+    const { splats } = assembleScene(a);
+    expect(splats[0].url).toBe("https://signed.example/chair.ply");
+  });
+
+  it("changes nothing but the URL — transform, label and clip are untouched", () => {
+    const plain = assembleScene(assets()).splats[0];
+    const a = assets();
+    a.asset_urls_compressed = { [GS]: "https://signed.example/chair.spz" };
+    const comp = assembleScene(a).splats[0];
+    expect({ ...comp, url: null }).toEqual({ ...plain, url: null });
+  });
+
+  it("renders from the compressed URL alone when only that one is present", () => {
+    // api-public always signs the PLY too, so this shape should not occur in
+    // production. It is pinned deliberately: a compressed URL points at a real
+    // object the converter wrote, so the honest response is to render it
+    // rather than to report the piece missing over a wire-format accident.
+    const a = assets();
+    a.asset_urls = {};
+    a.asset_urls_compressed = { [GS]: "https://signed.example/chair.spz" };
+    const { splats, unrenderable } = assembleScene(a);
+    expect(splats).toHaveLength(1);
+    expect(splats[0].url).toBe("https://signed.example/chair.spz");
+    expect(unrenderable).toEqual([]);
+  });
+});

@@ -8,7 +8,8 @@
       "**/node_modules/**",
       "dev-fixtures/**",
       "hero/piece.json",
-      "hero/*.ply"
+      "hero/*.ply",
+      "hero/*.spz"
     ],
     "headers": [
       {

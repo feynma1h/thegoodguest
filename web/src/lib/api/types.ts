@@ -204,6 +204,11 @@ export interface SceneAssets {
   /** Room shell sibling (decision 0066). Absent/null = not yet. */
   shell?: ShellDoc | null;
   asset_urls: Record<string, string>; // gs:// URI -> signed HTTPS URL
+  /** The compressed tier (decision 0126), keyed by the SAME gs:// URI as
+   * `asset_urls` so a lookup picks a format rather than an object. Present
+   * only for splats that have been transcoded; absent map = tier not built
+   * for this scene, which is a normal state, not an error. */
+  asset_urls_compressed?: Record<string, string>;
   expires_at: string; // ISO 8601
 }
 
@@ -361,7 +366,13 @@ export function assembleScene(assets: SceneAssets): AssembledScene {
   const splats: PositionedSplat[] = [];
   const unrenderable: FusedObject[] = [];
   for (const obj of assets.manifest.objects ?? []) {
-    const url = obj.splat_gcs_uri ? assets.asset_urls[obj.splat_gcs_uri] : undefined;
+    // Prefer the compressed tier, fall back to the PLY (decision 0126). Same
+    // Gaussians either way -- SPZ is a re-encoding of the same splat, not a
+    // reduced one -- so this is a wire-format choice and nothing else.
+    const url = obj.splat_gcs_uri
+      ? (assets.asset_urls_compressed?.[obj.splat_gcs_uri] ??
+         assets.asset_urls[obj.splat_gcs_uri])
+      : undefined;
     if (obj.placed && obj.world_transform && url) {
       splats.push({
         url,

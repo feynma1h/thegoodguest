@@ -506,6 +506,50 @@ class UnsignedDevUrlSigner:
         return f"https://storage.googleapis.com/{bucket}/{path}"
 
 
+# Signing is one IAM signBlob round trip each, and the serial loop cost a
+# measured 0.9-2.6 s of pure time-to-first-byte (decision 0124, which chose
+# not to fix it while the payload was the 99% term). The compressed tier is
+# that decision's own named trigger: at ~47 MB a 2 s stall is no longer 1%.
+# Bounded and order-preserving, the precedent being 0074's _mint_all pool.
+# Modest by default on purpose -- 0080's mint OOM came from per-call session
+# construction, which the signer does not do (it reuses one storage.Client),
+# but a 512 MiB service earns a conservative ceiling anyway. The pool is
+# per-request and capped at the number of URIs, so a small room spends fewer
+# threads than the ceiling; the worst case is this number times however many
+# /assets calls are in flight, which is one per room view.
+_ASSET_SIGN_CONCURRENCY = int(os.environ.get("ASSET_SIGN_CONCURRENCY", "8"))
+
+
+def _sign_assets(signer, items: list[tuple[str, str | None]]) -> tuple[dict, dict]:
+    """Sign (manifest_uri, compressed_uri|None) pairs concurrently.
+
+    Returns (asset_urls, asset_urls_compressed), both keyed by the MANIFEST
+    uri so the client looks up one key and picks a format. Any failure
+    propagates -- a partially signed room is not a room.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not items:
+        return {}, {}
+
+    def _sign(uri: str) -> str:
+        return signer.sign(uri, _ASSET_URL_TTL_SECONDS)
+
+    # One flat wave, not one per format: two sequential maps would make the
+    # compressed URIs wait on the last PLY signature for no reason.
+    comp_items = [(ply, spz) for ply, spz in items if spz]
+    flat = [ply for ply, _ in items] + [spz for _, spz in comp_items]
+    workers = max(1, min(_ASSET_SIGN_CONCURRENCY, len(flat)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        signed = list(pool.map(_sign, flat))
+
+    asset_urls = {ply: url for (ply, _), url in zip(items, signed)}
+    asset_urls_compressed = {
+        ply: url for (ply, _), url in zip(comp_items, signed[len(items):])
+    }
+    return asset_urls, asset_urls_compressed
+
+
 _manifest_fetcher = None
 _url_signer = None
 
@@ -1291,6 +1335,24 @@ def get_scene_assets(
                        scene_id, exc)
         shell = None
 
+    # The compressed tier (decision 0126): a sibling index, shell.json's
+    # precedent. Absent = the tier was never built for this scene, which is
+    # the state every scene starts in and a perfectly good one -- the client
+    # falls back to the PLY. A fetch error degrades the same way: a
+    # compressed tier must never take a room down.
+    compressed_index = {}
+    comp_uri = scene.result_uri.rsplit("/", 1)[0] + "/compressed.json"
+    try:
+        comp_bytes = _get_manifest_fetcher().fetch_optional(comp_uri)
+        if comp_bytes is not None:
+            doc = json.loads(comp_bytes)
+            if isinstance(doc, dict) and isinstance(doc.get("entries"), dict):
+                compressed_index = doc["entries"]
+    except (ManifestFetchError, ValueError) as exc:
+        logger.warning("assets: compressed index degraded to none for scene %s: %s",
+                       scene_id, exc)
+        compressed_index = {}
+
     # Sign the splats the viewer renders: the scene-level fused objects.
     # (Pre-v2 manifests have no "objects" array and yield no URLs; no such
     # scenes exist with real users, so no compatibility shim.)
@@ -1299,11 +1361,17 @@ def get_scene_assets(
         for obj in manifest.get("objects", [])
         if isinstance(obj, dict) and obj.get("splat_gcs_uri")
     }
+    # (manifest uri, compressed uri or None) -- the PLY is always signed so the
+    # client's fallback is real, not nominal.
+    to_sign: list[tuple[str, str | None]] = []
+    for uri in sorted(splat_uris):
+        entry = compressed_index.get(uri)
+        spz = entry.get("uri") if isinstance(entry, dict) else None
+        to_sign.append((uri, spz if isinstance(spz, str) else None))
+
     signer = _get_url_signer()
-    asset_urls = {}
     try:
-        for uri in sorted(splat_uris):
-            asset_urls[uri] = signer.sign(uri, _ASSET_URL_TTL_SECONDS)
+        asset_urls, asset_urls_compressed = _sign_assets(signer, to_sign)
     except Exception as exc:
         logger.exception("assets: signing failed for scene %s: %s", scene_id, exc)
         return JSONResponse(
@@ -1319,6 +1387,7 @@ def get_scene_assets(
             "manifest": manifest,
             "shell": shell,
             "asset_urls": asset_urls,
+            "asset_urls_compressed": asset_urls_compressed,
             "expires_at": expires_at.isoformat(),
         },
     )

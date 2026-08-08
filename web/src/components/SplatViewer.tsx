@@ -59,6 +59,7 @@ import {
   pathLengths,
   pathPointAt,
   planReveal,
+  revealHoldMs,
   settleEase,
   windowProgress,
 } from "@/lib/reveal";
@@ -587,11 +588,6 @@ export default function SplatViewer({
         renderer.domElement.addEventListener("pointerdown", onGrab);
         renderer.domElement.addEventListener("pointerup", onRelease);
 
-        await Promise.all(meshes.map((m) => m.initialized));
-        if (disposed) return;
-        setOutcome({ key, phase: "ready" });
-        renderer.domElement.style.opacity = "1";
-
         // --- The reveal (decision 0097). lib/reveal decides every cue;
         // this block builds what the cues drive and the render loop plays
         // them. Reduced motion produces an `immediate` plan — the room is
@@ -601,6 +597,34 @@ export default function SplatViewer({
         ).matches;
         const plan = planReveal({ shell: shellPlanes, splats, reducedMotion });
         const assembling = revealRef.current && !plan.immediate;
+
+        // Which pieces have actually arrived (decision 0127). The reveal's
+        // first two movements — the contour and the surfaces — need zero
+        // splat bytes, so the stage is honest well before the room is
+        // downloaded; the object wave then waits per piece rather than the
+        // whole room waiting for its last byte.
+        const arrived = new Set<number>();
+        let objectHoldMs = 0;
+        meshes.forEach((m, i) => {
+          m.initialized.then(
+            () => arrived.add(i),
+            (err: unknown) => {
+              // Count a failed piece as arrived: one broken splat must not
+              // freeze the wave behind it forever. It simply never shows.
+              console.warn(`splat ${i} (${splats[i].label}) failed to load`, err);
+              arrived.add(i);
+            },
+          );
+        });
+
+        if (!assembling) {
+          // No choreography to gate against — keep the settled behaviour, in
+          // which a load failure surfaces as the room's error state.
+          await Promise.all(meshes.map((m) => m.initialized));
+          if (disposed) return;
+        }
+        setOutcome({ key, phase: "ready" });
+        renderer.domElement.style.opacity = "1";
 
         // Cue lookups keyed by the index each cue addresses.
         const surfaceCue = new Map(plan.surfaces.map((c) => [c.index, c]));
@@ -844,6 +868,15 @@ export default function SplatViewer({
           if (assembling) drawContour?.(now);
           if (assembling && !revealDoneFired) {
             const t = now - revealT0;
+            // The object wave stretches for bytes; the surfaces never do,
+            // because they are measured geometry and already here.
+            objectHoldMs = revealHoldMs({
+              objects: plan.objects,
+              isReady: (i) => arrived.has(i),
+              t,
+              delayMs: objectHoldMs,
+            });
+            const objT = t - objectHoldMs;
 
             // Surfaces: fade up in place. No translation, ever.
             for (const [i, cue] of surfaceCue) {
@@ -873,7 +906,7 @@ export default function SplatViewer({
 
             // Pieces: settle from rest to rest, present before still.
             for (const [i, cue] of objectCue) {
-              const raw = windowProgress(t, cue.startMs, cue.durationMs);
+              const raw = windowProgress(objT, cue.startMs, cue.durationMs);
               const mesh = meshes[i];
               if (raw <= 0) {
                 mesh.visible = false;
@@ -889,11 +922,13 @@ export default function SplatViewer({
               mesh.opacity = settleEase(Math.min(1, raw / SETTLE_FADE_FRACTION));
             }
 
-            if (!captionsDoneFired && t >= plan.captionsDoneMs) {
+            // Both closing beats belong to the object wave, so they ride its
+            // clock — the guest must not speak over a room still arriving.
+            if (!captionsDoneFired && objT >= plan.captionsDoneMs) {
               captionsDoneFired = true;
               revealCaptionsDoneRef.current?.();
             }
-            if (t >= plan.doneMs) {
+            if (objT >= plan.doneMs) {
               revealDoneFired = true;
               revealDoneRef.current?.();
             }
