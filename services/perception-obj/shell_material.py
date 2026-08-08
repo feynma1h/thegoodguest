@@ -342,6 +342,18 @@ def infer_material(
                 family = raw_family
                 confidence = round(float(raw_conf), 4)
                 model = SHELL_MATERIAL_MODEL
+                # Log ADMISSIONS too, not just rejections (decision 0100). The
+                # family-instability finding — byte-identical evidence yielding
+                # a different family across two bakes — was only findable by
+                # diffing two shell.json files by hand, because a family
+                # admitted at the gate floor left no trace anywhere. An
+                # admission at or near SHELL_MATERIAL_MIN_CONF is the model
+                # reporting a coin flip, and it should be greppable as one.
+                logger.info(
+                    "shell_material: %s classified family=%s conf=%.2f%s",
+                    kind, family, raw_conf,
+                    " AT_GATE_FLOOR" if raw_conf <= SHELL_MATERIAL_MIN_CONF else "",
+                )
             else:
                 logger.info(
                     "shell_material: %s classification gated (family=%s conf=%.2f)",
