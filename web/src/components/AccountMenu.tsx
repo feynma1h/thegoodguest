@@ -13,7 +13,7 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import DeleteAccountPanel from "@/components/DeleteAccountPanel";
 import SignInPanel from "@/components/SignInPanel";
@@ -52,18 +52,22 @@ export default function AccountMenu() {
   }, [mode]);
 
   // Closing the menu abandons a half-finished delete confirmation rather than
-  // leaving it armed for the next open.
-  useEffect(() => {
-    if (!open) setDeleting(false);
-  }, [open]);
+  // leaving it armed for the next open. This is a property of the close
+  // ACTION, so it lives in the one function every close path calls — an
+  // effect watching `open` would be a cascading render for a decision no
+  // render needs to make (react-hooks/set-state-in-effect).
+  const closeMenu = useCallback(() => {
+    setOpen(false);
+    setDeleting(false);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(e.target as Node)) closeMenu();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") closeMenu();
     };
     window.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
@@ -71,7 +75,7 @@ export default function AccountMenu() {
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, closeMenu]);
 
   const identity =
     mode === "mock"
@@ -95,7 +99,7 @@ export default function AccountMenu() {
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? closeMenu() : setOpen(true))}
         aria-label="Account"
         aria-expanded={open}
         className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-ink/25 text-ink/60 transition-colors hover:border-ink/50 hover:text-ink"
@@ -141,7 +145,7 @@ export default function AccountMenu() {
             {mode !== "live" && (
               <Link
                 href="/viewer"
-                onClick={() => setOpen(false)}
+                onClick={closeMenu}
                 className="block px-4 py-3 text-sm text-ink/70 transition-colors hover:bg-ink/[0.04] hover:text-ink"
               >
                 Dev viewer
@@ -186,6 +190,27 @@ export default function AccountMenu() {
                 onCancel={() => setDeleting(false)}
               />
             )}
+
+            {/* The legal documents' second home. SiteFooter carries them
+                everywhere else, but it stands down on /room — and the room
+                page is exactly where someone is looking at a scan of their
+                bedroom and may want to know what happens to it. */}
+            <div className="flex gap-4 border-t border-ink/10 px-4 py-2.5 text-[11px] text-ink/40">
+              <Link
+                href="/privacy"
+                onClick={closeMenu}
+                className="transition-colors hover:text-ink"
+              >
+                Privacy
+              </Link>
+              <Link
+                href="/terms"
+                onClick={closeMenu}
+                className="transition-colors hover:text-ink"
+              >
+                Terms
+              </Link>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

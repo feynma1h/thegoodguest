@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Instrument_Sans, Source_Serif_4 } from "next/font/google";
 
+import SiteFooter from "@/components/SiteFooter";
 import SiteNav from "@/components/SiteNav";
 import "./globals.css";
 
@@ -41,6 +42,7 @@ export default function RootLayout({
       >
         <SiteNav />
         <main>{children}</main>
+        <SiteFooter />
       </body>
     </html>
   );
