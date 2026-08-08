@@ -64,6 +64,7 @@ import {
   windowProgress,
 } from "@/lib/reveal";
 import { openingRect, projectToWallPlane, wallFrame } from "@/lib/shell3d";
+import { rendererKey } from "@/lib/viewerKey";
 
 interface SplatViewerProps {
   splats: PositionedSplat[];
@@ -92,6 +93,60 @@ interface SplatViewerProps {
    * positions — wall letters and template piece numbers. Renderer-agnostic
    * input like everything else here; null/absent renders nothing. */
   labels?: ViewerLabel[] | null;
+  /** Measured footprints of pieces a proposal has moved or removed
+   * (decision 0131): the measurement survives on screen as its outline,
+   * drawn on the floor in the reveal's contour language — the pen in the
+   * paper tone, which in this room MEANS measurement. Renderer-agnostic
+   * world geometry; null/absent draws nothing. */
+  outlines?: MeasuredOutline[] | null;
+}
+
+/** One measured footprint: a yaw-oriented rectangle on the floor. Same
+ * shape as a clip volume's footprint because it comes from the same
+ * measured RoomPlan box. */
+export interface MeasuredOutline {
+  center_world: [number, number, number];
+  half_extents_m: [number, number, number];
+  yaw_rad: number;
+}
+
+/** The slice of a Spark SplatMesh the placement seam touches. Structural,
+ * so the transform effect needs no Spark types at module scope (decision
+ * 0053's containment rule cuts both ways). */
+interface SplatMeshHandle {
+  position: { set(x: number, y: number, z: number): void; y: number };
+  quaternion: { set(x: number, y: number, z: number, w: number): void };
+  scale: { set(x: number, y: number, z: number): void; setScalar(v: number): void };
+  visible: boolean;
+  opacity: number;
+}
+
+/** Write one splat's world placement onto its live mesh. The clip volume
+ * is parented to the mesh in its LOCAL frame, so it follows this without
+ * being recomputed — a moved piece carries its measured box with it, which
+ * is exactly right: the box is the object's, not the room's. */
+function applyPlacement(mesh: SplatMeshHandle, s: PositionedSplat): void {
+  mesh.position.set(...s.position);
+  mesh.quaternion.set(...s.rotation_xyzw);
+  if (typeof s.scale === "number") mesh.scale.setScalar(s.scale);
+  else mesh.scale.set(...s.scale);
+}
+
+/** Push the current placement of every splat onto the live meshes.
+ * `hidden` is honoured here rather than by dropping the splat from the
+ * array: unmounting a mesh is a full re-download (decision 0130 measured
+ * it), and a removal the person can undo must cost nothing to undo. */
+function applyLivePlacements(
+  meshes: SplatMeshHandle[],
+  splats: PositionedSplat[],
+  revealOwnsVisibility: boolean,
+): void {
+  for (let i = 0; i < meshes.length; i++) {
+    const s = splats[i];
+    if (!s) continue;
+    applyPlacement(meshes[i], s);
+    if (!revealOwnsVisibility) meshes[i].visible = !s.hidden;
+  }
 }
 
 /** One floating badge: 1–2 chars at a world position. kind picks color
@@ -190,16 +245,22 @@ export default function SplatViewer({
   onRevealCaptionsDone,
   onRevealDone,
   labels = null,
+  outlines = null,
 }: SplatViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // The renderer key is STRUCTURE ONLY — which files are in the scene, and
+  // what fixed geometry surrounds them. Transforms are deliberately absent
+  // (decision 0133): a splat's position used to sit in this key, so moving
+  // one piece tore the renderer down and re-downloaded the whole room —
+  // 275.8 MB and 25–56 s on the reference room (0123). Transforms are now
+  // applied to live meshes by their own effect below, and a proposed move
+  // costs nothing. `clip` stays in the key because it is a different
+  // GEOMETRY of the same file (a new SDF edit), not a placement of it —
+  // and because a clip volume is parented to its mesh, so it follows a
+  // move for free rather than needing to be rebuilt by one.
   const key = useMemo(
-    () =>
-      splats.map((s) => `${s.url}@${s.position.join(",")}`).join("|") +
-      "|shell:" +
-      (shell
-        ?.map((p) => `${p.kind}:${p.material.albedo_hex ?? "-"}:${p.corners.length}`)
-        .join(",") ?? "none"),
-    [splats, shell],
+    () => rendererKey({ splats, shell, labels, outlines }),
+    [splats, shell, labels, outlines],
   );
   const [outcome, setOutcome] = useState<LoadOutcome | null>(null);
 
@@ -220,6 +281,21 @@ export default function SplatViewer({
   // would tear down and reload the room the user just watched assemble —
   // a blink at exactly the moment the reveal is supposed to have landed.
   const revealRef = useRef(reveal);
+
+  // --- The transform seam (decision 0133). The renderer effect below owns
+  // structure; these three refs own placement, so a proposal moves furniture
+  // without the scene reloading. `splats` is read through the ref inside the
+  // render loop for the same reason it is absent from the effect's
+  // dependencies: an array identity change must never restart the renderer.
+  const splatsRef = useRef(splats);
+  const meshesRef = useRef<SplatMeshHandle[]>([]);
+  // While the object wave is playing, visibility belongs to the reveal —
+  // it is mid-sentence about which pieces have arrived, and a proposal
+  // must not interrupt it. Ownership returns when the wave ends.
+  const revealOwnsVisibilityRef = useRef(false);
+  useEffect(() => {
+    splatsRef.current = splats;
+  });
 
   const hasContent = splats.length > 0 || (shell?.length ?? 0) > 0;
   const phase: "empty" | "loading" | "ready" | "error" = !hasContent
@@ -432,12 +508,12 @@ export default function SplatViewer({
         // and camera-framing consumers reduce a triple to its largest axis.
         const scaleMax = (v: number | [number, number, number]) =>
           typeof v === "number" ? v : Math.max(...v);
-        const meshes = splats.map((s) => {
+        const meshes = splats.map((s, i) => {
           const mesh = new SplatMesh({ url: s.url });
-          mesh.position.set(...s.position);
-          mesh.quaternion.set(...s.rotation_xyzw);
-          if (typeof s.scale === "number") mesh.scale.setScalar(s.scale);
-          else mesh.scale.set(...s.scale);
+          // Build from the LIVE placement, not this closure's: the effect
+          // is async (three dynamic imports), so a proposal that landed
+          // mid-load would otherwise be applied a frame later as a jump.
+          applyPlacement(mesh, splatsRef.current[i] ?? s);
           scene.add(mesh);
           // Clip volume (decision 0104): a box-anchored splat may reach
           // past the measured box it is dressed in, and that mass is
@@ -475,6 +551,57 @@ export default function SplatViewer({
           }
           return mesh;
         });
+        // Publish the placement seam. Any proposal that lands from here on
+        // reaches these meshes through the transform effect, never through
+        // a rebuild.
+        meshesRef.current = meshes as unknown as SplatMeshHandle[];
+
+        // --- Where a moved piece was measured (decision 0131). Its
+        // footprint stays on the floor in the contour's own line and tone,
+        // because in this room that line means MEASUREMENT — the same
+        // language the reveal used to draw the boundary. Not a badge, not a
+        // ghost of the object: the measurement, still there, one field away
+        // from the proposal both on screen and in the document.
+        const outlineParts: Array<{
+          object: InstanceType<typeof THREE.Object3D>;
+          geometry: { dispose(): void };
+          material: { dispose(): void };
+        }> = [];
+        for (const o of outlines ?? []) {
+          const [hx, , hz] = o.half_extents_m;
+          const cos = Math.cos(o.yaw_rad);
+          const sin = Math.sin(o.yaw_rad);
+          // The box's own base, lifted a hair so it sits ON the floor rather
+          // than z-fighting it. Derived from the measurement itself, not from
+          // the shell — an outline must survive a room with no floor.
+          const y = o.center_world[1] - o.half_extents_m[1] + 0.004;
+          const corners: [number, number, number][] = (
+            [
+              [-hx, -hz],
+              [hx, -hz],
+              [hx, hz],
+              [-hx, hz],
+              [-hx, -hz],
+            ] as [number, number][]
+          ).map(([u, v]) => [
+            o.center_world[0] + u * cos + v * sin,
+            y,
+            o.center_world[2] - u * sin + v * cos,
+          ]);
+          const geometry = new THREE.BufferGeometry().setAttribute(
+            "position",
+            new THREE.Float32BufferAttribute(corners.flat(), 3),
+          );
+          const material = new THREE.LineBasicMaterial({
+            color: CONTOUR_COLOR,
+            transparent: true,
+            opacity: CONTOUR_FLOOR_OPACITY,
+            depthWrite: false,
+          });
+          const line = new THREE.Line(geometry, material);
+          scene.add(line);
+          outlineParts.push({ object: line, geometry, material });
+        }
 
         // Dev walk badges: always-on-top sprites, one per label. Canvas
         // circle + text, no external assets (CSP holds).
@@ -597,6 +724,8 @@ export default function SplatViewer({
         ).matches;
         const plan = planReveal({ shell: shellPlanes, splats, reducedMotion });
         const assembling = revealRef.current && !plan.immediate;
+        revealOwnsVisibilityRef.current = assembling;
+        applyLivePlacements(meshesRef.current, splatsRef.current, assembling);
 
         // Which pieces have actually arrived (decision 0127). The reveal's
         // first two movements — the contour and the surfaces — need zero
@@ -905,20 +1034,24 @@ export default function SplatViewer({
             }
 
             // Pieces: settle from rest to rest, present before still.
+            // Placement is read LIVE (splatsRef) — a piece proposed away
+            // mid-wave settles into the place it is now going, never the
+            // one this closure was built with.
             for (const [i, cue] of objectCue) {
               const raw = windowProgress(objT, cue.startMs, cue.durationMs);
               const mesh = meshes[i];
-              if (raw <= 0) {
+              const live = splatsRef.current[i] ?? splats[i];
+              if (raw <= 0 || live.hidden) {
                 mesh.visible = false;
                 continue;
               }
               if (!firedSteps.has(i)) {
                 firedSteps.add(i);
                 mesh.visible = true;
-                if (cue.named) revealStepRef.current?.(i, splats[i].label);
+                if (cue.named) revealStepRef.current?.(i, live.label);
               }
               const eased = settleEase(raw);
-              mesh.position.y = splats[i].position[1] + SETTLE_DROP_M * (1 - eased);
+              mesh.position.y = live.position[1] + SETTLE_DROP_M * (1 - eased);
               mesh.opacity = settleEase(Math.min(1, raw / SETTLE_FADE_FRACTION));
             }
 
@@ -930,6 +1063,11 @@ export default function SplatViewer({
             }
             if (objT >= plan.doneMs) {
               revealDoneFired = true;
+              // The wave has finished speaking: visibility goes back to the
+              // placement seam, and any proposal that landed during the
+              // reveal takes effect on this frame.
+              revealOwnsVisibilityRef.current = false;
+              applyLivePlacements(meshesRef.current, splatsRef.current, false);
               revealDoneRef.current?.();
             }
           }
@@ -956,9 +1094,16 @@ export default function SplatViewer({
           renderer.domElement.removeEventListener("pointerup", onRelease);
           renderer.domElement.removeEventListener("pointerdown", cancelEntrance);
           controls.dispose();
+          meshesRef.current = [];
+          revealOwnsVisibilityRef.current = false;
           for (const m of meshes) {
             scene.remove(m);
             m.dispose?.();
+          }
+          for (const { object, geometry, material } of outlineParts) {
+            scene.remove(object);
+            geometry.dispose();
+            material.dispose();
           }
           for (const { sprite, dispose } of labelSprites) {
             scene.remove(sprite);
@@ -1000,7 +1145,24 @@ export default function SplatViewer({
       disposed = true;
       cleanup?.();
     };
-  }, [key, splats, shell, idleOrbit, labels]);
+    // `key` is the structural signature of everything this effect BUILDS —
+    // splat files, clip volumes, shell planes, badges, outlines — so the
+    // arrays those come from are deliberately NOT dependencies. Depending
+    // on `splats` by identity would restart the renderer whenever a caller
+    // recomputed the array, which is exactly what a proposal does (0133);
+    // structure is the key's job, placement is the seam's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, idleOrbit]);
+
+  // The placement seam. Runs on every `splats` change and costs one matrix
+  // write per piece; the renderer above is untouched.
+  useEffect(() => {
+    applyLivePlacements(
+      meshesRef.current,
+      splats,
+      revealOwnsVisibilityRef.current,
+    );
+  }, [splats]);
 
   return (
     <div

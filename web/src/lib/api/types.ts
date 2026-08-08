@@ -305,6 +305,14 @@ export interface PositionedSplat {
    * drew before.
    */
   clip?: SplatClip;
+  /**
+   * Withheld from the room by a design proposal (action "remove",
+   * decision 0131). The splat stays in this list on purpose: unmounting a
+   * mesh is a full re-download and re-parse (0130 measured it), and
+   * "back to measured" must always be one cheap action (0133). So a
+   * removal is a HIDE, and undoing one costs nothing.
+   */
+  hidden?: boolean;
 }
 
 /** An oriented world-space box; yaw-only, matching RoomPlan boxes. */
