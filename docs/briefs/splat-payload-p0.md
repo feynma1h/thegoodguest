@@ -67,7 +67,9 @@ round-trip. Wasted signatures per scene: `b667f891` 24 of 40, `e2bbc1b2` 16 of
 22, `a7e073ae` 12 of 22, `09684dde` 9 of 20.
 
 That is time-to-first-byte the user waits through before a single splat
-starts. **Measure it before fixing it** — it may be 200 ms or it may be 15 s.
+starts. **Measured 2026-08-09 from production logs: 0.9–2.6 s**, scaling with
+signed-URI count. Real, but under 1% of the wait — recorded and deliberately
+not fixed in decision 0124, with the trigger for revisiting it.
 There is precedent for the fix shape if it turns out to matter: decision 0074
 found the same serial-round-trip pattern in `_mint_all` and cured it with a
 bounded order-preserving pool (`UPLOAD_SESSION_MINT_CONCURRENCY`). Filtering
@@ -77,10 +79,24 @@ objects before narrowing the contract.
 
 ---
 
-## The question that decides everything else
+## The question that decides everything else — ANSWERED 2026-08-09
 
-**Is the 6–7 minutes network-bound or parse/GPU-bound? Nobody knows, and the
-answer changes which fixes are worth building.**
+**It is network-bound, decisively. Decision 0123 carries the measurements;
+this section is kept for the reasoning that led to them.** Parse plus GPU
+upload is 0.6–3 s for a 275.8 MB room in the shipped renderer — under 1% of
+the wait — so the "fewer Gaussians" branch below is NOT the lever for this
+symptom. Bytes on the wire are. Two further measured results bound the fix:
+generic gzip buys only 1.36× (float32 is high-entropy, so serving the
+existing PLYs compressed is not the cheap win it looks like), while
+quantization to an SPZ-class layout buys ~4.3× at 0.006 mm position error.
+About 10% of the payload is downloaded and then discarded outright.
+
+Also refuted along the way, so nobody re-tests them: signed-URL churn does
+**not** remount the viewer (the shell-grace refetch completes before mount),
+and a browser's single HTTP/2 connection to `storage.googleapis.com` is not
+a throttle — it was the *fastest* client measured.
+
+**The original question, for the record:**
 
 ~300 MB in ~6.5 minutes is ~6 Mbps effective. That is slow for a download on
 a decent connection and entirely plausible for PLY→Gaussian parsing and GPU
