@@ -522,6 +522,18 @@ export default function SplatViewer({
           // opacity deletes everything outside; Spark scopes an edit to
           // one mesh by parenting, so the SDF's LOCAL transform has to be
           // the box expressed in the mesh's frame.
+          //
+          // THE YAW HERE IS THE WRONG SIGN — measured, decision 0135.
+          // `setFromAxisAngle([0,1,0], yaw)` maps local (u,0,v) to
+          // x = u·cos+v·sin, z = -u·sin+v·cos, but the server's `yaw_rad`
+          // rotates (x, z) as an ordinary 2D plane, so this box sits 2θ
+          // from the one it is meant to cut. Two independent instruments
+          // agree across all four walk rooms (see 0135 and
+          // room_geometry.OrientedBox.local_axes_xz). NOT fixed here: it
+          // re-renders every existing room, 0104 adjudicated the clip by
+          // eye, and 0080/0085 make that the operator's call. It may also
+          // be the cause of 0129's clip cross-section defect — worth an
+          // A/B render before anyone touches it.
           if (s.clip) {
             mesh.updateMatrixWorld(true);
             const boxWorld = new THREE.Matrix4().compose(
