@@ -422,11 +422,13 @@ struct RootFlowView: View {
                         onPrimary: rescanFromScratch,
                         onSecondary: endFlight)
 
-        case .incompleteUpload:
+        case .incompleteUpload(let missingCount):
             // failed_incomplete: an incomplete upload, not a bad scan. No region is
             // named and no partial re-upload exists yet, so the one honest path is a
-            // full rescan (FailureView.recoverable copy owns the honesty).
-            FailureView(kind: .recoverable,
+            // full rescan (FailureView.recoverable copy owns the honesty). The count
+            // IS named — the server sent it, and dropping it was decision 0085's
+            // finding 1.
+            FailureView(kind: .recoverable(missingCount: missingCount),
                         onPrimary: rescanFromScratch,
                         onSecondary: endFlight)
 
