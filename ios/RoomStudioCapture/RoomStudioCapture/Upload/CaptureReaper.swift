@@ -141,15 +141,44 @@ actor CaptureReaper {
     /// retry ladder — this is a janitor, not a user surface), real UserDefaults.
     private init() {
         self.store = .shared
-        self.fetchStatus = { bundleId in
-            guard let token = try? await Self.launchScanToken() else { return nil }
-            guard case .success(let (code, data)) = await ScenePoller.liveGET(bundleId: bundleId, idToken: token),
-                  code == 200,
-                  let response = try? JSONDecoder().decode(SceneResponse.self, from: data)
-            else { return nil }
-            return response.status
-        }
+        self.fetchStatus = { bundleId in await CaptureReaper.productionFetchStatus(bundleId) }
         self.acknowledged = { DismissedBundles().set }
+    }
+
+    /// The production confirming GET, as a named function rather than an inline
+    /// closure: the closure form defeated the type-checker once breadcrumbs were
+    /// added to its branches ("failed to produce diagnostic"), and a janitor's
+    /// only evidence channel is worth keeping compilable.
+    private static func productionFetchStatus(_ bundleId: String) async -> SceneStatus? {
+        let short = String(bundleId.prefix(8))
+        let token: String
+        do {
+            token = try await launchScanToken()
+        } catch {
+            #if DEBUG
+            StagingHooks.breadcrumb("reaper-token-FAIL \(short)")
+            #endif
+            return nil
+        }
+        let outcome = await ScenePoller.liveGET(bundleId: bundleId, idToken: token)
+        guard case .success(let pair) = outcome else {
+            #if DEBUG
+            StagingHooks.breadcrumb("reaper-get-transport-FAIL \(short)")
+            #endif
+            return nil
+        }
+        let code: Int = pair.0
+        let data: Data = pair.1
+        guard code == 200, let response = try? JSONDecoder().decode(SceneResponse.self, from: data) else {
+            #if DEBUG
+            StagingHooks.breadcrumb("reaper-get \(short) code=\(code) decoded=false")
+            #endif
+            return nil
+        }
+        #if DEBUG
+        StagingHooks.breadcrumb("reaper-get \(short) code=200 status=\(String(describing: response.status))")
+        #endif
+        return response.status
     }
 
     /// Testing init.
@@ -200,12 +229,29 @@ actor CaptureReaper {
     /// Bounded work: one store enumeration; at most one GET per acknowledged
     /// .complete record, and a reclaimed record never appears again.
     func reapAcknowledgedAtLaunch() async {
-        guard let ids = try? await store.allBundleIds(), !ids.isEmpty else { return }
+        guard let ids = try? await store.allBundleIds(), !ids.isEmpty else {
+            #if DEBUG
+            StagingHooks.breadcrumb("reaper-scan no-ids")
+            #endif
+            return
+        }
         let acked = acknowledged()
+        #if DEBUG
+        StagingHooks.breadcrumb("reaper-scan ids=\(ids.count) acked=\(acked.count)")
+        #endif
         for id in ids {
-            guard let record = try? await store.load(bundleId: id) else { continue }
-            switch CaptureReclaim.launchScanAction(phase: record.uploadPhase,
-                                                   acknowledged: acked.contains(id)) {
+            guard let record = try? await store.load(bundleId: id) else {
+                #if DEBUG
+                StagingHooks.breadcrumb("reaper-load-FAIL \(id.prefix(8))")
+                #endif
+                continue
+            }
+            let action = CaptureReclaim.launchScanAction(phase: record.uploadPhase,
+                                                         acknowledged: acked.contains(id))
+            #if DEBUG
+            StagingHooks.breadcrumb("reaper-action \(id.prefix(8)) phase=\(record.uploadPhase.rawValue) acked=\(acked.contains(id)) -> \(action)")
+            #endif
+            switch action {
             case .skip:
                 continue
             case .reclaim:
@@ -217,5 +263,8 @@ actor CaptureReaper {
                 await reclaim(bundleId: id)
             }
         }
+        #if DEBUG
+        StagingHooks.breadcrumb("reaper-scan done")
+        #endif
     }
 }
