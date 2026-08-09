@@ -7,24 +7,22 @@
 #     `services/perception-obj/tests` and `tools/test_reenqueue_scene.py`.
 #     Those two therefore have to be invoked by path, which is exactly what
 #     CLAUDE.md's testpaths note says.
-#   - perception-obj declares `numpy<2` (its production base image is
-#     pytorch/pytorch:2.3.1, which pins numpy 1.x) while packages/schemas
-#     declares `numpy>=1.24` and resolves to 2.x in practice. Installing both
-#     in one environment would force one of them off its production version
-#     and test a configuration nothing ships.
+#   - perception-obj declares `numpy<2` to match the environment its image
+#     actually builds (torch 2.5.1+cu121 on condaforge/mambaforge, whose SAM 3D
+#     stack is on numpy 1.x), while packages/schemas declares `numpy>=1.24` and
+#     resolves to 2.x in practice. Installing both in one environment would
+#     force one of them off its production version and test a configuration
+#     nothing ships.
 #
 # Dependencies come from `tools/ci_deps.py`, which reads each component's own
 # pyproject. The services are flat modules and NOT pip-installable (their
 # pyprojects say so); only packages/schemas and packages/api-core are real
 # packages and get installed editable.
 #
-# VERIFICATION STATUS at the time this was written: the root (600 passed,
-# 10 skipped) and re-enqueue (18 passed) jobs were reproduced end to end in a
-# clean venv on macOS/Python 3.14 using exactly these install commands. The
-# perception job installed cleanly and ran 611/612 there, with one failure
-# discussed in that job's comment. Nothing has run on Linux or on 3.11,
-# because the repo had no remote when this landed — the first push is the
-# first real execution.
+# Deliberately no pass counts in this file. They were stated here once, drifted
+# within days of the suites growing, and a stale number in a workflow comment
+# reads as a claim about the run you are looking at. The job output is the
+# count.
 
 name: python
 
@@ -143,10 +141,10 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - run: python -m pip install ruff
-      # NON-GATING, and the number is the reason: `ruff check .` reports 389
-      # errors repo-wide as of 2026-08-08 (343 auto-fixable, mostly `UP`
+      # NON-GATING, and the backlog is the reason: `ruff check .` reports
+      # several hundred errors repo-wide, the large majority auto-fixable `UP`
       # modernisations like `Optional[X]` -> `X | None`, plus two deliberate
-      # `assert False` in perception's test_receiver_repo.py). The house rule
+      # `assert False` in perception's test_receiver_repo.py. The house rule
       # has been "ruff clean on TOUCHED files", not repo-wide, so gating here
       # would be permanently red and would train everyone to ignore it.
       #

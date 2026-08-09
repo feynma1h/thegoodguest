@@ -12,10 +12,11 @@
 /// uses FirebaseTokenVerifier (ENVIRONMENT=production), so "test-uid:<uid>"
 /// NullTokenVerifier tokens are NOT accepted against the deployed service.
 ///
-/// The manifest-path-violation status code confirmed here: the server contract
-/// says "server does NO semantic validation" on relative_path values, so a
-/// path with a leading "/" is expected to return 200 (server accepts it). The
-/// actual observed code is asserted and documented below.
+/// The manifest-path-violation case below is pinned against the live server,
+/// not against the decision notes: api-public validates manifest path format
+/// and rejects a leading "/" with 400. An earlier reading of the contract as
+/// "no semantic validation" was wrong, and the test asserts the measured
+/// behaviour so a contract change breaks here rather than on a phone.
 
 import XCTest
 @testable import RoomStudioCapture

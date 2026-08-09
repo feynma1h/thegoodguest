@@ -6,10 +6,11 @@
  *                 http://localhost:8080, a local uvicorn api-public) with
  *                 the NullTokenVerifier's "test-uid:dev-user" token.
  *   live        — LiveApiClient against the deployed api-public with a
- *                 Firebase ID token from Sign in with Apple (decision 0051:
- *                 the same account the iOS app linked; signed out, the token
- *                 provider yields null and the client throws its typed
- *                 no_local_token error, which pages render as sign-in).
+ *                 Firebase ID token from a federated provider — Google today,
+ *                 Apple once enrollment lands (decisions 0051/0094). The web
+ *                 only ever READS an identity the phone created; signed out,
+ *                 the token provider yields null and the client throws its
+ *                 typed no_local_token error, which pages render as sign-in.
  */
 
 import { LiveApiClient, type ApiClient, type TokenProvider } from "./client";

@@ -1,10 +1,20 @@
 "use client";
 
 /**
- * The motion system: ONE damped spring, used by every element that moves
- * (founding draft: tension 180 / friction 24 — motion's stiffness/damping
- * equivalents). Nothing animates that doesn't need to; what does animate
- * uses exactly this.
+ * The motion system: ONE damped spring for anything that MOVES — hover, press,
+ * layout shifts (founding draft: tension 180 / friction 24, motion's
+ * stiffness/damping equivalents). Nothing animates that doesn't need to, and
+ * anything that travels uses exactly this. Import SPRING; don't hand-tune a
+ * second one.
+ *
+ * Two deliberate exceptions, both of which are entrances rather than motion:
+ * the room-card stagger in app/rooms/page.tsx and the sheet scrim in
+ * components/NewRoomSheet.tsx fade in on short eased tweens, because a spring
+ * on an appearing element overshoots opacity for no gain.
+ *
+ * The 3D reveal is a separate system on purpose — lib/reveal.ts scores the
+ * whole choreography on smootherstep and SplatViewer plays it. Same intent
+ * (begin and arrive at rest), different medium; it does not import SPRING.
  */
 
 import Link from "next/link";
