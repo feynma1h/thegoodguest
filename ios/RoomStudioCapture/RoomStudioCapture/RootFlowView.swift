@@ -79,6 +79,16 @@ struct RootFlowView: View {
     /// every return to `.home`, so without this the restore undid `endFlight()` the
     /// instant it landed — re-adopting the bundle the user had just finished with.
     @State private var didRestoreUnfinished = false
+    /// What the `failed_incomplete` screen can offer (decisions 0084 + 0116).
+    ///
+    /// Starts `.unavailable` — the state that promises nothing — and is raised to
+    /// `.available` only once CaptureRecovery has confirmed on disk that every
+    /// missing file is still here. The disk check is async, so the screen can
+    /// render its rescan-only form for a frame before flipping; that direction
+    /// is chosen deliberately. Defaulting to `.available` would show a promise
+    /// the phone might not be able to keep, and a promise withdrawn is worse
+    /// than one that arrives a frame late.
+    @State private var resendState: FailureCopy.Resend = .unavailable
 
     enum Stage: Equatable { case home, capturing, gotRoom, review, sent }
 
@@ -424,13 +434,24 @@ struct RootFlowView: View {
 
         case .incompleteUpload(let missingCount):
             // failed_incomplete: an incomplete upload, not a bad scan. No region is
-            // named and no partial re-upload exists yet, so the one honest path is a
-            // full rescan (FailureView.recoverable copy owns the honesty). The count
-            // IS named — the server sent it, and dropping it was decision 0085's
-            // finding 1.
-            FailureView(kind: .recoverable(missingCount: missingCount),
-                        onPrimary: rescanFromScratch,
-                        onSecondary: endFlight)
+            // named. The count IS named — the server sent it, and dropping it was
+            // decision 0085's finding 1.
+            //
+            // The offered path is now conditional (decisions 0084 + 0116): re-send
+            // the missing files when they are still on this phone, rescan when they
+            // are not. `resendState` is computed by the .task below, never guessed
+            // here, and both buttons bind through FailureCopy's own table so a
+            // label can never be paired with the wrong action.
+            let actions = FailureCopy.recoverableActions(resendState)
+            FailureView(
+                kind: .recoverable(missingCount: missingCount, resend: resendState),
+                onPrimary: { performRecovery(actions.primary) },
+                onSecondary: { performRecovery(actions.secondary) }
+            )
+            // Recompute on arrival AND whenever the count changes: a second
+            // round of recovery lands here again with a smaller list, and a
+            // stale offer would be describing the previous attempt.
+            .task(id: missingCount) { await refreshResendOffer() }
 
         case .uploadFailed:
             // The blobs for THIS bundle failed terminally: bundle.pb never lands, no
@@ -512,6 +533,7 @@ struct RootFlowView: View {
         lastSceneCreatedAt = nil   // per-send, not per-view: a retained anchor from a
                                    // previous capture would time THIS room's clock
                                    // from the previous room's arrival.
+        resendState = .unavailable // same reason: never inherit a re-send state.
         ScenePoller.shared.reset()
         UploadFailureMonitor.shared.clearDeferral()
         coordinator.reset()
@@ -623,6 +645,118 @@ struct RootFlowView: View {
         ScenePoller.shared.start(bundleId: bundleId)
     }
 
+    // MARK: - failed_incomplete recovery (decisions 0084 + 0116)
+
+    /// The paths the poller is currently reporting missing.
+    ///
+    /// Read from the POLLER, not from `waitScreen`: WaitFlowState deliberately
+    /// narrows `.recoverable` to a count, because a count is all ROUTING needs
+    /// and blob paths are plumbing that must never reach copy. The ACTION does
+    /// need them, and reading them here — one hop, at the call site that sends
+    /// them — keeps the routing table pure rather than widening it to carry an
+    /// input only this button uses.
+    private var missingPaths: [String] {
+        if case .recoverable(let paths) = poller.pollState { return paths }
+        return []
+    }
+
+    /// Which bundle the recovery acts on: the one the POLLER asked about.
+    ///
+    /// The paths and the id have to come from the same answer. `sentBundleId`
+    /// can name a different capture than the poll loop is on — the loop
+    /// deliberately outlives the wait screen, and decision 0074's stand-down
+    /// exists precisely because those two can disagree — and re-sending one
+    /// bundle's blobs against another's record would fail the plan's
+    /// manifest check at best, and cross two captures at worst. Falls back to
+    /// the flight only if the poller has already been reset.
+    private var recoveryBundleId: String? {
+        poller.currentBundleId ?? sentBundleId
+    }
+
+    /// Ask CaptureRecovery whether a re-send can honestly be offered, and say so.
+    ///
+    /// This is the honesty constraint's enforcement point: the screen's promise
+    /// is downstream of an actual disk check, so a capture whose files were
+    /// reclaimed, never restored (an iCloud-migrated record, decision 0074), or
+    /// swept gets the rescan copy rather than a button that cannot work.
+    private func refreshResendOffer() async {
+        // A re-send in flight or just failed already describes THIS screen's
+        // state; the disk cannot contradict it, and overwriting would drop the
+        // user's own attempt out of the copy mid-send.
+        if resendState == .inFlight || resendState == .failed { return }
+        guard let bundleId = recoveryBundleId,
+              let record = try? await UploadSessionStore.shared.load(bundleId: bundleId)
+        else {
+            resendState = .unavailable
+            return
+        }
+        let outputDir = record.outputDir
+        let plan = CaptureRecovery.plan(
+            missingPaths: missingPaths,
+            manifestPaths: record.manifestPaths,
+            fileExists: { FileManager.default.fileExists(
+                atPath: outputDir.appendingPathComponent($0).path) }
+        )
+        if case .resend = plan {
+            resendState = .available
+        } else {
+            resendState = .unavailable
+        }
+    }
+
+    /// Bind one of FailureCopy's actions to what it actually does.
+    private func performRecovery(_ action: FailureCopy.Action) {
+        switch action {
+        case .resend: resendMissingFiles()
+        case .rescan: rescanFromScratch()
+        case .leave:  endFlight()
+        }
+    }
+
+    /// Send the missing files again.
+    ///
+    /// USER-INITIATED, deliberately. An automatic re-send would spend a unit of
+    /// the account's daily mint quota and re-upload on whatever network the
+    /// phone happens to be on, without the user ever being told the first
+    /// attempt fell short — and if it failed the same way it would do it again
+    /// on every launch. A tap is also the acknowledgement that makes the
+    /// subsequent "Sending your room" screen honest.
+    private func resendMissingFiles() {
+        // Read both from the poller's answer, in this order: `missingPaths` is
+        // only meaningful for the bundle the poller reported them for.
+        guard let bundleId = recoveryBundleId else { return }
+        let paths = missingPaths
+        resendState = .inFlight
+        Task {
+            let outcome = await BlobUploadManager.shared.resendMissingBlobs(
+                bundleId: bundleId, missingPaths: paths)
+            switch outcome {
+            case .started:
+                // Hand the screen back to the ordinary send surfaces. The poller
+                // is parked in its terminal `.recoverable` state, so resetting it
+                // is what lets `waitScreen` fall back through `.idle` to
+                // `.sending` — and re-declaring the expectation is required
+                // because reset() clears it (see ScenePoller.expectedBundleId).
+                // Polling restarts on the completion kick when bundle.pb lands
+                // again, exactly as it does for a first send.
+                resendState = .unavailable
+                ScenePoller.shared.reset()
+                ScenePoller.shared.expectBundle(bundleId)
+                // The card was ended when the failure published a terminal
+                // stage, so a fresh one is needed rather than an update: real
+                // bytes are moving again, and this is precisely the window in
+                // which the phone gets locked.
+                LiveActivityController.shared.begin(bundleId: bundleId)
+            case .refused:
+                // The plan changed its mind between the offer and the tap
+                // (files disappeared). The rescan copy is the honest fallback.
+                resendState = .unavailable
+            case .failed:
+                resendState = .failed
+            }
+        }
+    }
+
     private func rescanFromScratch() {
         // Ends the old flight (poller, sent id, anchor, deferral) before starting a
         // new capture — otherwise home would keep advertising the abandoned bundle.
@@ -670,6 +804,9 @@ struct RootFlowView: View {
         sentBundleId = nil
         sentBundleFailedOnDisk = false
         lastSceneCreatedAt = nil
+        // Per-flight, like the anchor above: a retained `.failed`/`.available`
+        // would describe the PREVIOUS capture's re-send on the next one's screen.
+        resendState = .unavailable
     }
 
     /// Decision-0074 stand-down: the polled room belongs to a different identity
