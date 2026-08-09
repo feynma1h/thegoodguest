@@ -82,7 +82,7 @@ struct ContentView: View {
             Button {
                 showSignInSheet = true
             } label: {
-                if auth.isAppleLinked {
+                if auth.isLinked {
                     Label("Signed in", systemImage: "checkmark.circle.fill")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
