@@ -69,10 +69,28 @@ walk day):
 Left in place pending the operator's call — future operator walks (the
 memory-noted identity-token flow) are the reason to keep it.
 
+**OUTCOME — the operator ruled REVOKE, 2026-08-08.** Recorded here because
+this note's own trigger asks for it and the ask went unanswered for a day; an
+audit on 2026-08-09 found all three "revoke" mentions above still reading as
+the recommendation while CLAUDE.md already carried the result, so the note
+read open when it was closed. Verified live 2026-08-09 rather than restated:
+`get-iam-policy` on the SA returns **no bindings at all**. Impersonation was
+confirmed 403 twice at revocation time, and two things learned there are worth
+keeping — `roles/owner` does NOT confer `getAccessToken`, so an owner is not a
+back door to this; and an interim "the revocation didn't work" reading was IAM
+propagation lag, not a failed command. The re-grant line above stands as the
+walk-day procedure.
+
 ## What would change this decision
 
-- Remediation 1 executed → perception joins the per-service SA discipline;
-  update CLAUDE.md's audit line and close this note's open half.
-- The operator rules on finding 4 either way → record the outcome here.
+- ~~Remediation 1 executed → perception joins the per-service SA discipline.~~
+  **DONE** — decision 0090's dedicated SA shipped on `perception-obj-00036-l9l`;
+  verified live 2026-08-09, the service runs as
+  `perception-obj-runtime@roomstudio.iam.gserviceaccount.com`, not the default
+  compute SA. This note's open half is closed. What remains deliberately NOT done
+  is removing `roles/editor` from the default compute SA — other workloads may
+  ride it, and that verification is its own pass.
+- ~~The operator rules on finding 4 either way → record the outcome here.~~
+  **DONE** — revoked, recorded above, verified live 2026-08-09.
 - Any new service ships → it gets a dedicated runtime SA from day one; the
   default compute SA never again acquires a workload.
