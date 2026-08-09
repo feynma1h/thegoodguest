@@ -4,15 +4,17 @@
 ///
 ///   • recoverable — the backend's `failed_incomplete`: not all of the room's
 ///     data reached the desk (an incomplete upload). There is no partial room to
-///     show honestly and — today — no re-upload of just the missing blobs (see the
-///     CLAUDE.md "no automatic re-upload for .recoverable" gap), so the one honest
-///     path is a full rescan. NO specific bad region is named: the missing items
-///     are upload blobs, not a known corner of the room. When the re-upload
-///     coordinator lands, this becomes "send the rest" against `missingPaths`.
-///     It DOES name how many files are missing (`FailureCopy.incompleteBody`) —
-///     the server sends `missing_paths` and the count is a fact about the room,
-///     separable from the re-upload promise the copy still must not make. The
-///     0072 redesign dropped it silently; decision 0085's walk caught that.
+///     show honestly, so the screen offers exactly one path — and WHICH path
+///     depends on whether the missing bytes are still on the phone. When they
+///     are, it is now "send what's missing" against `missingPaths` (decision
+///     0084's coordinator, un-blocked by 0116's force_remint); when they are
+///     not, it stays the full rescan it always was. CaptureRecovery makes that
+///     call from the disk, and `FailureCopy.Resend` carries it in. NO specific
+///     bad region is named: the missing items are upload blobs, not a known
+///     corner of the room. It DOES name how many files are missing — the server
+///     sends `missing_paths` and the count is a fact about the room, separable
+///     from the re-send promise, which only the `.available` copy makes. The
+///     0072 redesign dropped the count silently; decision 0085's walk caught it.
 ///   • terminal — nothing survived; the deepest ink surface, one path: try again.
 ///     No specific cause is named — the pipeline surfaces no honest per-object
 ///     reason, so the copy stays general rather than inventing one.
@@ -34,28 +36,135 @@ import SwiftUI
 /// Read by: FailureView. Pinned by: FailureCopyTests.
 nonisolated enum FailureCopy {
 
-    /// The `failed_incomplete` body. `missingCount` is the number of blob paths
-    /// the server reported absent.
+    /// Whether a re-send of the missing files can be offered, and what it is
+    /// doing. Decided by CaptureRecovery from facts on disk — never guessed at
+    /// the view layer, because the whole honesty constraint below turns on it.
+    enum Resend: Equatable {
+        /// The named files are on this phone. The re-send is real: offer it.
+        case available
+        /// No honest re-send (files gone, or nothing usable named). Rescan only —
+        /// this is the state the screen shipped in before recovery existed, and
+        /// its copy is unchanged.
+        case unavailable
+        /// A re-send is running right now.
+        case inFlight
+        /// A re-send was attempted and did not go through. The files are still
+        /// here, so the offer stands.
+        case failed
+    }
+
+    /// What the recoverable screen's two buttons DO.
+    enum Action: Equatable {
+        /// Re-send the missing blobs (BlobUploadManager.resendMissingBlobs).
+        case resend
+        /// Start a fresh capture.
+        case rescan
+        /// Leave the flight, keeping the capture on disk.
+        case leave
+    }
+
+    /// The recoverable screen's buttons, as a table.
+    ///
+    /// Labels and actions are decided TOGETHER, in one place, because the defect
+    /// they invite is a mismatch between them: a screen that says "Send what's
+    /// missing" and starts a rescan destroys the capture the sentence just
+    /// promised to send. The view renders the labels from here and the flow
+    /// binds the actions from here, so neither side can drift.
+    struct Actions: Equatable {
+        let primary: Action
+        let primaryLabel: String
+        /// False while a re-send is in flight — the one state where tapping
+        /// again would spend a second mint for no gain.
+        let primaryEnabled: Bool
+        let secondary: Action
+        let secondaryLabel: String
+    }
+
+    static func recoverableActions(_ resend: Resend) -> Actions {
+        switch resend {
+        case .available:
+            return Actions(primary: .resend, primaryLabel: "Send what's missing",
+                           primaryEnabled: true,
+                           secondary: .leave, secondaryLabel: "Not now")
+        case .inFlight:
+            return Actions(primary: .resend, primaryLabel: "Sending…",
+                           primaryEnabled: false,
+                           secondary: .leave, secondaryLabel: "Not now")
+        case .failed:
+            // The rescan moves up to the secondary slot here — it is the real
+            // alternative once sending has failed once, and "Not now" is still
+            // reachable by leaving the screen.
+            return Actions(primary: .resend, primaryLabel: "Try sending again",
+                           primaryEnabled: true,
+                           secondary: .rescan, secondaryLabel: "Scan the room again")
+        case .unavailable:
+            return Actions(primary: .rescan, primaryLabel: "Scan the room again",
+                           primaryEnabled: true,
+                           secondary: .leave, secondaryLabel: "Not now")
+        }
+    }
+
+    /// The `failed_incomplete` body when no re-send can be offered.
+    /// `missingCount` is the number of blob paths the server reported absent.
     ///
     /// THE HONESTY CONSTRAINT (decision 0084): naming the count must not imply
-    /// that those files can be re-sent. There is no re-upload — it is blocked on
-    /// a mint-contract change, not on client work — so the count is stated as a
-    /// FACT and the only offered path stays a full rescan. "N files need
-    /// re-uploading" (the wording the superseded SceneStatusView used) is exactly
-    /// the sentence that would promise one.
+    /// that those files can be re-sent. In THIS state they cannot — the bytes
+    /// are gone from the phone, or the server named nothing usable — so the
+    /// count is stated as a FACT and the only offered path stays a full rescan.
+    /// "N files need re-uploading" (the wording the superseded SceneStatusView
+    /// used) is exactly the sentence that would promise one.
+    ///
+    /// The constraint has NOT been relaxed by the re-send landing; it has been
+    /// made conditional. `incompleteBody(missingCount:resend:)` may promise a
+    /// re-send only in `.available`, where CaptureRecovery has confirmed every
+    /// named file is on disk. This function is what ships everywhere else, and
+    /// it is unchanged.
     ///
     /// A count of 0 degrades to the unquantified wording: the server can omit
     /// `missing_paths`, and "0 files didn't make it" is both false and absurd.
     static func incompleteBody(missingCount: Int) -> String {
-        let opening: String
-        switch missingCount {
-        case ..<1:  opening = "Some of your room's data didn't finish its trip to the desk"
-        case 1:     opening = "One file didn't finish its trip to the desk"
-        default:    opening = "\(missingCount) files didn't finish their trip to the desk"
-        }
-        return opening
+        countClause(missingCount)
             + ", so I can't show you a partial version honestly. "
             + "Nothing's wrong with the room itself — one more full pass and I'll have all of it."
+    }
+
+    /// The `failed_incomplete` body for a given re-send state.
+    ///
+    /// Only `.available` promises anything, and only because CaptureRecovery
+    /// checked: every named file exists in the capture's output directory, and
+    /// `force_remint` (decision 0116) makes fresh upload URIs obtainable for
+    /// them. That is the whole content of the promise — it says the files are
+    /// here and can go again, not that the room will succeed.
+    static func incompleteBody(missingCount: Int, resend: Resend) -> String {
+        switch resend {
+        case .unavailable:
+            return incompleteBody(missingCount: missingCount)
+        case .available:
+            return countClause(missingCount)
+                + ", so I can't show you a partial version honestly. "
+                + "I still have them here on the phone, though — I can send just those, "
+                + "and you won't have to walk the room again."
+        case .inFlight:
+            return countClause(missingCount)
+                + ". I'm sending those now — the rest of the room is already up there, "
+                + "so this is the last of it."
+        case .failed:
+            return countClause(missingCount)
+                + ", and my attempt to send them just now didn't get through. "
+                + "They're still here on the phone, so it's worth one more go — "
+                + "or one more full pass, if you'd rather start clean."
+        }
+    }
+
+    /// The shared opening clause: how many files did not arrive.
+    /// One implementation so the singular/plural agreement and the zero-degrade
+    /// cannot differ between the four bodies above.
+    private static func countClause(_ missingCount: Int) -> String {
+        switch missingCount {
+        case ..<1:  return "Some of your room's data didn't finish its trip to the desk"
+        case 1:     return "One file didn't finish its trip to the desk"
+        default:    return "\(missingCount) files didn't finish their trip to the desk"
+        }
     }
 }
 
@@ -63,7 +172,9 @@ struct FailureView: View {
     enum Kind: Equatable {
         /// `missingCount` — how many blob paths the server reported absent. See
         /// FailureCopy.incompleteBody for the honesty constraint on stating it.
-        case recoverable(missingCount: Int)
+        /// `resend` — whether those files can actually be sent again, decided by
+        /// CaptureRecovery from the disk, never from the view.
+        case recoverable(missingCount: Int, resend: FailureCopy.Resend)
         case terminal
         /// The upload itself failed terminally (http_4xx, 308_persistent,
         /// empty_bundle_pb, blob_unreadable_at_remint_manifest…). NOT a capture
@@ -72,21 +183,22 @@ struct FailureView: View {
         case uploadFailed(reason: String?)
     }
 
-    var kind: Kind = .recoverable(missingCount: 0)
+    var kind: Kind = .recoverable(missingCount: 0, resend: .unavailable)
     var onPrimary: () -> Void = {}
     var onSecondary: () -> Void = {}
 
     var body: some View {
         switch kind {
-        case .recoverable(let missingCount): recoverable(missingCount: missingCount)
+        case .recoverable(let missingCount, let resend):
+            recoverable(missingCount: missingCount, resend: resend)
         case .terminal:    terminal
         case .uploadFailed(let reason): uploadFailed(reason: reason)
         }
     }
 
-    // MARK: Recoverable (incomplete upload → full rescan)
+    // MARK: Recoverable (incomplete upload → re-send the missing files, or rescan)
 
-    private func recoverable(missingCount: Int) -> some View {
+    private func recoverable(missingCount: Int, resend: FailureCopy.Resend) -> some View {
         VStack(spacing: 0) {
             Spacer(minLength: 12)
 
@@ -106,7 +218,7 @@ struct FailureView: View {
                     Text("The room didn't all make it up")
                         .font(RSFont.ui(.callout, weight: .semibold))
                         .foregroundStyle(Color.rsInk)
-                    Text(FailureCopy.incompleteBody(missingCount: missingCount))
+                    Text(FailureCopy.incompleteBody(missingCount: missingCount, resend: resend))
                         .rsFont(.guest, size: 14.5)
                         .foregroundStyle(Color.rsInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -117,10 +229,21 @@ struct FailureView: View {
 
             Spacer()
 
+            // Labels come from the same table the flow binds its actions from,
+            // so the button can never say one thing and do another.
+            let actions = FailureCopy.recoverableActions(resend)
             VStack(spacing: 10) {
-                Button(action: onPrimary) { Text("Scan the room again") }
+                Button(action: onPrimary) { Text(actions.primaryLabel) }
                     .buttonStyle(RSPrimaryButtonStyle())
-                Button(action: onSecondary) { Text("Not now") }
+                    .disabled(!actions.primaryEnabled)
+                    // RSPrimaryButtonStyle does not read isEnabled, so a bare
+                    // .disabled() is INVISIBLE — a full-strength rust button
+                    // that ignores taps. Found by screenshot at AX5, not by
+                    // reading. Dimming at the call site is ReviewView's
+                    // established treatment for the same problem; changing the
+                    // shared style would touch every primary in the app.
+                    .opacity(actions.primaryEnabled ? 1 : 0.55)
+                Button(action: onSecondary) { Text(actions.secondaryLabel) }
                     .buttonStyle(RSQuietButtonStyle())
             }
             .padding(.bottom, 8)
@@ -210,16 +333,28 @@ struct FailureView: View {
     }
 }
 
-#Preview("Recoverable — one file") {
-    FailureView(kind: .recoverable(missingCount: 1))
+#Preview("Recoverable — can send (one file)") {
+    FailureView(kind: .recoverable(missingCount: 1, resend: .available))
 }
 
-#Preview("Recoverable — several files") {
-    FailureView(kind: .recoverable(missingCount: 14))
+#Preview("Recoverable — can send (several)") {
+    FailureView(kind: .recoverable(missingCount: 14, resend: .available))
+}
+
+#Preview("Recoverable — sending") {
+    FailureView(kind: .recoverable(missingCount: 14, resend: .inFlight))
+}
+
+#Preview("Recoverable — send failed") {
+    FailureView(kind: .recoverable(missingCount: 3, resend: .failed))
+}
+
+#Preview("Recoverable — rescan only") {
+    FailureView(kind: .recoverable(missingCount: 14, resend: .unavailable))
 }
 
 #Preview("Recoverable — count unknown") {
-    FailureView(kind: .recoverable(missingCount: 0))
+    FailureView(kind: .recoverable(missingCount: 0, resend: .unavailable))
 }
 
 #Preview("Terminal") {
