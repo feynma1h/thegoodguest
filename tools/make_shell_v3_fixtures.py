@@ -17,9 +17,8 @@ Stages assets responses under gitignored web/public/dev-fixtures/ so
                                 the neutral treatment) — the capture_expired
                                 leg on v3 surfaces.
   scene-247003de-v3env          v3 method "anchor_envelope": the preserved
-                                247003de bundle under the SERVING merge
-                                knobs (SHELL_WALL_MERGE_GAP_M=1.0,
-                                NORMAL_TOL=15 — the 634038b calibration);
+                                247003de bundle under the serving merge
+                                calibration, which is also the code default;
                                 manifest + object splat URLs reused verbatim
                                 from the staged scene-247003de fixture (no
                                 PLY copies).
@@ -97,8 +96,10 @@ STAGED_247_ASSETS = FIXTURES_DIR / "scene-247003de" / "assets.json"
 
 EXPIRES = "2099-01-01T00:00:00+00:00"
 
-# The 634038b serving calibration — the envelope regression tests verify the
-# selection under these exact knobs (test_247003de_under_serving_merge_knobs).
+# The serving merge calibration. These match room_planes' defaults, so the
+# assignment below is a no-op today — it is kept because a staged fixture must
+# reproduce what production renders even if a future default moves, and a
+# silently-different fixture is worse than a redundant line.
 SERVING_WALL_MERGE_GAP_M = 1.0
 SERVING_WALL_NORMAL_TOL_DEG = 15.0
 
@@ -246,8 +247,8 @@ def make_envelope_fixture() -> None:
     staged = json.loads(STAGED_247_ASSETS.read_text())
     scene_id = staged["scene_id"]
 
-    # The serving merge calibration, exactly as the regression test applies
-    # it (module attributes — room_planes reads env at import time).
+    # Pin the serving merge calibration explicitly (module attributes —
+    # room_planes reads env at import time). Equal to the defaults today.
     room_planes.SHELL_WALL_MERGE_GAP_M = SERVING_WALL_MERGE_GAP_M
     room_planes.SHELL_WALL_NORMAL_TOL_DEG = SERVING_WALL_NORMAL_TOL_DEG
 
