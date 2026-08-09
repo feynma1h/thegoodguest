@@ -118,8 +118,34 @@ from conversation_repo import (
     InMemoryConversationRepository,
     TurnRecord,
 )
-from guest_prompt import PROMPT_VERSION, build_system_prompt, telemetry_flags
-from scene_facts import cached_scene_facts, render_facts_block
+from design_spec import (
+    DesignSpec,
+    DesignSpecRepository,
+    InMemoryDesignSpecRepository,
+    Transform,
+    apply_to_manifest,
+    client_dict as spec_client_dict,
+)
+from guest_prompt import (
+    PROMPT_VERSION,
+    build_system_prompt,
+    render_arrangement_block,
+    telemetry_flags,
+)
+from guest_tools import (
+    MAX_TOOL_ROUNDS,
+    TOOLS,
+    log_turn_tools,
+    run_tool as run_guest_tool,
+    tool_result_texts,
+    unprompted_proposal,
+)
+from room_geometry import derive_room_geometry, spec_key
+from scene_facts import (
+    cached_scene_facts,
+    derive_scene_facts,
+    render_facts_block,
+)
 
 # Ensure local packages are importable in dev without a virtualenv install.
 # Gated off in production, where the packages are pip-installed by the
@@ -650,35 +676,68 @@ class AnthropicGuestStreamer:
         max_tokens: int,
         system: list[dict],
         messages: list[dict],
+        tools: list[dict] | None = None,
+        run_tool=None,
     ) -> AsyncIterator[dict]:
         import anthropic  # deferred
 
+        convo = list(messages)
+        usage_total = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+        }
         try:
-            async with self._get_client().messages.stream(
-                model=model,
-                max_tokens=max_tokens,
-                thinking={"type": "disabled"},
-                system=system,
-                messages=messages,
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield {"type": "delta", "text": text}
-                final = await stream.get_final_message()
-            usage = final.usage
-            yield {
-                "type": "final",
-                "stop_reason": final.stop_reason or "end_turn",
-                "usage": {
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                    "cache_read_input_tokens": getattr(
-                        usage, "cache_read_input_tokens", 0
-                    ) or 0,
-                    "cache_creation_input_tokens": getattr(
-                        usage, "cache_creation_input_tokens", 0
-                    ) or 0,
-                },
-            }
+            for _round in range(MAX_TOOL_ROUNDS + 1):
+                kwargs: dict = {}
+                if tools:
+                    kwargs["tools"] = tools
+                async with self._get_client().messages.stream(
+                    model=model,
+                    max_tokens=max_tokens,
+                    thinking={"type": "disabled"},
+                    system=system,
+                    messages=convo,
+                    **kwargs,
+                ) as stream:
+                    async for text in stream.text_stream:
+                        yield {"type": "delta", "text": text}
+                    final = await stream.get_final_message()
+                usage = final.usage
+                for k in usage_total:
+                    usage_total[k] += getattr(usage, k, 0) or 0
+
+                calls = [b for b in final.content if getattr(b, "type", "") == "tool_use"]
+                if not calls or run_tool is None or _round == MAX_TOOL_ROUNDS:
+                    # Out of rounds with tool calls pending means the model is
+                    # looping. The turn ends on what it has already said —
+                    # never on a half-applied round nobody narrated.
+                    if calls and _round == MAX_TOOL_ROUNDS:
+                        logger.warning(
+                            "conversation: tool rounds exhausted with %d call(s) pending",
+                            len(calls),
+                        )
+                    yield {
+                        "type": "final",
+                        "stop_reason": final.stop_reason or "end_turn",
+                        "usage": usage_total,
+                    }
+                    return
+
+                # The assistant turn goes back verbatim (tool_use blocks and
+                # all), then one user message carrying every result.
+                convo.append({"role": "assistant", "content": final.content})
+                results = []
+                for call in calls:
+                    payload = await run_tool(call.name, dict(call.input or {}))
+                    results.append({
+                        "type": "tool_result",
+                        "tool_use_id": call.id,
+                        "content": json.dumps(payload),
+                    })
+                    yield {"type": "tool_result", "name": call.name, "result": payload}
+                convo.append({"role": "user", "content": results})
         except anthropic.APIStatusError as exc:
             code = (
                 "model_unavailable"
@@ -701,6 +760,7 @@ class NullGuestStreamer:
         yield  # pragma: no cover — makes this an async generator
 
 _conversation_repo: Optional[ConversationRepository] = None
+_design_spec_repo: Optional[DesignSpecRepository] = None
 _guest_streamer = None
 
 # asyncio keeps only weak references to tasks; the turn task must survive the
@@ -724,6 +784,23 @@ def _get_conversation_repo() -> ConversationRepository:
                 "FIRESTORE_PROJECT unset — using in-memory ConversationRepository"
             )
     return _conversation_repo
+
+
+def _get_design_spec_repo() -> DesignSpecRepository:
+    global _design_spec_repo
+    if _design_spec_repo is None:
+        project = os.environ.get("FIRESTORE_PROJECT")
+        if project:
+            from design_spec import FirestoreDesignSpecRepository
+
+            _design_spec_repo = FirestoreDesignSpecRepository(project=project)
+            logger.info("Using Firestore DesignSpecRepository")
+        else:
+            _design_spec_repo = InMemoryDesignSpecRepository()
+            logger.info(
+                "FIRESTORE_PROJECT unset — using in-memory DesignSpecRepository"
+            )
+    return _design_spec_repo
 
 
 def _get_guest_streamer():
@@ -1412,6 +1489,49 @@ def _scene_facts_for(scene):
     return cached_scene_facts(scene.scene_id, _load)
 
 
+def _scene_manifest(scene) -> dict:
+    """Blocking — call off-loop."""
+    return json.loads(_get_manifest_fetcher().fetch(scene.result_uri))
+
+
+def _scene_shell(scene) -> dict | None:
+    """The shell sibling, or None. Degrades on every failure, like /assets:
+    the solver's own rule is that no measured walls means wall relations
+    refuse, which is a worse conversation but never a broken one.
+
+    0132 named this a new read on the turn's hot path and asked for it to be
+    measured rather than assumed cheap. It is only reached when the room has
+    an arrangement or the guest calls a tool — a plain question still costs
+    exactly what it did in stage 1.
+    """
+    try:
+        raw = _get_manifest_fetcher().fetch_optional(
+            scene.result_uri.rsplit("/", 1)[0] + "/shell.json"
+        )
+        return json.loads(raw) if raw is not None else None
+    except (ManifestFetchError, ValueError) as exc:
+        logger.warning(
+            "conversation: shell unavailable for scene %s: %s", scene.scene_id, exc
+        )
+        return None
+
+
+def _proposed_view(scene, spec: DesignSpec):
+    """The room the person is looking at: facts re-derived from the proposed
+    arrangement, plus the block that tells the guest which of them are
+    conditional (decision 0132 — "the solver can re-derive facts for the
+    proposed room with the same code and the same epistemics").
+
+    An empty spec returns the CACHED measured facts unchanged, so a room
+    nobody has rearranged costs exactly what stage 1 cost.
+    """
+    if not spec.entries:
+        return _scene_facts_for(scene), ""
+    manifest = _scene_manifest(scene)
+    facts = derive_scene_facts(apply_to_manifest(manifest, spec))
+    return facts, render_arrangement_block(spec.entries)
+
+
 @app.get(
     "/scenes/{scene_id}/conversation",
     summary="Conversation meta + recent turns for a ready scene",
@@ -1497,6 +1617,72 @@ async def _replay_stream(turn: TurnRecord) -> AsyncIterator[bytes]:
     yield _sse("done", {"turn": _turn_to_client_dict(turn)})
 
 
+async def _tool_session(scene, user_id: str, client_msg_id: str, turn_index: int | None):
+    """Build the turn's tool runner and hand back a way to read what it did.
+
+    Geometry and the arrangement are loaded ONCE, lazily, on the first tool
+    call — a turn where the guest only talks never fetches the shell, so the
+    stage-1 cost profile is unchanged for stage-1 conversations. Writes go
+    through the repo per round, so a client that disconnects mid-turn still
+    finds its room rearranged (the 0058 shield covers the spec too).
+    """
+    repo = _get_design_spec_repo()
+    # `revision` counts REAL changes, not tool calls: a refused proposal must
+    # not tell the client the room moved.
+    state: dict = {
+        "spec": None, "geometry": None, "measured": {}, "results": [], "revision": 0,
+    }
+
+    def _load() -> None:
+        if state["geometry"] is not None:
+            return
+        manifest = _scene_manifest(scene)
+        shell = _scene_shell(scene)
+        facts = derive_scene_facts(manifest)
+        names = {i.object_id: i.name for i in facts.inventory}
+        state["geometry"] = derive_room_geometry(manifest, shell, names=names)
+        state["measured"] = {
+            spec_key(o): t
+            for o in manifest.get("objects", [])
+            if isinstance(o, dict)
+            and (t := Transform.from_doc(o.get("world_transform") or {})) is not None
+        }
+        state["spec"] = repo.get(scene.scene_id, user_id)
+
+    def _call(name: str, tool_input: dict) -> dict:
+        _load()
+        outcome = run_guest_tool(
+            name,
+            tool_input,
+            spec=state["spec"],
+            geometry=state["geometry"],
+            manifest_transforms=state["measured"],
+            turn_index=turn_index,
+            client_msg_id=client_msg_id,
+        )
+        if outcome.changed:
+            state["spec"] = repo.put(outcome.spec, now=datetime.now(tz=timezone.utc))
+            state["revision"] += 1
+        else:
+            state["spec"] = outcome.spec
+        state["results"].append(outcome.result)
+        return outcome.result
+
+    async def run(name: str, tool_input: dict) -> dict:
+        try:
+            return await asyncio.to_thread(_call, name, tool_input)
+        except Exception:
+            # A tool that blows up is reported to the model as a refusal, not
+            # as a dead turn: the guest can still say it could not manage it,
+            # which is a better outcome than an error event.
+            logger.exception(
+                "conversation: tool %s failed for scene %s", name, scene.scene_id
+            )
+            return {"error": "tool_failed"}
+
+    return run, state
+
+
 async def _run_guest_turn(
     *,
     queue: asyncio.Queue,
@@ -1506,6 +1692,8 @@ async def _run_guest_turn(
     user_text: str,
     facts,
     history: list[TurnRecord],
+    arrangement: str = "",
+    turn_index: int | None = None,
 ) -> None:
     """Drain the model stream, persist the completed turn, feed the SSE
     queue. Runs as an independent task so a client disconnect cannot stop
@@ -1549,16 +1737,31 @@ async def _run_guest_turn(
             }],
         })
 
+        run_tool, tool_state = await _tool_session(
+            scene, user_id, client_msg_id, turn_index
+        )
+        announced = 0
         async with asyncio.timeout(GUEST_MODEL_TIMEOUT_S):
             async for event in _get_guest_streamer().stream_turn(
                 model=GUEST_MODEL,
                 max_tokens=GUEST_MAX_TOKENS,
-                system=build_system_prompt(facts),
+                system=build_system_prompt(facts, arrangement),
                 messages=messages,
+                tools=TOOLS,
+                run_tool=run_tool,
             ):
                 if event["type"] == "delta":
                     parts.append(event["text"])
                     await queue.put(("delta", event["text"]))
+                elif event["type"] == "tool_result":
+                    # The room changes on screen the moment it changes on the
+                    # server: the client refetches its spec rather than being
+                    # told the new transforms, which keeps it a reader (0131).
+                    # Only on a REAL change — a refused proposal must not send
+                    # the client after a room that did not move.
+                    if tool_state["revision"] > announced:
+                        announced = tool_state["revision"]
+                        await queue.put(("arrangement", None))
                 elif event["type"] == "final":
                     usage = event["usage"]
                     stop_reason = event["stop_reason"]
@@ -1591,14 +1794,27 @@ async def _run_guest_turn(
         await _fail("turn_failed")
         return
 
-    # Observe-only telemetry (decision 0058): flags + structured log, never
-    # blocking, never failing the turn.
+    # Observe-only telemetry (decisions 0058, 0132): flags + structured log,
+    # never blocking, never failing the turn.
+    tool_results = tool_state["results"]
     try:
         flags = telemetry_flags(
             assistant_text,
             render_facts_block(facts),
             [t.user_text for t in history] + [user_text],
+            tool_result_texts(tool_results),
         )
+        proposed = any(
+            c.get("applied")
+            for r in tool_results
+            for c in (r.get("changes") or [])
+        )
+        if unprompted_proposal(user_text, proposed):
+            flags.append("unprompted_proposal")
+        if tool_results:
+            log_turn_tools(
+                scene.scene_id, tool_results, flags, datetime.now(tz=timezone.utc)
+            )
     except Exception:
         logger.exception("conversation: telemetry failed (observe-only)")
         flags = []
@@ -1652,10 +1868,18 @@ async def _turn_stream(
     user_text: str,
     facts,
     history: list[TurnRecord],
+    arrangement: str = "",
+    turn_index: int | None = None,
 ) -> AsyncIterator[bytes]:
     """SSE body: forwards the turn task's events; emits ": ping" during
-    model silence. The vocabulary here is OURS (delta/done/error) — a
-    transform of the model stream, never a passthrough."""
+    model silence. The vocabulary here is OURS (delta/arrangement/done/error)
+    — a transform of the model stream, never a passthrough.
+
+    `arrangement` carries no payload on purpose: it says the room changed and
+    the client refetches the spec. Pushing transforms down the conversation
+    stream would make the composer a second source of scene state, and 0131
+    keeps the client a reader.
+    """
     queue: asyncio.Queue = asyncio.Queue()
     task = asyncio.create_task(_run_guest_turn(
         queue=queue,
@@ -1665,6 +1889,8 @@ async def _turn_stream(
         user_text=user_text,
         facts=facts,
         history=history,
+        arrangement=arrangement,
+        turn_index=turn_index,
     ))
     _conversation_turn_tasks.add(task)
     task.add_done_callback(_conversation_turn_tasks.discard)
@@ -1679,6 +1905,8 @@ async def _turn_stream(
                 continue
             if kind == "delta":
                 yield _sse("delta", {"text": payload})
+            elif kind == "arrangement":
+                yield _sse("arrangement", {})
             elif kind == "done":
                 yield _sse("done", {"turn": payload})
                 return
@@ -1787,7 +2015,10 @@ async def post_conversation_message(
         return err
 
     try:
-        facts = await asyncio.to_thread(_scene_facts_for, scene)
+        spec = await asyncio.to_thread(
+            _get_design_spec_repo().get, scene_id, user_id
+        )
+        facts, arrangement = await asyncio.to_thread(_proposed_view, scene, spec)
     except (ManifestFetchError, ValueError) as exc:
         logger.error(
             "conversation: manifest unavailable for scene %s: %s", scene_id, exc
@@ -1843,7 +2074,94 @@ async def post_conversation_message(
             user_text=req.text,
             facts=facts,
             history=history,
+            arrangement=arrangement,
+            # The index this turn will take. Persist assigns indices serially
+            # inside its transaction, so this is the expected value rather
+            # than a guaranteed one — a spec entry's `origin` is provenance,
+            # not a join key, and it is recorded before the turn exists.
+            turn_index=len(history),
         ),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )
+
+
+# ---------------------------------------------------------------------------
+# Design Specification routes (decision 0131)
+# ---------------------------------------------------------------------------
+
+def _live_spec_keys(scene) -> set[str]:
+    """Every key the CURRENT manifest resolves. An entry outside this set is
+    orphaned — the object it named is no longer in the room."""
+    manifest = _scene_manifest(scene)
+    return {
+        spec_key(o) for o in manifest.get("objects", []) if isinstance(o, dict)
+    }
+
+
+@app.get(
+    "/scenes/{scene_id}/design_spec",
+    summary="The caller's proposed arrangement for a ready scene",
+)
+def get_design_spec(scene_id: str, authorization: str = Header(...)) -> JSONResponse:
+    """Return the caller's Design Specification: proposed placements, each
+    carrying the measurement it departs from (decision 0131).
+
+    Response (200):
+      {spec_version, scene_id, updated_at,
+       entries: [{key, action, label, measured_transform, proposed_transform,
+                  measured_footprint, solver, description, origin, orphaned}]}
+
+    A scene+user pair with no arrangement returns 200 with an empty list —
+    not 404. `orphaned: true` means the key no longer resolves in the current
+    manifest (a re-drive dropped the object); such entries are reported, never
+    silently dropped and never re-pointed onto a different piece.
+
+    Errors mirror /scenes/{scene_id}/assets: 400 / 401 / 403 / 404 / 409.
+    """
+    user_id, err = _verify_bearer(authorization)
+    if err is not None:
+        return err
+    err = _validate_uuid4(scene_id, "invalid_scene_id")
+    if err is not None:
+        return err
+    scene, err = _load_owned_ready_scene(scene_id, user_id)
+    if err is not None:
+        return err
+
+    spec = _get_design_spec_repo().get(scene_id, user_id)
+    try:
+        live = _live_spec_keys(scene) if spec.entries else set()
+    except (ManifestFetchError, ValueError) as exc:
+        # An unreadable manifest must not make every entry look orphaned —
+        # that would invite the client to offer to clear a perfectly good
+        # arrangement. Degrade to "nothing is orphaned" and log.
+        logger.warning(
+            "design_spec: manifest unavailable for scene %s: %s", scene_id, exc
+        )
+        live = {e.key for e in spec.entries}
+    return JSONResponse(status_code=200, content=spec_client_dict(spec, live))
+
+
+@app.delete(
+    "/scenes/{scene_id}/design_spec",
+    summary="Put the whole room back as measured",
+)
+def delete_design_spec(scene_id: str, authorization: str = Header(...)) -> JSONResponse:
+    """Discard the caller's arrangement entirely — "back to measured", which
+    decision 0133 requires to be one action, always: not a versioning feature
+    but the honesty invariant made operable. Idempotent."""
+    user_id, err = _verify_bearer(authorization)
+    if err is not None:
+        return err
+    err = _validate_uuid4(scene_id, "invalid_scene_id")
+    if err is not None:
+        return err
+    scene, err = _load_owned_ready_scene(scene_id, user_id)
+    if err is not None:
+        return err
+
+    repo = _get_design_spec_repo()
+    cleared = len(repo.get(scene_id, user_id).entries)
+    repo.clear(scene_id, user_id)
+    return JSONResponse(status_code=200, content={"cleared": cleared})

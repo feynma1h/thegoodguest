@@ -35,8 +35,8 @@ from scene_facts import derive_scene_facts, render_facts_block
 # ---------------------------------------------------------------------------
 
 _PINNED = (
-    2,
-    "e0ccfa678dc5d46e8e314732da188edc43884c894ed7b5357056e506bea4aaa6",
+    3,
+    "94dd33ea4efd08c3ad0536d7e9f576126cb69f62234122666c3fe304e62561c8",
 )
 
 
@@ -53,20 +53,38 @@ class TestPinnedCharter:
         lowered = STATIC_CHARTER.lower()
         for needle in (
             "center to center",   # distances framing
-            "eyes, not hands",    # the mover line's truth
             "one room per conversation",
             "walls and floor",
             # 0096: the two new claim classes carry their epistemics in the
             # charter, not just in the facts block.
             "longest dimension",
             "floors, not measurements",
+            # 0132: the hands rules. Each is a truth the model would
+            # otherwise have to infer from the tool schema alone.
+            "you never choose coordinates",   # rule 6: no invented positions
+            "a refusal is a real answer",     # rule 6a
+            "stay ideas until they say yes",  # rule 6b: suggest, never act
+            "placements are verbatim too",    # rule 2a
+            "conditional",                    # rule 10
         ):
             assert needle in lowered, f"charter lost capability truth: {needle}"
 
-    def test_charter_has_seven_exemplars(self):
-        # 0096 added the clearance-floor and longest-dimension refusals.
-        assert STATIC_CHARTER.count("Person:") == 7
-        assert STATIC_CHARTER.count("Guest:") == 7
+    def test_charter_has_eleven_exemplars(self):
+        # 0096 added the clearance-floor and longest-dimension refusals; 0132
+        # replaced the "I can't move things yet" exemplar with five covering
+        # a successful move, a solver refusal, an ambiguous anchor, an
+        # unprompted idea offered rather than acted on, and a conditional
+        # clearance in a rearranged room.
+        assert STATIC_CHARTER.count("Person:") == 11
+        assert STATIC_CHARTER.count("Guest:") == 11
+
+    def test_charter_no_longer_claims_the_guest_cannot_move_anything(self):
+        """0132 gave the guest hands. A charter still saying "eyes, not
+        hands" would make it refuse the feature it now has — the same class
+        of false statement about the product as the shell test below."""
+        lowered = STATIC_CHARTER.lower()
+        assert "eyes, not hands" not in lowered
+        assert "cannot move" not in lowered
 
     def test_charter_does_not_claim_the_shell_is_missing(self):
         """The shell SHIPS now (0066/0069/0077) and the person may be looking
@@ -118,11 +136,43 @@ class TestBuildSystemPrompt:
         assert facts_block["cache_control"] == {"type": "ephemeral"}
 
     def test_user_text_never_in_system(self):
-        # Structural: the builder takes only facts — there is no parameter
-        # through which user text could enter the system prompt.
+        # Structural: the builder takes derived facts and a server-rendered
+        # arrangement block — there is no parameter through which user text
+        # could enter the system prompt. `arrangement` is produced by
+        # render_arrangement_block from SOLVER output only, which the
+        # companion test below pins.
         import inspect
         params = inspect.signature(build_system_prompt).parameters
-        assert list(params) == ["facts"]
+        assert list(params) == ["facts", "arrangement"]
+
+    def test_arrangement_block_is_optional_and_unbreakpointed(self):
+        # No arrangement -> byte-identical to stage 1, so a room nobody
+        # rearranged pays nothing for this feature (including cache-wise).
+        assert build_system_prompt(_facts(), "") == build_system_prompt(_facts())
+        blocks = build_system_prompt(_facts(), "THE ARRANGEMENT — ...")
+        assert len(blocks) == 3
+        # The arrangement changes most often, so it must NOT hold a cache
+        # breakpoint: it rides the rolling message one instead.
+        assert "cache_control" not in blocks[2]
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+        assert blocks[1]["cache_control"] == {"type": "ephemeral"}
+
+    def test_arrangement_block_carries_only_server_sentences(self):
+        from design_spec import SpecEntry, Transform
+
+        measured = Transform((0.0, 0.0, 0.0), (0, 0, 0, 1), 1.0)
+        entry = SpecEntry(
+            key="box:X", action="move", label="bed",
+            measured_transform=measured, proposed_transform=measured,
+            measured_footprint=None, solver=None,
+            description="the bed is back against the wall",
+            turn_index=0, client_msg_id="c",
+        )
+        block = guest_prompt.render_arrangement_block([entry])
+        assert "the bed is back against the wall" in block
+        # Rule 10 has to be actionable from this block alone.
+        assert "would" in block.lower()
+        assert guest_prompt.render_arrangement_block([]) == ""
 
 
 # ---------------------------------------------------------------------------
