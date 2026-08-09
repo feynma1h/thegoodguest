@@ -4,9 +4,9 @@ Two things are being pinned, and they fail differently:
 
   1. COMPLETENESS — the plan names every per-user collection and prefix. The
      failure mode is silent: data survives a deletion the user was told
-     finished. `test_plan_names_every_known_collection` is deliberately
-     written against a hand-maintained list so that adding a collection
-     without adding it to the planner breaks a test rather than a promise.
+     finished. `test_deletion_covers_every_collection_the_source_declares`
+     DISCOVERS the collection names from the service source, so a collection
+     introduced anywhere else breaks a test rather than a promise.
 
   2. ORDERING — GCS before Firestore, identity last. This is invisible to the
      planner and only observable through the executor, so the fakes below
@@ -18,12 +18,17 @@ so a query built the wrong way fails here rather than in production.
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 import public_server
 from account_deletion import (
+    CONVERSATION_TURNS_SUBCOLLECTION,
     CONVERSATIONS_COLLECTION,
+    DESIGN_SPECS_COLLECTION,
     MINT_QUOTAS_COLLECTION,
     SCENES_COLLECTION,
     UPLOAD_SESSIONS_COLLECTION,
@@ -168,8 +173,8 @@ CAPTURES, OUTPUTS = "captures-bkt", "outputs-bkt"
 @pytest.fixture
 def world():
     """One user with two scenes (one of whose upload_session has TTL'd away),
-    one conversation with two turns, plus another user's data that must
-    survive untouched."""
+    one conversation with two turns, one design spec, plus another user's data
+    that must survive untouched."""
     log: list = []
     data = {
         SCENES_COLLECTION: {
@@ -194,6 +199,10 @@ def world():
         },
         f"{CONVERSATIONS_COLLECTION}/scene-x__{OTHER}/turns": {
             "000000": {"user_text": "theirs"},
+        },
+        DESIGN_SPECS_COLLECTION: {
+            f"scene-a__{UID}": {"user_id": UID, "scene_id": "scene-a"},
+            f"scene-x__{OTHER}": {"user_id": OTHER, "scene_id": "scene-x"},
         },
         MINT_QUOTAS_COLLECTION: {UID: {"count": 3}, OTHER: {"count": 1}},
     }
@@ -250,18 +259,57 @@ def test_plan_unions_bundle_ids_from_scenes_and_sessions():
     )
 
 
-def test_plan_names_every_known_collection():
-    """Hand-maintained completeness list. If you add a per-user collection
-    anywhere in this system and it is not here, this test is where you find
-    out — not a user who was told their data was gone."""
-    known = {
+def test_deletion_covers_every_collection_the_source_declares():
+    """Completeness, DISCOVERED rather than restated.
+
+    This test used to compare account_deletion's own constants against a
+    hardcoded set of the same four strings — which can only fail if someone
+    edits both halves of one file, and never fires for the case its docstring
+    promised: a collection introduced somewhere else. `design_specs` was added
+    by the design-spec repository and went unnoticed for exactly that reason,
+    so user design proposals survived a deletion reported as complete.
+
+    Now the collection names are read out of the service source. A new
+    `COLLECTION = "..."` or `.collection("...")` anywhere in api-public,
+    api-internal, or api-core fails here until it is either deleted with the
+    account or listed as deliberately not per-user.
+    """
+    roots = [
+        Path(__file__).resolve().parents[1],                       # api-public
+        Path(__file__).resolve().parents[2] / "api-internal",
+        Path(__file__).resolve().parents[3]
+        / "packages" / "api-core" / "roomstudio_api_core",
+    ]
+    literal = re.compile(r'(?:COLLECTION[A-Z_]*\s*=\s*|\.collection\()"([a-z_]+)"')
+    declared: set[str] = set()
+    for root in roots:
+        for path in root.rglob("*.py"):
+            if "tests" in path.parts or path.name.startswith("test_"):
+                continue
+            declared |= set(literal.findall(path.read_text(encoding="utf-8")))
+
+    deleted_with_the_account = {
         SCENES_COLLECTION,
         UPLOAD_SESSIONS_COLLECTION,
         CONVERSATIONS_COLLECTION,
+        CONVERSATION_TURNS_SUBCOLLECTION,
+        DESIGN_SPECS_COLLECTION,
         MINT_QUOTAS_COLLECTION,
     }
-    assert known == {"scenes", "upload_sessions", "conversations", "upload_mint_quotas"}
+    # Nothing is exempt today. A genuinely non-per-user collection goes here
+    # WITH the reason it carries no user data — never to quiet this test.
+    not_per_user: set[str] = set()
 
+    assert declared, "collection discovery matched nothing — the regex broke"
+    uncovered = declared - deleted_with_the_account - not_per_user
+    assert not uncovered, (
+        f"collections not erased by DELETE /account: {sorted(uncovered)}. "
+        "Add them to plan_account_deletion and AccountDeleter.delete, or "
+        "list them in not_per_user with a reason."
+    )
+
+
+def test_plan_names_every_collection_it_deletes():
     plan = plan_account_deletion(
         UID,
         OwnedRecords(
@@ -269,11 +317,21 @@ def test_plan_names_every_known_collection():
             scene_bundle_ids=("b1",),
             upload_session_bundle_ids=("b1",),
             conversation_doc_ids=(f"s1__{UID}",),
+            design_spec_doc_ids=(f"s1__{UID}",),
         ),
     )
     assert plan.scene_ids and plan.upload_session_ids
     assert plan.conversation_doc_ids and plan.mint_quota_doc_id == UID
+    assert plan.design_spec_doc_ids
     assert plan.outputs_prefixes and plan.captures_prefixes
+
+
+def test_a_design_spec_alone_is_not_an_empty_plan():
+    """A user who proposed a rearrangement and nothing else still has data."""
+    plan = plan_account_deletion(
+        UID, OwnedRecords(design_spec_doc_ids=(f"s1__{UID}",))
+    )
+    assert not plan.is_empty
 
 
 def test_empty_plan_is_reported_empty():
@@ -432,7 +490,7 @@ def test_report_counts_carry_no_paths_or_ids(world):
     object paths and is logged, never shipped."""
     counts = world["deleter"].delete(UID).counts()
     assert set(counts) == {
-        "rooms", "conversations", "conversation_messages",
+        "rooms", "conversations", "conversation_messages", "design_specs",
         "upload_sessions", "files",
     }
     assert all(isinstance(v, int) for v in counts.values())
