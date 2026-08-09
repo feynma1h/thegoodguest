@@ -35,6 +35,7 @@ struct SignInSheet: View {
 
     @ObservedObject private var auth = AuthManager.shared
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     /// Raw nonce for the in-flight Apple request; its SHA-256 went to Apple.
     @State private var currentRawNonce: String?
@@ -51,34 +52,44 @@ struct SignInSheet: View {
     @State private var showConflictDeadEnd = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(auth.isLinked ? "Signed in" : "Sign in")
-                .font(.title2.weight(.semibold))
-                .padding(.top, 28)
+        // Scrollable, and .large at accessibility sizes (the GuidanceSheet
+        // pattern): at AX5 the intro copy alone overfills a .medium detent,
+        // and a fixed VStack left BOTH provider buttons unreachable — found
+        // by screenshot, per the iOS test policy. The GeometryReader minHeight
+        // keeps the footer pinned to the sheet bottom at regular sizes.
+        GeometryReader { geo in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(auth.isLinked ? "Signed in" : "Sign in")
+                        .font(.title2.weight(.semibold))
+                        .padding(.top, 28)
 
-            if auth.isLinked {
-                linkedBody
-            } else {
-                signInBody
+                    if auth.isLinked {
+                        linkedBody
+                    } else {
+                        signInBody
+                    }
+
+                    Spacer(minLength: 16)
+
+                    // The verification affordance: identity is the UID, shown plainly.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("device identity")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text(auth.uid ?? "not signed in yet")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.bottom, 20)
+                }
+                .padding(.horizontal, 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: geo.size.height)
             }
-
-            Spacer()
-
-            // The verification affordance: identity is the UID, shown plainly.
-            VStack(alignment: .leading, spacing: 4) {
-                Text("device identity")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Text(auth.uid ?? "not signed in yet")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-            .padding(.bottom, 20)
         }
-        .padding(.horizontal, 24)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .presentationDetents([.medium])
+        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium])
         .interactiveDismissDisabled(isWorking)
         .alert(
             Text("This \(conflictProviderNoun) already has a home"),
