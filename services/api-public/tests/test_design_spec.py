@@ -70,7 +70,7 @@ def _entry(key="box:X", action="move", **over):
         if action == "move" else None,
         measured_footprint=Footprint((1.0, 0.5, 2.0), (0.9, 0.3, 1.1), 0.4),
         solver=SolverTrace("against_wall", "wall_02", ("keeps_height",), "because"),
-        description="the bed is back against the wall",
+        description="the bed is against the wall",
         turn_index=0, client_msg_id="c1",
     )
     base.update(over)

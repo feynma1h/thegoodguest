@@ -165,11 +165,11 @@ class TestBuildSystemPrompt:
             key="box:X", action="move", label="bed",
             measured_transform=measured, proposed_transform=measured,
             measured_footprint=None, solver=None,
-            description="the bed is back against the wall",
+            description="the bed is against the wall",
             turn_index=0, client_msg_id="c",
         )
         block = guest_prompt.render_arrangement_block([entry])
-        assert "the bed is back against the wall" in block
+        assert "the bed is against the wall" in block
         # Rule 10 has to be actionable from this block alone.
         assert "would" in block.lower()
         assert guest_prompt.render_arrangement_block([]) == ""
