@@ -229,8 +229,22 @@ shell_receiver, shell_enqueue, compress_receiver, compress_enqueue, anthropic"
 # encoder and the browser's decoder drifting apart is the exact failure 0126
 # exists to prevent, so both sides move deliberately. Keep the spark and three
 # versions in step with web/package.json.
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
-    && rm -rf /var/lib/apt/lists/*
+# Node comes from conda-forge, NOT apt. This image is Ubuntu 20.04 (focal),
+# whose `nodejs` package is 10.19 — old enough that it cannot parse the encoder
+# at all: `node:fs`-style import specifiers need >= 14.18, `?.`/`??` need >= 14,
+# and Spark 2.1.0 is ESM ("type": "module"). Nothing warns on the way in, which
+# is what makes this worth a comment — Spark declares no `engines`, so npm
+# installs it happily under npm 6 and the mismatch surfaces only when node
+# actually runs. The in-image smoke below is what caught it.
+#
+# Pinned to the exact version tools/spz_encode.mjs was validated on (decision
+# 0126) and the one web/ builds with, so both sides of 0126's one-encoder rule
+# run the same runtime. Installed into its own prefix rather than `base` or the
+# sam3d-objects env: /opt/nodejs/bin holds only node/npm/npx, so prepending it
+# cannot shadow python or perturb either conda env.
+RUN mamba create -y -p /opt/nodejs -c conda-forge "nodejs=22.23.1" \
+    && mamba clean -afy
+ENV PATH=/opt/nodejs/bin:$PATH
 RUN mkdir -p /opt/spz && cd /opt/spz \
     && npm init -y >/dev/null \
     && npm install --no-audit --no-fund --omit=dev \
@@ -258,7 +272,9 @@ body = struct.pack('<34f', *([0.1] * 34)); \
 d = tempfile.mkdtemp(); p = os.path.join(d, 'a.ply'); q = os.path.join(d, 'a.spz'); \
 open(p, 'wb').write(hdr + body); \
 out = subprocess.run(['node', os.environ['SPZ_ENCODER_PATH'], p, q], \
-                     capture_output=True, check=True); \
+                     capture_output=True); \
+assert out.returncode == 0, 'node exited %d; stderr:\n%s' % ( \
+    out.returncode, out.stderr.decode('utf-8', 'replace')[-2000:]); \
 stats = json.loads(out.stdout.decode().strip().splitlines()[-1]); \
 assert stats['gaussians'] == 2, stats; \
 assert os.path.getsize(q) > 0; \
