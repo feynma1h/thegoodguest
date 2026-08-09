@@ -15,7 +15,7 @@ is exactly the failure this module is written to prevent. If you add a
 per-user collection anywhere in this system, add it to `plan_account_deletion`
 and to its test.
 
-THE MAP (verified against the live project, 2026-08-08):
+THE MAP:
 
   Firestore (project FIRESTORE_PROJECT)
     scenes/{scene_id}                     where user_id == uid
@@ -23,6 +23,7 @@ THE MAP (verified against the live project, 2026-08-08):
     upload_mint_quotas/{uid}              doc id IS the uid
     conversations/{scene_id}__{uid}       where user_id == uid
       └─ turns/{index}  (SUBCOLLECTION — does not cascade; deleted explicitly)
+    design_specs/{scene_id}__{uid}        where user_id == uid
 
   GCS
     gs://{captures}/captures/{bundle_id}/**   for every bundle_id the user
@@ -74,12 +75,14 @@ logger = logging.getLogger(__name__)
 # Collection names. Imported from the repositories that own them wherever one
 # exists, so a rename there cannot silently desync this module. `conversations`
 # / `turns` are api-public's own (conversation_repo).
+from design_spec import FirestoreDesignSpecRepository
 from roomstudio_api_core.scene_read_repo import FirestoreSceneReadRepository
 from roomstudio_api_core.upload_session_repo import FirestoreUploadSessionRepository
 
 SCENES_COLLECTION = FirestoreSceneReadRepository.COLLECTION
 UPLOAD_SESSIONS_COLLECTION = FirestoreUploadSessionRepository.COLLECTION
 MINT_QUOTAS_COLLECTION = FirestoreUploadSessionRepository.QUOTA_COLLECTION
+DESIGN_SPECS_COLLECTION = FirestoreDesignSpecRepository.COLLECTION
 CONVERSATIONS_COLLECTION = "conversations"
 CONVERSATION_TURNS_SUBCOLLECTION = "turns"
 
@@ -100,6 +103,7 @@ class OwnedRecords:
     scene_bundle_ids: tuple[str | None, ...] = ()
     upload_session_bundle_ids: tuple[str, ...] = ()
     conversation_doc_ids: tuple[str, ...] = ()
+    design_spec_doc_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,7 @@ class DeletionPlan:
     scene_ids: tuple[str, ...]
     upload_session_ids: tuple[str, ...]
     conversation_doc_ids: tuple[str, ...]
+    design_spec_doc_ids: tuple[str, ...]
     mint_quota_doc_id: str
 
     @property
@@ -123,6 +128,7 @@ class DeletionPlan:
             or self.scene_ids
             or self.upload_session_ids
             or self.conversation_doc_ids
+            or self.design_spec_doc_ids
         )
 
 
@@ -136,6 +142,7 @@ class DeletionReport:
     upload_sessions_deleted: int = 0
     conversations_deleted: int = 0
     conversation_turns_deleted: int = 0
+    design_specs_deleted: int = 0
     mint_quota_deleted: bool = False
     identity_deleted: bool = False
     complete: bool = False
@@ -147,6 +154,7 @@ class DeletionReport:
             "rooms": self.scenes_deleted,
             "conversations": self.conversations_deleted,
             "conversation_messages": self.conversation_turns_deleted,
+            "design_specs": self.design_specs_deleted,
             "upload_sessions": self.upload_sessions_deleted,
             "files": self.blobs_deleted,
         }
@@ -168,6 +176,7 @@ def plan_account_deletion(user_id: str, records: OwnedRecords) -> DeletionPlan:
         scene_ids=tuple(sorted(records.scene_ids)),
         upload_session_ids=tuple(sorted(set(records.upload_session_bundle_ids))),
         conversation_doc_ids=tuple(sorted(records.conversation_doc_ids)),
+        design_spec_doc_ids=tuple(sorted(records.design_spec_doc_ids)),
         mint_quota_doc_id=user_id,
     )
 
@@ -216,6 +225,9 @@ class AccountDeleter:
             ),
             conversation_doc_ids=tuple(
                 snap.id for snap in self._query(CONVERSATIONS_COLLECTION, user_id)
+            ),
+            design_spec_doc_ids=tuple(
+                snap.id for snap in self._query(DESIGN_SPECS_COLLECTION, user_id)
             ),
         )
 
@@ -266,6 +278,12 @@ class AccountDeleter:
             conv_ref.delete()
             report.conversations_deleted += 1
 
+        # Design specs before scenes, for the same reason as conversations: a
+        # spec's doc id is derived from its scene.
+        for doc_id in plan.design_spec_doc_ids:
+            self._db.collection(DESIGN_SPECS_COLLECTION).document(doc_id).delete()
+            report.design_specs_deleted += 1
+
         for scene_id in plan.scene_ids:
             self._db.collection(SCENES_COLLECTION).document(scene_id).delete()
             report.scenes_deleted += 1
@@ -303,9 +321,10 @@ class AccountDeleter:
         report.complete = True
         logger.info(
             "account_deletion: complete uid=%s rooms=%d conversations=%d "
-            "turns=%d sessions=%d blobs=%d identity=%s",
+            "turns=%d specs=%d sessions=%d blobs=%d identity=%s",
             user_id, report.scenes_deleted, report.conversations_deleted,
-            report.conversation_turns_deleted, report.upload_sessions_deleted,
+            report.conversation_turns_deleted, report.design_specs_deleted,
+            report.upload_sessions_deleted,
             report.blobs_deleted, report.identity_deleted,
         )
         return report
