@@ -317,11 +317,13 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 | lane | worktree / branch | decisions | scope |
 |---|---|---|---|
-| A | `../roomstudio-ios-residue` · `ios-residue` | 0135–0138 | `ios/` only — 0084's `.recoverable` re-upload coordinator + 0049 item 1 (both unblocked: `force_remint` is SERVING on `api-public-00032-has`). **Widen with 0094 iOS Google linking** — same domain, and live: the operator's rooms are split across two identities. |
-| B | `../roomstudio-perception-emit` · `perception-emit` | 0139–0142 | `services/perception-obj/` + `tools/` — 0096's `i_up` **EMIT ONLY** (the `scene_facts` consume + `facts_version` bump is a separate follow-on) + wiring the SPZ converter into the pipeline. **Widen with 0062 frame coverage.** Must NOT touch `services/api-public/`. |
-| C | `../roomstudio-stage2` · `stage2` | 0143–0148 | `web/` + `services/api-public/` — stage 2 per 0131/0132/0133, the `SplatViewer.tsx:196` position-in-key fix, and it CARRIES decision 0130's handback review (that handback never reached the session it was written for; progressive loading re-derived it independently). Must NOT touch `services/perception-obj/`. |
+| A | `../roomstudio-ios-residue` · `ios-residue` | **0138–0141** | `ios/` only — 0084's `.recoverable` re-upload coordinator + 0049 item 1 (both unblocked: `force_remint` is SERVING on `api-public-00032-has`). **Widen with 0094 iOS Google linking** — same domain, and live: the operator's rooms are split across two identities. |
+| B | `../roomstudio-perception-emit` · `perception-emit` | **0142–0145** | `services/perception-obj/` + `tools/` — 0096's `i_up` **EMIT ONLY** (the `scene_facts` consume + `facts_version` bump is a separate follow-on) + wiring the SPZ converter into the pipeline. **Widen with 0062 frame coverage.** Must NOT touch `services/api-public/`. |
+| C | ~~`../roomstudio-stage2`~~ **MERGED 2026-08-09** | **0135–0137 used** | `web/` + `services/api-public/` — stage 2 per 0131/0132/0133, the `SplatViewer.tsx:196` position-in-key fix, and it CARRIES decision 0130's handback review (that handback never reached the session it was written for; progressive loading re-derived it independently). Must NOT touch `services/perception-obj/`. |
 
-Free decision numbers outside those blocks: 0105–0109, 0112–0115, 0118–0121, 0128, 0134, 0149+.
+Free decision numbers outside those blocks: 0105–0109, 0112–0115, 0118–0121, 0128, 0134, 0146+.
+
+**Blocks were REALLOCATED 2026-08-09 after a near-miss, and the cause is worth keeping:** the coordinator wrote each block in a chat heading rather than inside the prompt text, so NO session ever received one. Lane C reasonably took the next free numbers (0135–0137) — which were lane A's — and only the fact that A and B had not yet written a note prevented a real collision. **Put the block inside the prompt body, every time.**
 
 **Held deliberately, not forgotten:** per-room deletion and the spatial relationship graph both wait on lane C (the first collides in two directories; the second is plausibly stage 2's substrate, and C's solver is what reveals its real shape). The operator chose to hold all further lanes until these three land.
 
