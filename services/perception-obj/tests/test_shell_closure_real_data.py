@@ -3,9 +3,9 @@ brief, chunk 1 verification): scene f3d70236, bundle 9fbe29b6 — 24 recorded
 ARKit anchors committed at fixtures/scene_f3d70236/bundle.pb (24 KB of
 geometry metadata, no pixels).
 
-Runs under the PRODUCTION merge calibration (SHELL_WALL_MERGE_GAP_M=1.0,
-SHELL_WALL_NORMAL_TOL_DEG=15 — commit 634038b's deploy env, the V3-walk
-values), because that is the wall set the deployed closure will see.
+Runs under the production merge calibration, which is now simply the code
+default — so this file no longer sets it, and the wall set pinned here is the
+one the deployed closure sees.
 
 What these pins mean (the V1 probe's assertions, made permanent):
   - the two floating unclassified fragments (members 16 and 12 — the
@@ -30,7 +30,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import room_planes
 from roomstudio_schemas import CaptureBundle
 from shell_geometry import assemble_shell, close_shell
 
@@ -52,21 +51,8 @@ def closure():
     bundle = CaptureBundle()
     bundle.ParseFromString(_FIXTURE.read_bytes())
     assert len(bundle.plane_anchors) == 24
-    # Production merge calibration (module attrs read at call time).
-    orig = (
-        room_planes.SHELL_WALL_MERGE_GAP_M,
-        room_planes.SHELL_WALL_NORMAL_TOL_DEG,
-    )
-    room_planes.SHELL_WALL_MERGE_GAP_M = 1.0
-    room_planes.SHELL_WALL_NORMAL_TOL_DEG = 15.0
-    try:
-        geometry = assemble_shell(bundle.plane_anchors)
-        closed = close_shell(geometry)
-    finally:
-        (
-            room_planes.SHELL_WALL_MERGE_GAP_M,
-            room_planes.SHELL_WALL_NORMAL_TOL_DEG,
-        ) = orig
+    geometry = assemble_shell(bundle.plane_anchors)
+    closed = close_shell(geometry)
     return geometry, closed
 
 

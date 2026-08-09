@@ -277,22 +277,34 @@ def _derive_real(scene: str):
 class TestRealCaptures:
     def test_247003de_envelope(self):
         """The adjudication's validated derivation, operator-confirmed
-        4.20 x 3.29 m against the real room; achieved offline values pinned
-        (sides to 1 cm, area 13.81 m^2)."""
+        4.20 x 3.29 m against the real room; achieved values pinned (sides to
+        1 cm, area 13.80 m^2), and the selected walls are the adjudication's
+        own 02/05/09/12.
+
+        These numbers moved by ~1 cm when the merge calibration became the
+        code default: this file used to pin the 0.35 m / 12 deg outcome here
+        and the 1.0 m / 15 deg outcome in a separate monkeypatched test, so
+        the headline pin was on a calibration nothing deployed. Under the
+        real one, one more wall pair merges (15 walls -> 14), which shifts
+        the extreme-offset planes the rectangle is built from by ~1 cm and
+        re-numbers the wall ids.
+        """
         _geometry, env = _derive_real("247003de")
         assert env is not None and env.closed
         assert len(env.walls) == 4
+        assert sorted(w.source.wall_id for w in env.walls) == [
+            "wall_02", "wall_05", "wall_09", "wall_12"
+        ]
         sides = sorted(env.quality["envelope_side_lengths_m"])
-        assert sides == pytest.approx([3.293, 3.319, 4.142, 4.212], abs=0.01)
+        assert sides == pytest.approx([3.293, 3.319, 4.147, 4.201], abs=0.01)
         # Opposite sides agree to <= 7 cm (the adjudication's 3-6 cm class).
         assert abs(sides[1] - sides[0]) <= 0.07
         assert abs(sides[3] - sides[2]) <= 0.07
-        assert env.quality["envelope_area_m2"] == pytest.approx(13.81, abs=0.05)
-        # The four selected sources are the four big reach-walls (areas
-        # 13.3 / 8.3 / 13.3 / 14.2 under code-default merge knobs) — no
+        assert env.quality["envelope_area_m2"] == pytest.approx(13.80, abs=0.05)
+        # The four selected sources are the four big reach-walls — no
         # furniture plane sneaks in.
         areas = sorted(round(w.source.area_m2, 1) for w in env.walls)
-        assert areas == pytest.approx([8.3, 13.3, 13.3, 14.2], abs=0.15)
+        assert areas == pytest.approx([9.1, 13.3, 13.3, 14.2], abs=0.15)
 
     def test_247003de_bed_rail_is_interior_evidence(self):
         """The seat-classified bed rail (the 0075 furniture-slab exhibit:
@@ -310,19 +322,20 @@ class TestRealCaptures:
         assert env is not None and env.closed
         assert len(env.walls) == 4
         sides = sorted(env.quality["envelope_side_lengths_m"])
-        assert sides == pytest.approx([3.149, 3.200, 4.220, 4.287], abs=0.01)
-        assert env.quality["envelope_area_m2"] == pytest.approx(13.50, abs=0.05)
+        assert sides == pytest.approx([3.149, 3.201, 4.211, 4.312], abs=0.01)
+        assert env.quality["envelope_area_m2"] == pytest.approx(13.52, abs=0.05)
 
-    def test_247003de_under_serving_merge_knobs(self, monkeypatch):
-        """The selection is downstream of the wall merge: under the SERVING
-        knobs (SHELL_WALL_MERGE_GAP_M=1.0, NORMAL_TOL=15 — the 634038b
-        calibration) the derivation picks the adjudication's exact wall ids
-        (02/05/09/12) and lands the same rectangle."""
-        monkeypatch.setattr(room_planes, "SHELL_WALL_MERGE_GAP_M", 1.0)
-        monkeypatch.setattr(room_planes, "SHELL_WALL_NORMAL_TOL_DEG", 15.0)
+    def test_selection_survives_a_narrower_merge(self, monkeypatch):
+        """The selection is downstream of the wall merge, so it is worth
+        knowing how sensitive it is. Under the pre-2026-07-23 calibration the
+        same four physical walls are chosen — the merge renumbers them
+        (02/04/10/13) and the rectangle moves ~1 cm, but no furniture plane
+        is admitted and the room is the same room."""
+        monkeypatch.setattr(room_planes, "SHELL_WALL_MERGE_GAP_M", 0.35)
+        monkeypatch.setattr(room_planes, "SHELL_WALL_NORMAL_TOL_DEG", 12.0)
         _geometry, env = _derive_real("247003de")
         assert env is not None and env.closed
         assert sorted(w.source.wall_id for w in env.walls) == [
-            "wall_02", "wall_05", "wall_09", "wall_12"
+            "wall_02", "wall_04", "wall_10", "wall_13"
         ]
-        assert env.quality["envelope_area_m2"] == pytest.approx(13.80, abs=0.05)
+        assert env.quality["envelope_area_m2"] == pytest.approx(13.81, abs=0.05)

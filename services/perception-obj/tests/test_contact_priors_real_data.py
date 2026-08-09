@@ -188,9 +188,17 @@ def _floor_scene(planes, *, label="chair", cam=None, half=(0.4, 0.3, 0.35), yaw=
     return fr, _ctx(pose, intr, mask, splat, planes), t_gt, s_gt, splat, floor_y
 
 
-def _wall_scene(planes, *, label="door", wall_id="wall_08", s_gt=1.0):
-    """A thin planar box hung on a real detected wall, viewed head-on."""
-    wall = next(w for w in planes.walls if w.wall_id == wall_id)
+def _wall_scene(planes, *, label="door", s_gt=1.0):
+    """A thin planar box hung on a real detected wall, viewed head-on.
+
+    The wall is chosen by AREA, not by id. Wall ids are assigned by the merge's
+    deterministic sort, so they renumber whenever the merge calibration
+    changes — this used to name `wall_08`, which under the pre-2026-07-23
+    knobs was the larger of two same-plane patches the merge now joins. The
+    scene wants the room's main wall; picking the largest says that directly
+    and survives the next recalibration.
+    """
+    wall = max(planes.walls, key=lambda w: w.width_m * w.height_m)
     n = wall.normal
     splat = _box((0.35, 0.5, 0.02))
     stats = robust_cloud_stats(splat)

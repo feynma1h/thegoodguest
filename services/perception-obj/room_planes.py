@@ -56,13 +56,7 @@ _VERTICAL = PlaneAlignment.Value("VERTICAL")
 
 # ---------------------------------------------------------------------------
 # Tunables (env-overridable; one-capture-calibrated defaults like the
-# sampling/budget knobs). NOTE: SHELL_WALL_MERGE_GAP_M and
-# SHELL_WALL_NORMAL_TOL_DEG are NOT calibrated here — the values measured
-# against f3d70236 (1.0 / 15, decision 0066, commit 634038b) are set as
-# deploy env in infra/deploy_perception.sh and are what production runs.
-# The defaults below (0.35 / 12) are what an offline run gets unless it
-# overrides them, as the real-data pins do explicitly — see
-# tests/test_shell_closure_real_data.py and tools/make_shell_v3_fixtures.py.
+# sampling/budget knobs).
 # ---------------------------------------------------------------------------
 
 # Minimum anchor area to be a floor candidate. Rejects noise specks that
@@ -75,9 +69,18 @@ SHELL_FLOOR_COPLANAR_TOL_M = float(os.environ.get("SHELL_FLOOR_COPLANAR_TOL_M", 
 
 # Walls merge when normals agree within this angle AND plane offsets agree
 # within the coplanar tolerance AND their lateral spans touch within the gap.
-SHELL_WALL_NORMAL_TOL_DEG = float(os.environ.get("SHELL_WALL_NORMAL_TOL_DEG", "12"))
+#
+# The gap and the normal tolerance are the values measured against the first
+# plane-carrying real capture (f3d70236, 2026-07-23): its main wall arrived as
+# two same-plane patches — 0.3 degrees apart, coplanar to 8 cm — split by a
+# 0.81 m occlusion gap, and its door pair was coplanar to 6 cm at 14.0
+# degrees. Both pairs are one physical wall, and 0.35 m / 12 degrees split
+# them. At 1.0 m / 15 degrees exactly those two pairs merge and every other
+# pair in that room still fails coplanarity by 0.2-3.2 m, so the widening
+# buys the two real merges without admitting a false one.
+SHELL_WALL_NORMAL_TOL_DEG = float(os.environ.get("SHELL_WALL_NORMAL_TOL_DEG", "15"))
 SHELL_WALL_COPLANAR_TOL_M = float(os.environ.get("SHELL_WALL_COPLANAR_TOL_M", "0.12"))
-SHELL_WALL_MERGE_GAP_M = float(os.environ.get("SHELL_WALL_MERGE_GAP_M", "0.35"))
+SHELL_WALL_MERGE_GAP_M = float(os.environ.get("SHELL_WALL_MERGE_GAP_M", "1.0"))
 
 # Minimum vertical-anchor area to ship as a wall (drops speck anchors).
 SHELL_MIN_WALL_AREA_M2 = float(os.environ.get("SHELL_MIN_WALL_AREA_M2", "0.3"))
