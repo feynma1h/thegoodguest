@@ -16,7 +16,7 @@
  */
 
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import Conversation from "@/components/conversation/Conversation";
 import SplatViewer from "@/components/SplatViewer";
@@ -26,10 +26,18 @@ import { getApiClient } from "@/lib/api";
 import { ApiError, SceneNotReadyError } from "@/lib/api/client";
 import {
   assembleScene,
+  type DesignSpecDoc,
   type FusedObject,
   type PositionedSplat,
+  type SceneManifest,
   type ShellPlane,
 } from "@/lib/api/types";
+import {
+  applyDesignSpec,
+  arrangementNote,
+  orphanNote,
+  type ProposedScene,
+} from "@/lib/designSpec";
 import { hasSeenReveal, markRevealSeen } from "@/lib/seen";
 import { statusMeta } from "@/lib/status";
 import {
@@ -48,6 +56,7 @@ type AssetsResult =
       splats: PositionedSplat[];
       shell: ShellPlane[] | null;
       unrenderable: FusedObject[];
+      manifest: SceneManifest;
     };
 
 // Shell grace window (0066): the shell task lands a beat after `ready`,
@@ -74,8 +83,13 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
   const [convDown, setConvDown] = useState(false);
   const onConvUnavailable = useCallback(() => setConvDown(true), []);
 
-  const assets =
-    result && result.forScene === sceneId ? result : { phase: "loading" as const };
+  const assets = useMemo(
+    () =>
+      result && result.forScene === sceneId
+        ? result
+        : { phase: "loading" as const },
+    [result, sceneId],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +110,10 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
         }
         if (cancelled) return;
         const { splats, shell, unrenderable } = assembleScene(sceneAssets);
-        setResult({ forScene: sceneId, phase: "ready", splats, shell, unrenderable });
+        setResult({
+          forScene: sceneId, phase: "ready", splats, shell, unrenderable,
+          manifest: sceneAssets.manifest,
+        });
       } catch (exc: unknown) {
         if (cancelled) return;
         if (exc instanceof SceneNotReadyError) {
@@ -120,9 +137,50 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
     };
   }, [sceneId]);
 
+  // --- The proposed arrangement (decision 0131). The spec is a SIBLING
+  // document, so it is fetched separately and overlaid; a room nobody has
+  // rearranged pays for exactly one extra GET and renders identically.
+  const [spec, setSpec] = useState<DesignSpecDoc | null>(null);
+  const refreshSpec = useCallback(() => {
+    getApiClient()
+      .getDesignSpec(sceneId)
+      .then(setSpec)
+      // An unavailable spec degrades to the measured room, which is the
+      // honest fallback and the only one that cannot mislead.
+      .catch(() => setSpec(null));
+  }, [sceneId]);
+  // No reset here on purpose: the room page mounts this with key={scene_id}
+  // (see the docstring), so a different room is a different instance and
+  // there is no stale spec to clear. Clearing it here would also be a
+  // synchronous setState in an effect body — the cascading-render class this
+  // codebase has now fixed three times (NewRoomSheet, AccountMenu).
+  useEffect(refreshSpec, [refreshSpec]);
+
+  // Memoized because the overlay's output is SplatViewer's `splats` prop:
+  // a fresh array every render would be harmless for the renderer (its key
+  // is structural — decision 0133) but would re-run the placement effect on
+  // every parent render for nothing.
+  const proposed: ProposedScene = useMemo(
+    () =>
+      assets.phase === "ready"
+        ? applyDesignSpec(assets.splats, assets.manifest, spec)
+        : { splats: [], states: [], outlines: [], applied: [], orphaned: [] },
+    [assets, spec],
+  );
+
+  const revertAll = useCallback(async () => {
+    try {
+      await getApiClient().clearDesignSpec(sceneId);
+    } finally {
+      refreshSpec();
+    }
+  }, [sceneId, refreshSpec]);
+
   const placed = assets.phase === "ready" ? assets.splats.length : 0;
   const seen = assets.phase === "ready" ? assets.unrenderable.length : 0;
   const hasShell = assets.phase === "ready" && (assets.shell?.length ?? 0) > 0;
+  const changed = arrangementNote(proposed.applied);
+  const orphans = orphanNote(proposed.orphaned);
 
   const comeIn = () => {
     setFreshReveal(true);
@@ -150,8 +208,9 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
       {/* The room itself. */}
       {assets.phase === "ready" && phase !== "hold" && (
         <SplatViewer
-          splats={assets.splats}
+          splats={proposed.splats}
           shell={assets.shell}
+          outlines={proposed.outlines}
           frameless
           reveal={phase === "assembling"}
           onRevealStep={(_, label) => setArrival(label)}
@@ -196,6 +255,26 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
         <>
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-6 pb-7">
             <div className="pointer-events-auto w-full max-w-2xl">
+              {/* What this room is showing that the scan did not (0131).
+                  Chrome, not the guest's voice: a plain statement about what
+                  is on screen, with the way back always one control away —
+                  0133 makes "back to measured" an invariant, not a feature. */}
+              {changed && (
+                <div className="mb-2.5 flex items-center justify-between gap-4 rounded-[12px] border border-ink/15 bg-paper/[0.96] px-4 py-2.5 shadow-float">
+                  <p className="text-[12px] leading-snug text-ink/70">{changed}</p>
+                  <button
+                    onClick={revertAll}
+                    className="shrink-0 rounded-full border border-ink/20 px-3 py-1 text-[11px] text-ink/70 transition-colors hover:bg-ink/[0.06]"
+                  >
+                    back to measured
+                  </button>
+                </div>
+              )}
+              {orphans && (
+                <div className="mb-2.5 rounded-[12px] border border-ink/15 bg-paper/[0.96] px-4 py-2.5 shadow-float">
+                  <p className="text-[12px] leading-snug text-ink/60">{orphans}</p>
+                </div>
+              )}
               {assets.phase === "ready" && !convDown ? (
                 <Conversation
                   sceneId={sceneId}
@@ -204,6 +283,7 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
                   }
                   countsNote={countsLine(placed, seen)}
                   onUnavailable={onConvUnavailable}
+                  onArrangementChanged={refreshSpec}
                 />
               ) : (
                 <>
@@ -229,15 +309,36 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
             <div className="pointer-events-auto absolute bottom-7 left-6 hidden w-60 rounded-xl bg-paper/95 p-4 shadow-float lg:block">
               <Eyebrow>In this room — {placed + seen}</Eyebrow>
               <ul className="mt-2.5 max-h-[34vh] space-y-1.5 overflow-y-auto">
-                {assets.splats.map((s, i) => (
-                  <li
-                    key={`${s.label}-${i}`}
-                    className="flex items-baseline justify-between gap-3 text-[13px]"
-                  >
-                    <span className="capitalize text-ink/85">{s.label}</span>
-                    <span className="text-[10.5px] text-ink/40">placed</span>
-                  </li>
-                ))}
+                {proposed.splats.map((s, i) => {
+                  // State reads as words, not a badge (0057 deleted
+                  // StatusBadge): "placed" is the measurement, "moved" and
+                  // "taken out" are the proposal, and the difference between
+                  // them is the point.
+                  const state = proposed.states[i] ?? "measured";
+                  return (
+                    <li
+                      key={`${s.label}-${i}`}
+                      className="flex items-baseline justify-between gap-3 text-[13px]"
+                    >
+                      <span
+                        className={
+                          state === "removed"
+                            ? "capitalize text-ink/40 line-through"
+                            : "capitalize text-ink/85"
+                        }
+                      >
+                        {s.label}
+                      </span>
+                      <span className="text-[10.5px] text-ink/40">
+                        {state === "removed"
+                          ? "taken out"
+                          : state === "moved"
+                            ? "moved"
+                            : "placed"}
+                      </span>
+                    </li>
+                  );
+                })}
                 {assets.unrenderable.map((o) => (
                   <li
                     key={o.object_id}
