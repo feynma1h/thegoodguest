@@ -4,7 +4,7 @@
 /// bundleId it believes it is reporting on and is DROPPED if that is not the
 /// activity's own bundle. This project has been bitten twice by a surface
 /// narrating the wrong capture — the stale doorway flashing over a new send
-/// (405131a) and the phantom room from a migrated record (decision 0074) — and a
+/// (87deb50) and the phantom room from a migrated record (decision 0074) — and a
 /// Lock Screen the user sees without opening the app is the worst place to
 /// discover a third instance.
 ///

@@ -2,11 +2,17 @@
 
 WHY: this repo's documentation is unusually SHA-dense. CLAUDE.md and
 `docs/decisions/*.md` cite specific commits constantly — "the fix landed in
-`2e064a6`", "merged ff to main, `7a476d5`" — because that is how the project
-records what happened. A `git filter-repo` run changes every commit hash, and
-without this the entire written record silently points at commits that no
-longer exist. That would be a worse outcome than the problem the rewrite was
-run to solve.
+<sha>", "merged ff to main, <sha>" — because that is how the project records
+what happened. A `git filter-repo` run changes every commit hash, and without
+this the entire written record silently points at commits that no longer
+exist. That would be a worse outcome than the problem the rewrite was run to
+solve.
+
+SOURCE FILES ARE COVERED TOO, and that is not theoretical. The first rewrite
+(the photo purge) ran with docs-only globs, and five citations inside .py and
+.swift comments were left pointing at commits that no longer existed. They sat
+dead for a day until an audit found them. Comments cite commits here for the
+same reason the docs do.
 
 HOW: `git filter-repo` writes `.git/filter-repo/commit-map`, two columns of
 `<old-sha> <new-sha>`. This builds a prefix index over the old hashes and
@@ -41,7 +47,23 @@ from pathlib import Path
 
 HEX = re.compile(r"\b[0-9a-f]{7,40}\b")
 ZERO = "0" * 40
-DEFAULT_GLOBS = ("CLAUDE.md", "docs/**/*.md", "README.md", "infra/**/*.md")
+# Docs first, then the source trees whose comments cite commits. A false
+# rewrite would need a non-commit hex token of 7-40 chars that also prefixes a
+# real commit hash; sha256 pins (64 chars) and CSS colours (6) cannot match the
+# pattern at all, and anything that does not resolve is reported, never guessed.
+DEFAULT_GLOBS = (
+    "CLAUDE.md",
+    "README.md",
+    "docs/**/*.md",
+    "infra/**/*.md",
+    "infra/**/*.sh",
+    "packages/**/*.py",
+    "services/**/*.py",
+    "tools/**/*.py",
+    "ios/**/*.swift",
+    "web/src/**/*.ts",
+    "web/src/**/*.tsx",
+)
 
 
 def load_map(path: Path) -> dict[str, str]:
