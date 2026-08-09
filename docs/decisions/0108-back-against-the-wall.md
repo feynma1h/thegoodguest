@@ -1,7 +1,18 @@
 # 0108 — "back against the wall" reads as a revert, and stands anyway
 
 **Date:** 2026-08-09
-**Status:** Decided
+**Status:** Superseded by the operator's ruling — the word changed (2026-08-10)
+
+> **Outcome (2026-08-10):** the operator ruled "back" is revert's word,
+> exclusively. The unconditional branch now reads "the {name} is against the
+> wall"; the idiom survives only when the user supplies it (the charter
+> exemplar keeps it in the user's mouth, and every other "back" in the
+> exemplars is genuine revert-speak — no charter change, PROMPT_VERSION
+> stays 3). The four flow-through pins were updated and a direct solver pin
+> added (`test_a_first_time_move_never_says_back`) so the ruling cannot
+> silently regress. Verified live on the deployed revision by re-running
+> this note's own turn — "move the bed against a wall" on the reference
+> room — and reading the reply and the spec description.
 
 ## Context
 

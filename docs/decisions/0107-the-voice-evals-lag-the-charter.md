@@ -1,7 +1,20 @@
 # 0107 — the voice evals lag the charter at PROMPT_VERSION 3
 
 **Date:** 2026-08-09
-**Status:** Decided
+**Status:** Decided — eval reshaped 2026-08-10
+
+> **Outcome (2026-08-10):** `test_mutation_gets_the_mover_line` is replaced
+> by `TestGuestHands::test_mutation_is_grounded_or_honestly_refused` — a
+> tool-wired eval in the same file with its own harness (`_ask_with_hands`:
+> production TOOLS, tool calls through the real `run_tool` against real
+> geometry, stream_turn's wire shape). It asserts the honesty of whichever
+> path sampling takes: an applied change must be narrated in the server's
+> own words, an unapplied one must never be narrated as done. Full suite
+> re-run live: **10/10 at PROMPT_VERSION 3**; the observed run took the
+> grounded branch (propose → nearer_to → applied, narrated verbatim). Still
+> unbuilt from this note's wishlist, carried as-is: a rule-10 conditional-
+> grammar eval, and a nonexistent-piece decline probe — next PROMPT_VERSION
+> bump revises the suite first, as below.
 
 ## Context
 
