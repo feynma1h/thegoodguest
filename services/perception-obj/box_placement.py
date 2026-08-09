@@ -74,6 +74,14 @@ _BOX_MATCH_MIN = float(os.environ.get("PLACEMENT_BOX_MATCH_MIN", "0.5"))
 # zeroes tier 1 — measured in-frame fraction 0.0 vs f129's 0.63).
 _BOX_SCORE_MIN_INFRAME = float(os.environ.get("PLACEMENT_BOX_SCORE_MIN_INFRAME", "0.5"))
 
+# How far a box's own up axis may tilt off the world vertical before its
+# extents lose their axis semantics (decision 0096's trigger). RoomPlan
+# boxes are pure-yaw by construction — the RP-2 probe measured worst
+# |up_y - 1| = 1e-7 over 9 boxes, i.e. ~0.03°, so this is not a threshold
+# real data sits near; it is the gate that keeps a tilted box from
+# claiming a height it does not have.
+_BOX_UP_MAX_TILT_DEG = float(os.environ.get("PLACEMENT_BOX_UP_MAX_TILT_DEG", "5"))
+
 # Extent-consistency bound for an axis assignment: max/min of the per-axis
 # box-dim / splat-extent ratios. Near-equal extents keep several assignments
 # alive — exactly the "enumerate all" clause.
@@ -682,9 +690,66 @@ def score_candidates_at_center(
 # The box-anchored object
 # ---------------------------------------------------------------------------
 
-def _box_dict(box, box_index: int) -> dict:
-    """The manifest's roomplan_box provenance block."""
+def box_extent_axes(box) -> dict | None:
+    """Which of the box's three extents is the UP one — or None when the
+    box's own geometry does not warrant the claim (decision 0096's named
+    trigger; see `_box_dict` for what ships).
+
+    RoomPlan's box frame is y-up, so `dimensions[1]` is the extent along
+    local +Y and `dimensions[0]/[2]` span the footprint. That is only a
+    statement about the WORLD vertical while local +Y IS world +Y, which
+    is exactly what a pure-yaw transform gives (0076/RP-2: worst
+    |up_y - 1| = 1e-7 across the probe's 9 boxes). So the warrant is
+    measured per box off the transform rather than assumed from the
+    format: tilt the box past `_BOX_UP_MAX_TILT_DEG` and there is no
+    up extent to name, so nothing is emitted and the consumer is back to
+    the sorted triple it has today.
+
+    The two horizontal extents ship DESCENDING and deliberately unnamed.
+    RoomPlan does not fix which of local X/Z is the long one (see
+    `RoomPlanBox.dimensions`), and there is no facing convention that
+    would make one "width" and the other "depth" — so they are reported
+    as a footprint pair, not as two named dimensions. Calling them width
+    and depth would be the 0065 error again: a label certifying more than
+    was measured.
+
+    Returns None rather than a flagged block: absent is already the state
+    every existing consumer handles, and an emitted-but-untrustworthy
+    number is the failure 0096 exists to prevent.
+    """
+    R = np.asarray(box.transform, dtype=np.float64)[:3, :3]
+    up_local = R[:, 1]
+    norm = float(np.linalg.norm(up_local))
+    if norm <= 0.0:
+        return None
+    # Angle between the box's own up axis and the world vertical. Signed,
+    # not axis-line: an upside-down box has no "up" extent to report.
+    cos_tilt = float(up_local[1]) / norm
+    tilt_deg = float(np.degrees(np.arccos(float(np.clip(cos_tilt, -1.0, 1.0)))))
+    if tilt_deg > _BOX_UP_MAX_TILT_DEG:
+        return None
+    dims = [float(d) for d in np.asarray(box.dimensions, dtype=np.float64)]
+    if len(dims) != 3 or not all(d > 0.0 for d in dims):
+        return None
+    horizontal = sorted((dims[0], dims[2]), reverse=True)
     return {
+        "up_m": round(dims[1], 4),
+        "horizontal_m": [round(h, 4) for h in horizontal],
+        "up_tilt_deg": round(tilt_deg, 4),
+    }
+
+
+def _box_dict(box, box_index: int) -> dict:
+    """The manifest's roomplan_box provenance block.
+
+    `dims` is RoomPlan's own local (x, y, z) order and stays that way —
+    it is provenance. `extent_axes_m` is the additive companion that says
+    which of those three is the vertical one, present only when the box's
+    transform warrants it (see `box_extent_axes`). Everything else here is
+    unchanged, so a reader that does not know the new key sees exactly the
+    block it saw before.
+    """
+    block = {
         "box_id": f"box_{box_index:02d}",
         "identifier": box.identifier,
         "category": box.category,
@@ -694,6 +759,10 @@ def _box_dict(box, box_index: int) -> dict:
         "yaw_rad": round(float(box.yaw_rad), 4),
         "center_world": [round(float(c), 4) for c in box.center_world],
     }
+    axes = box_extent_axes(box)
+    if axes is not None:
+        block["extent_axes_m"] = axes
+    return block
 
 
 def build_box_object(

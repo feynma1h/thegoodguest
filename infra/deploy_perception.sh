@@ -116,8 +116,12 @@ ensure_obj_runtime_iam() {
         --role="roles/secretmanager.secretAccessor" \
         --project="${PROJECT_ID}" --quiet >/dev/null
 
-    # /process enqueues its own /shell task: enqueue rights on the queue and
-    # actAs on the Cloud Tasks OIDC invoker SA (decision 0066).
+    # /process enqueues its own second- and third-stage tasks (/shell,
+    # decision 0066; /compress, decisions 0125/0126): enqueue rights on the
+    # queue and actAs on the Cloud Tasks OIDC invoker SA. Both stages ride
+    # the same queue and the same invoker SA — the OIDC AUDIENCE differs per
+    # route, which needs no IAM — so these two grants cover both and adding
+    # a stage does not add a grant.
     gcloud tasks queues add-iam-policy-binding perception-dispatch \
         --location="${REGION}" --project="${PROJECT_ID}" \
         --member="serviceAccount:${OBJ_RUNTIME_SA}" \
