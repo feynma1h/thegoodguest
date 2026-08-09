@@ -53,6 +53,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PositionedSplat, ShellPlane } from "@/lib/api/types";
+import { viewerYawRad, type ClipSign } from "@/lib/clipSign";
 import {
   SETTLE_DROP_M,
   SETTLE_FADE_FRACTION,
@@ -100,6 +101,11 @@ interface SplatViewerProps {
    * paper tone, which in this room MEANS measurement. Renderer-agnostic
    * world geometry; null/absent draws nothing. */
   outlines?: MeasuredOutline[] | null;
+  /** Which yaw sign the clip volumes and measured outlines are built with
+   * (lib/clipSign): "shipped" is what every room has rendered since 0104;
+   * "measured" is the server's own convention (0135). Dev-viewer A/B only
+   * (decision 0112) — no product route sets this. */
+  clipSign?: ClipSign;
 }
 
 /** One measured footprint: a yaw-oriented rectangle on the floor. Same
@@ -247,6 +253,7 @@ export default function SplatViewer({
   onRevealDone,
   labels = null,
   outlines = null,
+  clipSign = "shipped",
 }: SplatViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // The renderer key is STRUCTURE ONLY — which files are in the scene, and
@@ -524,24 +531,28 @@ export default function SplatViewer({
           // one mesh by parenting, so the SDF's LOCAL transform has to be
           // the box expressed in the mesh's frame.
           //
-          // THE YAW HERE IS THE WRONG SIGN — measured, decision 0135.
-          // `setFromAxisAngle([0,1,0], yaw)` maps local (u,0,v) to
+          // THE DEFAULT YAW HERE IS THE WRONG SIGN — measured, decision
+          // 0135. `setFromAxisAngle([0,1,0], yaw)` maps local (u,0,v) to
           // x = u·cos+v·sin, z = -u·sin+v·cos, but the server's `yaw_rad`
-          // rotates (x, z) as an ordinary 2D plane, so this box sits 2θ
-          // from the one it is meant to cut. Two independent instruments
-          // agree across all four walk rooms (see 0135 and
-          // room_geometry.OrientedBox.local_axes_xz). NOT fixed here: it
+          // rotates (x, z) as an ordinary 2D plane, so the shipped box
+          // sits 2θ from the one it is meant to cut. Two independent
+          // instruments agree across all four walk rooms (see 0135 and
+          // room_geometry.OrientedBox.local_axes_xz), and the cut-fraction
+          // A/B (decision 0112) measured the consequence: the shipped
+          // orientation cuts 23–34 points of in-box body mass on rp7
+          // storage / rp7 bed / spike table / rp6g1 table that the
+          // measured orientation keeps. NOT flipped by default: it
           // re-renders every existing room, 0104 adjudicated the clip by
-          // eye, and 0080/0085 make that the operator's call. It may also
-          // be the cause of 0129's clip cross-section defect — worth an
-          // A/B render before anyone touches it.
+          // eye, and 0080/0085 make that the operator's call — `clipSign`
+          // ("measured" = the server convention, via lib/clipSign) is the
+          // A/B that walk judges.
           if (s.clip) {
             mesh.updateMatrixWorld(true);
             const boxWorld = new THREE.Matrix4().compose(
               new THREE.Vector3(...s.clip.center_world),
               new THREE.Quaternion().setFromAxisAngle(
                 new THREE.Vector3(0, 1, 0),
-                s.clip.yaw_rad,
+                viewerYawRad(s.clip.yaw_rad, clipSign),
               ),
               new THREE.Vector3(...s.clip.half_extents_m),
             );
@@ -582,8 +593,14 @@ export default function SplatViewer({
         }> = [];
         for (const o of outlines ?? []) {
           const [hx, , hz] = o.half_extents_m;
-          const cos = Math.cos(o.yaw_rad);
-          const sin = Math.sin(o.yaw_rad);
+          // Same inline map as three.js R_y(+θ), so the outline shares the
+          // clip volume's yaw-sign choice — under "shipped" it agrees with
+          // the shipped clip (both 2θ off the measurement, decision 0135);
+          // under "measured" both agree with the solver that produced the
+          // footprint. One knob, never two half-flipped surfaces.
+          const yawEff = viewerYawRad(o.yaw_rad, clipSign);
+          const cos = Math.cos(yawEff);
+          const sin = Math.sin(yawEff);
           // The box's own base, lifted a hair so it sits ON the floor rather
           // than z-fighting it. Derived from the measurement itself, not from
           // the shell — an outline must survive a room with no floor.
@@ -1164,8 +1181,13 @@ export default function SplatViewer({
     // on `splats` by identity would restart the renderer whenever a caller
     // recomputed the array, which is exactly what a proposal does (0133);
     // structure is the key's job, placement is the seam's.
+    // `clipSign` rebuilds the renderer like a structure change: a different
+    // sign is a different SDF/outline geometry for the same files. It is an
+    // effect dep rather than a rendererKey input because it is a viewer
+    // interpretation of the scene, not scene data — and it only ever changes
+    // on the dev viewer's URL toggle (decision 0112).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, idleOrbit]);
+  }, [key, idleOrbit, clipSign]);
 
   // The placement seam. Runs on every `splats` change and costs one matrix
   // write per piece; the renderer above is untouched.

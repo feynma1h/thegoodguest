@@ -21,6 +21,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 
 import RoomViewerPanel from "@/components/RoomViewerPanel";
 import SplatViewer, { type ViewerLabel } from "@/components/SplatViewer";
+import { parseClipSign, type ClipSign } from "@/lib/clipSign";
 import {
   assembleScene,
   type FusedObject,
@@ -71,11 +72,13 @@ function DevViewerContent({
   fixture,
   reveal,
   showLabels,
+  clipSign,
 }: {
   directUrl: string | null;
   fixture: string | null;
   reveal: boolean;
   showLabels: boolean;
+  clipSign: ClipSign;
 }) {
   const key = directUrl ?? (fixture ? `fixture:${fixture}` : "");
   const [result, setResult] = useState<Result | null>(null);
@@ -154,6 +157,7 @@ function DevViewerContent({
             shell={state.shell}
             reveal={reveal}
             labels={showLabels ? state.labels : null}
+            clipSign={clipSign}
             className="mt-8 h-[62vh]"
           />
           {state.unrenderable.length > 0 && (
@@ -182,6 +186,10 @@ function ViewerContent() {
   // ?labels=1 renders the fixture's _walk_labels sidecar as in-scene badges
   // (wall letters + piece numbers), so a reviewer can name what they see.
   const showLabels = params.get("labels") === "1";
+  // ?clipsign=measured builds clip volumes (and measured outlines) with the
+  // server's own yaw convention instead of the shipped sign — the 0135 A/B
+  // (decision 0112). Absent/anything-else is the shipped render, unchanged.
+  const clipSign = parseClipSign(params.get("clipsign"));
 
   return (
     <div>
@@ -199,6 +207,7 @@ function ViewerContent() {
           fixture={fixture}
           reveal={reveal}
           showLabels={showLabels}
+          clipSign={clipSign}
         />
       )}
     </div>
