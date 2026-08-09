@@ -7,7 +7,8 @@ reaper), 0036/0051/0074 (identity), 0072 (Good Guest failure surfaces)
 
 > Number 0085 was reserved for this sitting by the release-residue pass. The
 > sitting executed on the iPhone 16 Pro with the operator present for its whole
-> length; `docs/briefs/release-residue-sitting.md` was the script.
+> length. The script it followed was a build brief, removed once the sitting
+> ran and its verdicts landed here.
 
 ## What was gated
 

@@ -1,4 +1,4 @@
-/// Pins for the floor plan's language tables (chunk RP-7, FloorPlanVoice):
+/// Pins for the floor plan's language tables (FloorPlanVoice):
 /// category naming under the confidence gate, the instruction relay, the
 /// spoken-line priority, the "enough" confirmation, and the coverage-tick
 /// mapping. These are the decisions the capture screen SPEAKS — pinned as

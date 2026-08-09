@@ -120,8 +120,8 @@ class TestSynthetic:
 
 @_needs_spike_bundle
 class TestSpikeFixtureGate:
-    """The RP-5 gate: on the spike fixture all 9 boxes covered in <=
-    PERCEPTION_MAX_FRAMES with >= 1 good view each; deterministic;
+    """The census set-cover gate: on the spike fixture all 9 boxes are
+    covered in <= PERCEPTION_MAX_FRAMES with >= 1 good view each; deterministic;
     achieved greedy picks pinned (7 cover frames, measured)."""
 
     @pytest.fixture(scope="class")

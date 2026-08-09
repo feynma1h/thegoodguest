@@ -1,16 +1,16 @@
-"""RP-2 pins for roomplan_room — the CapturedRoom JSON parser + room_planes
-adapters (decision 0077).
+"""CapturedRoom parser pins for roomplan_room — the JSON parser +
+room_planes adapters (decision 0077).
 
 The fixture is the REAL RoomBuilder [.beautifyObjects] output of the co-run
 spike's probe run (probe-20260728-143602, decision 0076), committed
 byte-verbatim at tests/fixtures/roomplan_spike/captured_room_built.json —
-the same document the design session's P2 probe parsed. The pin set is P2's
-measured numbers, exact, at achieved accuracy:
+the same document the 0077 design session's parser probe read. The pin set
+is that probe's measured numbers, exact, at achieved accuracy:
 
   * 13 walls, all pure-up (|up_y - 1| <= 1e-4; achieved 2e-7), two
     perpendicular families (max deviation 2.65 deg), every bottom on the
     floor; 9 walls 3.05 m tall + four 1.95 m door-height segments (the
-    brief's "3.05 top / 1.95 segments" — heights above the floor; the
+    shorthand "3.05 top / 1.95 segments" — heights above the floor; the
     absolute world tops are 1.631 / 0.532 with the floor at y = -1.418).
   * Floor: one polygon, 10 corners, 14.98 m^2, perfectly planar.
   * 9 objects, all pure-yaw (worst |up_y - 1| = 1e-7), incl. the dining
@@ -21,11 +21,11 @@ measured numbers, exact, at achieved accuracy:
     opening — the rect-from-dimensions fallback is the dominant real path;
     only wall_00 carries an explicit (6-corner) polygon.
 
-The adapter gate proves chunk D and the room-sanity gate consume
-RoomPlan-derived planes UNCHANGED: the same fusion path that places
-single-view objects against ARKit anchor planes places them against these
-(floor contact to <= 1 cm / bottom-on-floor <= 3 mm, wall contact with the
-normal aligned to dot >= 0.99 — chunk D's achieved tolerances), and
+The adapter gate proves the single-view contact priors and the room-sanity
+gate consume RoomPlan-derived planes UNCHANGED: the same fusion path that
+places single-view objects against ARKit anchor planes places them against
+these (floor contact to <= 1 cm / bottom-on-floor <= 3 mm, wall contact
+with the normal aligned to dot >= 0.99 — the priors' achieved tolerances), and
 _position_outside_room gates against the RoomPlan floor rect + wall top.
 
 Run from repo root:

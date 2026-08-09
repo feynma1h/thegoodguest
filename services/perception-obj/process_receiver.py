@@ -25,7 +25,12 @@ The scene manifest URI is stored in Scene.result_uri on success.
 
 Manifest contract (manifest_version 2):
   {scene_id, bundle_uri, schema_version, manifest_version: 2, frame_count,
+   frames_total, frames_sampled, sampling: {...},
+   roomplan: {...} (only on bundles claiming a CapturedRoom),
    objects: [...], frames: [...]}
+  "sampling" records the frame-selection policy, the selected indices,
+  whether the budget stopped the run, and whether fusion refinement was
+  skipped (see sampling.py / census_sampling.py / budget.py).
   "objects" is the scene-level fused array (one entry per physical object,
   with a world transform in the ARKit world frame — see fusion.py); it is
   what the web viewer renders. "frames" carries the per-frame observations
@@ -808,7 +813,7 @@ def _build_refinement_context(
     # Measured room planes, parsed once (via room_planes — the same reading
     # the shell renders) and reused for every single-view contact-prior
     # placement. A bundle with no plane anchors yields empty planes, so
-    # priors are inert and single-view objects stay unplaced (0067 chunk D
+    # priors are inert and single-view objects stay unplaced (decision 0067's
     # degrade lock). Cached because fusion may call it per unplaced object.
     room_planes_holder: list = []
 
@@ -1511,7 +1516,7 @@ def run_perception(
 
     # Scene-level roomplan note — emitted ONLY when the bundle claims a
     # CapturedRoom, so a no-roomplan bundle's manifest stays byte-identical
-    # to the pre-0077 shape (the RP-4 degrade lock).
+    # to the pre-0077 shape (the no-CapturedRoom degrade lock).
     roomplan_note: Optional[dict] = None
     if bundle.HasField("room_plan") and bundle.room_plan.json_gcs_path:
         roomplan_note = {

@@ -17,9 +17,9 @@ Why TestClient tests alongside handler tests:
   caused by exactly this: the annotation resolved to a query parameter
   instead of a body model, all handler tests passed, production broke.
 
-IMPORTANT: server.py must be loaded by file path to avoid the
-services/api/server.py collision in sys.modules — see the same pattern and
-comment in test_server_registry.py.
+IMPORTANT: server.py is loaded by file path, not module name, so no other
+server.py cached as sys.modules["server"] can shadow it — see the same
+pattern and the full rationale in test_server_registry.py.
 
 Run from repo root:
   pytest services/perception-obj/tests/test_server_routes.py -v

@@ -1,5 +1,5 @@
-/// Real-room pins for the floor-plan extraction (chunk RP-7): the spike
-/// reference room's CapturedRoom JSON (the SAME fixture RP-2 pinned
+/// Real-room pins for the floor-plan extraction: the spike reference room's
+/// CapturedRoom JSON (the SAME fixture perception-obj's roomplan_room pins
 /// server-side, committed verbatim from the probe run) decodes through
 /// Apple's Codable path and extracts to the numbers the design recorded —
 /// 13 walls, 9 objects, the 14.98 m² ten-corner floor, the ~43.7° wall-grid
@@ -8,7 +8,8 @@
 ///
 /// Pinned at achieved accuracy per house rule. If Apple's Codable schema
 /// changes (a `version` bump), the DECODE fails first — which is exactly the
-/// signal RP-2's server-side version pin watches for; this is its client twin.
+/// signal the server-side version pin in test_roomplan_room.py watches for;
+/// this is its client twin.
 
 import RoomPlan
 import simd
@@ -60,8 +61,8 @@ final class FloorPlanFixtureTests: XCTestCase {
 
     func test_extraction_gridHeading_matchesSpikeFamilies() throws {
         // The two perpendicular wall families sit at ~43.7° to the world axes
-        // (the design's "43.5° family heading", re-derived by this session's
-        // weighted estimator at 43.680°; pinned at achieved accuracy).
+        // (the design's "43.5° family heading", re-derived by
+        // FloorPlanMath.gridHeading at 43.680°; pinned at achieved accuracy).
         let snap = FloorPlanSnapshot(room: try loadRoom())
         let g = try XCTUnwrap(FloorPlanMath.gridHeading(walls: snap.walls))
         XCTAssertEqual(Double(g) * 180 / .pi, 43.680, accuracy: 0.1)

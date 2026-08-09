@@ -257,7 +257,15 @@ def _blob_exists(bucket_name: str, blob_path: str) -> bool:
 
 
 def _collect_bundle_blob_paths(bundle) -> list[str]:
-    """Return all relative blob paths referenced in the bundle."""
+    """Return the relative blob paths the pre-GPU existence gate checks.
+
+    Frame RGB, depth and confidence blobs, plus the RoomPlan USDZ. NOT
+    room_plan.json_gcs_path: a ROOMPLAN bundle whose room.json never landed
+    still dispatches, and degrades downstream to LIDAR_ARKIT shell semantics
+    (shell_receiver's room_json_missing path, decision 0077) rather than
+    being held here as failed_incomplete. Nothing records which of the two
+    was intended, so treat the asymmetry as open rather than settled.
+    """
     paths: list[str] = []
     for frame in bundle.frames:
         if frame.rgb_gcs_path:
@@ -390,7 +398,7 @@ def _run_ingest(
             content={"status": "failed_invalid", "error": error_code},
         )
 
-    # 4. Device identity. Guaranteed non-empty by validation check 2
+    # 4. Device identity. Guaranteed non-empty by validation check 3
     # (device_id_missing bundles were rejected above).
     device_id = bundle.device.device_id
 

@@ -3,7 +3,7 @@
 /// Accepts a token provider closure (rather than a raw token string) so it
 /// can re-fetch a fresh token on a 401 and retry once without the caller
 /// needing to wire the retry logic. 5xx and network errors are retried with
-/// exponential backoff + jitter (decision 0037).
+/// exponential backoff + jitter (decision 0038).
 ///
 /// Return value is [UploadSessionEntry], keyed by relative_path. The server
 /// gives NO ordering guarantees — always map by relative_path, never by index.
@@ -157,12 +157,12 @@ actor UploadSessionClient {
     /// Per-request timeout for the mint POST. MUST exceed api-public's Cloud
     /// Run request ceiling (120 s): a local timeout below the server's own
     /// limit manufactures a failure for a mint the server may still complete.
-    /// Measured live (RP-6 Gate 3): a ~2,200-path long-walk mint died twice
-    /// over — client abandoned at URLSession's default 60 s, server 504'd at
-    /// its 120 s ceiling — and the mint stores nothing on abort, so a retry
-    /// restarts from zero. The client half of the fix is outliving the server
-    /// window; the server half (UPLOAD_SESSION_MINT_CONCURRENCY bump) is an
-    /// env-only revision recorded for RP-8.
+    /// Measured on a real ~2,200-path long-walk capture: the mint died twice
+    /// over — the client abandoned at URLSession's default 60 s, and Cloud Run
+    /// 504'd at its 120 s ceiling (one POST, 504 at 120.001 s) — and the mint
+    /// stores nothing on abort, so a retry restarts from zero. This constant
+    /// is the client half of the fix (outlive the server window); the server
+    /// half is api-public's UPLOAD_SESSION_MINT_CONCURRENCY, now serving at 64.
     static let mintTimeoutSec: TimeInterval = 180
 
     /// Returns "now". Injected in tests so a 429's stated wait can be evaluated

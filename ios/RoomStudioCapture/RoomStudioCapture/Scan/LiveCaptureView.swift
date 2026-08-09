@@ -6,9 +6,9 @@
 /// the felt floor/walls/corners ticks), and whether it's enough (the guest's
 /// spoken confirmation). Warnings speak plainly and never blame.
 ///
-/// LAYERING (decisions 0072/0077, chunk RP-7): this file is the SwiftUI
-/// OVERLAY; the live geometry behind the `LiveMeshHost` seam is the Good Guest
-/// FLOOR PLAN (FloorPlanView.swift) — the 2D minimap decision 0077 chose over
+/// LAYERING (decisions 0072/0077): this file is the SwiftUI OVERLAY; the live
+/// geometry behind the `LiveMeshHost` seam is the Good Guest FLOOR PLAN
+/// (FloorPlanView.swift) — the 2D minimap decision 0077 chose over
 /// a 3D mesh render — fed by CaptureManager's RoomPlan delegate stream via
 /// `FloorPlanFeed`. With no feed (previews, non-LiDAR simulators) the seam
 /// renders empty and the overlay still verifies. The overlay itself is driven
@@ -62,7 +62,7 @@ struct LiveCaptureView: View {
         ZStack {
             captureBackdrop
 
-            // The live floor plan (RP-7) — the room drawing itself.
+            // The live floor plan — the room drawing itself.
             LiveMeshHost(feed: feed,
                          paused: state.tracking != .good,
                          dimmed: state.tracking == .tooDark)
@@ -229,10 +229,10 @@ struct LiveCaptureView: View {
 
 // MARK: - Live floor plan seam
 
-/// Hosts the live geometry: the Good Guest floor plan (RP-7), fed by
-/// CaptureManager's RoomPlan delegate stream. The inset keeps the plan's fit
-/// region clear of the overlay chrome (tracking pill above; guest line, ticks
-/// and shutter below) so the room draws in the screen's visual center band.
+/// Hosts the live geometry: the Good Guest floor plan, fed by CaptureManager's
+/// RoomPlan delegate stream. The inset keeps the plan's fit region clear of the
+/// overlay chrome (tracking pill above; guest line, ticks and shutter below)
+/// so the room draws in the screen's visual center band.
 /// With no feed (previews, sessions without a RoomPlan co-run) the seam is
 /// empty — an honest nothing, never an invented room.
 private struct LiveMeshHost: View {

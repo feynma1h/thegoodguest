@@ -22,8 +22,9 @@
 /// that cannot start (unsupported device, user disabled them in Settings, budget
 /// exhausted) must not affect an upload by even one branch.
 ///
-/// Read by: RootFlowView, UploadCoordinator, BlobUploadManager,
-/// RoomStudioCaptureApp. Pinned by: LiveActivityControllerTests (through the
+/// Read by: RootFlowView (the WaitScreen mirror + lifecycle), BlobUploadManager
+/// (progress, finalize, complete), UploadFailureMonitor (terminal failure,
+/// paused). Pinned by: LiveActivityControllerTests (through the
 /// LiveActivityHost seam — the tests never touch real ActivityKit).
 
 import ActivityKit

@@ -73,10 +73,10 @@ describe("settleEase", () => {
     expect(settleEase(4)).toBe(1);
   });
 
-  // THE operator finding from RP-8 (decision 0080): the old curve
+  // THE operator finding (decision 0080): the old curve
   // (1-(1-t)^3) starts at maximum velocity — "comes down at high speed
   // then slows". A settle must begin at rest and arrive at rest.
-  it("begins and ends at rest — the RP-8 note, pinned", () => {
+  it("begins and ends at rest — the operator finding, pinned", () => {
     const h = 1e-5;
     const vStart = (settleEase(h) - settleEase(0)) / h;
     const vEnd = (settleEase(1) - settleEase(1 - h)) / h;

@@ -1,10 +1,9 @@
-/// The live floor plan's data layer (decision 0077 choice 3, chunk RP-7 —
-/// task #13's shape). A CapturedRoom becomes a small value snapshot — wall
-/// segments, furniture footprints, the floor polygon — projected onto the
-/// world XZ plane, plus the pure math the renderer needs (room-grid heading,
-/// fit-to-rect, corner adjacency).
+/// The live floor plan's data layer (decision 0077 choice 3). A CapturedRoom
+/// becomes a small value snapshot — wall segments, furniture footprints, the
+/// floor polygon — projected onto the world XZ plane, plus the pure math the
+/// renderer needs (room-grid heading, fit-to-rect, corner adjacency).
 ///
-/// Copy-out principle (0076 Q3 / RP-6): extraction runs on RoomPlan's delivery
+/// Copy-out principle (decision 0076 Q3): extraction runs on RoomPlan's delivery
 /// thread and only plain values cross to the MainActor; no RoomPlan type ever
 /// reaches view land, and nothing here retains an ARFrame. `FloorPlanFeed` is
 /// a SEPARATE ObservableObject from CaptureManager on purpose: camera-pose
@@ -13,8 +12,9 @@
 /// only FloorPlanView observes the feed.
 ///
 /// Read by: CaptureManager (extraction + publishing), FloorPlanView (render),
-/// ReviewView (the built room, static), FloorPlanTests (pins — synthetic math
-/// plus the spike fixture, the same room RP-2 pinned server-side).
+/// ReviewView (the built room, static), FloorPlanMathTests (synthetic math) and
+/// FloorPlanFixtureTests (the spike CapturedRoom fixture — the same room
+/// perception-obj's roomplan_room pins server-side).
 
 import Combine
 import Foundation
@@ -114,7 +114,7 @@ extension FloorPlanSnapshot {
         }
 
         if let floor = room.floors.first {
-            // Corners are in the surface's LOCAL frame (RP-2); empty corners
+            // Corners are in the surface's LOCAL frame; empty corners
             // degrade to the rectangle the dimensions describe.
             let local: [SIMD3<Float>] = floor.polygonCorners.isEmpty
                 ? [SIMD3(-floor.dimensions.x / 2, -floor.dimensions.y / 2, 0),

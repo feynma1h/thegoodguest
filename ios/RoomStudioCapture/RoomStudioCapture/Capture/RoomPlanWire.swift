@@ -1,4 +1,4 @@
-/// Pure decisions for the RoomPlan co-run wire (decision 0077, chunk RP-6).
+/// Pure decisions for the RoomPlan co-run wire (decision 0077).
 ///
 /// CaptureManager owns the RoomCaptureSession lifecycle; every decision that
 /// determines WHAT ships — tier, provenance string, census copy — lives here
@@ -94,13 +94,14 @@ enum RoomPlanWire {
     /// Whether to re-assert .sceneDepth via a mid-scan config re-run (decision
     /// 0076's measured-survivable probe — the scan continues and builds clean).
     ///
-    /// Found live at RP-6 Gate 1: attaching the RoomPlan co-run in the SAME
-    /// runloop turn as the production run() shipped a 268-frame capture with
-    /// sceneDepth nil on EVERY frame — the spike never saw this because its
-    /// attach always followed seconds later. The guard observes reality
-    /// (frames, not configs) and fires only when depth has NEVER been seen:
-    /// legal mid-walk dropouts (which occur after first depth) must not
-    /// trigger a re-run, and it fires at most once per capture.
+    /// Found live on the first hardware capture of this build (decision 0079):
+    /// attaching the RoomPlan co-run in the SAME runloop turn as the production
+    /// run() shipped a 268-frame capture with sceneDepth nil on EVERY frame —
+    /// the spike never saw this because its attach always followed seconds
+    /// later. The guard observes reality (frames, not configs) and fires only
+    /// when depth has NEVER been seen: legal mid-walk dropouts (which occur
+    /// after first depth) must not trigger a re-run, and it fires at most once
+    /// per capture.
     static func shouldReassertDepth(hasLidar: Bool,
                                     depthEverSeen: Bool,
                                     alreadyReasserted: Bool,

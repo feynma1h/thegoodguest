@@ -34,9 +34,11 @@ nonisolated enum WaitScreen: Equatable {
     case processingFailed
     /// The upload was incomplete (failed_incomplete). `missingCount` is how many
     /// blob paths the server reported absent — a fact about the room worth
-    /// stating, and separable from the re-upload that does NOT exist yet
-    /// (decision 0084). 0 means the server named none, which the copy degrades
-    /// to the unquantified wording rather than announcing "0 files".
+    /// stating, and deliberately separated from the re-send itself: whether one
+    /// can honestly be offered is decided from disk by CaptureRecovery, not
+    /// from this count (decisions 0084 + 0116). 0 means the server named none,
+    /// which the copy degrades to the unquantified wording rather than
+    /// announcing "0 files".
     case incompleteUpload(missingCount: Int)
     /// Could not send it up. `terminal` = retrying provably cannot help.
     case sendFailed(terminal: Bool)

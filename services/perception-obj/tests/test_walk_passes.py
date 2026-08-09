@@ -1,4 +1,4 @@
-"""Synthetic unit invariants for the RP-8 walk placement passes
+"""Synthetic unit invariants for the post-fusion placement passes
 (decision 0082): the cross-label 3D duplicate gate, wall back-face
 anchoring + floor-class declip, door-geometry opening demotion, and the
 box-top support snap. Real-data verification is the spike full-fusion run

@@ -797,7 +797,7 @@ def test_union_bbox_matches_footprint_bbox():
 
 
 # -----------------------------------------------------------------------------
-# Single-view contact solves (decision 0067 chunk D)
+# Single-view contact solves (decision 0067)
 # -----------------------------------------------------------------------------
 
 def _box_points(half, n=5):

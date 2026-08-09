@@ -8,13 +8,11 @@
 ///   • backend ready / failed / failed_invalid  → reclaim (server has the data,
 ///     or no re-send of the same bytes can change the answer).
 ///   • backend failed_incomplete                → RETAIN EVERYTHING. The on-disk
-///     blobs are the only material a future re-upload could send. That
-///     coordinator is server-blocked today (decision 0084): POST /upload_session
-///     re-mints return the STORED session URIs while the upload_sessions doc
-///     lives (7-day TTL), and a finalized GCS resumable session cannot accept a
-///     re-write — so a client-only re-drive of a swept blob cannot work. When
-///     the mint contract learns to vend fresh URIs (launch hardening), the
-///     coordinator builds on the files this rule preserves.
+///     blobs are the material the re-send uses: CaptureRecovery decides from
+///     disk whether the re-send can honestly be offered, and
+///     BlobUploadManager.resendMissingBlobs force-re-mints (decision 0116)
+///     exactly those paths plus bundle.pb and re-sends them. Reclaiming here
+///     would destroy the only copy of the bytes recovery needs.
 ///   • upload-phase .failed (client-terminal)   → reclaim only once the user has
 ///     acknowledged the flight (endFlight from the uploadFailed screen, or a
 ///     prior acknowledgment) — the reason has been shown; the record's only

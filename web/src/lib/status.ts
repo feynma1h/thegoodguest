@@ -1,6 +1,7 @@
 /**
  * SceneStatus display semantics, mirroring the iOS ScenePollState
- * classification (ios/.../Scene/ScenePoller.swift): in-flight states keep
+ * classification (ios/RoomStudioCapture/RoomStudioCapture/Scene/ScenePoller.swift):
+ * in-flight states keep
  * polling, failed_incomplete is recoverable (re-upload of missing files),
  * ready/failed/failed_invalid are terminal.
  */

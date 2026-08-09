@@ -30,7 +30,9 @@ so a confirmation dialog would be friction protecting nothing. An unprompted
 idea is speech only. Checked the way 0058 checks voice: an observe-only flag
 when a turn proposes into a message that asked for nothing.
 
-Consumers: public_server.py (the conversation turn), tests/test_guest_tools.py.
+Consumers: public_server.py (the conversation turn). Exercised directly by
+tests/test_design_spec.py, and through the streaming route by
+tests/test_design_spec_routes.py.
 """
 from __future__ import annotations
 

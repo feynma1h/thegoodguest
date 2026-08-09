@@ -11,7 +11,7 @@ Three independent estimators feed one MaterialResult per plane:
   cap excludes blown speculars. Below SHELL_MATERIAL_MIN_TEXELS observed
   texels the estimate is None (the viewer's neutral treatment).
   secondary_hex is deliberately always None in v1 (two-tone separation
-  deferred as noisy — the brief's "defer if noisy" clause).
+  deferred as noisy).
 
   FAMILY — classified, confidence-gated. The plane's rectified evidence
   crops go to ONE Anthropic vision call (SHELL_MATERIAL_MODEL, default
@@ -25,8 +25,8 @@ Three independent estimators feed one MaterialResult per plane:
   never wrong-specific; a missing/failed inference NEVER blocks
   shell.json.
 
-  Note on the 0069 brief's "temperature 0": non-default sampling params
-  are rejected (400) on claude-sonnet-5, so temperature is omitted;
+  Note on temperature: non-default sampling params are rejected (400) on
+  claude-sonnet-5, so temperature is omitted (recorded in decision 0070);
   thinking is explicitly disabled (the model's silent default is
   adaptive). Determinism rests on the receiver's write-once noop, with
   MATERIAL_VERSION + model recorded in the doc.

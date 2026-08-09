@@ -38,7 +38,10 @@ before this module existed, so kept-list ordering — and therefore every
 per-object splat cache key — is unchanged by their arrival.
 
 Consumers: process_receiver.py (both the legacy and census two-pass paths),
-shell_receiver.py, server.py, tests/test_privacy_suppression.py.
+shell_receiver.py, tests/test_privacy_suppression.py. The Dockerfile also
+COPYs this module and asserts at build time that the default concept is live
+— privacy.py is a deferred import, so a missing COPY would pass every probe
+and silently ship people again.
 """
 from __future__ import annotations
 

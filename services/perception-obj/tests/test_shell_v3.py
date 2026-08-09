@@ -205,8 +205,8 @@ def _spike_room_bytes() -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# The roomplan method against the committed spike fixture (the RP-3 gate:
-# spike fixture reproduction, offline)
+# The roomplan method against the committed spike fixture (the shell-v3
+# gate: spike fixture reproduction, offline)
 # ---------------------------------------------------------------------------
 
 def _polygon_area_xz(poly: list[list[float]]) -> float:

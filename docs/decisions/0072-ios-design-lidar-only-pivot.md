@@ -11,8 +11,8 @@ screen (start/stop, a frame counter, a tracking-state badge, no camera preview â
 "headless by design"). With the web direction settled and the operator's
 2026-07-24 pivot toward a Pro/LiDAR-first pipeline (board item 7, decision 0071),
 we ran a dedicated Claude Design session for the iOS surface. It returned a
-complete 11-screen spec (`Roomstudio iOS Capture.dc.html`, untracked at repo
-root), faithful to Good Guest and translated to iOS idioms (SF Symbols, native
+complete 11-screen spec (`docs/product/ios-capture-screens.html`), faithful to
+Good Guest and translated to iOS idioms (SF Symbols, native
 sheets, safe areas, haptics/sound).
 
 ## What we chose

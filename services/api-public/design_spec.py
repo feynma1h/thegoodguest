@@ -30,16 +30,18 @@ class as 0080's version-blind shell fast-path that nooped silently for a week.
 Firestore layout (server-only writes; the web client NEVER touches Firestore):
 
   design_specs/{scene_id}__{user_id}
-    {scene_id, user_id, created_at, updated_at, entries: [...]}
+    {scene_id, user_id, spec_version, updated_at, entries: [...]}
 
 The same `{scene_id}__{user_id}` grain as conversations, in a SEPARATE
 document so that clearing a conversation does not silently discard an
 arrangement and vice versa.
 
-ONE ARRANGEMENT PER SCENE+USER, ordered, linear (0133): undo drops the last
-entry, revert drops one object's, and "back to measured" is always one action
-— not a versioning feature but the honesty invariant made operable. No
+ONE ARRANGEMENT PER SCENE+USER, ordered, linear (0133): revert drops the
+named objects' entries or all of them, and "back to measured" is always one
+action — not a versioning feature but the honesty invariant made operable. No
 branches, no named alternatives; re-open when someone wants two side by side.
+(0133 also describes a last-entry undo. It is not built: the repository
+exposes get/put/clear, and the tools are propose and revert.)
 
 F6 cascade note: identical to conversations — specs exist only for scenes
 that reached `ready`, and the scenes TTL sweeps only terminal-failure scenes,
@@ -246,7 +248,7 @@ class SpecEntry:
 class DesignSpec:
     """One arrangement. `entries` is ordered oldest-first; at most one entry
     per key (a second proposal for the same piece REPLACES the first, which
-    is what "move it a bit further" means and keeps undo linear)."""
+    is what "move it a bit further" means and keeps the arrangement linear)."""
     scene_id: str
     user_id: str
     entries: tuple[SpecEntry, ...] = ()

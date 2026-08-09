@@ -2,8 +2,8 @@
 /// output directory: tier dispatch, depth capture (LiDAR devices), per-keyframe
 /// pose/intrinsics/gravity extraction, RoomPlan co-run, and bundle assembly.
 ///
-/// RoomPlan co-run (decisions 0076/0077, chunk RP-6): the production config runs
-/// FIRST with .resetTracking (RoomPlan never resets tracking — the host owns
+/// RoomPlan co-run (decisions 0076/0077): the production config runs FIRST
+/// with .resetTracking (RoomPlan never resets tracking — the host owns
 /// hygiene), then a RoomCaptureSession attaches to the SAME ARSession and runs.
 /// The per-frame copy-out path is untouched; ARFrames are never retained
 /// (10 retained = pipeline death in ~1 s, measured in the spike). Stop order:
@@ -105,19 +105,19 @@ final class CaptureManager: NSObject, ObservableObject {
     @Published private(set) var builtFloorPlan: FloorPlanSnapshot?
     /// Live census from RoomPlan's didUpdate stream (full-room counts, 0076 Q6).
     /// Equality-gated: didUpdate fires on every refinement, and RootFlowView
-    /// observes this manager. Feeds the §3 coverage ticks (RP-7).
+    /// observes this manager. Feeds the §3 coverage ticks.
     @Published private(set) var liveCensus: RoomCensus?
     /// Wall-corner adjacencies measured on the live plan (FloorPlanMath), the
     /// CORNERS tick's input. Updated in step with liveCensus.
     @Published private(set) var liveCornerCount: Int = 0
     /// RoomPlan's latest guidance instruction (sparse — ~one per scan measured).
-    /// Raw relay; the guest-voice mapping rides floorPlanFeed.guidance (RP-7).
+    /// Raw relay; the guest-voice mapping rides floorPlanFeed.guidance.
     @Published private(set) var roomPlanInstruction: RoomCaptureSession.Instruction?
 
-    /// The live floor plan's publisher (RP-7). A separate ObservableObject on
-    /// purpose: camera poses publish at up to ~20 Hz, and @Published state on
-    /// this manager would re-render every observer (RootFlowView) at that
-    /// rate — only the floor-plan subtree observes the feed.
+    /// The live floor plan's publisher. A separate ObservableObject on purpose:
+    /// camera poses publish at up to ~20 Hz, and @Published state on this
+    /// manager would re-render every observer (RootFlowView) at that rate —
+    /// only the floor-plan subtree observes the feed.
     let floorPlanFeed = FloorPlanFeed()
     /// Objects already announced as "new piece" moments (didAdd dedupe).
     private var announcedPieceIds: Set<UUID> = []
@@ -126,10 +126,14 @@ final class CaptureManager: NSObject, ObservableObject {
     private var lastCameraPosition: SIMD2<Float>?
     private var lastCameraForward: SIMD2<Float>?
 
-    /// Root directory for this capture's output (temp, per-session UUID).
+    /// Root directory for this capture's output:
+    /// <Application Support>/<app-bundle-id>/captures/<bundle-id> — never
+    /// temporaryDirectory, which iOS can purge mid-upload (decision 0043).
     /// Structure: <bundleOutputDir>/frames/NNNNNN.jpg
     ///            <bundleOutputDir>/depth/NNNNNN.f32     (LiDAR tier only)
     ///            <bundleOutputDir>/confidence/NNNNNN.png (LiDAR tier only)
+    ///            <bundleOutputDir>/roomplan/room.json   (ROOMPLAN tier only, written on stop)
+    ///            <bundleOutputDir>/roomplan/room.usdz   (ROOMPLAN tier only, best-effort debugging artifact)
     ///            <bundleOutputDir>/bundle.pb            (written on stop)
     private(set) var bundleOutputDir: URL?
 
@@ -185,11 +189,11 @@ final class CaptureManager: NSObject, ObservableObject {
     /// room (LIDAR_ARKIT semantics; the capture stays valid).
     private static let roomPlanEndTimeoutSec: TimeInterval = 15
 
-    // Depth-loss guard (found live at RP-6 Gate 1: the same-runloop co-run
-    // attach shipped a capture with sceneDepth nil on all 268 frames; the
-    // spike's attach always followed later and never saw it). State feeds
-    // RoomPlanWire.shouldReassertDepth; the cure is 0076's measured-survivable
-    // mid-scan config re-run.
+    // Depth-loss guard (found live on the first hardware capture of this
+    // build: the same-runloop co-run attach shipped 268 frames with sceneDepth
+    // nil on every one; the spike's attach always followed later and never saw
+    // it — decision 0079). State feeds RoomPlanWire.shouldReassertDepth; the
+    // cure is 0076's measured-survivable mid-scan config re-run.
     private var depthEverSeen = false
     private var depthReasserted = false
     private var depthlessFrameCount = 0
@@ -236,7 +240,7 @@ final class CaptureManager: NSObject, ObservableObject {
         depthReasserted     = false
         depthlessFrameCount = 0
 
-        // Live floor plan state (RP-7).
+        // Live floor plan state.
         floorPlanFeed.reset()
         announcedPieceIds   = []
         lastCameraPublishAt = 0
@@ -327,8 +331,8 @@ final class CaptureManager: NSObject, ObservableObject {
         let classified = capturedPlaneAnchors.filter { !$0.classification.isEmpty }.count
         logger.info("[CaptureManager] plane anchors at stop: total=\(self.capturedPlaneAnchors.count, privacy: .public) horizontal=\(horiz, privacy: .public) vertical=\(vert, privacy: .public) classified=\(classified, privacy: .public)")
 
-        // Depth observability at stop (the RP-6 Gate-1 depth loss was invisible
-        // until the bundle was parsed server-side — never again).
+        // Depth observability at stop (that depth loss was invisible until the
+        // bundle was parsed server-side — never again).
         let withDepth = capturedFrames.filter { $0.depth != nil }.count
         logger.info("[CaptureManager] keyframes with depth at stop: \(withDepth, privacy: .public)/\(self.capturedFrames.count, privacy: .public) reasserted=\(self.depthReasserted, privacy: .public)")
 
@@ -730,8 +734,8 @@ extension CaptureManager: ARSessionDelegate {
         // sceneDepth: ARDepthData? — LiDAR rear sensor, nil on non-LiDAR devices.
         // capturedDepthData is the front TrueDepth camera; do NOT use it here.
         let depthData   = frame.sceneDepth
-        // Plain values for the floor plan's camera cone (RP-7). Only .normal
-        // frames reach here, so the pose is valid by construction.
+        // Plain values for the floor plan's camera cone. Only .normal frames
+        // reach here, so the pose is valid by construction.
         let cameraTransform = camera.transform
         let pixels = UncheckedSendable(value: pixelBuffer)
 

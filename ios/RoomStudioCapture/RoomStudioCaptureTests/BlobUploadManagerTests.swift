@@ -1786,7 +1786,7 @@ final class BlobUploadManagerTests: XCTestCase {
     }
 
     func test_429_withContext_retriesInProcess_thenDefersTransient_neverFatal() async throws {
-        // The P5(b) invariant, preserved at its new position: a persistent 429 is never
+        // The terminal-failure invariant, preserved at its new position: a persistent 429 is never
         // fatal — it exhausts the in-process schedule (maxRetries sleeps), then defers
         // cross-launch with exactly one counter bump.
         let paths = ["frames/000000.jpg", "bundle.pb"]

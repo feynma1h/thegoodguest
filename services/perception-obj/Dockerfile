@@ -206,7 +206,9 @@ COPY services/perception-obj/compress_enqueue.py /app/compress_enqueue.py
 # Deferred-import smoke: placement/fusion/sampling/budget and the shell_*
 # modules are imported lazily inside /process and /shell, so a missing COPY
 # above passes /health and every pre-traffic probe, then breaks the first
-# real reconstruction (the board-item-1 trap). Fail the BUILD instead.
+# real reconstruction (this happened: placement.py and fusion.py were
+# absent from an image that passed /health and every probe). Fail the
+# BUILD instead.
 # (Light imports only — numpy + roomstudio_schemas; no torch, no model
 # weights.) `anthropic` is on the line because shell_material defers it:
 # a missing pip install would not crash — the 0069 fallback rule would

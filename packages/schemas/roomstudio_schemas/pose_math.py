@@ -19,9 +19,9 @@ This module is small on purpose. If the math here ever changes, every
 consumer in the Python codebase changes with it because they all import
 from here.
 
-Tests live at tools/test_pose_math.py and pin canonical rotations,
-conjugate-is-inverse, length preservation, and a cross-check against
-the rotation-matrix path (R.T @ v == rotate_by_quat(v, conjugate(q))).
+Tests live at packages/schemas/tests/test_pose_math.py and pin canonical
+rotations, conjugate-is-inverse, length preservation, and a cross-check
+against the rotation-matrix path (R.T @ v == rotate_by_quat(v, conjugate(q))).
 """
 from __future__ import annotations
 
@@ -48,9 +48,15 @@ def rotate_vec_by_quat(v: Vec3, q: QuatXYZW) -> Vec3:
     Used in this exact form by glm and Eigen's Quaternion::_transformVector.
 
     For unit quaternions the result is exact to float precision; this
-    function does not renormalize. For non-unit q the result is scaled
-    by ||q||² — the proto contract guarantees unit norm, so we don't pay
-    for a normalize on the hot path.
+    function does not renormalize. A non-unit q does NOT merely scale the
+    result: the 12-mul form equals q · (0, v) · q⁻¹ only when ||q|| == 1,
+    so off the unit sphere it returns a different rotation entirely. With
+    q = 2·(0, √2/2, 0, √2/2) and v = (1, 0, 0) this returns (-3, 0, -4),
+    where 4× the unit answer would be (0, 0, -4). The proto contract
+    guarantees unit norm and ingest enforces it within QUAT_NORM_TOLERANCE
+    (services/api-internal/validation.py `_check_quaternion_norms`), so we
+    don't pay for a normalize on the hot path — normalize first if your q
+    comes from anywhere other than a validated Pose.
     """
     vx, vy, vz = v
     qx, qy, qz, qw = q
@@ -137,7 +143,10 @@ def quat_to_rotmat(q: QuatXYZW) -> np.ndarray:
     rotate_vec_by_quat does one vector at a time.
 
     Like rotate_vec_by_quat, this assumes unit norm (the proto contract)
-    and does not renormalize; a non-unit q scales the result by ||q||².
+    and does not renormalize — and like it, a non-unit q does not scale the
+    result. The 1 - 2(...) form is a rotation matrix only for unit q; off
+    the unit sphere the returned matrix is not a rotation at all. Normalize
+    first if q comes from anywhere other than a validated Pose.
     """
     qx, qy, qz, qw = q
     return np.array([

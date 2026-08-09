@@ -1,5 +1,5 @@
 """Decision 0081 regression pins on real data: the cloud-alignment axis
-instrument on the RP-8 spike scene's six box objects, at achieved values.
+instrument on the spike scene's six box objects, at achieved values.
 
 The probe verdict this productionizes (recorded in decision 0081): every
 appearance-scorer variant (current NCC, NCC@256, gradient NCC, LiDAR
@@ -62,7 +62,7 @@ PINS = {
     "obj_006": (False, 0.0020, (1, 2, 0), 8),
     "obj_007": (True, 0.2063, (0, 2, 1), 8),
 }
-# The RP-8 walk's shipped (extent-best, no-filter) assignments that the
+# The walk's shipped (extent-best, no-filter) assignments that the
 # instrument now overturns — the two operator-visible rotation defects.
 OVERTURNED = {"obj_003": (1, 2, 0), "obj_007": (1, 2, 0)}
 
@@ -202,7 +202,7 @@ class TestAxisCloudPins:
     def test_walk_defects_are_overturned(self, built):
         """The two operator-visible rotation failures (bed 90°, office
         chair 90°): the instrument's winner is a DIFFERENT assignment from
-        the extent-best default that shipped at RP-8."""
+        the extent-best default that shipped before the axis instrument."""
         ctx, room, objs = built
         for oid, shipped_assign in OVERTURNED.items():
             rec = ctx.observations[oid]
@@ -254,7 +254,7 @@ class TestAxisCloudPins:
     def test_no_depth_degrades_to_up_filtered_default(self, built):
         """Warm re-drive shape: same fixtures, no depth accessor — the
         up-filtered extent default ships unresolved (still strictly better
-        than the RP-8 default for the two overturned objects' UP axis)."""
+        than the pre-instrument default for the two overturned objects' UP axis)."""
         ctx = FixtureCtx()
         room = _room()
         ctx.get_depth = None  # type: ignore[assignment]

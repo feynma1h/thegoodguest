@@ -78,10 +78,12 @@ def expiry_for_transition(
     touch=True, value=datetime → schedule expiry (terminal failures).
     touch=True, value=None → clear a pending expiry (revival to queued).
 
-    Only the transitions api-internal itself performs flow through here;
-    perception-obj's release paths (its own receiver_repo) do not stamp, so
-    a perception-side `failed` carries no expire_at until the follow-up
-    recorded in decision 0086.
+    Only the transitions api-internal itself performs flow through here.
+    perception-obj mirrors these semantics in its own receiver_repo
+    (`expiry_for_failed`) — deliberately a duplicate rather than an import,
+    because that image installs packages/schemas only, so there is no shared
+    module to import from. Its env var name and default days are pinned there
+    against this module's constants so the two cannot drift silently.
     """
     if new_status in _EXPIRING_STATUSES:
         return True, now + timedelta(days=_failed_ttl_days())

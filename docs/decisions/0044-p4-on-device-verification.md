@@ -1,11 +1,15 @@
-0044 — P4 on-device verification: finalize hardware-proven (alive-process), relaunch-recovery gap localized
-Date: 2026-06-03
-Status: Decided
-Context
+# 0044 — P4 on-device verification: finalize hardware-proven (alive-process), relaunch-recovery gap localized
+
+**Date:** 2026-06-03
+**Status:** Decided
+
+## Context
+
 P4 (background blob upload, bundle.pb last) had been verified only in simulator and by the 115-test suite. The finalize fix (Anomaly A) and the POST-stall fix (Q1c) were committed/blessed but had zero hardware execution. This note records the on-device verification campaign on a non-LiDAR iPhone17,5 (iOS 26.5), its gate results, the bugs caught during it, and — most importantly — a relaunch-recovery gap that Gate 2b surfaced and that recon localized precisely. It draws the P4-close line for the ARKIT_ONLY tier and hands the recovery gap to P5 fully scoped.
 The P4 finalize/handoff work spans commits eb46df9 → 9155faf → d50f749 (atop earlier P4 wiring, e.g. 8b7d4ff, and the os.Logger switch bf47b4f). HEAD at verification was d50f749.
 This is ARKIT_ONLY only. LiDAR tiers (captureDepth, tier dispatch, the 0032 depth-intrinsics derivation) have zero execution on a non-LiDAR device and remain a separate full-P4-close blocker requiring a Pro device.
-What we verified (gates)
+## What we verified (gates)
+
 Verification rigor was decided as Console-primary + GCS-secondary, with GCS authoritative — because Console/os_log output proved unreliable under app suspension (see "Observability" below), the cloud object is the source of truth for any claim about what completed while the device was non-active. All GCS verification was performed from the Mac (operator gcloud creds), with the phone never re-foregrounded during the check, so "completed under suspension" actually holds.
 
 Gate 1 — upload-start handoff: PASS (commit eb46df9). Handoff line fired; frames + bundle.pb uploaded; Content-Type: application/octet-stream wire-check passed; ingest triggered; ordering held (no bundle_fetch_failed).
@@ -15,7 +19,8 @@ Scope of this PASS: it proves the end-to-end post-session pipeline completes und
 Gate 2b — finalize across process death + relaunch: NEGATIVE (root-caused). See the dedicated section below. This is the headline finding of the campaign.
 Gate 3 — diagnosis capability: UNBLOCKED (detached Console working; see Observability).
 
-The Gate-2b finding: bundle.pb strands on relaunch
+## The Gate-2b finding: bundle.pb strands on relaunch
+
 Observed (bundle 09c50526-d27d-4904-8265-96540319f2e9): with Network Link Conditioner widening the window, all frames uploaded and were verified complete in GCS; → enqueued bundle.pb PUT was logged while the app was alive; the app was then swipe-up force-quit; the device was locked ~5 min; the app was reopened and left foreground ~5 min; bundle.pb never appeared in GCS. No ✗ fatal blob error was logged at any point. The persisted upload-session record showed bundle.pb = pending, all frames uploaded, mint timestamp fresh (well within the 12h staleness guard).
 Root cause (recon-confirmed in source):
 
@@ -25,17 +30,19 @@ Structural limitation. BlobUploadStatus (UploadSessionRecord.swift:41–45) has 
 
 Two process-death routes, same stranded outcome, different signatures: swipe-up force-quit suppresses the OS background-relaunch hook → beginUploadSession is never called → stranded with no fatal logged (matches the observation). OS-kill-under-memory-pressure → drain hook fires → no_context → onFatalBlobError stub → stranded with a fatal logged. We observed only the swipe-up route; the OS-kill route is inferred from source and remains to be observed.
 Why this is not a P4 finalize regression. The finalize fix does what it claims when its trigger fires (Gate 2 proves this). Gate 2b reveals that the relaunch recovery path was never actually built — the persisted record has no launch-time reader. That is a missing recovery feature, correctly surfaced by Gate 2b, not a defect in the finalize fix. Accordingly, P4-close for ARKIT_ONLY finalize verification rests on Gate 2 (alive-process), and the recovery gap is recorded as P5 scope.
-Bugs caught during the campaign (resolved)
+## Bugs caught during the campaign (resolved)
 
 Handoff wire (Gate-1-caught). enqueuePhasOneBlobs had a definition and zero callers; the wire was never built; the 92-green suite missed it (untested integration seam, no CI). Fixed in eb46df9.
 Fast-path routing trap (STEP-0-caught). A bare relaunch enqueue on a fully-uploaded record would enqueue zero tasks and never finalize. The eb46df9 fast path branches on allNonBundlePbBlobsUploaded: true → onAllBlobsUploaded (12h staleness → finalize / 410 re-mint); false → enqueuePhasOneBlobs.
 Duplicate-upload scare → log-rendering artifact. On-device logs showed duplicated frame-upload success and handoff lines, raising a double-invocation hypothesis. Recon proved no double-fire is possible in source. A throwaway .info diagnostic emitting task.taskIdentifier at the delegate callback settled it: every duplicated pair carried the same taskIdentifier (e.g. frame 000308 → taskId 309 twice, status 200) → one task per frame, one completion per task; the duplication is in the Console/os_log stream under the induced lock/unlock, not application behavior. This also confirmed the success log line (BlobUploadManager.swift:389, .debug, keyed on relativePath+bundleId only) is structurally count-blind — it cannot distinguish one task from two. Diagnostic branch deleted after capture.
 
-Observability resolution (Anomaly B)
+## Observability resolution (Anomaly B)
+
 The detached-Console "empty stream" was operator tooling, not the logging unit: log stream targets the Mac's unified log without --device, and Info/Debug are hidden by default. Resolution: Console.app with the device in the sidebar, Include Info + Include Debug, a subsystem predicate (com.roomstudio.RoomStudioCapture), and launching the app from the device icon, not Xcode Run — or xcrun devicectl device syslog stream --device <UDID>. A consequence baked into all gate rigor: log timing under suspension is unreliable (buffering / coalescing / duplication), so GCS is authoritative for any "completed while suspended" claim.
-POST stall (Q1c)
+## POST stall (Q1c)
+
 beginUploadSession (@MainActor) calls URLSession.shared in-process during the 2–20s session-creation window; backgrounding/locking in that window stalls the POST until foreground. Re-confirmed on hardware this campaign — session creation completed only after foregrounding in every run. The fix (branch p4-q1c-upload-session-bgtask @ d9d8354, two-window background-assertion architecture, +18 in UploadCoordinator.swift) is built, blessed, 115-green, and is a separate PR from the finalize work. It is intentionally not in the Gate 2 binary (which isolates the finalize fix). Note: whether session creation succeeds when the app is backgrounded but unlocked (distinct from locked) was not tested and is a POST-fix verification item.
-What we decided
+## What we decided
 
 P4 ARKIT_ONLY finalize is verified for the alive-process path (Gate 2 PASS). Gates 1 and 4 pass. Gate 3 unblocked. This closes P4 finalize verification for the ARKIT_ONLY tier. It is a verification milestone, not a launch-readiness statement — see decision 2.
 The Gate-2b relaunch-stranding gap is recorded, root-caused, and owned by P5 — not fixed in P4. Fixing it requires net-new launch-time rehydration logic that lives in the P5 recovery seams (onSessionExpired / onFatalBlobError), coupled to the idempotency-hardening item (decision 3). It is a pre-launch gap (blocks launch) but not a P4-close blocker (P4-close = finalize verification, met for the alive-process path).
@@ -48,7 +55,7 @@ The coupled recovery cluster for P5 — design together, not piecemeal:
 Firm constraint (not a preference): (c) is a prerequisite for (a). Launch-time rehydration introduces a second beginUploadSession invocation path, which is exactly the re-entry the latch/guard protect against; recon confirms enqueueBundlePb is unconditional, so a second invocation would double-enqueue bundle.pb. The coordinator docstring currently claims "safe to call multiple times" — it is not, until (c) lands.
 POST fix (d9d8354) ships as its own PR, independent of finalize.
 
-What would change this decision
+## What would change this decision
 
 An OS-kill-under-memory-pressure repro showing the relaunch behaves differently from the swipe-up route (e.g. the drain hook successfully re-driving bundle.pb). The diag-bundlepb-reason-public branch (dc552ab) is the tool to read the redacted fatal reason when that route is staged.
 A finalize/commit endpoint on the backend that validates blob presence — the staleness guard and recovery could lean on it instead of the client-side heuristic.

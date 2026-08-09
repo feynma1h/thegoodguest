@@ -1,8 +1,9 @@
 """pytest configuration for services/perception-obj tests.
 
 Adds services/perception-obj to sys.path so that receiver_repo, oidc,
-process_receiver, fcm, and server are importable without installation.
-This mirrors the sys.path approach used in services/api/tests/.
+process_receiver, fcm, and server are importable without installation. The
+service is a flat module set, not a package — its pyproject says so — and the
+api services' test dirs use the same approach.
 """
 import sys
 from pathlib import Path

@@ -47,7 +47,8 @@ Run startup probe never gets a TCP connection, and the deploy rolls back.
 
 Install `roomstudio-schemas` as a proper pip package in the container image,
 using the same two-stage 0005 protobuf workaround already applied in
-`services/api/Dockerfile`. Remove the `sys.path` manipulation and the now-
+`services/api/Dockerfile` (that service was later split into api-internal and
+api-public, which both still build this way). Remove the `sys.path` manipulation and the now-
 unused `sys` and `Path` imports. The import becomes a straightforward
 top-level `from roomstudio_schemas import CaptureBundle`.
 
@@ -67,7 +68,8 @@ makes the dependency visible to tooling.
 
 The cost of the pip install approach is that the Dockerfile must now be
 built from the repo root (to reach `packages/schemas/`). This is already
-the pattern used by `services/api/Dockerfile` and adds negligible complexity.
+the pattern used by `services/api/Dockerfile` (that service was later split into api-internal and
+api-public, which both still build this way) and adds negligible complexity.
 
 ## What would change this decision
 

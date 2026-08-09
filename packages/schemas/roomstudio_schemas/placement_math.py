@@ -838,7 +838,7 @@ def triangulate_rays(
 
 
 # -----------------------------------------------------------------------------
-# Single-view contact solves (decision 0067 chunk D)
+# Single-view contact solves (decision 0067)
 # -----------------------------------------------------------------------------
 #
 # A single view cannot triangulate a depth (one ray, no baseline), so most

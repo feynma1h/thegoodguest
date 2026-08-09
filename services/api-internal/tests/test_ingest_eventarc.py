@@ -26,7 +26,7 @@ NullFcmNotifier is used for all tests. _blob_exists and _fetch_bundle_bytes
 are patched so no GCS credentials are needed.
 
 Run from repo root:
-  pytest services/api/tests/test_ingest_eventarc.py -v
+  pytest services/api-internal/tests/test_ingest_eventarc.py -v
 """
 from __future__ import annotations
 

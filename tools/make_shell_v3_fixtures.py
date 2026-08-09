@@ -1,5 +1,4 @@
-"""Generate shell.json v3 dev fixtures for the web viewer (the RP-3 viewer
-half — decision 0077; gates RP-8's operator walk).
+"""Generate shell.json v3 dev fixtures for the web viewer (decision 0077).
 
 Stages assets responses under gitignored web/public/dev-fixtures/ so
 /viewer?fixture=<dir> renders every shell state offline:
@@ -20,7 +19,7 @@ Stages assets responses under gitignored web/public/dev-fixtures/ so
   scene-247003de-v3env          v3 method "anchor_envelope": the preserved
                                 247003de bundle under the SERVING merge
                                 knobs (SHELL_WALL_MERGE_GAP_M=1.0,
-                                NORMAL_TOL=15 — the e33d98a calibration);
+                                NORMAL_TOL=15 — the 634038b calibration);
                                 manifest + object splat URLs reused verbatim
                                 from the staged scene-247003de fixture (no
                                 PLY copies).
@@ -48,8 +47,7 @@ tools/convert_roomplan_spike.py if absent — deterministic),
 outputs/real-capture-247003de/, and the staged
 web/public/dev-fixtures/scene-247003de/assets.json.
 
-Consumers: the /viewer?fixture= dev workbench; the RP-3 viewer-half
-browser walk.
+Consumers: the /viewer?fixture= dev workbench.
 """
 from __future__ import annotations
 
@@ -99,7 +97,7 @@ STAGED_247_ASSETS = FIXTURES_DIR / "scene-247003de" / "assets.json"
 
 EXPIRES = "2099-01-01T00:00:00+00:00"
 
-# The e33d98a serving calibration — the envelope regression tests verify the
+# The 634038b serving calibration — the envelope regression tests verify the
 # selection under these exact knobs (test_247003de_under_serving_merge_knobs).
 SERVING_WALL_MERGE_GAP_M = 1.0
 SERVING_WALL_NORMAL_TOL_DEG = 15.0
@@ -229,8 +227,8 @@ def make_roomplan_fixtures() -> None:
             "expires_at": EXPIRES,
             "_fixture_provenance": {
                 "generator": "tools/make_shell_v3_fixtures.py",
-                "geometry": "committed spike CapturedRoom fixture via the "
-                            "merged RP-3 code path (verbatim)",
+                "geometry": "committed spike CapturedRoom fixture through the "
+                            "merged shell-v3 code path (verbatim)",
                 "materials": (
                     "observed from outputs/roomplan-spike-bundle frames "
                     f"{frame_indices} with EMPTY exclusion masks (no SAM "

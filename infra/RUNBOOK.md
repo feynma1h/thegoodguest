@@ -227,7 +227,9 @@ grep -rq "FirebaseTokenVerifier" packages/api-core/ \
 
 ```bash
 grep -n "def ingest\|ingest/eventarc\|health" services/api-internal/ingest_server.py
-# Expect: /ingest route, /ingest/eventarc route, /health route all present.
+# Expect: /ingest/eventarc and /health present. There is no bare /ingest route —
+# it was removed when the legacy HTTP ingest surface was dropped; if grep shows
+# one, a legacy handler has been reintroduced.
 ```
 
 ### 0f. Code-level preconditions: eventarc_setup.sh

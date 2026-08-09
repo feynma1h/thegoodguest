@@ -4,6 +4,18 @@ GPU service running VGGT-1B for scene-level geometric reconstruction.
 
 Deployed to Cloud Run with an L4 GPU in `asia-southeast1`.
 
+## PARKED — nothing in the live pipeline calls this
+
+This service exists for the photo-upload path (Android, and iPhones without
+LiDAR), which is deferred until the iOS capture path is solid. The shipping
+pipeline is iOS → `api-internal` → `perception-obj`, and no code in that chain
+references perception-geom. It stays deployed rather than deleted because the
+photo-upload decision is open, not closed; it scales to zero, so an idle
+revision costs nothing.
+
+Read the rest of this file as a description of a service that works, not one
+that is in use.
+
 ## Why split from perception-obj
 
 SAM 3D Objects pins `torch==2.5.1+cu121` while VGGT pins `torch==2.3.1`. These

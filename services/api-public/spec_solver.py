@@ -7,10 +7,10 @@ or declines. Neither is asked for the other's job.
 
 REFUSAL IS THE FEATURE. `{applied: false, reason}` is the same shape as
 `placed: false` with a reason, which this pipeline has shipped since 0052 and
-which 0067 chunk D restated as THE EVIDENCE RULE: a proposed transform ships
-only if it is grounded; a guessed transform is never emitted. Every path out
-of here is either a transform that satisfies every constraint below, or a
-machine reason the guest can say out loud.
+the single-view contact priors (0067) restated as THE EVIDENCE RULE: a
+proposed transform ships only if it is grounded; a guessed transform is never
+emitted. Every path out of here is either a transform that satisfies every
+constraint below, or a machine reason the guest can say out loud.
 
 THE CONSTRAINTS, all measured:
   - the piece's whole footprint lands inside the measured floor polygon
@@ -218,8 +218,8 @@ class Tolerances:
 
       - 4 placed boxes across 3 rooms have footprints that leave the measured
         floor polygon. Real: RoomPlan boxes reach into alcoves and under
-        walls, and 0067 chunk D already carries a floor-hit MARGIN for the
-        same reason.
+        walls, and the single-view contact priors already carry a floor-hit
+        MARGIN (PLACEMENT_FLOOR_HIT_MARGIN_M) for the same reason.
       - 4 pairs across 3 rooms already overlap in footprint — a chair pushed
         under a table is the clearest, and it is physically correct.
 

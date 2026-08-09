@@ -1,5 +1,5 @@
-/// Pins for the floor plan's pure math (chunk RP-7): segment construction,
-/// grid heading, corner adjacency, fit, and the camera plan pose. Synthetic
+/// Pins for the floor plan's pure math: segment construction, grid heading,
+/// corner adjacency, fit, and the camera plan pose. Synthetic
 /// inputs only — the real-room extraction is pinned by FloorPlanFixtureTests
 /// on the spike fixture. No RoomPlan session, no ARKit; simulator-safe.
 

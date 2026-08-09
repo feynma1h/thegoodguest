@@ -4,10 +4,10 @@
 # must explicitly inherit it with the line below, then add extras.
 .gitignore
 
-# ── Large tracked files not needed in any build ──────────────────────────────
-# 9 HEIC photos (~21 MiB total). Tracked by git for local tooling; not needed
-# in Cloud Build. Dropping this alone cuts the repo-root archive from 21 MiB
-# to < 1 MiB.
+# ── Tracked files not needed in any build ────────────────────────────────────
+# Nine synthetic room renders (~720 KB total), used only by
+# tools/build_test_bundle.py and regenerable with tools/make_synthetic_photos.py.
+# No service Dockerfile COPYs from here, so the build context does not need them.
 test_data/
 
 # ── Build / cache artifacts ───────────────────────────────────────────────────
@@ -49,10 +49,18 @@ __MACOSX/
 .claude/
 
 # ── Repo sections never needed in a container build ──────────────────────────
-# docs/ and tools/ contain decision notes, workflow docs, and local scripts.
-# Neither service's Dockerfile COPYs anything from these directories.
+# docs/ is decision notes and workflow docs; no Dockerfile COPYs from it.
 docs/
-tools/
+
+# tools/ is deliberately NOT excluded. It looks like local-only scripting, and
+# was excluded on that reasoning, but services/perception-obj/Dockerfile COPYs
+# tools/spz_encode.mjs — the SPZ encoder the /compress stage runs, and the one
+# the image's build-time smoke exercises. With tools/ excluded, that COPY fails
+# and no perception-obj image can be built at all. The whole directory is
+# ~300 KB of tracked source, so excluding it saved nothing worth this.
+# If a future service needs it out of its context, exclude by file, not by
+# directory: a gitignore-style negation cannot re-include a path inside an
+# already-excluded directory.
 
 # The web app deploys to Firebase Hosting, not Cloud Run; no service Dockerfile
 # COPYs from web/. Its node_modules/ and .next/ are ignored only by the NESTED

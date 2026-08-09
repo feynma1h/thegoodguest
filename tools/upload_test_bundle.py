@@ -9,7 +9,10 @@ GET /scenes/by-bundle/{bundle_id} until a terminal state or timeout.
 Four mutually exclusive modes (positional argument):
 
   happy-path (default)
-      Full end-to-end. Expects scene status=ready → exit 0.
+      Full end-to-end. The synthetic fixture carries non-decodable placeholder
+      pixels, so the ingest validation gate fast-fails it pre-GPU. Expects
+      scene status=failed_invalid → exit 0; any other terminal status, `ready`
+      included, exits 1. See docs/decisions/0025.
 
   skip-blob
       Include a blob in the manifest but never PUT to its session URI.

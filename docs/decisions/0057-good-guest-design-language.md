@@ -9,8 +9,8 @@ gating and conversation sequencing stand)
 0056 codified "Apple premium, not gold premium" as neutral achromatic dark
 chrome, after a warm-luxury pass (Fraunces + amber) was rejected. A
 comprehensive design file then arrived as the new visual authority: **"Good
-Guest — Product System"** (`Good Guest - Product System.dc.html`, untracked at
-repo root as of this writing) — the product personified as a guest in your
+Guest — Product System"** (`docs/product/good-guest-product-system.html`) —
+the product personified as a guest in your
 home: warm, permission-spoken, literary; the room page framed as "a
 conversation happening in a room; everything else is furniture the
 conversation can summon." The founder directed implementing the file as

@@ -9,7 +9,7 @@
 /// the bones, but a few gaps": a coverage claim about a capture that does not
 /// exist, on the one screen whose job is telling the truth before sending.
 ///
-/// Unreachable today (thinCoverage is never set true — task #13), which is exactly
+/// Unreachable today (thinCoverage is never set true), which is exactly
 /// why it is pinned: the trap springs the day coverage gets wired, and by then
 /// nobody will remember the two expressions have to agree.
 
@@ -67,8 +67,10 @@ final class ReviewCopyTests: XCTestCase {
 
     // MARK: - The dormant treatment
 
-    /// The ONE case the gaps copy is for. Unreachable in the app today (task #13),
-    /// so this is also the record of what wiring thinCoverage is supposed to produce.
+    /// The ONE case the gaps copy is for. Unreachable in the app today —
+    /// RootFlowView never passes thinCoverage true, because turning the live
+    /// census into a quality claim is an unmade copy decision. This is also the
+    /// record of what that wiring is supposed to produce.
     func testThinCoverageCopyAppliesOnlyToASendableThinCapture() {
         XCTAssertEqual(text(thin: true), gaps)
     }

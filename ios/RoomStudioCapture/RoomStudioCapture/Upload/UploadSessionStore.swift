@@ -106,7 +106,9 @@ actor UploadSessionStore {
         return updated
     }
 
-    /// Delete the session record for a bundle (upload-success cleanup).
+    /// Delete the session record for a bundle. Called only by CaptureReaper.reclaim
+    /// (a user-seen terminal outcome, decision 0084) and by CaptureStorageSweeper's
+    /// dead-record pass — never on mere upload success.
     func delete(bundleId: String) throws {
         let url = fileURL(for: bundleId)
         guard FileManager.default.fileExists(atPath: url.path) else { return }

@@ -83,25 +83,25 @@ is not "0", fusion additionally:
      `in_plane_resolved`, `sign_flag`, `extent_m_sorted` on every refined
      PLACED object, and `deduped_observations` on every object.
   9. Places single-view objects that can't triangulate against MEASURED
-     room planes (decision 0067 chunk D). An unplaced single-member ray
+     room planes (decision 0067). An unplaced single-member ray
      cluster of a floor/wall-mapped class (contact_priors) gets a contact-
      prior transform — bottom-on-the-detected-floor or ray-onto-a-detected-
      wall — which ships only if it reprojects onto the object's own mask
      (the evidence gate). No planes in the bundle → inert; the object stays
      `insufficient_observations` and the rest of refinement is unchanged.
  10. Applies a room-sanity gate to every PLACED object (the triangulated /
-     silhouette / depth_fit path — NOT chunk D's contact placements, which
-     are self-gated against a measured surface). A placement whose position
-     lands OUTSIDE the measured room (beyond the detected floor rectangle +
-     margin, below the floor, or above the wall top), whose physical size is
-     implausible, or whose class the shell already renders as a structural
-     opening (door/window — a free splat mid-room is double-wrong) is
-     demoted to unplaced with an explicit reason rather than rendered as a
-     guessed transform. This is the "never emit a guessed transform" rule
-     (0052/0067) applied to triangulation blow-ups — the floating mirror,
-     the 5 cm speck, the mid-room door. The outside-room half needs measured
-     planes and is inert without them (the degrade lock); the class/scale
-     halves need no geometry.
+     silhouette / depth_fit path — NOT the single-view contact placements,
+     which are self-gated against a measured surface). A placement whose
+     position lands OUTSIDE the measured room (beyond the detected floor
+     rectangle + margin, below the floor, or above the wall top), whose
+     physical size is implausible, or whose class the shell already renders
+     as a structural opening (door/window — a free splat mid-room is
+     double-wrong) is demoted to unplaced with an explicit reason rather
+     than rendered as a guessed transform. This is the "never emit a guessed
+     transform" rule (0052/0067) applied to triangulation blow-ups — the
+     floating mirror, the 5 cm speck, the mid-room door. The outside-room
+     half needs measured planes and is inert without them (the degrade
+     lock); the class/scale halves need no geometry.
 
 Refinement is CPU-only, bounded (fixed iteration budgets, no RNG —
 identical inputs always produce identical manifests) and budget-aware
@@ -155,7 +155,7 @@ _FOOTPRINT_MIN = float(os.environ.get("PLACEMENT_FOOTPRINT_MIN", "0.5"))
 _INPLANE_MARGIN = float(os.environ.get("PLACEMENT_INPLANE_MARGIN", "0.03"))
 _SIGNFLAG_MARGIN = float(os.environ.get("PLACEMENT_SIGNFLAG_MARGIN", "0.03"))
 _REFINE_MIN_REMAINING_S = float(os.environ.get("PLACEMENT_REFINE_MIN_REMAINING_S", "20"))
-# A single-view contact-prior placement (decision 0067 chunk D) ships only
+# A single-view contact-prior placement (decision 0067) ships only
 # if the proposed transform reprojects onto the object's OWN mask at least
 # this well (tier-1 soft-IoU). The prior closes an under-determined DOF
 # against a measured surface; this gate keeps it from ever emitting a
@@ -186,15 +186,16 @@ _MIN_EXTENT_M = float(os.environ.get("PLACEMENT_MIN_EXTENT_M", "0.08"))
 # SAM object classes the room SHELL already renders as structural openings:
 # door/window are ARKit plane-anchor classifications AND SAM labels — a door
 # is a wall_NN opening, not a free splat floating in the room. Never
-# FREE-place (triangulate) these; a measured wall-contact placement (chunk D)
-# is exempt (it sits on the actual wall, not mid-room). Env-overridable.
+# FREE-place (triangulate) these; a single-view measured wall-contact
+# placement is exempt (it sits on the actual wall, not mid-room).
+# Env-overridable.
 _SHELL_OPENING_CLASSES = frozenset(
     s.strip().lower()
     for s in os.environ.get("PLACEMENT_SHELL_OPENING_CLASSES", "door,window").split(",")
     if s.strip()
 )
-# Placements produced by chunk D's measured-surface contact priors — exempt
-# from the room-sanity gate (they are placed ON the measured floor/wall by
+# Placements produced by the single-view measured-surface contact priors
+# — exempt from the room-sanity gate (they are placed ON the measured floor/wall by
 # construction and carry their own bounds + evidence gates).
 _CONTACT_POSITION_SOURCES = frozenset(
     ("single_view_floor_contact", "single_view_wall_contact")
@@ -203,7 +204,7 @@ _CONTACT_POSITION_SOURCES = frozenset(
 # --- LIDAR_ROOMPLAN long-tail gates (decision 0077; measured on 247003de) ---
 # These three gates run ONLY when the scene carries a parsed CapturedRoom
 # (ctx.get_roomplan) — bundles without one reproduce today's behaviour
-# byte-for-byte (the RP-4 degrade lock).
+# byte-for-byte (the no-CapturedRoom degrade lock).
 #
 # Cross-label containment dedup: two same-frame masks that are the SAME
 # region under different labels (the f242 artwork/painting/mirror triple,
@@ -229,9 +230,13 @@ _DEPTH_TRUST_RMS_M = float(os.environ.get("PLACEMENT_DEPTH_TRUST_RMS_M", "0.05")
 # in v1: scale_suspect + the measured ratio, never a mutation.
 _SPAN_MIN = float(os.environ.get("PLACEMENT_SPAN_MIN", "0.5"))
 
-# --- RP-8 walk classes 2-5 (decision 0082) ----------------------------------
-# Cross-label 3D duplicate gate (walk class 2): two placed objects whose
-# VOLUMES coincide (sampled-point containment either way >= this) under
+# --- Post-fusion placement passes (decision 0082) ---------------------------
+# Knobs for the four defect classes measured on the first real RoomPlan
+# rooms: cross-label 3D duplicates, wall back-face anchoring + floor declip,
+# door-geometry opening demotion, and the on-top-of support snap.
+#
+# Cross-label 3D duplicate gate: two placed objects whose VOLUMES
+# coincide (sampled-point containment either way >= this) under
 # confusable labels are one physical object — the near-identity mask gate's
 # 3D, cross-frame sibling (desk+nightstand, monitor+tv, mirror x2 all
 # survived it at partial mask overlap).
@@ -257,23 +262,23 @@ _CROSS_LABEL_3D_GROUPS = [
     if grp.strip()
 ]
 
-# Wall back-face anchoring (walk class 3): a wall-class splat placed by
-# depth/triangulation renders centered IN the wall; snap its back face onto
-# the nearest measured wall plane instead. Bounds keep the snap a
+# Wall back-face anchoring: a wall-class splat placed by depth or
+# triangulation renders centered IN the wall; snap its back face onto the
+# nearest measured wall plane instead. Bounds keep the snap a
 # refinement, never a teleport.
 _WALL_SNAP_NEAR_M = float(os.environ.get("PLACEMENT_WALL_SNAP_NEAR_M", "0.6"))
 _WALL_SNAP_MAX_M = float(os.environ.get("PLACEMENT_WALL_SNAP_MAX_M", "0.5"))
 _WALL_SNAP_RECT_PAD_M = float(os.environ.get("PLACEMENT_WALL_SNAP_RECT_PAD_M", "0.4"))
 _WALL_ALIGN_MAX_DEG = float(os.environ.get("PLACEMENT_WALL_ALIGN_MAX_DEG", "60"))
-# Floor-class wall declip (class 3's second half): furniture may clip a
+# Floor-class wall declip (the same pass's second half): furniture may clip a
 # measured wall by at most this before being pushed back into the room.
 _WALL_PENETRATION_TOL_M = float(os.environ.get("PLACEMENT_WALL_PENETRATION_TOL_M", "0.08"))
 _WALL_DECLIP_MAX_M = float(os.environ.get("PLACEMENT_WALL_DECLIP_MAX_M", "0.35"))
 
-# Door-geometry demotion (walk class 4): a placed object of a storage-ish
-# label sitting ON a RoomPlan door/window surface is that opening,
-# mislabeled ("cabinet N is actually a door" x5) — demote like the label
-# rule does, keyed on measured geometry instead of the label.
+# Door-geometry demotion: a placed object of a storage-ish label sitting ON
+# a RoomPlan door/window surface is that opening, mislabeled ("cabinet N is
+# actually a door" x5) — demote like the label rule does, keyed on measured
+# geometry instead of the label.
 _OPENING_GEOM_CLASSES = frozenset(
     s.strip().lower()
     for s in os.environ.get(
@@ -285,9 +290,9 @@ _OPENING_GEOM_CLASSES = frozenset(
 _OPENING_GEOM_NEAR_M = float(os.environ.get("PLACEMENT_OPENING_GEOM_NEAR_M", "0.35"))
 _OPENING_GEOM_RECT_PAD_M = float(os.environ.get("PLACEMENT_OPENING_GEOM_RECT_PAD_M", "0.25"))
 
-# On-top-of support snap (walk class 5, v1: RoomPlan box tops only — the
-# measured support surfaces): a small-class object whose bottom hovers or
-# sinks within reach of a box top, over that box's footprint, rests ON it.
+# On-top-of support snap (v1: RoomPlan box tops only — the measured support
+# surfaces): a small-class object whose bottom hovers or sinks within reach
+# of a box top, over that box's footprint, rests ON it.
 _SUPPORT_CLASSES = frozenset(
     s.strip().lower()
     for s in os.environ.get(
@@ -299,25 +304,13 @@ _SUPPORT_CLASSES = frozenset(
 _SUPPORT_SNAP_M = float(os.environ.get("PLACEMENT_SUPPORT_SNAP_M", "0.35"))
 _SUPPORT_XZ_PAD_M = float(os.environ.get("PLACEMENT_SUPPORT_XZ_PAD_M", "0.15"))
 
-# Support snap v2 (decision 0104): the surfaces a small object may rest on
-# when NO RoomPlan box covers it. 0082 deferred these deliberately — "an
-# unmeasured support surface would move one estimate onto another" — and
-# the 0085 walk collected the bill: the lamp and the TV never rest, because
-# the nightstand beneath them is a depth_fit object with no box, so v1 had
-# nothing to snap to. Measured on the walked rooms: the monitor floats
-# 0.221 m above the table it belongs on, the lamp sinks 0.058 m into the
-# nightstand.
-#
-# The v1 objection stands and is answered by ORDERING, not by ignoring it:
-# a measured box top always wins over a splat top when both are in reach,
-# so a splat surface is consulted only where measurement is silent. The
-# supporter must itself be a furniture class that HAS a top surface — a
-# lamp never supports a TV.
-# Deliberately just the one class the walk measured. Floors for bed, sofa,
-# door and wardrobe were drafted and CUT: no walked room produced a
-# collapsed one, and the drafted values demoted legitimate small-geometry
-# test fixtures — i.e. the only evidence they generated was evidence
-# against themselves. Add a class when a walk produces a collapse in it.
+# The default scale-floor map (the rule that reads it is at
+# _LABEL_SCALE_FLOOR_M below): deliberately just the one class the
+# acceptance review measured. Floors for bed, sofa, door and wardrobe were
+# drafted and CUT: no reviewed room produced a collapsed one, and the
+# drafted values demoted legitimate small-geometry test fixtures — i.e.
+# the only evidence they generated was evidence against themselves. Add a
+# class when a real capture produces a collapse in it.
 _LABEL_SCALE_FLOOR_DEFAULT = "tv:0.35|television:0.35"
 
 
@@ -336,11 +329,11 @@ def _parse_scale_floors(raw: str) -> dict[str, float]:
     return out
 
 
-# Label-aware scale floor (walk class 4, decision 0104). The textile
-# silhouette-span gate FLAGS collapse-into-cloud degeneracy but never acts
-# on it (0082, flag-only) — and on the walked rooms it did not even fire
-# for the 0.245 m "television" the operator found hanging in the air where
-# a monitor should be. Flagging is not fixing: a 24 cm television is not a
+# Label-aware scale floor (decision 0104). The textile silhouette-span gate
+# FLAGS collapse-into-cloud degeneracy but never acts on it (0082,
+# flag-only) — and on the reviewed rooms it did not even fire for the
+# 0.245 m "television" the operator found hanging in the air where a monitor
+# should be. Flagging is not fixing: a 24 cm television is not a
 # small television, it is a failed reconstruction, and shipping it as
 # placed asserts a measurement nobody made.
 #
@@ -355,6 +348,20 @@ _LABEL_SCALE_FLOOR_M = _parse_scale_floors(
     os.environ.get("PLACEMENT_LABEL_SCALE_FLOOR_M", _LABEL_SCALE_FLOOR_DEFAULT)
 )
 
+# Support snap v2 (decision 0104): the surfaces a small object may rest on
+# when NO RoomPlan box covers it. 0082 deferred these deliberately — "an
+# unmeasured support surface would move one estimate onto another" — and
+# the acceptance review (decision 0085) collected the bill: the lamp and
+# the TV never rest, because the nightstand beneath them is a depth_fit
+# object with no box, so v1 had nothing to snap to. Measured on the
+# reviewed rooms: the monitor floats 0.221 m above the table it belongs
+# on, the lamp sinks 0.058 m into the nightstand.
+#
+# The v1 objection stands and is answered by ORDERING, not by ignoring it:
+# a measured box top always wins over a splat top when both are in reach,
+# so a splat surface is consulted only where measurement is silent. The
+# supporter must itself be a furniture class that HAS a top surface — a
+# lamp never supports a TV.
 _SUPPORT_SURFACE_CLASSES = frozenset(
     s.strip().lower()
     for s in os.environ.get(
@@ -401,7 +408,7 @@ class RefinementContext:
         intensity-scale-invariant), so callers can cache the small form.
     get_room_planes() -> contact_priors.RoomPlanes | None — optional; the
         measured floor + walls (parsed once via room_planes), used for
-        single-view contact-prior placement (decision 0067 chunk D). Absent
+        single-view contact-prior placement (decision 0067). Absent
         or empty (no plane anchors in the bundle) → priors inert, single-
         view objects stay insufficient_observations (the degrade lock).
     get_roomplan() -> roomplan_room.RoomPlanRoom | None — optional; the
@@ -410,7 +417,7 @@ class RefinementContext:
         for covered categories, plus the three LIDAR_ROOMPLAN long-tail
         gates (cross-label dedup, mirror depth-trust, textile span). Absent
         or None → fusion reproduces the pre-0077 behaviour byte-for-byte
-        (the RP-4 degrade lock, test-pinned).
+        (the no-CapturedRoom degrade lock, test-pinned).
     budget: object exposing .remaining() -> float (seconds), or None for
         no limit (e.g. tests). Refinement is skipped scene-wide if
         remaining() < min_remaining_s when fusion starts, and stops
@@ -944,7 +951,8 @@ def _apply_silhouette_span(obj: dict, ctx: RefinementContext) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# RP-8 walk classes 2-5 (decision 0082): post-fusion placement passes
+# Post-fusion placement passes (decision 0082): cross-label 3D duplicates,
+# wall anchoring + floor declip, door-geometry opening demotion, support snap
 # -----------------------------------------------------------------------------
 
 def _sampled_world_points(obj: dict, ctx: RefinementContext, cap: int = 600):
@@ -1876,7 +1884,7 @@ def _try_single_view_prior(
     obj: dict, cluster: list[dict], ctx: RefinementContext
 ) -> Optional[dict]:
     """Attempt a measured-plane contact placement for an unplaced single-
-    view object (decision 0067 chunk D). Returns a fully-placed object dict
+    view object (decision 0067). Returns a fully-placed object dict
     on success, or None to leave it `insufficient_observations`.
 
     The prior proposes a transform (contact_priors.solve_placement); this
@@ -1983,7 +1991,8 @@ def _position_outside_room(pos: np.ndarray, planes) -> bool:
 def _room_sanity_reason(obj: dict, ctx: Optional[RefinementContext]) -> Optional[str]:
     """Why a placed object should be demoted to unplaced, or None if it
     passes. Applies to the triangulated / silhouette / depth_fit path only —
-    chunk D's measured-surface contact placements are exempt (self-gated).
+    the single-view measured-surface contact placements are exempt
+    (self-gated).
 
       * `represented_as_shell_opening` — a door/window class the shell already
         renders as a wall opening; a free (triangulated) splat for it, at a
@@ -2114,8 +2123,8 @@ def fuse_scene_objects_with_meta(
     # --- LIDAR_ROOMPLAN census pass (decision 0077) -------------------------
     # Box association/placement/suppression run only when the scene carries
     # a parsed CapturedRoom. The three measured long-tail gates are NOT
-    # census-gated anymore — fork (a), resolved always-on at the RP-8 walk —
-    # so a no-census scene differs from the pre-0077 pass exactly by those
+    # census-gated — they run for every refined scene (see below) — so a
+    # no-census scene differs from the pre-0077 pass exactly by those
     # gates' effects (the revised degrade pin covers this).
     room = None
     if ctx.get_roomplan is not None:
@@ -2136,12 +2145,11 @@ def fuse_scene_objects_with_meta(
 
     # The three measured long-tail gates (cross-label near-identity dedup,
     # mirror depth-trust, textile silhouette-span below) run for EVERY
-    # refined scene, census or not — fork (a) resolved always-on by the
-    # operator at the RP-8 walk (they were measured on 247003de, a
-    # LIDAR_ARKIT capture the census keying left unprotected; the walk also
-    # found cross-label duplicates on census scenes, so the gates are the
-    # floor, not the ceiling). Box passes below stay census-gated: they
-    # need boxes.
+    # refined scene, census or not: they were measured on 247003de, a
+    # LIDAR_ARKIT capture census keying would leave unprotected, and
+    # cross-label duplicates were also observed on census scenes — so the
+    # gates are the floor, not the ceiling. Box passes below stay
+    # census-gated: they need boxes.
     observations, cross_records = _dedup_cross_label(observations, ctx)
     for rec in cross_records:
         key = (rec["frame_index"], rec["kept_mask_index"])
@@ -2218,7 +2226,7 @@ def fuse_scene_objects_with_meta(
                     refinement_skipped = True
             elif obj.get("reason") == "insufficient_observations":
                 # Single-view object: a measured-plane contact prior may
-                # place it (decision 0067 chunk D). Budget-gated like the
+                # place it (decision 0067). Budget-gated like the
                 # refine path — an object is fully placed-and-finalized or
                 # left legacy-unplaced, never half-done.
                 if _budget_allows(ctx):
@@ -2251,14 +2259,15 @@ def fuse_scene_objects_with_meta(
             if bi is not None:
                 fused[i] = _suppress_as_box_duplicate(obj, bi)
 
-    # --- RP-8 walk placement passes (decision 0082) -------------------------
+    # --- post-fusion placement passes (decision 0082) -----------------------
     # Order matters: opening demotion first (a mislabeled door needs no
     # snapping), then the 3D duplicate gate over raw placements, then the
     # geometric snaps (wall back-face / declip / support). All bounded
     # numpy; one budget check for the block keeps the honesty contract.
     # Pure and IO-free, so it runs always-on beside the other long-tail
-    # gates (the fork-(a) precedent) and BEFORE the budget-gated block —
-    # a demoted object must not then be snapped onto a support.
+    # gates (same reasoning: a census-keyed gate leaves LIDAR_ARKIT scenes
+    # unprotected) and BEFORE the budget-gated block — a demoted object
+    # must not then be snapped onto a support.
     for i in range(len(fused)):
         fused[i] = _apply_label_scale_floor(fused[i])
 

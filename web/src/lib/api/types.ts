@@ -38,7 +38,7 @@ export interface WorldTransform {
   position: [number, number, number]; // meters, ARKit world frame (+Y up)
   rotation_xyzw: [number, number, number, number]; // unit quaternion
   /** Uniform (the shipped server contract) or per-axis — the latter only
-   * from staged RP-8 A/B fixtures; see PositionedSplat.scale. */
+   * from staged A/B fixtures; see PositionedSplat.scale. */
   scale: number | [number, number, number];
 }
 
@@ -47,7 +47,13 @@ export interface FusedObject {
   object_id: string;
   label: string;
   placed: boolean;
-  method: "depth_fit" | "layout_triangulated" | null;
+  method:
+    | "depth_fit" // fusion.py: LiDAR depth-cloud fit
+    | "layout_triangulated" // fusion.py: multi-view ray triangulation
+    | "roomplan_box" // box_placement.py: anchored to a measured RoomPlan box
+    | "single_view_floor_contact" // contact_priors.py: dropped onto the floor
+    | "single_view_wall_contact" // contact_priors.py: onto the nearest wall
+    | null;
   reason?: string; // present when placed is false
   splat_gcs_uri: string | null;
   world_transform: WorldTransform | null;
@@ -287,7 +293,7 @@ export interface PositionedSplat {
   rotation_xyzw: [number, number, number, number];
   /**
    * Uniform splat-local -> world scale (the shipped v1 contract), or a
-   * per-axis [x, y, z] scale — the RP-8 uniform-vs-stretch A/B side, fed
+   * per-axis [x, y, z] scale — the uniform-vs-stretch comparison side, fed
    * only by staged fixtures today. Decision 0077 defers the per-axis knob
    * server-side; if it ever ships, this union is its landing shape.
    */
@@ -434,7 +440,9 @@ export interface AssembledScene {
  * Map an assets response to the viewer's input: placed fused objects whose
  * splat URI has a signed URL become PositionedSplats; everything else is
  * reported as unrenderable. The shell doc, when ready, becomes ShellPlanes
- * (floor first, then walls) with signed texture URLs resolved.
+ * (floor first, then walls) carrying each plane's parametric material —
+ * measured albedo, roughness and confidence-gated family. Nothing
+ * shell-borne is fetched or signed (decision 0069).
  */
 export function assembleScene(assets: SceneAssets): AssembledScene {
   const splats: PositionedSplat[] = [];

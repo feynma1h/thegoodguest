@@ -7,7 +7,8 @@ TokenVerifier interface with two implementations:
 firebase-admin is imported lazily so this module is safe to import in tests
 without the library installed or Firebase credentials configured.
 
-Consumers: public_server.py (POST /captures/{bundle_id}/upload_session).
+Consumers: public_server.py — every Firebase-authenticated route, via
+_verify_bearer.
 """
 from __future__ import annotations
 
@@ -37,8 +38,9 @@ class FirebaseTokenVerifier(TokenVerifier):
 
     Initializes the default Firebase app from Application Default Credentials
     on first instantiation (Cloud Run ADC).  If the app is already initialized,
-    reuses it. (In this service the verifier is a lazy singleton and nothing
-    else initializes firebase_admin, so the reuse branch is defensive only.)
+    reuses it. (DELETE /account also initializes firebase_admin — see
+    public_server._get_account_deleter — so whichever path runs first wins and
+    the reuse branch is genuinely reached, not merely defensive.)
 
     firebase-admin is imported lazily so importing this module in tests is safe.
     """

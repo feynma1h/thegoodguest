@@ -3,11 +3,18 @@
      Sets RUN_INTEGRATION_TESTS=1 in the Test action environment so
      UploadSessionClientTests executes against the live api-public endpoint.
 
-     IMPORTANT: this scheme ARMS the integration tests.
-     Use -scheme RoomStudioCapture (auto-created) for normal CI runs.
-     Use this scheme only when you have:
-       - GoogleService-Info.plist present in the app target, AND
-       - network access to api-public-q62kcditqa-as.a.run.app.
+     IMPORTANT: this scheme ARMS the integration tests, and it is the ONLY
+     scheme in the project — there is no shared default scheme to fall back
+     to, so every run of the suite hits the live endpoint.
+
+     For the offline subset, run this scheme with
+       -skip-testing:RoomStudioCaptureTests/UploadSessionClientTests
+     which is what .github/workflows/ios.yml does.
+
+     Running it unskipped needs:
+       - GoogleService-Info.plist present in the app target (gitignored),
+       - network access to api-public-q62kcditqa-as.a.run.app, and
+       - headroom in the per-UID daily capture ceiling that endpoint enforces.
 -->
 <Scheme
    LastUpgradeVersion = "2650"

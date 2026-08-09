@@ -45,9 +45,12 @@ would also mean touching api-public in the same window as a payload change,
 for no user-visible gain.
 
 The fix, when it is worth doing, is already shaped by precedent and should be
-cheap: decision 0074 found the identical serial-round-trip pattern in
-`_mint_all` and cured it with a bounded order-preserving pool
-(`UPLOAD_SESSION_MINT_CONCURRENCY`). Filtering to placed-only is a **separate**
+cheap: the identical serial-round-trip pattern in `_mint_all` was cured with a
+bounded order-preserving pool (`UPLOAD_SESSION_MINT_CONCURRENCY`) — no note
+records it, so the reasoning lives in that function's docstring in
+`packages/api-core/roomstudio_api_core/upload_session_repo.py`, with the
+measurement that forced it (an 878-path manifest at ~80 s serial, past the iOS
+client's 60 s timeout). Filtering to placed-only is a **separate**
 and independently correct change — but it narrows the response contract, so
 check what else consumes `asset_urls` first. Two consumers to clear before
 narrowing: the shell's texture URIs join the same signing walk (0066), and

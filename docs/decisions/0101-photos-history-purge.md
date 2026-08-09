@@ -1,15 +1,15 @@
 # 0101 — Purging the real room photos from git history
 
 **Date:** 2026-08-08
-**Status:** Decided; working-tree half shipped; **history purge PREPARED AND
-REHEARSED BUT NOT YET EXECUTED** — it must run before the repo's first push
+**Status:** DONE — working tree and history both purged, before the first push
 
-> **OPEN — the nine HEIC blobs are still reachable in this repo's history.**
-> The purge command below was blocked by a tooling permission guard on
-> history-rewriting operations and needs the operator to run it (or to grant
-> the permission). Everything it depends on is done and verified; the two
-> commands in "What we chose" are the whole remaining operation. **Do not push
-> this repo to any remote until they have run.**
+> **CLOSED.** The operator ran the commands below on 2026-08-08 and the repo
+> gained its remote afterwards. Verified at the time and again on 2026-08-09:
+> `git rev-list --objects --all | grep -c HEIC` returns 0,
+> `git log --all -- 'test_data/photos/*.HEIC'` returns no commits, and the
+> blobs are absent from the very first tree that carried them. The "do not
+> push until this runs" hold that used to sit here is discharged; `origin` is
+> github.com/feynma1h/roomstudio and `main` tracks it.
 
 ## Context
 

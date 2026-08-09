@@ -1,12 +1,13 @@
 """ARKit plane-anchor interpretation — THE single module that turns a
 bundle's measured PlaneAnchor set into room planes (decisions 0066/0069;
-extraction chartered by 0067's brief §room_planes and 0069's brief chunk 1).
+the extraction into ONE shared interpretation module is chartered by
+decision 0067 and consumed by 0069's closure).
 
 Owns: per-anchor parsing into world frame, floor selection (0066's
 lowest-cluster semantics), wall coplanar merge (union-find), and the
 plane/ray query helpers consumers build on. Both the shell pipeline
 (shell_geometry → closure → shell_receiver) and placement's plane-anchor
-contact priors (0067 chunk D) read anchors through here — do NOT
+contact priors (decision 0067) read anchors through here — do NOT
 re-implement anchor interpretation elsewhere.
 
 Nothing here is inferred: every emitted plane is a merge of anchors ARKit
@@ -38,7 +39,7 @@ Pure numpy + proto in, dataclasses out. No GCS, no PIL, no model imports —
 unit-testable against hand-built anchors with known ground truth.
 
 Consumers: shell_geometry.py (assembly + closure), shell_receiver.py,
-tests/test_shell_geometry.py; placement chunk D when it lands.
+contact_priors.py (single-view contact priors), tests/test_shell_geometry.py.
 """
 from __future__ import annotations
 
@@ -55,9 +56,13 @@ _VERTICAL = PlaneAlignment.Value("VERTICAL")
 
 # ---------------------------------------------------------------------------
 # Tunables (env-overridable; one-capture-calibrated defaults like the
-# sampling/budget knobs — SHELL_WALL_MERGE_GAP_M / SHELL_WALL_NORMAL_TOL_DEG
-# carry the V3-walk calibration from f3d70236, decision 0066 + commit
-# e33d98a's deploy env; kept mirrored there)
+# sampling/budget knobs). NOTE: SHELL_WALL_MERGE_GAP_M and
+# SHELL_WALL_NORMAL_TOL_DEG are NOT calibrated here — the values measured
+# against f3d70236 (1.0 / 15, decision 0066, commit 634038b) are set as
+# deploy env in infra/deploy_perception.sh and are what production runs.
+# The defaults below (0.35 / 12) are what an offline run gets unless it
+# overrides them, as the real-data pins do explicitly — see
+# tests/test_shell_closure_real_data.py and tools/make_shell_v3_fixtures.py.
 # ---------------------------------------------------------------------------
 
 # Minimum anchor area to be a floor candidate. Rejects noise specks that

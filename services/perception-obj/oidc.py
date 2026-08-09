@@ -15,10 +15,16 @@ Two claims are checked:
 google.oauth2.id_token.verify_oauth2_token is used for verification.
 The google-auth library is already available in the runtime environment.
 
-OIDCVerifier.verify() is called once per /process request before any
-state is read or mutated.
+OIDCVerifier.verify() is called once per Cloud Tasks request, before any
+state is read or mutated. Each task route constructs its OWN verifier with
+its own audience (RECEIVER_URL + the route path), so a token minted for
+one route cannot replay against another: server.py's
+_get_oidc_verifier (/process), _get_shell_oidc_verifier (/shell) and
+_get_compress_oidc_verifier (/compress).
 
-Consumers: process_receiver.py (POST /process route).
+Consumers: server.py (one verifier per Cloud Tasks route);
+process_receiver.py, shell_receiver.py, compress_receiver.py (OIDCError
+handling).
 """
 from __future__ import annotations
 

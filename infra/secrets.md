@@ -87,10 +87,56 @@ The cloudbuild configs reference `:latest`, so new builds automatically use the
 new version. Existing deployed services aren't affected (weights are already in
 the image).
 
+## `anthropic-api-key`
+
+Anthropic API key, created 2026-07-21. Unlike `hf-token` this one IS read at
+runtime, by two services:
+
+- **api-public** — the conversation guest model (decision 0058). Required in
+  production: `_PRODUCTION_REQUIRED_VARS` in `services/api-public/public_server.py`
+  lists it, so a missing key fails startup rather than degrading silently.
+- **perception-obj** — shell material family inference (decision 0069), read at
+  `services/perception-obj/shell_material.py:195`. Absent here it degrades by
+  design: family inference switches off and planes ship the measured albedo as a
+  clean matte.
+
+Both mount it as `ANTHROPIC_API_KEY` from `:latest` via `--set-secrets`
+(`infra/deploy_api_public.sh`, `infra/deploy_perception.sh`).
+
+### Grants
+
+Secret-scoped `roles/secretmanager.secretAccessor`, never project-scoped. Both
+deploy scripts assert their own binding idempotently on every run —
+`deploy_api_public.sh` for `api-public-runtime@`, and `ensure_obj_runtime_iam()`
+in `deploy_perception.sh` for `perception-obj-runtime@`. api-public's also fails
+fast if the secret is absent, since a `--set-secrets` deploy against a missing
+secret fails later with a much less legible error.
+
+A third accessor is currently bound and is NOT asserted by any script: the
+default compute SA `502805861152-compute@developer.gserviceaccount.com`. It is a
+leftover from before the dedicated runtime service accounts existed and is worth
+revoking under decision 0090's least-privilege pass — check for a live consumer
+first.
+
+```bash
+gcloud secrets get-iam-policy anthropic-api-key --project=roomstudio
+```
+
+### Rotation
+
+Add a new version. Both services mount `:latest`, which Cloud Run resolves when
+an instance starts — so a redeploy guarantees the new version, and a revision
+left running keeps whatever its live instances resolved at startup.
+
+```bash
+read -s ANTHROPIC_KEY
+printf '%s' "$ANTHROPIC_KEY" | gcloud secrets versions add anthropic-api-key \
+    --project=roomstudio --data-file=-
+unset ANTHROPIC_KEY
+```
+
 ## Future secrets
 
-Add new secrets here as they're created. Likely future additions:
+Add new secrets here as they're created. Likely future addition:
 
-- `anthropic-api-key` — for the reasoning service's Claude calls
 - `gemini-api-key` — alternative reasoning model
-- `supabase-service-key` — when the API service connects to the database

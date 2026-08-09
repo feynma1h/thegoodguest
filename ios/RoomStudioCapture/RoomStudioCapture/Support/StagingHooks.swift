@@ -23,9 +23,15 @@
 ///   fatalBlob:     "frames/000002.jpg" — feed a fake 404: TERMINAL
 ///                  classification, sibling-task cancellation across the live
 ///                  concurrent PUTs, `.failed` + reason persisted → banner.
-///   suspendBundlePb: true — enqueue the bundle.pb PUT then suspend the task:
-///                  the on-disk state is exactly "enqueued, not landed", so a
-///                  force-quit + reopen exercises Gate 2b deterministically.
+///   suspendBundlePb: true — create the bundle.pb PUT task and never call
+///                  resume(). An in-process suspend() is ignored by
+///                  nsurlsessiond on a background session (measured on device
+///                  2026-08-08), so withholding resume is what actually
+///                  produces "enqueued, not landed" — and it holds, rather
+///                  than for a sub-second window no human can hit. A
+///                  force-quit + reopen then exercises the relaunch-recovery
+///                  route deterministically; the relaunch re-enqueues and
+///                  resumes normally.
 ///   exitAfterCompletions: N — abrupt exit(0) after the Nth successful blob
 ///                  completion: an OS-kill-shaped death with sibling transfers
 ///                  in flight, for the background-relaunch (.task fires?) probe.

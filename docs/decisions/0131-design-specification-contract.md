@@ -1,7 +1,11 @@
 # 0131 — The Design Specification: a proposal sitting beside the measurement, never over it
 
 **Date:** 2026-08-09
-**Status:** Decided (design; nothing built — extends 0056's stage-2 half)
+**Status:** Decided and BUILT, not yet deployed — `design_spec.py`,
+`spec_solver.py`, and `room_geometry.py` in api-public, with the web overlay in
+`web/src/lib/designSpec.ts`. Merged to `main` 2026-08-09; api-public still
+serves the pre-stage-2 image, and the live voice evals decision 0058 requires
+on a PROMPT_VERSION bump have not run. Extends 0056's stage-2 half.
 
 ## Context
 

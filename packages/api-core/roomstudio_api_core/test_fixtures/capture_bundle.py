@@ -129,8 +129,11 @@ def build_capture_bundle(
             JSON (json_gcs_path, the geometry source of truth per decision
             0077) and the USDZ debugging artifact (only meaningful for
             lidar-roomplan tier).
-        use_hardware_id_fallback: leave device_id empty; set hardware_id
-            instead. Tests the FALLBACK_HARDWARE_ID ingester path.
+        use_hardware_id_fallback: leave device_id empty and set hardware_id
+            instead. The hardware_id fallback was removed; the ingester now
+            REJECTS such a bundle as failed_invalid with error code
+            'device_id_missing' (validation check 3). This exists to
+            exercise that rejection.
         plane_anchor_count: number of PlaneAnchor entries to add (decision
             0066). 0 (default) mirrors pre-plane clients — the shell's
             "unavailable" degrade path. When > 0, the first anchor is a

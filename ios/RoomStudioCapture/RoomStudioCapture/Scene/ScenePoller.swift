@@ -5,7 +5,7 @@
 /// stop (failed_incomplete — re-upload needed from the other front).
 ///
 /// FOREGROUND-ONLY: uses URLSession.shared, not the background blob session.
-/// Polling must be paused when the app backgrounds (SceneStatusView handles this).
+/// Polling is paused when the app backgrounds (RootFlowView's scenePhase handler).
 ///
 /// Polling is the authoritative channel for scene-completion detection — FCM
 /// push (ready/failed) is a best-effort accelerant, not a substitute: it can
@@ -26,9 +26,12 @@
 ///      decision 0045). Starts polling immediately only if the status screen is
 ///      already visible. Otherwise a no-op — the .complete disk record is the
 ///      shared seam; onAppear reads it independently.
-///   2. start(bundleId:) — called directly from SceneStatusView.onAppear.
+///   2. start(bundleId:) — called by RootFlowView (the connection-trouble "Try now"
+///      resume and resumePollIfUploadFinished); also by SceneStatusView.onAppear on
+///      the retained ContentView rollback path.
 ///
-/// Read by: SceneStatusView, BlobUploadManager (one outbound call only).
+/// Read by: RootFlowView (routing + lifecycle), BlobUploadManager (one outbound
+/// call), CaptureReaper (liveGET), SceneStatusView (rollback path only).
 
 import Combine
 import Foundation
@@ -88,11 +91,11 @@ final class ScenePoller: ObservableObject {
     // Cadence values sanity-checked against the first real capture
     // (2026-07-21, scene 25a14caf): the 2 s window catches the ~3–5 s
     // pre-GPU failed_invalid fast-fail; the 10 s/30 s tiers are proportionate
-    // to a pipeline whose GPU cold start alone is ~3.5 min. Deliberately NOT
-    // retuned further yet: the perception envelope is broken for real-sized
-    // captures (no frame sampling, ~10× over budget) and its fix changes the
-    // latency profile these values would be tuned against. Revisit after the
-    // envelope fix ships real completion times.
+    // to a pipeline whose GPU cold start alone is ~3.5 min. Not re-derived
+    // since: the perception envelope fix (frame sampling + budget admission)
+    // has shipped, so real completion times now exist — these constants have
+    // simply not been tuned against them. Revisit with production /process
+    // durations.
     /// Elapsed < cadenceShortWindow  → cadenceShort between ticks.
     static let cadenceShortWindow:  TimeInterval = 30
     /// Elapsed < cadenceMediumWindow → cadenceMedium between ticks.
@@ -129,9 +132,10 @@ final class ScenePoller: ObservableObject {
     /// cleared by reset()). While set, notifyBundleComplete ignores completions
     /// for OTHER bundles: a previous capture's cross-launch upload finishing
     /// mid-flight would otherwise start polling the OLD bundle and render its
-    /// doorway over the new capture's wait — the surviving RootFlowView-era form
-    /// of the room-shell-residue (3) stale-panel finding. nil = no active
-    /// expectation; any completion may start (the restore/re-entry path).
+    /// doorway over the new capture's wait — the same class of stale-panel
+    /// defect the status surface had before, in its RootFlowView-era form.
+    /// nil = no active expectation; any completion may start (the
+    /// restore/re-entry path).
     private(set) var expectedBundleId: String?
 
     /// The long-running poll loop task.
@@ -246,7 +250,8 @@ final class ScenePoller: ObservableObject {
     }
 
     /// Visibility gate for the foreground gating rule (see decisions 0046/0047):
-    /// called from SceneStatusView.onAppear / onDisappear.
+    /// called from RootFlowView (the wait screen's onAppear/onDisappear and the
+    /// scenePhase handler).
     func setVisible(_ visible: Bool) {
         isVisible = visible
     }

@@ -10,12 +10,12 @@
 ///
 /// NO RETRY AFFORDANCE, deliberately: this banner surfaces only
 /// `uploadPhase == .failed` records (see `UploadFailureMonitor`), which are
-/// TERMINAL by construction (P5(b) — DEFERRED paths retry cross-launch without
-/// setting `.failed`). `BlobUploadManager.rehydrateBundle` refuses `.failed`
-/// records, so a "try again" here would be a silent no-op. It is a truthful
-/// notification with one honest action — dismiss — matching the original
-/// `UploadFailureView` semantics. A real re-drive belongs to the deferred
-/// terminal-state-handling design, not a dead button.
+/// TERMINAL by construction: DEFERRED paths retry cross-launch without ever
+/// setting `.failed` (decision 0045). `BlobUploadManager.rehydrateBundle`
+/// refuses `.failed` records, so a "try again" here would be a silent no-op.
+/// It is a truthful notification with one honest action — dismiss — matching
+/// the original `UploadFailureView` semantics. A real re-drive belongs to the
+/// deferred terminal-state-handling design, not a dead button.
 ///
 /// The room is not named: iOS holds no room name (rooms are named on the web
 /// from captured data), so the copy stays general rather than inventing one.

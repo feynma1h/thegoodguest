@@ -1,13 +1,12 @@
-# Production hosting flip — making roomstudio.web.app public
+# Production hosting — roomstudio.web.app
 
-The web app has only ever been deployed to the `preview` channel. This file is
-the operator-run procedure for releasing the `live` channel, and the record of
-which preconditions were verified (and when) so the flip is a decision rather
-than an investigation.
+The `live` channel was released on 2026-08-08; `https://roomstudio.web.app`
+serves the app. This file is the record of which preconditions were verified
+(and when), and the operator-run procedure for redeploying that channel.
 
 `infra/RUNBOOK.md` is the Cloud Run deploy runbook and is unaffected by this —
-no backend change is required to go live. **This is a one-line command guarded
-by a judgement call, not a technical project.**
+no backend change is required to release the site. **This is a one-line command
+guarded by a judgement call, not a technical project.**
 
 Everything under "Preconditions" was verified live on 2026-08-08 against
 serving revision `api-public-00032-has` and preview channel release
@@ -29,8 +28,8 @@ cd web && npm run build && npx firebase deploy --only hosting --project roomstud
 is not optional: `firebase deploy` uploads whatever is already in `out/`, and a
 stale `out/` is how you ship last week's bundle to the public URL.
 
-After it completes, `https://roomstudio.web.app` serves the app instead of
-"Site Not Found". The `preview` channel is untouched and keeps its own URL.
+Each run cuts a new release on `live`. The `preview` channel is untouched and
+keeps its own URL.
 
 ---
 
@@ -50,25 +49,25 @@ starting point.
 | 6 | Nothing private is served | `hero/piece.json`, `hero/*.ply` and `dev-fixtures/**` are in the hosting `ignore` list and return 404 on the deployed origin — confirmed by request, not by reading config. This lock is load-bearing: `next build` copies `public/` into `out/` **gitignore and all**, so a 44 MB splat of a real room is otherwise one deploy from a public URL. Re-confirm it after the flip. |
 | 7 | Abuse surface | The board-4 gate for "first non-developer user" has shipped: per-UID daily capture ceiling (12) and mint quota (50), transactional bundle ownership, semantic manifest validation, scene TTLs. Live-probed on the serving revision. |
 
-## Preconditions that are NOT technical — read before running
+## Open items that are NOT technical
 
 - **Terms §9–§11 have not been read by an Indian lawyer.** They are specific
   rather than boilerplate, and the §11 liability cap can be void against a
   consumer under Consumer Protection Act 2019 §2(46). The service is free, so
   the cap's first limb ("the greater of what you paid…") is always zero and the
-  clause is doing all the work. Publishing the site publishes the Terms.
-- **Sign-in on production is unproven end to end.** Gate B was passed on the
-  preview channel with a real Google account (decision 0094). The production
-  origin satisfies every precondition above, but no one has completed a sign-in
-  on `roomstudio.web.app` itself. Expect to do that as step 1 of the post-flip
-  check, in an ordinary browser — automation panes block the popup.
+  clause is doing all the work. The site is public, so the Terms are published.
+- **Sign-in on production is unproven end to end.** It was passed on the preview
+  channel with a real Google account (decision 0094). The production origin
+  satisfies every precondition above, but no one has completed a sign-in on
+  `roomstudio.web.app` itself — see "Still owed" below. It needs an ordinary
+  browser; automation panes block the popup.
 
 ---
 
-## Post-flip verification
+## Verification after every deploy
 
-Run against `https://roomstudio.web.app`. The first three are cheap and catch
-the failure modes this project has actually hit.
+Run against `https://roomstudio.web.app`. These are cheap and catch the failure
+modes this project has actually hit. All three passed on the released site.
 
 ```bash
 P=https://roomstudio.web.app
@@ -78,7 +77,10 @@ for f in /hero/piece.json /hero/piece.ply /dev-fixtures/x; do
 curl -s -D - -o /dev/null $P/ | grep -i content-security-policy                      # wasm-unsafe-eval present
 ```
 
-Then, in an ordinary browser (not an automation pane):
+## Still owed on the production origin
+
+None of these has been done on `roomstudio.web.app` itself — they were passed on
+the preview channel only. In an ordinary browser (not an automation pane):
 
 1. Sign in with Google. Expect the existing account, not a new one — decision
    0094's never-create guard means a brand-new identity here is a **failure**,
@@ -93,11 +95,32 @@ Then, in an ordinary browser (not an automation pane):
 
 ## Rollback
 
-Firebase Hosting keeps every release. To revert immediately:
+Firebase Hosting keeps every release. **There is no `hosting:rollback` command**
+— the pinned firebase-tools 15.24.0 registers `hosting:clone`, `hosting:disable`
+and the `hosting:channel:*` / `hosting:sites:*` families, and nothing else under
+`hosting`. Reaching for a rollback subcommand during an incident fails at the
+first keystroke.
+
+The primary route is the Firebase console — Hosting → Release history →
+Rollback — because it can pick **any** prior release, which the CLI can only do
+if you already know the version id.
+
+By CLI, `hosting:clone <source> <targetChannel>` re-releases an existing version
+onto `live`. Source takes either `<site>:<channel>` or `<site>@<version>`:
 
 ```bash
-cd web && npx firebase hosting:rollback --project roomstudio
+# Re-release a known prior version (version id from the console's release list)
+cd web && npx firebase hosting:clone roomstudio@VERSION_ID roomstudio:live
+
+# Or re-release whatever the preview channel currently holds — only correct if
+# preview is actually the content you want; it is not necessarily the release
+# that preceded the bad one.
+cd web && npx firebase hosting:clone roomstudio:preview roomstudio:live
 ```
+
+`hosting:disable` is the blunt option: it posts a `SITE_DISABLE` release and the
+site stops serving immediately, which beats serving a broken build while you
+find the right version. Deploying again re-enables it.
 
 There is no backend state to unwind — going live changes no data, mints no
 credential, and alters no Cloud Run revision. The blast radius is the public

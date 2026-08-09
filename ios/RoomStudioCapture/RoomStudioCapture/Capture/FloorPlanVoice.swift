@@ -1,6 +1,6 @@
-/// The live floor plan's language decisions (chunk RP-7), as pure tables per
-/// the house pattern (RoomPlanWire, WaitFlowState): what a box is called, what
-/// a "new piece" moment says, how RoomPlan's sparse instructions sound in the
+/// The live floor plan's language decisions, as pure tables per the house
+/// pattern (RoomPlanWire, WaitFlowState): what a box is called, what a "new
+/// piece" moment says, how RoomPlan's sparse instructions sound in the
 /// guest's voice, which line the capture screen speaks when several compete,
 /// and how the census maps onto the §3 coverage ticks.
 ///

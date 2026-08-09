@@ -12,10 +12,12 @@ model packages). Between tests, reset only the registry module globals so we
 get a clean slate without paying the cost — or fragility — of full module
 reimports across an already-collected test suite.
 
-IMPORTANT: services/api/server.py also exists. When the full test suite runs,
-the api tests execute first, caching services/api/server.py as
-sys.modules["server"]. We must import by file path (not by name) to
-unconditionally get the perception-obj server.
+IMPORTANT: import the server by file path, not by module name. This
+originally guarded against services/api/server.py being cached as
+sys.modules["server"] by an earlier collection pass; that collision was
+designed out when the API entrypoints were renamed to ingest_server.py /
+public_server.py, and the load-by-path stays as cheap defence against any
+future bare server.py.
 """
 from __future__ import annotations
 
@@ -40,7 +42,8 @@ sys.modules.setdefault("models.sam3d", MagicMock())
 
 # Load by absolute path so we always get services/perception-obj/server.py,
 # regardless of which server.py pytest may have cached as sys.modules["server"]
-# from an earlier test collection pass (e.g. services/api/server.py).
+# from an earlier test collection pass. No collected test binds a bare
+# `server` module today; this keeps that from ever mattering again.
 _PERC_SERVER_PATH = Path(__file__).resolve().parents[1] / "server.py"
 _spec = importlib.util.spec_from_file_location("perc_server", _PERC_SERVER_PATH)
 server = importlib.util.module_from_spec(_spec)

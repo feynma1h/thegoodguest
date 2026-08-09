@@ -1,5 +1,5 @@
-/// The Good Guest live floor plan (decision 0077 choice 3, chunk RP-7) — the
-/// room drawing itself in ink as RoomPlan finds it. Replaces the gold-ink mesh
+/// The Good Guest live floor plan (decision 0077 choice 3) — the room
+/// drawing itself in ink as RoomPlan finds it. Replaces the gold-ink mesh
 /// placeholder behind LiveCaptureView's `LiveMeshHost` seam, and reappears at
 /// review, static, as "the room you got".
 ///
@@ -13,8 +13,9 @@
 /// their middles as they land; boxes settle in with a scale+fade; doors and
 /// windows read as cuts in the wall line (a gap painted in the backdrop
 /// color — no swing arcs: RoomPlan wall normals are not reliably interior
-/// (RP-2 measured flips), so a swung door would be a guess). The plan keeps
-/// the room squared to the screen via the wall-grid heading, smoothed;
+/// (measured on the reference room, 2 of its 13 walls point away), so a
+/// swung door would be a guess). The plan keeps the room squared to the
+/// screen via the wall-grid heading, smoothed;
 /// Reduce Motion collapses every entrance to its finished state.
 ///
 /// Read by: LiveCaptureView (live, via FloorPlanFeed), ReviewView (static).

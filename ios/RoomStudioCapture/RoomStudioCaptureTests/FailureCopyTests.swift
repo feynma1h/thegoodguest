@@ -9,7 +9,8 @@
 ///
 /// So the copy is a table now, and the two things a body like this gets wrong —
 /// the singular/plural agreement and the zero-degrade — are pinned rather than
-/// eyeballed. The honesty constraint (no re-upload promise, decision 0084) is
+/// eyeballed. The honesty constraint (decisions 0084 + 0116 — a re-send is
+/// promised only when CaptureRecovery has confirmed the files are on disk) is
 /// pinned too: it is a product invariant, not a wording preference.
 
 import XCTest
@@ -59,11 +60,13 @@ final class FailureCopyTests: XCTestCase {
 
     // MARK: - The honesty constraint (decision 0084)
 
-    /// THE PRODUCT INVARIANT: there is no re-upload of the missing blobs. It is
-    /// blocked on a mint-contract change server-side, not on client work, so any
-    /// wording that promises one is a lie the user acts on. "N files need
+    /// THE PRODUCT INVARIANT: the rescan-only body must never imply the missing
+    /// blobs can be re-sent. Only `incompleteBody(missingCount:resend:)` in
+    /// `.available` may make that promise, because only there has CaptureRecovery
+    /// confirmed every named file is still on the phone. "N files need
     /// re-uploading" — the superseded SceneStatusView's line, and the obvious
-    /// phrasing to reach for when restoring a count — is exactly that promise.
+    /// phrasing to reach for when restoring a count — is exactly the promise
+    /// this overload must not make.
     func testNeverPromisesAReUpload() {
         for count in [0, 1, 2, 40] {
             let body = FailureCopy.incompleteBody(missingCount: count).lowercased()

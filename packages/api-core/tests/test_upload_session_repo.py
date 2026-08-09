@@ -414,7 +414,7 @@ class TestMintQuota:
 
 
 # ---------------------------------------------------------------------------
-# Per-UID daily CAPTURE ceiling (decision 0097)
+# Per-UID daily CAPTURE ceiling (decision 0098)
 #
 # The mint quota bounds API calls; this bounds GPU spend. The pair of tests
 # that matter are the ones separating the two: a re-mint of a capture already
@@ -713,7 +713,7 @@ class TestForceRemintImplementationParity:
 class TestMintSessionCache:
     """The production minter reuses one AuthorizedSession per thread.
 
-    Pins the RP-8 fix: per-call google.auth.default() + AuthorizedSession
+    Pins the credential-caching fix: per-call google.auth.default() + AuthorizedSession
     construction OOM-killed the 512 MiB api-public instance on a 2,170-path
     manifest at mint concurrency 64. Credentials resolution and session
     construction must happen at most once per thread, not once per path.

@@ -1,4 +1,4 @@
-/// Pins for the RoomPlan wire decisions (decision 0077, chunk RP-6).
+/// Pins for the RoomPlan wire decisions (decision 0077).
 ///
 /// Every decision that determines what ships — the tier condition, the final
 /// tier table, the provenance string, the census line — is a pure function in
@@ -71,7 +71,7 @@ final class RoomPlanWireTests: XCTestCase {
         XCTAssertNil(RoomPlanWire.capturedRoomVersion(fromJSON: notJSON))
     }
 
-    // MARK: - Depth re-assert guard (found live at RP-6 Gate 1)
+    // MARK: - Depth re-assert guard (found on the first hardware capture of the co-run (decision 0079))
 
     func test_shouldReassertDepth_table() {
         let t = RoomPlanWire.depthReassertThreshold

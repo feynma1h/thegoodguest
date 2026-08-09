@@ -295,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
                          "/process: no Firestore reset, no lease, no bundle "
                          "existence gate (a swept bundle IS the "
                          "capture_expired case the handler must record). "
-                         "NOTE: the /shell noop is VERSION-GATED (0d67608): an "
+                         "NOTE: the /shell noop is VERSION-GATED (ab0a060): an "
                          "existing shell.json at the current max output "
                          "version noops, an older one regenerates. Delete the "
                          "blob only to force a same-version re-bake.")

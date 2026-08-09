@@ -89,9 +89,10 @@ interface SplatViewerProps {
    * while the remaining pieces flow in. */
   onRevealCaptionsDone?: () => void;
   onRevealDone?: () => void;
-  /** Dev-workbench badges (RP-8 walk): short texts floated at world
-   * positions — wall letters and template piece numbers. Renderer-agnostic
-   * input like everything else here; null/absent renders nothing. */
+  /** Dev-workbench badges: short texts floated at world positions — wall
+   * letters and piece numbers, so a reviewer can name what they are looking
+   * at. Renderer-agnostic input like everything else here; null/absent
+   * renders nothing. */
   labels?: ViewerLabel[] | null;
   /** Measured footprints of pieces a proposal has moved or removed
    * (decision 0131): the measurement survives on screen as its outline,

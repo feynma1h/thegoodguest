@@ -1,7 +1,9 @@
 /// Quiet banner surfacing an upload-level terminal failure (uploadPhase == .failed).
 ///
-/// Mounted unconditionally in ContentView and renders nothing while no failure is
-/// surfaced — the same always-mounted pattern as SceneStatusView: the .task on the
+/// Mounted unconditionally in ContentView — the retained rollback root, not the
+/// shipped flow, where RootFlowView surfaces the same failure through
+/// UploadFailedBanner — and renders nothing while no failure is surfaced. The
+/// same always-mounted pattern as SceneStatusView: the .task on the
 /// container is the independent scan path (UploadFailureMonitor.refresh) that finds
 /// .failed records persisted by prior launches, while the in-process kick arrives via
 /// BlobUploadManager.onFatalBlobError → notifyUploadFailed.

@@ -4,7 +4,7 @@ ARKit anchors committed at fixtures/scene_f3d70236/bundle.pb (24 KB of
 geometry metadata, no pixels).
 
 Runs under the PRODUCTION merge calibration (SHELL_WALL_MERGE_GAP_M=1.0,
-SHELL_WALL_NORMAL_TOL_DEG=15 — commit e33d98a's deploy env, the V3-walk
+SHELL_WALL_NORMAL_TOL_DEG=15 — commit 634038b's deploy env, the V3-walk
 values), because that is the wall set the deployed closure will see.
 
 What these pins mean (the V1 probe's assertions, made permanent):

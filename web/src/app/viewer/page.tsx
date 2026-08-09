@@ -43,9 +43,9 @@ type Result =
       labels: ViewerLabel[] | null;
     };
 
-/** Dev-only sidecar written into staged fixtures by the RP-8 walk tooling:
- * wall letters + placed-object numbers, shared with the 2D key maps so the
- * two surfaces can never disagree. Absent on real API responses. */
+/** Dev-only sidecar carried by staged review fixtures: wall letters +
+ * placed-object numbers, shared with the 2D key maps so the two surfaces
+ * can never disagree. Absent on real API responses. */
 type WalkLabelSidecar = {
   _walk_labels?: {
     walls?: ViewerLabel[];
@@ -175,12 +175,12 @@ function ViewerContent() {
   const sceneId = params.get("scene");
   const directUrl = params.get("url");
   const fixture = params.get("fixture");
-  // ?reveal=1 replays the §4 assembly over the loaded fixture — the RP-8
-  // real-speed reveal watch runs here (13-wall spike shell) rather than in
-  // the throttled preview pane or the hand-authored !v3 mock.
+  // ?reveal=1 replays the §4 assembly over the loaded fixture — a real-speed
+  // reveal watch on a real room (13-wall spike shell) rather than in the
+  // throttled preview pane or the hand-authored !v3 mock.
   const reveal = params.get("reveal") === "1";
   // ?labels=1 renders the fixture's _walk_labels sidecar as in-scene badges
-  // (wall letters + template piece numbers) for the RP-8 scoring walk.
+  // (wall letters + piece numbers), so a reviewer can name what they see.
   const showLabels = params.get("labels") === "1";
 
   return (

@@ -1,37 +1,23 @@
-//
-//  RoomStudioCaptureTests.swift
-//  RoomStudioCaptureTests
-//
-//  Created by Utkarsh Singh on 30/05/26.
-//
+/// The Xcode-generated anchor class for the RoomStudioCaptureTests target.
+///
+/// It holds no real coverage: testExample and testPerformanceExample assert
+/// nothing, and they are counted honestly as stubs rather than as tests (see
+/// CLAUDE.md's iOS test policy). The suites that pin behaviour live in sibling
+/// files in this folder — the target is a PBXFileSystemSynchronizedRootGroup,
+/// so they are picked up from the directory and nothing routes through here.
 
 import XCTest
 @testable import RoomStudioCapture
 
 final class RoomStudioCaptureTests: XCTestCase {
 
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
-    }
-
     func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // Any test you write for XCTest can be annotated as throws and async.
-        // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
-        // Mark your test async to allow awaiting for asynchronous code to complete. Check the results with assertions afterwards.
-        // XCTest Documentation
-        // https://developer.apple.com/documentation/xctest
+        // Asserts nothing. Kept so the target has a compiling anchor class.
     }
 
     func testPerformanceExample() throws {
-        // This is an example of a performance test case.
         self.measure {
-            // Put the code you want to measure the time of here.
+            // Measures an empty block. Asserts nothing.
         }
     }
 
