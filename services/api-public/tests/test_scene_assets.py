@@ -2,10 +2,12 @@
 
 Covers:
   - 200 happy path: verbatim manifest passthrough, one signed URL per
-    unique fused-object splat URI, expires_at ~1h out
+    unique PLACED fused-object splat URI, expires_at ~1h out
   - splat-URI dedupe across fused objects
-  - unplaced fused objects still get their splat signed (viewer may show
-    them off to the side); objects without a splat URI are skipped
+  - unplaced fused objects are NOT signed (decision 0124: the viewer
+    renders placed objects only — unplaced ones are text-only inventory,
+    so their signatures were unfetched signBlob latency); objects without
+    a splat URI are skipped
   - 409 scene_not_ready for every non-ready status (body carries status)
   - 401 / 400 / 403 / 404 mirroring the by-bundle contract
   - 502 upstream_error: manifest fetch failure, malformed JSON, signer
@@ -82,7 +84,9 @@ def _manifest(objects: list[dict] | None = None) -> dict:
             {
                 "object_id": "obj_001",
                 "label": "lamp",
-                "placed": False,
+                # Placed, so the default fixture keeps exercising multi-URI
+                # signing; unplaced filtering has its own class (0124).
+                "placed": True,
                 "splat_gcs_uri": "gs://outputs/scenes/s1/frames/0001/splats/00_lamp.ply",
             },
         ],
@@ -195,7 +199,7 @@ class TestAssetsHappyPath:
         assert body["scene_id"] == scene.scene_id
         assert body["manifest"] == manifest  # verbatim, not rewritten
         urls = body["asset_urls"]
-        # Both fused objects' splats signed — including the unplaced one.
+        # Both placed objects' splats signed.
         assert set(urls) == {
             "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply",
             "gs://outputs/scenes/s1/frames/0001/splats/00_lamp.ply",
@@ -210,8 +214,8 @@ class TestAssetsHappyPath:
     def test_duplicate_splat_uris_signed_once(self, client) -> None:
         shared = "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply"
         manifest = _manifest(objects=[
-            {"object_id": "a", "splat_gcs_uri": shared},
-            {"object_id": "b", "splat_gcs_uri": shared},
+            {"object_id": "a", "placed": True, "splat_gcs_uri": shared},
+            {"object_id": "b", "placed": True, "splat_gcs_uri": shared},
         ])
         signer = FakeSigner()
         resp = _get_assets(
@@ -221,10 +225,76 @@ class TestAssetsHappyPath:
         assert signer.calls == [shared]
 
     def test_objects_without_splat_uri_skipped(self, client) -> None:
-        manifest = _manifest(objects=[{"object_id": "a", "splat_gcs_uri": None}])
+        manifest = _manifest(
+            objects=[{"object_id": "a", "placed": True, "splat_gcs_uri": None}]
+        )
         resp = _get_assets(client, _scene(), manifest_bytes=json.dumps(manifest).encode())
         assert resp.status_code == 200
         assert resp.json()["asset_urls"] == {}
+
+
+class TestAssetsPlacedOnlySigning:
+    """The placed-only filter (decision 0124; its trigger fired when the
+    compressed tier put the payload in the tens of MB).
+
+    assembleScene builds a PositionedSplat only for placed objects — an
+    unplaced one surfaces as text-only inventory (label + reason), so its
+    signature was an IAM signBlob round trip nobody ever fetched: 12 of 22
+    on the reference room, each a network call inside the user's
+    time-to-first-byte."""
+
+    _CHAIR = "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply"
+    _CURTAIN = "gs://outputs/scenes/s1/frames/0002/splats/00_curtain.ply"
+
+    def _mixed(self) -> dict:
+        return _manifest(objects=[
+            {"object_id": "obj_000", "label": "chair", "placed": True,
+             "splat_gcs_uri": self._CHAIR},
+            {"object_id": "obj_001", "label": "curtain", "placed": False,
+             "splat_gcs_uri": self._CURTAIN},
+            {"object_id": "obj_002", "label": "mirror", "placed": False,
+             "splat_gcs_uri": None},
+        ])
+
+    def test_unplaced_objects_are_not_signed(self, client) -> None:
+        signer = FakeSigner()
+        resp = _get_assets(
+            client, _scene(),
+            manifest_bytes=json.dumps(self._mixed()).encode(),
+            signer=signer,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert set(body["asset_urls"]) == {self._CHAIR}
+        # The saving is real: the signer is never even asked about the
+        # curtain — the filter removes the round trip, not just the key.
+        assert signer.calls == [self._CHAIR]
+        # The manifest still carries the unplaced object verbatim — the
+        # inventory line the UI shows comes from there, not from a URL.
+        labels = [o["label"] for o in body["manifest"]["objects"]]
+        assert "curtain" in labels and "mirror" in labels
+
+    def test_compressed_map_filters_identically(self, client) -> None:
+        """An index carrying entries for BOTH objects: the unplaced one is
+        never consulted, so no key can appear in asset_urls_compressed
+        without its PLY fallback in asset_urls — the two cannot disagree."""
+        index = json.dumps({
+            "compressed_version": 1, "format": "spz", "entries": {
+                self._CHAIR: {
+                    "uri": self._CHAIR.replace(".ply", ".spz"), "bytes": 1},
+                self._CURTAIN: {
+                    "uri": self._CURTAIN.replace(".ply", ".spz"), "bytes": 1},
+            },
+        }).encode()
+        resp = _get_assets(
+            client, _scene(),
+            manifest_bytes=json.dumps(self._mixed()).encode(),
+            compressed_bytes=index,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert set(body["asset_urls_compressed"]) == {self._CHAIR}
+        assert set(body["asset_urls_compressed"]) <= set(body["asset_urls"])
 
 
 class TestAssetsNotReady:
@@ -421,10 +491,12 @@ class TestAssetsUpstreamFailures:
 class TestAssetsCompressedTier:
     """The compressed tier (decision 0126): an additive sibling index.
 
-    The load-bearing property is that the PLY keeps its entry no matter what,
-    so `asset_urls` never narrows and the client's fallback is a real URL
-    rather than a nominal one. A scene with no index must be byte-identical
-    to the pre-0126 response apart from an empty map.
+    The load-bearing property is that a signed splat's PLY keeps its entry
+    no matter what, so `asset_urls` never narrows below the compressed map
+    and the client's fallback is a real URL rather than a nominal one. A
+    scene with no index must be byte-identical to the pre-0126 response
+    apart from an empty map. (Placed-only filtering — 0124 — happens before
+    either map exists, on the one uri set both are built from.)
     """
 
     _CHAIR = "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply"

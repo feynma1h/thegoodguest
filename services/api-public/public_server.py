@@ -26,7 +26,8 @@ Endpoints:
 
   GET  /scenes/{scene_id}/assets
       The ready scene's perception manifest plus V4-signed HTTPS URLs for
-      its fused objects' splat files (a browser cannot fetch gs:// URIs).
+      its PLACED objects' splat files (a browser cannot fetch gs:// URIs;
+      unplaced objects are text-only inventory — decision 0124).
       409 scene_not_ready until the scene reaches `ready`. Auth: Firebase
       ID token + ownership. Consumer: the web app's scene viewer.
       Production prerequisites: the runtime SA needs storage.objectViewer
@@ -1374,9 +1375,11 @@ def get_scene_assets(
 
     The manifest references splat files by gs:// URI, which a browser
     cannot fetch. This endpoint fetches the manifest server-side and signs
-    a V4 HTTPS URL (TTL 1h) for each splat referenced by the scene-level
-    fused "objects" array (manifest_version 2 — see perception-obj's
-    process_receiver docstring for the contract).
+    a V4 HTTPS URL (TTL 1h) for each PLACED object's splat in the
+    scene-level fused "objects" array (manifest_version 2 — see
+    perception-obj's process_receiver docstring for the contract; the
+    placed-only filter is decision 0124 — unplaced objects render as
+    text-only inventory, so their signatures were unfetched latency).
 
     Auth: Firebase ID token; the caller must own the scene.
 
@@ -1391,8 +1394,10 @@ def get_scene_assets(
     the SAME manifest gs:// URI as asset_urls so a client looks up one key
     and picks a format. A splat with no compressed counterpart is simply
     absent from it, and a missing, malformed or unreachable index leaves it
-    empty. asset_urls never narrows — the PLY is always signed — so the
-    fallback is a real URL, not a nominal one.
+    empty. asset_urls never narrows BELOW the compressed map — every signed
+    splat's PLY is always signed too — so the fallback is a real URL, not a
+    nominal one. (Both maps carry placed objects only; they filter from the
+    one uri set, so they cannot disagree.)
 
     shell (decisions 0066/0069) is a SIBLING of the manifest, read from
     scenes/{id}/shell.json beside the manifest: null means the shell
@@ -1471,13 +1476,19 @@ def get_scene_assets(
                        scene_id, exc)
         compressed_index = {}
 
-    # Sign the splats the viewer renders: the scene-level fused objects.
+    # Sign the splats the viewer renders: the PLACED fused objects (0124's
+    # placed-only filter — its trigger fired when the compressed tier put the
+    # payload in the tens of MB). assembleScene builds a PositionedSplat only
+    # for placed objects; unplaced ones surface as text-only inventory, so
+    # signing them was pure signBlob latency — 12 of 22 URIs on the reference
+    # room. Filtering the ONE uri set keeps both maps in agreement by
+    # construction: an unplaced object's compressed entry is never consulted.
     # (Pre-v2 manifests have no "objects" array and yield no URLs; no such
     # scenes exist with real users, so no compatibility shim.)
     splat_uris = {
         obj["splat_gcs_uri"]
         for obj in manifest.get("objects", [])
-        if isinstance(obj, dict) and obj.get("splat_gcs_uri")
+        if isinstance(obj, dict) and obj.get("splat_gcs_uri") and obj.get("placed")
     }
     # (manifest uri, compressed uri or None) -- the PLY is always signed so the
     # client's fallback is real, not nominal.
