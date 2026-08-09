@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 # in the module namespace then, FastAPI silently treats `req` as a query param
 # instead of a body model, producing 422 on every Cloud Tasks delivery.
 # See docs/decisions/0010.
+from compress_receiver import CompressRequest  # noqa: E402  (same 0010 rule)
 from process_receiver import ProcessRequest  # noqa: E402
 from shell_receiver import ShellRequest  # noqa: E402  (same 0010 rule for /shell)
 
@@ -92,6 +93,13 @@ PROCESS_REQUEST_BUDGET_SECONDS = float(
 # (Cloud Tasks retries) rather than computing past the platform cutoff.
 SHELL_REQUEST_BUDGET_SECONDS = float(
     os.environ.get("SHELL_REQUEST_BUDGET_SECONDS", "900")
+)
+
+# Same mirror for /compress (decisions 0125/0126). Running out of budget is
+# not an error there: the stage writes the index with what it banked and the
+# rest of the room falls back to PLY, so the next re-drive finishes the job.
+COMPRESS_REQUEST_BUDGET_SECONDS = float(
+    os.environ.get("COMPRESS_REQUEST_BUDGET_SECONDS", "900")
 )
 
 # -----------------------------------------------------------------------------
@@ -197,6 +205,7 @@ _receiver_repo = None
 _fcm_notifier = None
 _oidc_verifier = None
 _shell_oidc_verifier = None
+_compress_oidc_verifier = None
 
 
 def _get_receiver_repo():
@@ -250,6 +259,22 @@ def _get_shell_oidc_verifier():
                 allowed_email=CLOUD_TASKS_INVOKER_SA,
             )
     return _shell_oidc_verifier
+
+
+def _get_compress_oidc_verifier():
+    """Separate verifier for /compress: same invoker SA, but the OIDC
+    audience is RECEIVER_URL + "/compress" — a /process or /shell token
+    must not replay here."""
+    global _compress_oidc_verifier
+    if _compress_oidc_verifier is None:
+        from oidc import OIDCVerifier
+        from process_receiver import CLOUD_TASKS_INVOKER_SA, RECEIVER_URL
+        if CLOUD_TASKS_INVOKER_SA:
+            _compress_oidc_verifier = OIDCVerifier(
+                audience=RECEIVER_URL + "/compress",
+                allowed_email=CLOUD_TASKS_INVOKER_SA,
+            )
+    return _compress_oidc_verifier
 
 
 @app.get("/")
@@ -402,3 +427,37 @@ async def shell(
     )
 
 
+
+
+@app.post(
+    "/compress",
+    summary="Cloud Tasks compressed-splat receiver (decisions 0125/0126)",
+    responses={
+        200: {"description": "Tier written, noop (already current), or drained"},
+        401: {"description": "OIDC token missing or invalid"},
+        422: {"description": "Malformed payload (natural poison drain)"},
+        500: {"description": "Environmental failure; Cloud Tasks will retry"},
+    },
+)
+async def compress(
+    request: Request,
+    req: CompressRequest,
+) -> JSONResponse:
+    """Compressed-splat third stage. Enqueued by /process's success path.
+
+    Like /shell, NEVER touches the SAM accessors — no model load, so a cold
+    start costs seconds. No scene lease, no Firestore, and never
+    manifest.json: it writes .spz siblings plus scenes/{id}/compressed.json
+    (see compress_receiver.py). A room with no compressed tier renders from
+    PLY exactly as it always has, so failure here is invisible.
+    """
+    from compress_receiver import handle_compress
+
+    deadline = time.monotonic() + COMPRESS_REQUEST_BUDGET_SECONDS
+    return await handle_compress(
+        request,
+        req,
+        oidc_verifier=_get_compress_oidc_verifier(),
+        outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
+        deadline=deadline,
+    )

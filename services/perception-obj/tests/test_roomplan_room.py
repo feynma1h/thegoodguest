@@ -38,6 +38,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import box_placement
 import contact_priors
 import fusion
 import numpy as np
@@ -574,3 +575,85 @@ class TestChunkDConsumesRoomPlanPlanes:
     def test_has_geometry_and_floor_y(self, planes):
         assert planes.has_geometry
         assert planes.floor_y == pytest.approx(_FLOOR_Y, abs=1e-3)
+
+
+class TestExtentAxesOnRealBoxes:
+    """`extent_axes_m` against the real spike room (decision 0096's trigger).
+
+    0096 recorded that the shipped dims triple was "descending-sorted in all
+    six real boxes", and concluded the axis semantics were unrecoverable.
+    Measured here on the committed fixture, that is not what the data says:
+    `dimensions` is Apple's own local (x, y, z) order, index 1 is the
+    vertical extent, and it is NOT the largest on 6 of 9 boxes — so the
+    ordering carries real information. (The descending triple 0096 saw is
+    `extent_m_sorted`, a different field.) These pins hold the corrected
+    reading in place: the up extent is the LARGEST on 4 of 9 boxes, the
+    middle on 3 and the smallest on 2, so no sort order can stand in for it.
+    """
+
+    # Apple's own category per box, with the height a human would measure.
+    _EXPECTED_UP_M = [
+        ("storage", 0.8152),
+        ("storage", 1.9119),   # tall shelf
+        ("table", 0.4662),
+        ("bed", 0.6109),       # NOT its 2.16 m length
+        ("table", 0.5704),
+        ("table", 0.7322),
+        ("chair", 0.6819),
+        ("chair", 0.9570),
+        ("refrigerator", 1.6351),  # the low-confidence wardrobe
+    ]
+
+    def test_every_real_box_names_its_up_extent(self, room):
+        got = [
+            (b.category, box_placement.box_extent_axes(b)["up_m"])
+            for b in room.objects
+        ]
+        assert got == [(c, pytest.approx(v)) for c, v in self._EXPECTED_UP_M]
+
+    def test_up_extent_is_physically_plausible_for_its_category(self, room):
+        """The independent check: every named up extent is a height a
+        person would accept for that piece of furniture. This is what
+        would fail loudly if the axis convention ever flipped."""
+        plausible = {
+            "bed": (0.3, 1.2),
+            "table": (0.3, 1.3),
+            "chair": (0.5, 1.4),
+            "storage": (0.3, 2.6),
+            "refrigerator": (0.8, 2.2),
+        }
+        for b in room.objects:
+            lo, hi = plausible[b.category]
+            up = box_placement.box_extent_axes(b)["up_m"]
+            assert lo <= up <= hi, f"{b.category} up extent {up} m"
+
+    def test_the_vertical_extent_is_not_recoverable_by_sorting(self, room):
+        """The measurement that justifies the field existing at all: on
+        most real boxes the up extent is neither the largest nor the
+        smallest, so no sort order can stand in for it."""
+        ranks = []
+        for b in room.objects:
+            dims = sorted((round(float(d), 4) for d in b.dimensions), reverse=True)
+            ranks.append(dims.index(box_placement.box_extent_axes(b)["up_m"]))
+        # Largest on 4 (the tall pieces), middle on 3, smallest on 2.
+        assert ranks == [1, 0, 1, 2, 2, 1, 0, 0, 0]
+
+    def test_real_boxes_are_upright_far_inside_the_gate(self, room):
+        """Every real box is exactly upright to float precision, so the
+        5-degree gate is nowhere near real data.
+
+        Note the stored `up_y` reads 1e-7 SHORT of 1 on 8 of 9 boxes.
+        That is column-norm error, not tilt: `box_extent_axes` normalizes
+        the up column before taking the angle, which is why it reports a
+        true zero where a bare `arccos(up_y)` would invent ~0.026 deg of
+        lean that is not in the data.
+        """
+        tilts = [box_placement.box_extent_axes(b)["up_tilt_deg"] for b in room.objects]
+        assert max(tilts) == 0.0
+        assert min(float(b.up_y) for b in room.objects) < 1.0
+
+    def test_footprint_pair_matches_the_other_two_dims(self, room):
+        for b in room.objects:
+            axes = box_placement.box_extent_axes(b)
+            dims = [round(float(d), 4) for d in b.dimensions]
+            assert axes["horizontal_m"] == sorted([dims[0], dims[2]], reverse=True)

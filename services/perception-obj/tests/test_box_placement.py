@@ -535,3 +535,125 @@ class TestSuppression:
         # Unplaced → not.
         unplaced = {**inside, "placed": False}
         assert box_placement.find_suppressing_box(unplaced, boxes, {0}) is None
+
+
+# ---------------------------------------------------------------------------
+# Up-axis extent semantics (decision 0096's named trigger)
+# ---------------------------------------------------------------------------
+
+class TestExtentAxes:
+    """`extent_axes_m` says which of the box's three extents is vertical.
+
+    The pins that matter are the two directions of the warrant: an upright
+    box names its up extent, and a box whose own transform does not put
+    local +Y on the world vertical names nothing at all.
+    """
+
+    def test_upright_box_names_its_up_extent(self):
+        # dims (x, y, z) = (2.0, 0.5, 1.0): a bed-shaped box, 0.5 m tall.
+        axes = box_placement.box_extent_axes(_box(dims=(2.0, 0.5, 1.0)))
+        assert axes == {
+            "up_m": 0.5,
+            "horizontal_m": [2.0, 1.0],
+            "up_tilt_deg": 0.0,
+        }
+
+    def test_up_is_dims_index_1_not_the_largest(self):
+        """The whole point: the vertical extent is not recoverable by
+        sorting. A wardrobe's up extent IS its largest; a bed's is its
+        smallest. Both come from the same index."""
+        wardrobe = box_placement.box_extent_axes(_box(dims=(0.9, 1.9, 0.6)))
+        bed = box_placement.box_extent_axes(_box(dims=(1.9, 0.6, 2.1)))
+        assert wardrobe["up_m"] == 1.9 == max(wardrobe["horizontal_m"] + [1.9])
+        assert bed["up_m"] == 0.6 == min(bed["horizontal_m"] + [0.6])
+
+    def test_horizontal_pair_is_descending(self):
+        axes = box_placement.box_extent_axes(_box(dims=(0.7, 0.5, 1.4)))
+        assert axes["horizontal_m"] == [1.4, 0.7]
+
+    def test_yaw_does_not_disturb_the_up_axis(self):
+        """A pure-yaw box is upright at every heading — the real regime."""
+        for yaw in (0.0, 0.7, 2.5, -1.9):
+            axes = box_placement.box_extent_axes(_box(dims=(2.0, 0.5, 1.0), yaw=yaw))
+            assert axes is not None, yaw
+            assert axes["up_m"] == 0.5
+            assert axes["up_tilt_deg"] == 0.0
+
+    def test_tilted_box_names_nothing(self):
+        """Past the gate there is no up extent to report, so the block is
+        absent rather than present-and-wrong."""
+        box = _box(dims=(2.0, 0.5, 1.0))
+        tilt = np.radians(20.0)
+        R = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, np.cos(tilt), -np.sin(tilt)],
+            [0.0, np.sin(tilt), np.cos(tilt)],
+        ])
+        box.transform = box.transform.copy()
+        box.transform[:3, :3] = R
+        assert box_placement.box_extent_axes(box) is None
+
+    def test_upside_down_box_names_nothing(self):
+        box = _box(dims=(2.0, 0.5, 1.0))
+        box.transform = box.transform.copy()
+        box.transform[:3, :3] = np.diag([1.0, -1.0, -1.0])
+        assert box_placement.box_extent_axes(box) is None
+
+    def test_gate_is_the_tilt_not_the_sign_of_y(self):
+        """A box tilted just inside the gate still reports, and its
+        measured tilt ships with it — the number is not rounded away."""
+        box = _box(dims=(2.0, 0.5, 1.0))
+        tilt = np.radians(3.0)
+        R = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, np.cos(tilt), -np.sin(tilt)],
+            [0.0, np.sin(tilt), np.cos(tilt)],
+        ])
+        box.transform = box.transform.copy()
+        box.transform[:3, :3] = R
+        axes = box_placement.box_extent_axes(box)
+        assert axes is not None
+        assert abs(axes["up_tilt_deg"] - 3.0) < 1e-3
+
+    def test_degenerate_dims_name_nothing(self):
+        box = _box(dims=(2.0, 0.0, 1.0))
+        assert box_placement.box_extent_axes(box) is None
+
+
+class TestExtentAxesDegradeLock:
+    """A reader that does not know the new key must see exactly the block
+    it saw before."""
+
+    _PRE_CHANGE_KEYS = {
+        "box_id", "identifier", "category", "confidence",
+        "attributes", "dims", "yaw_rad", "center_world",
+    }
+
+    def test_every_pre_existing_key_is_untouched(self):
+        box = _box(dims=(1.9, 0.6, 2.1), yaw=0.4)
+        block = box_placement._box_dict(box, 3)
+        assert self._PRE_CHANGE_KEYS <= set(block)
+        assert set(block) - self._PRE_CHANGE_KEYS == {"extent_axes_m"}
+        # dims stays RoomPlan's own local order — provenance, not sorted.
+        assert block["dims"] == [1.9, 0.6, 2.1]
+
+    def test_block_is_absent_not_null_when_unwarranted(self):
+        """Absent is the state existing consumers already handle; a null
+        would be a new shape for them to learn."""
+        box = _box(dims=(2.0, 0.5, 1.0))
+        box.transform = box.transform.copy()
+        box.transform[:3, :3] = np.diag([1.0, -1.0, -1.0])
+        assert "extent_axes_m" not in box_placement._box_dict(box, 0)
+
+    def test_extent_m_sorted_is_unchanged_by_this_field(self):
+        """The sorted triple keeps its old meaning and old value: the new
+        block adds semantics beside it, it does not redefine it."""
+        box = _box(dims=(1.9, 0.6, 2.1))
+        assert sorted((round(float(d), 4) for d in box.dimensions), reverse=True) == [
+            2.1, 1.9, 0.6
+        ]
+        assert box_placement.box_extent_axes(box)["up_m"] == 0.6
+
+    def test_emission_is_deterministic(self):
+        box = _box(dims=(1.9, 0.6, 2.1), yaw=0.4)
+        assert box_placement._box_dict(box, 1) == box_placement._box_dict(box, 1)
