@@ -1,6 +1,6 @@
 """Unit tests for OIDCVerifier.
 
-Tests cover the five failure modes the brief specifies:
+Tests cover the one success path and the four ways OIDCVerifier.verify raises:
   - valid token   → no exception
   - wrong aud     → OIDCError(invalid_token)  [verify_oauth2_token raises ValueError]
   - wrong email   → OIDCError(wrong_email)

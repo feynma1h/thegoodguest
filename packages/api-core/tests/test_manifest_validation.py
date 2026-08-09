@@ -178,7 +178,7 @@ class TestSizeRules:
         assert err is not None and "entries" in err
 
     def test_realistic_long_walk_within_default_caps(self) -> None:
-        # RP-8's 2,170-path manifest is the largest real one to date; a
+        # The 2,170-path manifest is the largest real one to date; a
         # same-shaped manifest must clear the default caps with headroom.
         manifest = [_entry(f"frames/{i:06d}.jpg", 400_000) for i in range(722)]
         manifest += [_entry(f"depth/{i:06d}.f32", 196_608) for i in range(722)]

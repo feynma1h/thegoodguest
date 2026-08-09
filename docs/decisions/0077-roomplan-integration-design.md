@@ -1,8 +1,11 @@
 # 0077 — RoomPlan integration: CapturedRoom as room + object skeleton, JSON verbatim on the wire, boxes carry placement
 
 **Date:** 2026-07-28
-**Status:** Decided (design; implementation pending — build brief at
-`docs/briefs/roomplan-integration-build-brief.md` until it ships).
+**Status:** Decided and SHIPPED — the wire, server, co-run, floor plan, and
+live drive all merged and deployed by 2026-08-06 (`perception-obj-00036-xer`).
+The code is `roomplan_room.py`, `shell_envelope.py`, `box_placement.py`, and
+`census_sampling.py` in perception-obj, plus the RoomPlan co-run and live floor
+plan in `ios/RoomStudioCapture/`. Operator walk verdicts are decision 0080.
 Supersedes the shell **geometry source** on the LIDAR_ROOMPLAN tier (0066's
 plane-anchor derivation and 0069's closure pass retire there); 0069's
 materials layer and the /shell stage architecture survive retargeted.

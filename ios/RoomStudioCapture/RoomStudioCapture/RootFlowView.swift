@@ -20,9 +20,8 @@
 ///
 /// Remaining activation follow-ups: add-more resume-with-progress
 /// (CaptureManager.startCapture currently mints a new bundle rather than
-/// extending), the real web-handoff universal link (NetworkConfig.webBaseURL is
-/// nil, so the doorway hides its CTA), and the Live Activity widget target
-/// (task #14). Task #13 landed as chunk RP-7: the live floor plan behind
+/// extending) and the real web-handoff universal link (NetworkConfig.webBaseURL
+/// is nil, so the doorway hides its CTA). The live floor plan sits behind
 /// LiveMeshHost, fed by capture.floorPlanFeed, with the coverage ticks driven
 /// from the live census below.
 ///
@@ -34,9 +33,11 @@
 /// opens directly at .home, and identity is minted by the app-level launch task,
 /// so nothing ever waits on a splash). These have no entry point here and appear
 /// only in their own previews. ReviewView's THIN-COVERAGE variant belongs to this
-/// list too: `thinCoverage` is never passed true below, because the app has no
-/// coverage signal at all (task #13), so the "I've got the bones, but a few gaps"
-/// treatment renders only in that file's preview.
+/// list too: `thinCoverage` is never passed true below. A coverage signal does
+/// exist — the live census drives the FLOOR/WALLS/CORNERS ticks on the capture
+/// screen — but promoting it to a quality VERDICT is a copy claim deliberately
+/// left unwired, so the "I've got the bones, but a few gaps" treatment renders
+/// only in that file's preview.
 
 import ARKit
 import SwiftUI
@@ -200,10 +201,10 @@ struct RootFlowView: View {
                 // "the room you got" is what the server will see.
                 census: capture.builtCensus?.reviewLine,
                 floorPlan: capture.builtFloorPlan,
-                // Neutral verdict, still: a coverage signal now exists (RP-7's
+                // Neutral verdict, still: a coverage signal now exists (the live
                 // census + floor plan), but turning it into a quality VERDICT
                 // ("clean" / thinCoverage) is a copy claim that deserves an
-                // operator decision — deferred, flagged in the RP-7 report.
+                // operator decision — deliberately deferred.
                 verdict: reviewVerdict,
                 // An empty capture cannot be sent: the backend would reject it as
                 // invalid and the user would be told "the scan didn't survive the
@@ -868,8 +869,8 @@ struct RootFlowView: View {
         @unknown default:
             .finding
         }
-        // Coverage from the live census (RP-7 — the task-#13 wiring): the
-        // floor is binary, walls/corners fill toward a closed room's worth.
+        // Coverage from the live census: the floor is binary, walls/corners
+        // fill toward a closed room's worth.
         // Steering (guidance/moments) rides floorPlanFeed into LiveCaptureView;
         // this guestLine is the DEFAULT the priority table falls back to.
         let cover = FloorPlanVoice.coverage(census: capture.liveCensus,

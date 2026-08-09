@@ -1,5 +1,5 @@
 """Measured-plane contact priors for single-view object placement
-(decision 0067 chunk D).
+(decision 0067).
 
 A single ARKIT_ONLY view of an object gives one camera ray and no baseline,
 so most single-frame objects can't triangulate a position and ship

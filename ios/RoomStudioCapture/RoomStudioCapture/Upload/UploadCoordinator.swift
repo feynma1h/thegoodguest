@@ -11,7 +11,9 @@
 /// BlobUploadManager picks up from `sessionState == .ready(_)` and executes
 /// the blob PUTs.
 ///
-/// Read by: ContentView (observe sessionState for UI feedback).
+/// Read by: RootFlowView, which owns the instance (@StateObject) and turns
+/// sessionState into flow state via WaitFlowState.sessionFailure. The retained
+/// ContentView rollback path holds its own instance.
 
 import Combine
 import Foundation

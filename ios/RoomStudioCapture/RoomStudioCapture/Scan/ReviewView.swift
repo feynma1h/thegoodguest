@@ -9,12 +9,12 @@
 /// rough version here would spend the magic early.
 ///
 /// THIN-COVERAGE VARIANT: BUILT BUT NOT REACHABLE TODAY. `thinCoverage` is never
-/// set true. A coverage SIGNAL now exists (RP-7's live census + floor plan), but
+/// set true. A coverage SIGNAL now exists (the live census + floor plan), but
 /// wiring it into a "your capture is thin" verdict is a copy claim about capture
 /// quality that deserves an operator decision, not a threshold invented here —
-/// deliberately deferred (flagged in the RP-7 ready report). Until then its copy
-/// ("I've got the bones, but a few gaps") must be read as designed-but-dormant,
-/// NOT as something the screen can say today.
+/// deliberately deferred pending that decision. Until then its copy ("I've got
+/// the bones, but a few gaps") must be read as designed-but-dormant, NOT as
+/// something the screen can say today.
 ///
 /// COPY FOLLOWS THE ACTIONS. `cardText` mirrors `actions`' precedence exactly, and
 /// they must stay in step: the two disagreed once — a capture that could not be
@@ -38,18 +38,18 @@ struct ReviewView: View {
     /// a call site that forgot to pass real numbers would ship it as measurement.
     var metrics: String
     /// The RoomPlan census line, e.g. "9 objects · 13 walls · 2 doors" (decision
-    /// 0077, chunk RP-6). Nil hides it — a capture whose room did not ship must
-    /// not show a census (the line describes what the server will see, and the
+    /// 0077). Nil hides it — a capture whose room did not ship must not show a
+    /// census (the line describes what the server will see, and the
     /// composition is pinned in RoomCensus.reviewLine).
     var census: String? = nil
-    /// The BUILT room's floor plan (chunk RP-7) — "the room you got", the same
-    /// component that drew live during capture, now settled. Published under
-    /// the census's rule (only when the room ships), so like the census it
+    /// The BUILT room's floor plan — "the room you got", the same component
+    /// that drew live during capture, now settled. Published under the
+    /// census's rule (only when the room ships), so like the census it
     /// shows what the server will see. Nil falls back to the generic sketch.
     var floorPlan: FloorPlanSnapshot? = nil
     /// The guest's verdict on the capture. REQUIRED, with no default, for the same
     /// reason as `metrics` and `rescanLabel`: the old default asserted "I can see the
-    /// whole room", which is a coverage claim the app cannot make (task #13).
+    /// whole room", which is a coverage claim the app deliberately does not make.
     var verdict: String
     /// When true, coverage is thin — the rescan path leads. NEVER TRUE TODAY; see the
     /// thin-coverage note in the file header before wiring it.
@@ -255,8 +255,8 @@ struct RoomSketch: View {
                rescanLabel: "Scan again from scratch")
 }
 
-// DORMANT TREATMENT — thinCoverage is never true in the app (task #13). This
-// preview is the only place it renders; see the header note before wiring it.
+// DORMANT TREATMENT — thinCoverage is never true in the app. This preview is
+// the only place it renders; see the header note before wiring it.
 #Preview("Thin coverage (dormant)") {
     ReviewView(metrics: "48 frames · LiDAR + RoomPlan",
                verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",

@@ -8,11 +8,6 @@
  * from a template, and where the system's behaviour is imperfect the document
  * says so rather than rounding up to a promise.
  *
- * `Blank` marks the four things only the operator can supply (entity,
- * jurisdiction, contact, address). They render as visibly unfilled slots so a
- * draft can never be mistaken for a finished document, and they are greppable
- * in source as `<Blank` for the same reason.
- *
  * Design: the Good Guest system (decision 0057) at reading width — serif for
  * the document voice, sans for structure, mono for the machine-checkable
  * facts (bucket names, retention windows, endpoints).
@@ -20,15 +15,6 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-
-/** An operator-supplied value that has not been supplied yet. */
-export function Blank({ children }: { children: ReactNode }) {
-  return (
-    <mark className="rounded-sm bg-sun/25 px-1 font-mono text-[0.85em] text-ink/75 ring-1 ring-sun/50">
-      {children}
-    </mark>
-  );
-}
 
 /** A section heading with a mono eyebrow — the document's spine. */
 export function Section({

@@ -1,8 +1,11 @@
 # 0067 — ARKIT_ONLY placement quality: pixel-footprint correspondence, silhouette fitting, measured-plane contact priors
 
 **Date:** 2026-07-23
-**Status:** Decided (design; implementation pending — build brief at
-`docs/briefs/placement-quality-build-brief.md` until it ships)
+**Status:** Decided and SHIPPED — chunks A–C merged 2026-07-23, chunk D
+2026-07-24, serving since `perception-obj-00033-zfg`. The code is
+`services/perception-obj/reproject.py`, `contact_priors.py`, and `fusion.py`'s
+`PLACEMENT_REFINE` path. Build verdicts, including the one probe that failed,
+are decision 0068.
 
 ## Context
 

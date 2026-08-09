@@ -1,3 +1,8 @@
+/// ROLLBACK PATH ONLY — not referenced by the app. RootFlowView is the root;
+/// this screen and the two views it alone mounts (SceneStatusView,
+/// UploadFailureView) are kept compilable so the pre-Good-Guest root can be
+/// restored (decision 0072). Nothing here runs in a shipped build.
+///
 /// Capture UI: start/stop button, live frame counter, tracking-state indicator,
 /// tier badge, bundle-path readout, upload-session status badge, the upload-failure
 /// banner (UploadFailureView), the scene processing status panel (SceneStatusView),

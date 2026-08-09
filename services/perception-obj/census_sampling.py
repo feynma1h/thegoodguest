@@ -15,8 +15,9 @@ spread:
      once a selected frame sees it WELL (in-frame fraction ≥
      PERCEPTION_BOX_COVER_MIN_INFRAME and on-frame area ≥
      PERCEPTION_BOX_COVER_MIN_AREA_FRAC of the frame) — the same
-     visibility class the RP-4 axis scorer accepts, so a covering view is
-     a scoreable view. Measured on the spike fixture (722 frames, 9
+     visibility class box_placement's axis scorer accepts
+     (PLACEMENT_BOX_SCORE_MIN_INFRAME), so a covering view is a scoreable
+     view. Measured on the spike fixture (722 frames, 9
      boxes): every box has 52–156 qualifying frames and greedy covers
      9/9 in 7 picks.
   2. Residue pass: remaining slots (within PERCEPTION_MAX_FRAMES) go to
@@ -40,8 +41,9 @@ import numpy as np
 from sampling import ROTATION_WEIGHT_M_PER_RAD, _distance_matrix, _frame_features
 
 # A frame covers a box when the projected footprint is at least this
-# in-frame (matches the RP-4 scoring skip threshold — cover views must be
-# scoreable) and at least this fraction of the frame's pixel area (a
+# in-frame (deliberately mirrors box_placement's
+# PLACEMENT_BOX_SCORE_MIN_INFRAME — cover views must be scoreable) and at
+# least this fraction of the frame's pixel area (a
 # distant speck view is not a good view). One-fixture-calibrated like
 # every PERCEPTION_* knob.
 PERCEPTION_BOX_COVER_MIN_INFRAME = float(

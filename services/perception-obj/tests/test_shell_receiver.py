@@ -302,8 +302,8 @@ class TestNoopPaths:
         assert gcs.blobs[f"{_BUCKET}/scenes/{_SCENE}/shell.json"] == existing
 
     def test_stale_version_regenerates(self, gcs):
-        """A pre-upgrade shell.json must NOT block the rewrite (found live
-        at RP-8: v2 shells nooped the v3 --shell re-drives; the walk rooms
+        """A pre-upgrade shell.json must NOT block the rewrite (found live:
+        v2 shells nooped the v3 --shell re-drives, and the walked rooms
         kept furniture-slab arkit_planes walls until hand-deleted). The
         seeded scene is ARKIT_ONLY, so the regenerated doc is the CURRENT
         v2 closure output (degrade lock) — the pin is that the stale blob

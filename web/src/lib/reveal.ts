@@ -3,7 +3,7 @@
  * loop (decision 0097).
  *
  * The reveal is the product's defining moment, and the first time it was
- * watched at real speed (RP-8, decision 0080) the verdict was that pieces
+ * watched at real speed the verdict (decision 0080) was that pieces
  * "come down at high speed then slow as a spring" and that walls and floor
  * should MATERIALIZE IN PLACE rather than arrive. This module is the
  * redesign's decision layer: every "what moves, when, for how long, and
@@ -29,7 +29,7 @@
  *      a few centimetres on a curve that begins AND ends at zero velocity
  *      — it starts at rest and arrives at rest, which is what "settle"
  *      means and is the exact opposite of the ease-out cubic that earned
- *      the RP-8 note. The first pieces are introduced one at a time and
+ *      that verdict. The first pieces are introduced one at a time and
  *      named; the rest arrive as one quickening wave, unnamed, so the
  *      assembly finishes as a breath instead of a queue.
  *   4. A beat of quiet before the guest speaks.

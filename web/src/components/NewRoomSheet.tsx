@@ -6,7 +6,8 @@
  * moment shouldn't cost the user their place in the app. The sheet opens
  * over whatever they were doing (nav CTA, rooms empty state, landing) and
  * closes back to it. /new remains as a deep-linkable standalone page
- * rendering the same ScanInstructions.
+ * carrying the full bridge — the listening desk and the declared QR
+ * placeholder — of which this sheet is the compact instruction-only form.
  *
  * One sheet instance lives in SiteNav; anything can open it by calling
  * openNewRoomSheet(), which dispatches a DOM event the instance listens

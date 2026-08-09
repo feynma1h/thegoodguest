@@ -7,9 +7,10 @@
  * the reveal — the room's measured boundary drawing itself, its surfaces
  * materializing in place, then the pieces settling, the leading few named
  * aloud (decision 0097) — and then settles into stage 1: the room
- * full-bleed, one guest line grounded in real counts, the disabled
- * composer holding the conversation's place, and the ledger-style
- * inventory floating at the edge.
+ * full-bleed, one guest line grounded in real counts, the live
+ * conversation surface where the composer sits — falling back to the
+ * disabled composer only when the conversation GET fails — and the
+ * ledger-style inventory floating at the edge.
  *
  * Mount with key={sceneId} so a different room resets the choreography.
  * All three.js stays behind SplatViewer's PositionedSplat contract.

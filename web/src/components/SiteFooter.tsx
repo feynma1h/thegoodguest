@@ -8,7 +8,8 @@
  *
  * It stands down on /room for the same reason SiteNav does: the room page is
  * immersive and carries its own floating chrome (design §5 — the room is the
- * page). The documents stay reachable from the account menu there.
+ * page). SiteNav goes with it, and the account menu rides inside SiteNav — so
+ * the documents are not currently reachable from the room page at all.
  */
 
 import Link from "next/link";

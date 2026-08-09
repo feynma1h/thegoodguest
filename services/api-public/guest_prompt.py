@@ -1,11 +1,12 @@
-"""The guest's contract: prompt-as-code for conversation stage 1 (decision 0058).
+"""The guest's contract: prompt-as-code (decisions 0058, 0096, 0132).
 
 This module owns PROMPT_VERSION, the static charter (identity + honesty rules
-+ five exemplars), and `build_system_prompt(facts)`. The prompt is CODE — no
-remote config, no environment drift; changing the charter without bumping
-PROMPT_VERSION turns tests/test_guest_prompt.py's pinned-hash test red, and
-every persisted turn records the reproducibility triple
-(facts_version, prompt_version, model).
++ the voice exemplars), and `build_system_prompt(facts, arrangement='')`. The
+charter's exemplar set grows with each bump — the version log below records
+what each bump added. The prompt is CODE — no remote config, no environment
+drift; changing the charter without bumping PROMPT_VERSION turns
+tests/test_guest_prompt.py's pinned-hash test red, and every persisted turn
+records the reproducibility triple (facts_version, prompt_version, model).
 
 Assembly order is fixed for caching and safety: static charter → per-scene
 facts → messages. User text NEVER enters the system prompt. cache_control

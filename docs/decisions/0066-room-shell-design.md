@@ -1,8 +1,9 @@
 # 0066 — Room shell: measured planes on the wire, textured-quad shell as a second perception stage
 
 **Date:** 2026-07-22
-**Status:** Decided (design; implementation pending — build brief at
-`docs/briefs/room-shell-build-brief.md` until it ships)
+**Status:** Decided and shipped (deployed 2026-07-23; the build brief was
+deleted on ship, per its own terms). The surfacing layer was later superseded
+by decision 0069.
 
 ## Context
 

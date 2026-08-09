@@ -1,7 +1,10 @@
 # 0132 — Stage 2's tool surface: the guest states intent, the server solves geometry
 
 **Date:** 2026-08-09
-**Status:** Decided (design; nothing built — extends 0058's guest contract)
+**Status:** Decided and BUILT, not yet deployed — `services/api-public/
+guest_tools.py` ships `propose` and `revert`, and the charter moved to
+PROMPT_VERSION 3. Merged to `main` 2026-08-09; no real model has called the
+tools yet and the live voice evals have not run. Extends 0058's guest contract.
 
 ## Context
 

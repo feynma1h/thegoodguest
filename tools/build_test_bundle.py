@@ -2,7 +2,10 @@
 integration testing, WITHOUT needing the iOS app yet.
 
 What's real and what's faked here:
-  - RGB frames: real (the existing HEIC photos, converted to JPEG).
+  - RGB frames: SYNTHETIC. Rendered by tools/make_synthetic_photos.py from
+    this module's own synthesize_pose() arc, through the same intrinsics
+    recorded below (fx = fy = max(w, h), principal point at centre) — so
+    frame i genuinely is what a camera at pose i would see (decision 0101).
   - Camera poses: FAKED. We synthesize a plausible "walking around the
     room" trajectory: poses arranged on an arc around the scene origin,
     all looking inward and roughly level. The backend can consume these

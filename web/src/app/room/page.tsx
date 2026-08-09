@@ -9,9 +9,11 @@
  * The room page is immersive — the global nav stands down (SiteNav
  * returns null here) and the page carries its own floating chrome. One
  * governing rule (design §0): this page is a conversation happening in
- * a room; everything else is furniture. Until the conversation backend
- * exists, the guest's lines are template narration grounded in real
- * state, and the composer ships disabled, saying so.
+ * a room; everything else is furniture. The guest's lines are template
+ * narration grounded in real state (lib/voice); on a ready room RoomStage
+ * hands the composer to the live conversation surface, and the disabled
+ * composer stays behind in the wait and as RoomStage's fallback when the
+ * conversation GET fails.
  *
  * States: the Wait (§3 — narrated arrival, real 10s polling, never a
  * progress bar), the partial failure (§8 — honest about missing files),

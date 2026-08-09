@@ -1,9 +1,10 @@
 # 0078 — Envelope-wall selection: height-reach, not classification (a measured amendment to 0077's brief)
 
 **Date:** 2026-07-28
-**Status:** Decided (amends one clause of the RP-3 contract in
-`docs/briefs/roomplan-integration-build-brief.md`; decision 0077 otherwise
-unchanged)
+**Status:** Decided and SHIPPED — amends one clause of the envelope-shell
+contract designed in decision 0077 (whose build brief was deleted once the work
+landed, as it instructed); 0077 is otherwise unchanged. The code is
+`services/perception-obj/shell_envelope.py`.
 
 ## Context
 

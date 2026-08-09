@@ -1,25 +1,26 @@
 """Box-anchored placement — RoomPlan boxes as the object skeleton
-(decision 0077 lock 5; P1 probe regime).
+(decision 0077).
 
 For covered furniture categories the RoomPlan box IS the measurement:
 position, extent, upright, and yaw were operator-verified 9/9 (0076), while
 the shipped SAM-3D-layout rotation measured ~90° yaw-wrong on the real bed
-and depth_fit halved its width (visible-region truncation — P1/P2
-collateral). So a box-anchored object takes position/extent/upright/yaw
-from the box; SAM 3D contributes APPEARANCE only (the splat from the best
-associated view), and the one genuinely unknown DOF — how the splat's
-per-reconstruction-ARBITRARY canonical frame sits inside the box — is
-resolved by the two-tier appearance instrument at the BOX center, P1's
-verified regime:
+and depth_fit halved its width (visible-region truncation — measured as
+collateral by 0077's scoring probe). So a box-anchored object takes
+position/extent/upright/yaw from the box; SAM 3D contributes APPEARANCE
+only (the splat from the best associated view), and the one genuinely
+unknown DOF — how the splat's per-reconstruction-ARBITRARY canonical frame
+sits inside the box — is resolved by the two-tier appearance instrument at
+the BOX center, the only regime that probe verified:
 
   * position precedes rotation: at the shipped (0.79 m off) center the
     scorer prefers UPSIDE-DOWN — candidates are only ever scored at
     box-quality centers (the pinned negative);
-  * degenerate views are SKIPPED, not averaged (P1's f164: a 1.4 m view of
-    the 2 m bed zeroes tier 1 for every box-frame candidate);
+  * degenerate views are SKIPPED, not averaged (the f164 close view: a
+    1.4 m view of the 2 m bed zeroes tier 1 for every box-frame candidate);
   * the winner ships only with a clear margin (PLACEMENT_AXIS_MARGIN,
-    default = P1's achieved 0.10 combined); below it the extent-best
-    mapping ships with `splat_axis_resolved: false`;
+    default 0.10, the combined margin that probe achieved on the reference
+    LiDAR capture); below it the extent-best mapping ships with
+    `splat_axis_resolved: false`;
   * the facing guard is FLAG-ONLY (v1, the 0067 lock-6 precedent): when the
     scorer prefers the 180°-about-vertical partner of the shipped mapping
     (= the anti-RoomPlan facing — a cuboid's 180° yaw is a self-symmetry,
@@ -27,7 +28,8 @@ verified regime:
     not decisively enough to ship, `facing_flag: true` records the
     disagreement and RoomPlan's conventional mapping ships.
 
-Scale stays UNIFORM (the RP-8 A/B: per-axis stretch amplified truncation),
+Scale stays UNIFORM (the uniform-vs-per-axis-scale A/B on the first real
+RoomPlan rooms, decision 0080: per-axis stretch amplified truncation),
 so a mis-proportioned splat necessarily overshoots its box on some axis.
 That overshoot is declared as a `splat_clip` volume rather than hidden by
 moving or rescaling the object — see `splat_clip_block` and decision 0104.
@@ -70,14 +72,14 @@ logger = logging.getLogger(__name__)
 _BOX_MATCH_MIN = float(os.environ.get("PLACEMENT_BOX_MATCH_MIN", "0.5"))
 
 # A view scores axis candidates only when the projected box footprint is
-# substantially in-frame (P1's degenerate-view lesson: the f164 close view
+# substantially in-frame (the degenerate-view lesson: the f164 close view
 # zeroes tier 1 — measured in-frame fraction 0.0 vs f129's 0.63).
 _BOX_SCORE_MIN_INFRAME = float(os.environ.get("PLACEMENT_BOX_SCORE_MIN_INFRAME", "0.5"))
 
 # How far a box's own up axis may tilt off the world vertical before its
 # extents lose their axis semantics (decision 0096's trigger). RoomPlan
-# boxes are pure-yaw by construction — the RP-2 probe measured worst
-# |up_y - 1| = 1e-7 over 9 boxes, i.e. ~0.03°, so this is not a threshold
+# boxes are pure-yaw by construction — measured on the spike room's 9
+# boxes, worst |up_y - 1| = 1e-7, i.e. ~0.03°, so this is not a threshold
 # real data sits near; it is the gate that keeps a tilted box from
 # claiming a height it does not have.
 _BOX_UP_MAX_TILT_DEG = float(os.environ.get("PLACEMENT_BOX_UP_MAX_TILT_DEG", "5"))
@@ -90,14 +92,15 @@ _AXIS_RATIO_TOL = float(os.environ.get("PLACEMENT_AXIS_RATIO_TOL", "1.6"))
 # The winning ASSIGNMENT's best cloud score must beat every other
 # assignment's best by this to ship (decision 0081: the margin gate keeps
 # its value and its meaning — refuse coin flips — but gates the assignment
-# DOF, the one the cloud instrument actually measures; P1's appearance
-# margin never materialized live: 0.0018-0.089 on RP-8 vs the 0.10 gate).
+# DOF, the one the cloud instrument actually measures; the appearance
+# margin the design probe achieved never materialized live — 0.0018-0.089
+# on the first real RoomPlan rooms against the same 0.10 gate).
 _AXIS_MARGIN = float(os.environ.get("PLACEMENT_AXIS_MARGIN", "0.10"))
 
 # Axis-level up filter (decision 0081): a candidate must map the layout
 # prior's splat-up direction to within this many degrees of the world
 # vertical AXIS LINE (sign-agnostic — the layout's up AXIS measured
-# trustworthy on 6/6 RP-8 spike boxes, its SIGN measured wrong on one, so
+# trustworthy on 6/6 spike-room boxes, its SIGN measured wrong on one, so
 # the sign is never trusted). Only applies when the observation carries a
 # layout rotation; without one the extent-tolerance enumeration stands.
 _AXIS_UP_MAX_DEG = float(os.environ.get("PLACEMENT_AXIS_UP_MAX_DEG", "45"))
@@ -125,12 +128,13 @@ _OVERLAP_MAX_PIXELS = int(os.environ.get("PLACEMENT_BOX_OVERLAP_MAX_PIXELS", "20
 
 # Splat-clip margin (decision 0104). A box-anchored splat is scaled by ONE
 # uniform factor — the median of the three box-dim/splat-extent ratios —
-# because per-axis stretch amplifies truncation (the RP-8 A/B). When the
-# splat's PROPORTIONS are wrong (visible-region truncation: class-6
-# residue), a uniform factor that fits one axis necessarily overshoots
-# another, and the overshoot leaves the measured box entirely: the 0085
-# walk saw a bed reach 0.44 m past its own footprint into the table and
-# the chair, in two independent rooms.
+# because per-axis stretch amplifies truncation (the same A/B as above).
+# When the splat's PROPORTIONS are wrong (visible-region truncation, the
+# residue 0080 recorded as model capability), a uniform factor that fits
+# one axis necessarily overshoots another, and the overshoot leaves the
+# measured box entirely: the acceptance review (decision 0085) found a bed
+# reaching 0.44 m past its own footprint into the table and the chair, in
+# two independent rooms.
 #
 # The overshoot is KNOWN-FALSE mass: the box is RoomPlan measurement the
 # operator verified 9/9 (0076), so splat points outside it are model
@@ -140,7 +144,7 @@ _OVERLAP_MAX_PIXELS = int(os.environ.get("PLACEMENT_BOX_OVERLAP_MAX_PIXELS", "20
 # untouched).
 #
 # The margin is measured, not guessed: at 0.10 m the clip removes nothing
-# from 8 of the 14 walked box objects and trims exactly the four gross
+# from 8 of the 14 reviewed box objects and trims exactly the four gross
 # overhangs the operator named (bed 0.46 m, storage 0.25 m, chair 0.21 m,
 # table 0.18 m). Tighter margins start gutting well-proportioned shells —
 # at 0.0 m a table with a 3 cm overhang loses 60% of its points.
@@ -152,9 +156,9 @@ _SPLAT_CLIP_MIN_FRACTION = float(
     os.environ.get("PLACEMENT_SPLAT_CLIP_MIN_FRACTION", "0.005")
 )
 
-# Percentile clip for splat extents along its LOCAL COORDINATE axes (the P1
-# probe's convention — candidates map coordinate axes onto box axes, so the
-# extents must be measured along the same axes, not PCA axes).
+# Percentile clip for splat extents along its LOCAL COORDINATE axes (the
+# scoring probe's convention — candidates map coordinate axes onto box
+# axes, so the extents must be measured along the same axes, not PCA axes).
 _EXTENT_PCTL = 2.0
 
 
@@ -464,8 +468,8 @@ def axis_mapping_candidates(
     """Enumerate extent-consistent right-handed mappings of the splat's
     coordinate axes onto the box axes. Per assignment, four sign candidates
     (s_up, s_h1) ∈ {±1}² with the third axis forced by right-handedness —
-    exactly the P1 probe's candidate set. Ordered: assignments by
-    consistency (extent-best first), signs in the fixed order
+    exactly the candidate set 0077's scoring probe used. Ordered:
+    assignments by consistency (extent-best first), signs in the fixed order
     (+,+), (+,−), (−,+), (−,−) — so candidates[0] is the extent-best
     default ("RoomPlan's" conventional mapping).
 
@@ -473,7 +477,7 @@ def axis_mapping_candidates(
     ALL SIX assignments are enumerated and filtered to those whose mapped
     up stays within PLACEMENT_AXIS_UP_MAX_DEG of the vertical axis line —
     extent consistency measured actively MISLEADING under visible-region
-    truncation (the RP-8 spike bed: the correct assignment sat at
+    truncation (the spike room's bed: the correct assignment sat at
     consistency 2.07, excluded by the 1.6 tolerance, while 1.53 shipped
     90° wrong), so when a trustworthy up axis exists it replaces the
     extent tolerance as the gate. Candidate ORDER is unchanged
@@ -580,7 +584,8 @@ def score_candidates_cloud(
     refine_similarity_nn the depth_fit path trusts) and scored
     exp(-rms / sigma). World-space by construction: immune to the crop-
     misalignment that defeats appearance scoring on truncated splats
-    (measured — no appearance variant separated any RP-8 box; this does)."""
+    (measured — no appearance-scorer variant separated any box's axis
+    mapping, across every view set tried (decision 0081); this does)."""
     from roomstudio_schemas.placement_math import (
         DegenerateGeometryError,
         refine_similarity_nn,
@@ -615,9 +620,10 @@ def resolve_axis_mapping(
     """(chosen_index, resolved, assignment_margin) — decision 0081's
     resolution policy. Scores group by ASSIGNMENT (the DOF the cloud
     instrument measures; 180° sign twins are cloud-near-degenerate —
-    measured 0.003-0.006 apart on the RP-8 bed — and stay with the fixed
-    (+,+)-first convention P1 called RoomPlan's conventional mapping,
-    which measured 5/5 on the corrected truth table). The winning
+    measured 0.003-0.006 apart on the spike room's bed — and stay with the
+    fixed (+,+)-first convention 0077's probe called RoomPlan's
+    conventional mapping, which measured 5/5 on the corrected truth table).
+    The winning
     assignment ships only when its best score beats every other
     assignment's best by _AXIS_MARGIN; otherwise the extent-best surviving
     assignment (candidates[0]) stands. chosen_index is always the FIRST
@@ -698,10 +704,10 @@ def box_extent_axes(box) -> dict | None:
     RoomPlan's box frame is y-up, so `dimensions[1]` is the extent along
     local +Y and `dimensions[0]/[2]` span the footprint. That is only a
     statement about the WORLD vertical while local +Y IS world +Y, which
-    is exactly what a pure-yaw transform gives (0076/RP-2: worst
-    |up_y - 1| = 1e-7 across the probe's 9 boxes). So the warrant is
-    measured per box off the transform rather than assumed from the
-    format: tilt the box past `_BOX_UP_MAX_TILT_DEG` and there is no
+    is exactly what a pure-yaw transform gives (0076; the parser pins
+    measure worst |up_y - 1| = 1e-7 across the spike room's 9 boxes). So
+    the warrant is measured per box off the transform rather than assumed
+    from the format: tilt the box past `_BOX_UP_MAX_TILT_DEG` and there is no
     up extent to name, so nothing is emitted and the consumer is back to
     the sorted triple it has today.
 
@@ -824,11 +830,11 @@ def build_box_object(
     quality["axis_up_filtered"] = u_local is not None
 
     # --- Assignment resolution: cloud-alignment instrument (0081). ------
-    # The appearance instrument measured unable to separate ANY RP-8 box
-    # (margins 0.0018-0.089 across every scorer variant and view set); the
-    # observation's own LiDAR cloud separates the assignment DOF at
-    # measured margins 0.15-0.47 where the geometry is decisive, and
-    # refuses honestly (0.002-0.014) on near-cubic objects.
+    # The appearance instrument measured unable to separate ANY box on the
+    # first real RoomPlan rooms (margins 0.0018-0.089 across every scorer
+    # variant and view set); the observation's own LiDAR cloud separates
+    # the assignment DOF at measured margins 0.15-0.47 where the geometry
+    # is decisive, and refuses honestly (0.002-0.014) on near-cubic objects.
     chosen = 0  # extent-best surviving default, signs (+, +)
     splat_axis_resolved = False
     facing_flag = False
@@ -854,7 +860,7 @@ def build_box_object(
 
     # --- Facing check (flag-only v1, semantics unchanged): the appearance
     # instrument still owns the 180°-partner leaf — the cloud is near-
-    # degenerate there (measured 0.003-0.006 on the RP-8 bed's sign twins).
+    # degenerate there (measured 0.003-0.006 on the spike bed's sign twins).
     scoreable_views: list[tuple] = []
     if allow_scoring and candidates:
         partner = _partner_index(candidates, chosen)
@@ -865,7 +871,7 @@ def build_box_object(
             )
             for assoc in associations:
                 if assoc.in_frame_fraction < _BOX_SCORE_MIN_INFRAME:
-                    continue  # degenerate view: skip, never average (P1)
+                    continue  # degenerate view: skip, never average
                 cam = ctx.get_camera(assoc.frame_index)
                 evidence = ctx.evidence_for(assoc.frame_index, assoc.mask_index)
                 if cam is None or evidence is None:

@@ -336,9 +336,10 @@ class TestCrossLabelDedup:
         assert out[0]["deduped_observations"] == 2
 
     def test_without_census_still_collapses(self):
-        """Fork (a), resolved always-on at the RP-8 walk: the cross-label
-        gate protects no-census scenes too (it was measured on 247003de, a
-        LIDAR_ARKIT capture the census keying left unprotected)."""
+        """These gates run for every refined scene, census or not: the
+        cross-label gate protects no-census scenes too (it was measured on
+        247003de, a LIDAR_ARKIT capture census keying would leave
+        unprotected)."""
         ctx, frames = self._triple_scene()
         ctx.room = None
         out = fusion.fuse_scene_objects(frames, ctx)
@@ -404,8 +405,8 @@ class TestDepthTrust:
         assert "depth_trust_demoted" not in out[0]["quality"]
 
     def test_without_census_bad_rms_also_demotes(self):
-        """Fork (a): specular depth is untrustworthy on every tier, not
-        just census scenes — the no-census mirror demotes identically."""
+        """Specular depth is untrustworthy on every tier, not just census
+        scenes — the no-census mirror demotes identically."""
         ctx, frames = self._mirror_scene(nn_rms=0.1959)
         ctx.room = None
         out = fusion.fuse_scene_objects(frames, ctx)
@@ -454,7 +455,7 @@ class TestSilhouetteSpan:
         assert obj["quality"]["silhouette_span_ratio"] >= 0.5
 
     def test_without_census_ratio_also_computed(self):
-        """Fork (a): the span instrument reads on every refined scene."""
+        """The span instrument reads on every refined scene, census or not."""
         ctx, frames = self._rug_scene(splat_scale=0.3)
         ctx.room = None
         out = fusion.fuse_scene_objects(frames, ctx)

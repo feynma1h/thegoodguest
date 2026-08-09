@@ -1,8 +1,11 @@
 # 0069 — Shell surfaces: generated parametric materials replace the photographic bake
 
 **Date:** 2026-07-23
-**Status:** Decided (design; implementation pending — build brief at
-`docs/briefs/shell-surfaces-build-brief.md` until it ships). Supersedes
+**Status:** Decided and SHIPPED — shell.json v2 with parametric materials,
+serving since 2026-07-24. The code is `services/perception-obj/shell_material.py`
+and `room_planes.py`; the texture bake it replaced (`shell_texture.py`,
+`shell_inpaint.py`, and the LaMa weights) is deleted. Build verdicts are
+decision 0070. Supersedes
 decision 0066's **surfacing layer** (texture bake + inpaint). 0066 stays
 authoritative for everything else: plane-anchor geometry source, the
 `/shell` stage architecture, degrade semantics, and the read contract's

@@ -39,7 +39,7 @@
 #   - GCS bucket GCS_CAPTURES_BUCKET already exists
 #
 # Usage (from repo root):
-#   ./infra/eventarc_setup.sh                  # run all five sections
+#   ./infra/eventarc_setup.sh                  # run all six sections
 #   ./infra/eventarc_setup.sh --lifecycle-only  # section (2) only
 #   ./infra/eventarc_setup.sh --ttl-only        # section (3) only
 #   ./infra/eventarc_setup.sh --trigger-only    # section (1) only
@@ -339,8 +339,8 @@ echo "=== (6) Perception-outputs CORS: let browsers read signed splat URLs ==="
 # worker surfaced it only as "Worker error: TypeError: Failed to fetch".
 #
 # This was invisible until then for a specific reason worth remembering: CORS is
-# enforced by browsers ONLY. Every prior verification of this path — Gate B's
-# "signed URL fetches 34 MB at 200" included — used curl or a server-side
+# enforced by browsers ONLY. Every prior verification of this path — including a
+# signed-URL fetch of a 34 MB splat returning 200 — used curl or a server-side
 # client, which never sends an Origin header and never checks for one back.
 #
 # CORS IS NOT AN ACCESS GRANT. Objects stay private: the signature is still

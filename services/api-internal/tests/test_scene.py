@@ -12,7 +12,7 @@ Tests are organized into four groups:
                           in-memory fake (copy isolation, error cases, etc.)
 
 Run from repo root:
-  pytest services/api/tests/test_scene.py -v
+  pytest services/api-internal/tests/test_scene.py -v
 """
 from __future__ import annotations
 

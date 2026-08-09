@@ -1,4 +1,5 @@
-/// Offline pin for the mint POST timeout invariant (found live at RP-6 Gate 3).
+/// Offline pin for the mint POST timeout invariant, found live on a real
+/// ~2,200-path capture.
 ///
 /// The client's mint timeout must exceed api-public's Cloud Run request
 /// ceiling (120 s as deployed): a local timeout below the server's own limit

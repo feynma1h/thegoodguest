@@ -1,9 +1,9 @@
 """CapturedRoom JSON interpretation — THE single module that turns a
 bundle's RoomPlan `room.json` (Apple's Codable JSONEncoder output, shipped
 verbatim per decision 0077) into typed room geometry, plus adapters onto the
-`room_planes` dataclass surface so placement's contact priors (0067 chunk D)
-and the room-sanity gate consume RoomPlan planes exactly as they consume
-ARKit anchor planes.
+`room_planes` dataclass surface so placement's contact priors (decision
+0067) and the room-sanity gate consume RoomPlan planes exactly as they
+consume ARKit anchor planes.
 
 Owns: Codable-document parsing (column-major 16-float transforms, single-key
 category/confidence dicts, local polygon corners with the rect-from-
@@ -12,7 +12,7 @@ and the ShellPlaneGeom adaptation (interior-oriented wall rects + floor
 rect). Do NOT parse room.json anywhere else.
 
 Wire facts this parser is built on (measured on the spike probe run,
-probe-20260728-143602 — the P2 probe of the 0077 design session):
+probe-20260728-143602 — the 0077 design session's parser probe):
 
   * Every surface (wall/floor/door/window/opening) shares ONE local frame
     convention: the polygon lies in local X-Y with local +Z the surface
@@ -20,7 +20,8 @@ probe-20260728-143602 — the P2 probe of the 0077 design session):
     world_from_local as 16 floats, COLUMN-MAJOR.
   * `polygonCorners` is usually EMPTY — 12 of the 13 probe walls and every
     door/window/opening serialize no polygon; geometry then comes from
-    `dimensions` as a centered rectangle (the P2 fallback). Only surfaces
+    `dimensions` as a centered rectangle (the rect-from-dimensions
+    fallback). Only surfaces
     with non-rectangular outlines (the probe's wall_00, 6 corners) carry
     explicit polygons.
   * RoomPlan does NOT orient wall normals consistently: 11 of the probe's
@@ -44,9 +45,12 @@ Pure json + numpy + room_planes dataclasses; no GCS, no proto, no model
 imports — unit-testable against the committed spike fixture. Deterministic:
 array order is preserved everywhere, no RNG.
 
-Consumers: RP-3's shell v3 build (walls/floor as polygons), RP-4's box
-placement (objects), RP-5's census-driven selection, and — via the
-ShellPlaneGeom adapters — contact_priors/fusion's sanity gate unchanged.
+Consumers: shell_receiver.py (shell.json v3 walls/floor as polygons),
+process_receiver.py (try_parse_captured_room), fusion.py (box association +
+wall geoms). box_placement.py and census_sampling.py consume the
+RoomPlanBox dataclasses produced here rather than importing this module,
+and contact_priors / fusion's room-sanity gate consume the ShellPlaneGeom
+adapters unchanged.
 """
 from __future__ import annotations
 
@@ -104,9 +108,9 @@ class RoomPlanBox:
     center_world: np.ndarray  # (3,)
     up_y: float  # world-Y component of local +Y; pure-yaw boxes → +1.0
     yaw_rad: float  # heading of local +X in world XZ: atan2(x.z, x.x)
-    # (the P2 probe convention — NOT the signed rotation about +Y, which
-    # is its negation; RP-4's axis-mapping enumeration works from the full
-    # transform, this field is provenance + regression pins)
+    # (the parser probe's convention — NOT the signed rotation about +Y,
+    # which is its negation; box_placement's axis-mapping enumeration works
+    # from the full transform, this field is provenance + regression pins)
 
 
 @dataclass
@@ -279,7 +283,7 @@ def try_parse_captured_room(raw: bytes | str) -> tuple[RoomPlanRoom | None, str 
 
 
 # ---------------------------------------------------------------------------
-# room_planes adaptation (chunk D + sanity gate consume these UNCHANGED)
+# room_planes adaptation (contact priors + sanity gate consume these UNCHANGED)
 # ---------------------------------------------------------------------------
 
 def _polygon_area(poly_local: np.ndarray) -> float:

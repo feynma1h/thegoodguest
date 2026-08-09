@@ -1,5 +1,12 @@
 """End-to-end smoke test for the roomstudio perception pipeline.
 
+SUPERSEDED AND NON-FUNCTIONAL: this targets the pre-split `api` Cloud Run
+service (INGESTER_SERVICE below), which no longer exists — the live services
+are api-internal, api-public, perception-obj and perception-geom — and it
+POSTs to `/ingest`, a route removed from api-internal when Eventarc became
+the only ingest path (its sole POST is /ingest/eventarc). The live end-to-end
+gate is tools/upload_test_bundle.py, driven by infra/RUNBOOK.md Phase 7.
+
 Pushes a synthesized capture bundle through the full pipeline:
   1. Upload bundle.pb + frames/ to GCS under a timestamped prefix.
   2. POST to the ingester's /ingest endpoint.
@@ -15,7 +22,8 @@ Credentials: gcloud ADC (run `gcloud auth application-default login` once).
 Service URLs are auto-detected via `gcloud run services describe` unless
 --ingester-url is passed explicitly.
 
-Consumed by: engineers manually verifying an end-to-end deploy.
+Consumed by: nothing live — kept only for its GCS-upload/Firestore-poll
+shape. Use tools/upload_test_bundle.py to verify a deploy.
 """
 from __future__ import annotations
 

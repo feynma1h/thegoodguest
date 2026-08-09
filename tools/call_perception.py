@@ -2,6 +2,12 @@
 Local CLI for calling the two deployed perception services and composing
 their outputs.
 
+PARTLY DEAD: perception-obj's /segment, /segment-raw and /objects were removed
+when /process became the only perception entrypoint (it now serves /process,
+/shell and /compress), so the `segment`, `objects` and `scene` subcommands
+404. Only `geom` (perception-geom /geom) still resolves; the composition
+helpers below are still imported by tools/compose_local.py.
+
 Run from the repo root:
 
     python tools/call_perception.py geom          # VGGT only, save point cloud GLB
@@ -18,9 +24,6 @@ perception service did internally. In particular, `cmd_scene`:
   2. calls perception-obj /objects for masks + splat PLYs
   3. computes per-object splat placement using the pointmap + mask
   4. composes everything into a single GLB
-
-NOTE: When orchestration moves to a server-side `api` service (option ii from
-the build plan), this composition logic moves there. For now, CLI.
 """
 from __future__ import annotations
 

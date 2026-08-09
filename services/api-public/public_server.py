@@ -49,11 +49,21 @@ Endpoints:
 
   POST /scenes/{scene_id}/conversation/messages
       One conversation turn. Body {text, client_msg_id}; the response IS
-      the stream: text/event-stream with events delta/done/error and
-      ": ping" comments during model silence. Everything checkable
-      pre-generation returns the JSON {error, detail} contract; once
-      streaming starts, failures travel as a terminal `error` event.
-      Consumer: the web app's composer.
+      the stream: text/event-stream with events delta / arrangement / done /
+      error and ": ping" comments during model silence. `arrangement`
+      carries no payload by design — it means the room changed, refetch the
+      design spec. Everything checkable pre-generation returns the JSON
+      {error, detail} contract; once streaming starts, failures travel as a
+      terminal `error` event. Consumer: the web app's composer.
+
+  GET  /scenes/{scene_id}/design_spec
+      The caller's proposed arrangement for a ready scene, each entry
+      carrying the measurement it departs from (decision 0131). 200 with an
+      empty list when there is none. Consumer: the web app's room stage.
+
+  DELETE /scenes/{scene_id}/design_spec
+      Discard the arrangement entirely — "back to measured", which 0133
+      requires to be one action, always. Idempotent.
 
 Run locally (from services/api-public/):
   uvicorn public_server:app --reload --port 8080
@@ -536,13 +546,16 @@ class UnsignedDevUrlSigner:
 # measured 0.9-2.6 s of pure time-to-first-byte (decision 0124, which chose
 # not to fix it while the payload was the 99% term). The compressed tier is
 # that decision's own named trigger: at ~47 MB a 2 s stall is no longer 1%.
-# Bounded and order-preserving, the precedent being 0074's _mint_all pool.
-# Modest by default on purpose -- 0080's mint OOM came from per-call session
-# construction, which the signer does not do (it reuses one storage.Client),
-# but a 512 MiB service earns a conservative ceiling anyway. The pool is
-# per-request and capped at the number of URIs, so a small room spends fewer
-# threads than the ceiling; the worst case is this number times however many
-# /assets calls are in flight, which is one per room view.
+# Bounded and order-preserving, the precedent being `_mint_all` in
+# packages/api-core/roomstudio_api_core/upload_session_repo.py -- see its
+# docstring for the serial measurement (an 878-path manifest at ~80 s, past
+# the iOS client's 60 s timeout). Modest by default on purpose -- the mint
+# OOM recorded above that module's per-thread credential cache came from
+# per-call session construction, which the signer does not do (it reuses one
+# storage.Client), but a 512 MiB service earns a conservative ceiling anyway.
+# The pool is per-request and capped at the number of URIs, so a small room
+# spends fewer threads than the ceiling; the worst case is this number times
+# however many /assets calls are in flight, which is one per room view.
 _ASSET_SIGN_CONCURRENCY = int(os.environ.get("ASSET_SIGN_CONCURRENCY", "8"))
 
 
@@ -648,15 +661,22 @@ class GuestModelError(Exception):
 class AnthropicGuestStreamer:
     """Production guest streamer: Claude via the Anthropic SDK.
 
-    Yields {"type": "delta", "text": ...} chunks, then one
-    {"type": "final", "stop_reason": ..., "usage": {...}}.
+    Yields {"type": "delta", "text": ...} chunks and
+    {"type": "tool_result", "name": ..., "result": ...} events, then one
+    {"type": "final", "stop_reason": ..., "usage": {...}} whose usage sums
+    every round.
 
-    ZERO tools on the call — read-only is architectural, not charter
-    (decision 0058). Thinking is explicitly disabled: claude-sonnet-5 runs
-    adaptive thinking by default when the field is omitted, and max_tokens
-    caps thinking + speech together — an invisible thought would spend the
-    guest's 250-token beat budget and truncate the reply. No sampling params
-    (rejected by the model family).
+    TOOLS ARE PASSED (decision 0132): the guest states an intent through
+    propose/revert and a server-side solver owns the geometry, so the model
+    still authors no coordinates. At most MAX_TOOL_ROUNDS (2) rounds; rounds
+    exhausted with calls still pending logs a warning and ends the turn on
+    what was already said, never on a half-applied round.
+
+    Thinking is explicitly disabled: claude-sonnet-5 runs adaptive thinking
+    by default when the field is omitted, and max_tokens caps thinking +
+    speech together — an invisible thought would spend the guest's 250-token
+    beat budget and truncate the reply. No sampling params (rejected by the
+    model family).
     """
 
     def __init__(self) -> None:
@@ -982,11 +1002,15 @@ def create_upload_session(
                                 invalid/oversized expected_size_bytes, a
                                 duplicate path, or bundle.pb is absent
       400 manifest_empty      — manifest has no entries
-      401 missing_token       — Authorization header absent or malformed
+      401 missing_token       — Authorization header present but not
+                                "Bearer <token>"
       403 forbidden           — JWT uid does not match the stored user_id for
                                 this bundle_id (another user's upload); the
                                 claim is transactional (gap a), so two
                                 concurrent first-mints can never both own it
+      422                     — Authorization header absent entirely; FastAPI
+                                rejects the required header before the
+                                handler runs, so this is never a 401
       429 rate_limited        — the caller's UTC-day mint quota is exhausted
                                 (gap b); body carries resets_at, and the
                                 Retry-After header the seconds until then
@@ -1129,11 +1153,15 @@ def get_scene_by_bundle(
 
     Errors:
       400 invalid_bundle_id   — bundle_id is not a UUIDv4
-      401 missing_token       — Authorization header absent or malformed
+      401 missing_token       — Authorization header present but not
+                                "Bearer <token>"
       401 invalid_token       — JWT failed verification
       403 forbidden           — JWT uid does not match scene.user_id
       403 forbidden           — scene.user_id is None (scene has no owner)
       404 not_found           — no scene exists for this bundle_id
+      422                     — Authorization header absent entirely; FastAPI
+                                rejects the required header before the
+                                handler runs, so this is never a 401
     """
     # 1. Verify Firebase ID token.
     user_id, err = _verify_bearer(authorization)
@@ -1203,8 +1231,12 @@ def list_scenes(
 
     Errors:
       400 invalid_limit       — limit outside 1..100
-      401 missing_token       — Authorization header absent or malformed
+      401 missing_token       — Authorization header present but not
+                                "Bearer <token>"
       401 invalid_token       — JWT failed verification
+      422                     — Authorization header absent entirely; FastAPI
+                                rejects the required header before the
+                                handler runs, so this is never a 401
 
     Consumer: the web app's scene browser.
     """
@@ -1240,9 +1272,9 @@ def delete_account(
 
     Removes, in this order: GCS capture blobs and perception artifacts →
     conversations (with their turns subcollection, which Firestore does NOT
-    cascade) → scenes → upload sessions → the mint-quota record → the
-    Firebase Auth user. See account_deletion.py for why that order and not
-    the faster-looking one.
+    cascade) → design specs → scenes → upload sessions → the mint-quota
+    record → the Firebase Auth user. See account_deletion.py for why that
+    order and not the faster-looking one.
 
     Idempotent and resumable: a second call on an already-deleted account
     finds nothing left and returns 200 with zero counts.
@@ -1252,7 +1284,7 @@ def delete_account(
 
     Response (200) — the pass completed, the identity is gone:
       {deleted: true, identity_deleted: true,
-       counts: {rooms, conversations, conversation_messages,
+       counts: {rooms, conversations, conversation_messages, design_specs,
                 upload_sessions, files}}
 
     Response (202) — partial; storage errors stopped the pass before any
@@ -1351,7 +1383,16 @@ def get_scene_assets(
     Response (200):
       {scene_id, manifest: <verbatim manifest.json>,
        shell: <verbatim shell.json> | null,
-       asset_urls: {<gs_uri>: <signed https url>}, expires_at: <ISO 8601>}
+       asset_urls: {<gs_uri>: <signed https url>},
+       asset_urls_compressed: {<gs_uri>: <signed https url>},
+       expires_at: <ISO 8601>}
+
+    asset_urls_compressed (decision 0126) is the compressed tier, keyed by
+    the SAME manifest gs:// URI as asset_urls so a client looks up one key
+    and picks a format. A splat with no compressed counterpart is simply
+    absent from it, and a missing, malformed or unreachable index leaves it
+    empty. asset_urls never narrows — the PLY is always signed — so the
+    fallback is a real URL, not a nominal one.
 
     shell (decisions 0066/0069) is a SIBLING of the manifest, read from
     scenes/{id}/shell.json beside the manifest: null means the shell

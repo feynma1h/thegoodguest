@@ -24,7 +24,11 @@
 /// When several bundles have failed, the most recent (by clientMintTimestamp — no
 /// failure timestamp is persisted) is surfaced; dismissing it lets the next one show.
 ///
-/// Read by: UploadFailureView. One inbound kick from BlobUploadManager.
+/// Read by: RootFlowView (the live root — it holds the shared instance, scans
+/// via .task, and routes dismissal) and UploadFailureView on the retained
+/// ContentView rollback path. BlobUploadManager drives it from several sites:
+/// one terminal notifyUploadFailed, plus the notifyUploadDeferred /
+/// clearDeferral pair that tracks whether a blob is merely waiting.
 
 import Combine
 import Foundation

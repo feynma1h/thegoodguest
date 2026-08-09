@@ -1,4 +1,4 @@
-"""Real-data + synthetic-ground-truth pins for decision 0067 chunk D:
+"""Real-data + synthetic-ground-truth pins for decision 0067:
 single-view object placement from measured plane-anchor contact priors.
 
 The measured input is REAL: tests/fixtures/scene_f3d70236/bundle.pb carries
@@ -6,7 +6,7 @@ the 24 ARKit plane anchors of the first plane-carrying capture (floor +
 merged walls), parsed through room_planes exactly as production does. The
 OBJECTS are synthetic boxes with known ground-truth transforms — f3d70236's
 per-frame SAM detections are not committed (and re-driving them needs the
-GPU), so chunk D is validated as "recover a known object placed against the
+GPU), so the single-view contact priors is validated as "recover a known object placed against the
 real measured room", which is precisely what the contact solve claims to
 do. The floor case is additionally exercised through a REAL f3d70236 camera
 pose end-to-end.
@@ -227,7 +227,7 @@ def test_prior_class_map():
     assert contact_priors.prior_class("door") == "wall"
     assert contact_priors.prior_class("curtain") == "wall"
     assert contact_priors.prior_class("artwork") == "wall"
-    # The RP-8 walk moved clock into the wall family ("clock ... should sit
+    # The operator walk moved clock into the wall family ("clock ... should sit
     # flat against the wall" — decision 0082); the single-view evidence
     # gate still refuses a desk clock a wall-contact solve would misplace.
     assert contact_priors.prior_class("clock") == "wall"

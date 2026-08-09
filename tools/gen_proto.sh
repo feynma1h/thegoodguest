@@ -9,13 +9,18 @@
 #   ios/RoomStudioCapture/RoomStudioCapture/Generated/capture_bundle.pb.swift  (Swift, if protoc-gen-swift present)
 #
 # Tooling:
-#   - protoc 7.35.0:    brew install protobuf   (current generated code requires runtime >=7.35.0)
+#   - protoc:           brew install protobuf   (libprotoc 35.0 or newer)
 #   - Swift plugin:     brew install swift-protobuf
 #   - Python stubs:     pip install mypy-protobuf
 #
-# The Swift output dir doesn't exist yet (no iOS project yet); the script
-# creates it on demand so the iOS app can drop in alongside this without
-# any further setup.
+# Note the two version lines are different things: protoc reports libprotoc
+# 35.0, while the generated Python declares "Protobuf Python Version: 7.35.0"
+# and enforces it at import via ValidateProtobufRuntimeVersion. A runtime older
+# than that fails at import, not at generation — which is the failure mode
+# decision 0021 chased through two service images.
+#
+# Both outputs are committed. The script creates the Swift output directory on
+# demand, so a fresh checkout regenerates without any setup step.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +48,7 @@ fi
 protoc "${PROTOC_PY_ARGS[@]}" "${PROTO_FILES[@]}"
 echo "  -> ${PY_OUT}/capture_bundle_pb2.py"
 
-# Swift out (best-effort; the iOS project consumes this when it exists)
+# Swift out (best-effort; skipped if protoc-gen-swift is not installed)
 SWIFT_OUT="ios/RoomStudioCapture/RoomStudioCapture/Generated"
 echo "=== Swift ==="
 if command -v protoc-gen-swift >/dev/null 2>&1; then

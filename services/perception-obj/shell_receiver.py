@@ -1,5 +1,5 @@
 """POST /shell receiver — the room-shell second stage (decisions 0066
-architecture / 0069 parametric surfaces).
+architecture / 0069 parametric surfaces / 0077 polygon-wall shells).
 
 Enqueued by /process's success path after release_ready (fire-and-forget;
 see shell_enqueue.py). Assembles the measured floor + wall set from the
@@ -12,11 +12,17 @@ family + roughness lookup), and writes ONE blob:
 
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/shell.json
 
-No raster textures exist in the serving contract (SHELL_VERSION 2 — the
-photographic bake and its inpainting left serving per 0069; the viewer
-renders materials from parameters). NEVER manifest.json (single writer
-stays /process), NEVER Firestore — shell failure cannot un-ready a room,
-and there is no scene lease: the shell.json write is a single idempotent
+Three methods, selected by tier (run_shell's dispatch): "arkit_planes" at
+shell_version 2 for ARKIT_ONLY; at shell_version 3, "roomplan" when a
+CapturedRoom parses (cached copy first, then the bundle's blob) and
+"anchor_envelope" for LiDAR bundles without one — including the
+parse-failure degrade, which is never a failure.
+
+No raster textures exist in any of them (the photographic bake and its
+inpainting left serving per 0069; the viewer renders materials from
+parameters). NEVER manifest.json (single writer stays /process), NEVER
+Firestore — shell failure cannot un-ready a room, and there is no scene
+lease: the shell.json write is a single idempotent
 blob PUT, deterministic for identical inputs (the material vision call is
 made at most once per plane per scene lifetime thanks to the write-once
 noop; MATERIAL_VERSION + model are recorded in the doc).
@@ -28,11 +34,14 @@ keep the grid). Unavailable is a WRITTEN file with a reason
 "capture_expired" when the captures bucket's 1-day lifecycle swept the
 pixels), not an error.
 
-Honesty invariants carried in the doc (0069, test-pinned): every wall
-ships measured_quad (the DETECTED extent — what facts may read) beside
-the rendered quad, with per-edge provenance; the floor ships
-measured_polygon beside the rendered polygon with per-segment states;
-closure never mutates measured geometry.
+Honesty invariants carried in the doc (0069, test-pinned): the measured
+geometry ships beside the rendered geometry, and closure never mutates it.
+What that looks like per method: v2 ships measured_quad (the DETECTED
+extent — what facts may read) per wall with per-edge provenance, and
+measured_polygon for the floor with per-segment states; "anchor_envelope"
+ships measured_quad per wall (no per-edge block); "roomplan" ships
+CapturedRoom geometry verbatim and adds measured_polygon only where
+render-time co-planarization moved a wall.
 
 Response classification mirrors 0004's receiver semantics: completed
 runs AND poison-class outcomes return 200 (Cloud Tasks drains);
@@ -42,9 +51,12 @@ bounds the handler inside the Cloud Run request window; running out of
 budget is environmental — the retry starts over.
 
 reads: bundle proto (poses/intrinsics/plane_anchors) from the captures
-bucket; manifest.json READ-ONLY for the complete-frame list; masks.npz
-per complete frame and RGB per frame. No SAM model is ever touched on
-this path — cold start is seconds.
+bucket; from the outputs bucket, manifest.json READ-ONLY for the
+complete-frame list, scenes/{scene_id}/roomplan/room.json (the
+/process-cached CapturedRoom, which outlives the captures sweep) and
+shell.json (the version-gated redelivery check); masks.npz per complete
+frame and RGB per frame. No SAM model is ever touched on this path —
+cold start is seconds.
 
 Consumers: server.py (POST /shell), tests/test_shell_receiver.py.
 """
@@ -317,7 +329,7 @@ def _wound_wall_polygon(surface, geom) -> np.ndarray:
 
 # RoomPlan stitches long walls into several segments whose planes disagree
 # by fractions of a degree to a few degrees and centimetres of offset — the
-# RP-8 walk read the spike's four-segment run as kinked ("should be a
+# operator read the spike room's four-segment run as kinked ("should be a
 # straight line"). Adjacent near-coplanar segments are co-planarized at
 # RENDER time: the rendered polygon projects onto the group's area-weighted
 # mean plane; the measured polygon ships beside it (the 0069 honesty
@@ -893,13 +905,13 @@ def run_shell(
     # current MAX output version means done (ready OR unavailable — neither
     # changes on re-run: the bundle is immutable and swept pixels never
     # return). An older version regenerates: for a LiDAR-tier scene that is
-    # the v2 -> v3 upgrade this gate exists for (found live at RP-8: the v3
-    # deploy's --shell re-drives nooped against July v2 shells and three
-    # walk rooms kept furniture-slab arkit_planes walls until the blobs
-    # were hand-deleted); for an ARKIT_ONLY scene the regeneration is a
-    # byte-identical v2 rewrite (deterministic, materials Firestore-cached)
-    # — wasted CPU on a rare redelivery, accepted to keep this gate free of
-    # a per-scene tier probe.
+    # the v2 -> v3 upgrade this gate exists for (found live: a
+    # version-blind redelivery noop left older v2 shells in place, so three
+    # re-driven rooms kept their furniture-slab arkit_planes walls until
+    # the blobs were deleted by hand); for an ARKIT_ONLY scene the
+    # regeneration is a byte-identical v2 rewrite (deterministic, materials
+    # Firestore-cached) — wasted CPU on a rare redelivery, accepted to keep
+    # this gate free of a per-scene tier probe.
     existing = _gcs_blob_exists_and_get(outputs_bucket, shell_blob)
     if existing is not None:
         try:

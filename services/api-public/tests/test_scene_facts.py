@@ -383,8 +383,9 @@ class TestSizes:
 
     def test_low_box_confidence_is_size_silent(self):
         """Low confidence is where the LABEL is wrong too — the spike room's
-        wardrobe arrives as a 'refrigerator'. RP-7 withholds the name there;
-        0096 withholds the authoritative size that would attach to it."""
+        wardrobe arrives as a 'refrigerator'. The iOS live floor plan
+        withholds the name there; 0096 withholds the authoritative size that
+        would attach to it."""
         facts = derive_scene_facts(
             _manifest([
                 _boxed("obj_000", "refrigerator", [0, 0.9, 0],

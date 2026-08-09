@@ -315,7 +315,7 @@ class TestRealCaptures:
 
     def test_247003de_under_serving_merge_knobs(self, monkeypatch):
         """The selection is downstream of the wall merge: under the SERVING
-        knobs (SHELL_WALL_MERGE_GAP_M=1.0, NORMAL_TOL=15 — the e33d98a
+        knobs (SHELL_WALL_MERGE_GAP_M=1.0, NORMAL_TOL=15 — the 634038b
         calibration) the derivation picks the adjudication's exact wall ids
         (02/05/09/12) and lands the same rectangle."""
         monkeypatch.setattr(room_planes, "SHELL_WALL_MERGE_GAP_M", 1.0)

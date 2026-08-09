@@ -86,7 +86,7 @@ class TestSpecKey:
     def test_box_identifiers_survive_re_drives(self):
         """THE KEY THE WHOLE SPEC HANGS ON.
 
-        The spike room's LIVE manifest was staged after RP-8's warm rounds and
+        The spike room's LIVE manifest was staged after its warm re-drives and
         again after the 0104 re-drive; `captured_room_built.json` is the
         capture's own RoomPlan artifact, committed 2026-07-28. If every
         identifier in the live manifest is still one of the capture's, the key
@@ -181,13 +181,13 @@ class TestYawConvention:
 
 class TestBoxAxisSemantics:
     def test_dims_are_width_height_depth_not_a_sorted_triple(self):
-        """`scene_facts` SIZES states the triple is descending-sorted and its
-        axis semantics unrecoverable, and limits the guest to a longest
-        dimension on that basis. On the real rooms it is not sorted in any
-        order and dims[1] is the height every time — every box over 1.5 m
-        tall is a wardrobe or a refrigerator. Pinned here because it is the
-        evidence board item 10(a) was waiting for; changing what the guest may
-        SAY is 0096's call and needs its own voice evals."""
+        """`scene_facts` SIZES once justified its longest-dimension-only rule
+        by the triple being descending-sorted with unrecoverable axis
+        semantics. On the real rooms it is not sorted in any order and dims[1]
+        is the height every time — every box over 1.5 m tall is a wardrobe or
+        a refrigerator. Pinned here because it is the evidence a size rule
+        change would rest on; changing what the guest may SAY is 0096's call
+        and needs its own voice evals."""
         largest_at = {0: 0, 1: 0, 2: 0}
         tall = []
         for _name, g in _rooms():
@@ -223,7 +223,8 @@ class TestPredicates:
 
     def test_footprint_containment_uses_corners_not_the_centre(self):
         # A piece half out of the room has its CENTRE inside; corner
-        # containment is the point (0067 chunk D's conservative posture).
+        # containment is the point (the single-view contact priors' posture,
+        # decision 0067: reject to unplaced rather than ship a wrong placement).
         straddling = OrientedBox(center=(3.9, 0, 2.0), dims=(1.0, 1.0, 1.0), yaw_rad=0)
         assert point_in_polygon((3.9, 2.0), self._SQUARE)
         assert not footprint_inside_floor(straddling, self._SQUARE)

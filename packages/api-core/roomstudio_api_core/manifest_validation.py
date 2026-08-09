@@ -1,6 +1,6 @@
 """Semantic manifest validation for POST /captures/{bundle_id}/upload_session.
 
-Closes pre-launch gaps (c) and F3 (decisions 0015/0018): every manifest entry
+Decisions 0015/0018 close two admission gaps here: every manifest entry
 must declare a real, bounded expected_size_bytes, and every relative_path must
 match the shapes the capture clients actually produce. The mint endpoint is
 the admission gate for upload capacity — a URI minted here is authority to
@@ -30,7 +30,7 @@ Size rules:
     guard — an oversized bundle.pb would otherwise upload fine and then
     bounce forever at ingest.
   - Whole-manifest caps: UPLOAD_SESSION_MAX_PATHS entries (default 6000;
-    the largest real manifest to date is 2,170 paths, RP-8 2026-08-06) and
+    the largest real manifest to date is 2,170 paths, 2026-08-06) and
     UPLOAD_SESSION_MAX_TOTAL_BYTES declared total (default 8 GiB; largest
     real bundle to date ~517 MB).
 

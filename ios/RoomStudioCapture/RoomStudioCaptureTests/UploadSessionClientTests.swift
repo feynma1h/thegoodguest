@@ -1,12 +1,17 @@
 /// Integration tests for UploadSessionClient against the live api-public service.
 ///
-/// PREREQUISITES — these tests are SKIPPED unless RUN_INTEGRATION_TESTS=1 is
-/// set in the scheme environment. They require:
+/// PREREQUISITES — the XCTSkipIf guard below is fail-open, but the project's
+/// ONLY scheme (RoomStudioCapture-Integration) already sets
+/// RUN_INTEGRATION_TESTS=1, so in practice these ALWAYS run live and go RED
+/// when the backend is unreachable. They require:
 ///   1. Network access to api-public-q62kcditqa-as.a.run.app
 ///   2. GoogleService-Info.plist present in the app target bundle (for Firebase auth)
+///   3. Headroom in the per-UID daily capture ceiling that endpoint enforces
 ///
-/// Run manually via Xcode: Edit Scheme > Test > Environment Variables >
-/// add RUN_INTEGRATION_TESTS = 1. Do not enable in CI (no network / plist).
+/// To run the offline subset instead, skip this class:
+///   -skip-testing:RoomStudioCaptureTests/UploadSessionClientTests
+/// which is what .github/workflows/ios.yml does, and why that workflow is
+/// manual-only.
 ///
 /// Tests use real Firebase anonymous tokens. The api-public production instance
 /// uses FirebaseTokenVerifier (ENVIRONMENT=production), so "test-uid:<uid>"

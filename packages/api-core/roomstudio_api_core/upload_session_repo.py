@@ -9,7 +9,7 @@ Resumable session URIs are valid for 7 days per GCS docs. The Firestore
 record carries a TTL on created_at (Firestore sweeps promptly once the
 timestamp is past — the record only needs to outlive the upload window).
 
-Ownership and admission (pre-launch gaps a + b, decisions 0015/0018):
+Ownership and admission (decisions 0015/0018):
 create_or_get runs a single transaction over the session record AND the
 caller's mint-quota document before any GCS mint happens:
 
@@ -28,7 +28,7 @@ caller's mint-quota document before any GCS mint happens:
     Quota is charged at admission, so a subsequent GCS mint failure burns
     the slot — accepted: mint failures are rare and the cap is generous.
   - A FIRST claim of a bundle_id additionally charges one CAPTURE against the
-    same day-rolled document (decision 0097). The two counters answer
+    same day-rolled document (decision 0098). The two counters answer
     different questions: mints bound API calls, captures bound GPU spend, and
     a capture is charged once however many times its bundle is re-minted. The
     capture cap is evaluated FIRST so a refused capture never burns mint
@@ -74,9 +74,11 @@ the same daily cap as every other mint, and it corrupts nothing.
 
 UploadSessionRepository interface:
   create_or_get(bundle_id, user_id, manifest, fcm_token, *, mint_uri_fn,
-                bucket, daily_mint_quota=None, now=None)
+                bucket, daily_mint_quota=None, daily_capture_quota=None,
+                force_remint=False, now=None)
     → list[{relative_path, session_uri}]
-    Raises ForeignBundleError / MintRateLimitedError per above.
+    Raises ForeignBundleError / CaptureLimitError / MintRateLimitedError
+    per above.
 
   get_user_id(bundle_id) → str | None
     Returns the stored user_id for a bundle_id, or None if no record exists.
@@ -142,7 +144,7 @@ class CaptureLimitError(Exception):
     Distinct from MintRateLimitedError, and the distinction is the point: the
     mint quota bounds API calls, this bounds GPU spend. One capture commits a
     reconstruction run — measured at up to 900 GPU-seconds per request and
-    typically two requests to completion (decision 0097) — so it is the unit
+    typically two requests to completion (decision 0098) — so it is the unit
     that actually costs money, and it is charged once per bundle_id however
     many times that bundle is minted or re-minted."""
 
@@ -423,8 +425,9 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
     Collections:
       'upload_sessions'    — document id = bundle_id. TTL policy on the
                              'created_at' field (infra/eventarc_setup.sh).
-      'upload_mint_quotas' — document id = user_id; {day, count, updated_at}.
-                             The UTC-day mint quota (gap b). No TTL needed:
+      'upload_mint_quotas' — document id = user_id;
+                             {day, count, captures, updated_at}. The UTC-day
+                             mint and capture quotas. No TTL needed:
                              one small doc per active user, overwritten on
                              each day roll.
 
@@ -594,7 +597,7 @@ class FirestoreUploadSessionRepository(UploadSessionRepository):
 # call resolved ADC credentials and built a fresh AuthorizedSession (a new
 # requests.Session + connection pool + token fetch): a 2,170-path LiDAR
 # manifest at UPLOAD_SESSION_MINT_CONCURRENCY=64 OOM-killed the 512 MiB
-# api-public instance mid-mint (measured live, RP-8 2026-08-06) and burned
+# api-public instance mid-mint (measured live, 2026-08-06) and burned
 # most of its wall clock on per-call TLS + auth. Per-thread rather than one
 # shared session for the same reason as the ingest cache: cross-thread
 # safety of the underlying requests.Session is not documented. Bounded by

@@ -284,7 +284,7 @@ class TestAxisMapping:
         """With a layout up prior (decision 0081), all six assignments are
         enumerated and only those mapping the up AXIS LINE near vertical
         survive — both signs (the layout's sign is never trusted: it
-        measured wrong on a real RP-8 table)."""
+        measured wrong on a real walked table)."""
         cands = box_placement.axis_mapping_candidates(
             _box(), np.array([1.0, 0.25, 0.5]), up_local=np.array([0.0, 1.0, 0.0])
         )
@@ -296,7 +296,7 @@ class TestAxisMapping:
         assert cands[0].signs == (1, 1)
 
     def test_up_filter_excludes_truncation_misleading_assignment(self):
-        """The RP-8 bed's failure class in synthetic form: extents prefer
+        """The walked bed's failure class in synthetic form: extents prefer
         an assignment whose up axis contradicts the layout prior; with the
         prior the wrong-up assignment is simply not enumerated."""
         cands = box_placement.axis_mapping_candidates(
@@ -410,7 +410,7 @@ class TestBuildBoxObject:
 
     def test_single_assignment_never_resolves(self, monkeypatch):
         """With one surviving assignment there is no rival — margin None,
-        default ships (the RP-8 live failure mode, now honest)."""
+        default ships (the live failure mode the walk found, now honest)."""
         box, ctx, assoc = _assoc_scene(dims=(2.0, 0.5, 1.0), ext=(1.0, 0.25, 0.5))
         cands = _cands(box, ctx)
         assert len({c.assignment for c in cands}) == 1

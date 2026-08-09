@@ -21,7 +21,7 @@ geometry placement.py and roomstudio_schemas.placement_math already
 compute (splat vertices, camera poses, projected pixels).
 
 Also home to the two other instrument uses from decision 0067: in-plane
-candidate generation/classification for planar objects (chunk C) and the
+candidate generation/classification for planar objects and the
 sign-flip diagnostic (mirrored_twin) that institutionalizes the 0065
 identity-twin episode as a runtime check. Policy (which candidate wins,
 what margin is required, what a winning flag means for the manifest)
@@ -71,7 +71,7 @@ _TIER2_GRID = int(os.environ.get("PLACEMENT_TIER2_GRID", "128"))
 _TIER2_MAX_POINTS = int(os.environ.get("PLACEMENT_TIER2_MAX_POINTS", "40000"))
 _TIER2_MIN_WEIGHTED_PIXELS = int(os.environ.get("PLACEMENT_TIER2_MIN_PIXELS", "12"))
 
-# A splat is "planar" (chunk C's in-plane candidates apply) when its
+# A splat is "planar" (in-plane candidates apply) when its
 # smallest-variance extent is this much smaller than its middle extent.
 _PLANAR_THIN_RATIO = float(os.environ.get("PLACEMENT_PLANAR_THIN_RATIO", "0.3"))
 
@@ -395,7 +395,7 @@ def combined_score(result: dict) -> float:
 
 
 # -----------------------------------------------------------------------------
-# Multi-view silhouette fit (chunk B's position/scale authority)
+# Multi-view silhouette fit — the >=2-view position/scale authority
 # -----------------------------------------------------------------------------
 
 _FIT_MAX_ITERS = int(os.environ.get("PLACEMENT_FIT_MAX_ITERS", "60"))
@@ -503,7 +503,7 @@ def fit_silhouette(
 
 
 # -----------------------------------------------------------------------------
-# In-plane candidates (chunk C) and the sign-flip diagnostic
+# In-plane candidates and the sign-flip diagnostic
 # -----------------------------------------------------------------------------
 
 def is_planar(local_points: np.ndarray, thin_ratio: float = _PLANAR_THIN_RATIO) -> bool:

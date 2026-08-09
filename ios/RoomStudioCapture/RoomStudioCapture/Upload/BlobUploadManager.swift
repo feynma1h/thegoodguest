@@ -45,9 +45,12 @@
 /// 408/429/503 regardless of our own API's rate-limiting posture — overrides the local
 /// backoff delay. A stated wait beyond maxRetryAfterHoldSec defers cross-launch instead:
 /// the client never retries EARLIER than the server asked, and never pins the completion
-/// chain for minutes. This is distinct from decision 0038's Retry-After item, which
-/// concerns UploadSessionClient's /upload_session retries and stays gated on the
-/// api-public rate limit (pre-launch gap (b)).
+/// chain for minutes. This is the blob-PUT half. UploadSessionClient implements the
+/// /upload_session half of decision 0038's Retry-After item, answering api-public's
+/// per-UID daily quotas (decisions 0087 and 0098 — mint quota and capture ceiling,
+/// both 429 with a Retry-After header): short stated waits are slept in place on the
+/// same 60 s hold cap named here, and a longer one — the normal case, since the quota
+/// rolls at UTC midnight — is surfaced with its reset time rather than retried.
 
 import Foundation
 import os
@@ -562,7 +565,7 @@ actor BlobUploadManager {
             // markingBlobUploaded (via markBlobUploaded → markingBlobUploaded). Decision 0045.
             transientCountedThisLaunch.remove(bundleId)
             #if DEBUG
-            // Staged OS-kill probe (Gate 2b / Fork A): abrupt exit(0) after the
+            // Staged OS-kill probe: abrupt exit(0) after the
             // Nth success, with sibling transfers still in flight. No-op unless
             // the staging flag is set.
             StagingHooks.noteBlobSuccessAndMaybeExit()
@@ -826,7 +829,7 @@ actor BlobUploadManager {
             let task = session.uploadTask(with: req, fromFile: fileURL)
             task.taskDescription = bundlePbDesc
 
-            // Gate 2b staging: hold the PUT by NEVER STARTING IT.
+            // Relaunch-recovery staging: hold the PUT by NEVER STARTING IT.
             //
             // The previous form called resume() and then suspend(). That does not
             // work on a BACKGROUND session: the transfer is performed out of

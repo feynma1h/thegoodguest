@@ -30,13 +30,13 @@ walk rooms (2026-08-09):
     reads as a 2 m wide, 0.5 m tall anything.
 
 This matters beyond the solver, so it is written here rather than in a
-comment: `scene_facts`'s SIZES section states that the triple is
-"descending-sorted in all six real boxes examined" and that "nothing in the
-manifest distinguishes them", and restricts the guest to a longest dimension
-on that basis. That premise does not hold on this data. Changing what the
-guest may SAY is decision 0096's call and needs its own voice evals, so
-nothing here touches it — but board item 10(a) is the place it lands, and the
-measurement above is the evidence it was waiting for.
+comment: `scene_facts` restricts the guest to a longest dimension, and the
+reason it originally gave — that the triple is descending-sorted and its axis
+semantics therefore unrecoverable — is what this measurement refuted. That
+note has been corrected; the RESTRICTION still stands, because changing what
+the guest may SAY is decision 0096's call and needs a FACTS_VERSION bump and
+its own voice evals. Nothing here touches it — the measurement above is the
+evidence that change would rest on.
 
 Consumers: spec_solver.py, guest_tools.py.
 """
@@ -210,10 +210,12 @@ def spec_key(obj: dict) -> str:
     scenes constantly (0080's four warm re-drives changed object counts on
     every room), so an id-keyed entry would silently re-point at a different
     object. Box identifiers are UUIDs carried verbatim from the capture's
-    own room.json, which RP-3 reads from the outputs cache on every re-drive.
+    own room.json, which perception caches in the outputs bucket
+    (scenes/{scene_id}/roomplan/room.json) and re-reads verbatim on every
+    re-drive.
 
     Verified rather than inferred (2026-08-09): all 9 identifiers in the spike
-    room's LIVE manifest — staged after RP-8's warm rounds and again after the
+    room's LIVE manifest — staged after its warm re-drives and again after the
     0104 re-drive — are byte-identical to the ones in the capture's
     `captured_room_built.json`, committed 11 days earlier as a verbatim
     fixture. The key survives re-drives because it belongs to the capture,
@@ -434,8 +436,8 @@ def footprint_inside_floor(box: OrientedBox, polygon: tuple[Vec2, ...]) -> bool:
 
     Corner containment, not centre containment: a piece half out of the room
     is exactly the failure this exists to catch, and it is the same
-    conservative posture as 0067 chunk D's floor-bounds gate — reject to
-    unplaced rather than ship a wrong placement.
+    conservative posture as the single-view contact priors' floor-bounds gate
+    (decision 0067) — reject to unplaced rather than ship a wrong placement.
     """
     if len(polygon) < 3:
         return False

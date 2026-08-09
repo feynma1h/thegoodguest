@@ -1,15 +1,16 @@
 """Convert a RoomPlan co-run spike recording into a real LIDAR_ROOMPLAN
-CaptureBundle — the first fixture of that tier (RP-0, decision 0077).
+CaptureBundle — the first fixture of that tier (decision 0077).
 
 The spike app (ios/RoomPlanSpike, decision 0076) records what the production
-capture app WILL record once RP-6 ships: per-keyframe RGB/depth/confidence
-with poses + intrinsics (keyframes.ndjson), the session's final plane-anchor
-set (plane_anchors.json), and the RoomBuilder [.beautifyObjects] output as
+capture app records: per-keyframe RGB/depth/confidence with poses +
+intrinsics (keyframes.ndjson), the session's final plane-anchor set
+(plane_anchors.json), and the RoomBuilder [.beautifyObjects] output as
 Apple's CapturedRoom Codable JSON (captured_room_built.json) plus the
 parametric USDZ. This tool assembles those into the GCS bundle-prefix layout
-with a valid bundle.pb, so every server chunk (RP-2..RP-5) runs against real
-LiDAR+RoomPlan data OFFLINE, and RP-8 can upload the same bundle for the
-live E2E on the room with operator-verified 9/9 ground truth.
+with a valid bundle.pb, so the whole server-side RoomPlan path
+(roomplan_room, shell v3, box placement, census sampling) runs against real
+LiDAR+RoomPlan data OFFLINE, and the same bundle can be uploaded for the
+live end-to-end on the room with operator-verified 9/9 ground truth.
 
 What is converted vs carried verbatim:
   - Frame poses / intrinsics / gravity: VERBATIM floats from keyframes.ndjson
@@ -40,9 +41,9 @@ Run from the repo root:
     python tools/convert_roomplan_spike.py
     python tools/inspect_bundle.py outputs/roomplan-spike-bundle/bundle.pb
 
-Consumers: RP-2..RP-5 offline gates, RP-8's upload, tests that need a real
-LIDAR_ROOMPLAN bundle. Re-run with --user-id <firebase-uid> before an RP-8
-upload so the bundle belongs to the uploading identity.
+Consumers: the offline perception tests and any live upload that needs a real
+LIDAR_ROOMPLAN bundle. Re-run with --user-id <firebase-uid> before uploading
+so the bundle belongs to the uploading identity.
 """
 from __future__ import annotations
 
@@ -82,8 +83,8 @@ def _stable_v4_uuid(name: str) -> str:
     """Deterministic id carrying the UUIDv4 version/variant layout.
 
     The live mint contract rejects any bundle_id whose version nibble isn't 4
-    (api-public _validate_uuid4 — iOS mints real UUIDv4s; found live at RP-8:
-    the plain uuid5 default 400'd with invalid_bundle_id before this fix).
+    (api-public _validate_uuid4 — iOS mints real UUIDv4s; found live: the
+    plain uuid5 default 400'd with invalid_bundle_id before this fix).
     Derive from uuid5 for run-id stability, then stamp the v4 version/variant
     bits the way uuid.UUID(int=..., version=4) canonicalizes them.
     """
@@ -153,7 +154,7 @@ def main() -> None:
                     help=f"Output bundle directory (default {DEFAULT_OUT})")
     ap.add_argument("--user-id", default=None,
                     help="CaptureBundle.user_id (default spike:{run_id}; pass a "
-                         "real Firebase UID before an RP-8 upload)")
+                         "real Firebase UID before uploading this bundle)")
     ap.add_argument("--bundle-id", default=None,
                     help="Override the bundle_id (default: stable uuid5 of the run_id)")
     args = ap.parse_args()

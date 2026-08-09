@@ -29,22 +29,27 @@ only at box confidence high/medium. Two measured reasons:
   - Splat-derived extents are not size truth. In the reference manifest a real
     meter-scale rug ships `extent_m_sorted` of 0.46 x 0.29 x 0.005 (the
     textile scale collapse, decision 0075), and every splat extent is exposed
-    to visible-region truncation — the open class-6 defect from the RP-8 walk.
+    to visible-region truncation, an open reconstruction defect (0080).
     A confident wrong size is worse than no size, so splat extents are size-
     silent. RoomPlan box dims own measurement truth for covered categories.
   - Low box confidence is where the labels are wrong too (the spike room's
-    wardrobe arrives as a low-confidence "refrigerator"). RP-7 already
-    withholds the NAME there; withholding the authoritative-sounding size
-    that would attach to that wrong name follows the same rule.
+    wardrobe arrives as a low-confidence "refrigerator"). The iOS live floor
+    plan already withholds the NAME at low box confidence; withholding the
+    authoritative-sounding size that would attach to that wrong name follows
+    the same rule.
 
-Only the LARGEST dimension is spoken, never a height or a footprint. The
-shipped `dims` triple carries no recoverable axis semantics: it is descending-
-sorted in all six real boxes examined, so the bed's 2.16 is a length while the
-wardrobe's 1.91 is a height, and nothing in the manifest distinguishes them.
-"About 2.2 m at its longest" is true under either reading; "2.2 m wide" is a
-coin flip. Unlocking height/footprint talk needs perception to ship the up-
-axis extent explicitly (box_placement already knows it as `i_up`) — until
-then this is not a hedge, it is the whole of what the data supports.
+Only the LARGEST dimension is spoken, never a height or a footprint — and the
+reason recorded here was wrong. `dims` IS (x, y, z) in the box's own yaw frame
+with index 1 the vertical extent (`_box_dict` in perception-obj's
+box_placement.py), and across 31 boxes in four rooms the triple is not sorted
+in any order — measured in room_geometry.py, which reads the same manifests.
+Perception now emits `extent_axes_m` = {up_m, horizontal_m, up_tilt_deg}
+beside `dims`, present only when the box's transform warrants it. But no
+manifest this service reads carries it yet: the field post-dates the serving
+perception image, so speaking a height waits on a re-drive AND on a
+FACTS_VERSION bump, a charter change and its voice evals — not on new
+perception capability. The splat-extent reason above is unaffected by any of
+that and still governs.
 
 CLEARANCES. Never a restated center distance — the charter forbids exactly
 that, and it stays forbidden. What IS derivable is a rigorous lower bound:

@@ -35,8 +35,9 @@ the immediate fix is "the failed branch reads `user_id` from the upload_sessions
 and writes it to the scene." Unification belongs in a follow-up if the divergence
 turns out to be load-bearing for other reasons.
 
-Confirmed there are exactly two scene-creation sites in `services/api-internal/server.py`
-(lines 423 and 495, both via `new_scene()` + `repo.create()`). No third site means
+Confirmed there are exactly two scene-creation sites in the ingest handler
+(since renamed `services/api-internal/ingest_server.py`), both via
+`new_scene()` + `repo.create()`. No third site means
 no shared helper is required; the fix is a one-liner in `_handle_failed_incomplete`.
 
 ## What we chose

@@ -12,7 +12,7 @@ curtain near the wall.
 The gate demotes exactly the failed placements and keeps the good ones, and
 is inert on the outside-room test without measured planes (the degrade lock),
 while the class/scale halves still fire (they need no geometry). Contact
-placements (chunk D) are exempt — they sit ON a measured surface by
+placements (the single-view contact priors) are exempt — they sit ON a measured surface by
 construction.
 
 Run from repo root:

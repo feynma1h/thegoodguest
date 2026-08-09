@@ -370,7 +370,7 @@ def test_legacy_fusion_is_deterministic():
 
 
 # -----------------------------------------------------------------------------
-# Cross-label behaviour after fork (a) (RP-8 walk, always-on): NEAR-IDENTICAL
+# Cross-label behaviour after fork (a) (operator walk, always-on): NEAR-IDENTICAL
 # masks collapse regardless of label (the cross-label gate's purpose — one
 # physical object triple-detected under different names); masks that are NOT
 # near-identical never merge across labels (the 0067 same-frame dedup and

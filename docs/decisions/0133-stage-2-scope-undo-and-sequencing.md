@@ -1,7 +1,9 @@
 # 0133 — Stage 2 scope: move and remove ship, the catalog does not, the ledger stays banned
 
 **Date:** 2026-08-09
-**Status:** Decided (design; nothing built)
+**Status:** Decided and BUILT, not yet deployed — move and remove ship; the
+catalog, versioning, and the ledger deliberately do not. Merged to `main`
+2026-08-09.
 
 ## Context
 

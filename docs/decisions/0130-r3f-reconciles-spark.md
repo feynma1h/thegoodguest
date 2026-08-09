@@ -23,7 +23,7 @@ needed the answer before the rest of this design was done.
 
 ## What we tried
 
-A throwaway probe (`web/src/app/probe-r3f/page.tsx`, deleted with this session)
+A throwaway probe (`web/src/app/probe-r3f/page.tsx`, deleted once it answered)
 mounting the real 10-object spike-room fixture — 4,056,000 Gaussians across ten
 real PLYs — as declarative JSX, with **every `SplatMesh` construction counted by
 a `Proxy` on the constructor** and every React mount/unmount logged. That makes
