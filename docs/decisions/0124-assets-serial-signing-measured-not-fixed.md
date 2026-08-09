@@ -1,7 +1,20 @@
 # 0124 — the assets endpoint's serial signing is real, measured, and not the P0
 
 **Date:** 2026-08-09
-**Status:** Decided
+**Status:** Trigger fired — placed-only filter shipped 2026-08-10
+
+> **Outcome (2026-08-10):** the first trigger fired (the compressed tier put
+> the payload in the tens of MB), and the placed-only filter shipped. The
+> consumer check this note demanded came back clean: the shell has signed
+> nothing since 0069 (the handler builds `to_sign` from manifest objects
+> only), `/viewer` fixtures never call `/assets` (staged from disk/GCS, and
+> the staging tools filter `placed` before any URL lookup), and the web's
+> `assembleScene` reads `asset_urls` only for objects it renders — unplaced
+> ones become text-only inventory before the lookup matters. Both maps
+> filter from the ONE uri set, so `asset_urls_compressed` can never carry a
+> key without its PLY fallback. Live on the reference room: 22 signed → 10.
+> The concurrency half was already done (ASSET_SIGN_CONCURRENCY=8, shipped
+> with 0126); this closes the note's remaining half.
 
 ## Context
 
