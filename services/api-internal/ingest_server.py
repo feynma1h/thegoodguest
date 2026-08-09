@@ -259,12 +259,16 @@ def _blob_exists(bucket_name: str, blob_path: str) -> bool:
 def _collect_bundle_blob_paths(bundle) -> list[str]:
     """Return the relative blob paths the pre-GPU existence gate checks.
 
-    Frame RGB, depth and confidence blobs, plus the RoomPlan USDZ. NOT
-    room_plan.json_gcs_path: a ROOMPLAN bundle whose room.json never landed
-    still dispatches, and degrades downstream to LIDAR_ARKIT shell semantics
-    (shell_receiver's room_json_missing path, decision 0077) rather than
-    being held here as failed_incomplete. Nothing records which of the two
-    was intended, so treat the asymmetry as open rather than settled.
+    THE RULE (decision 0105): every blob the bundle DECLARES must have
+    arrived. A path is in the manifest because the capture wrote it, so a
+    declared path with no object behind it is a lost upload — which is what
+    `failed_incomplete` and `missing_paths` exist to say.
+
+    Stating it as a rule rather than a list is what keeps this honest as the
+    wire grows: a new optional message that carries a GCS path is covered the
+    day it is declared, and a path that stops being uploaded stops being
+    declared and drops out of the check on its own. No field needs a
+    consumption-dependent special case, and none has one.
     """
     paths: list[str] = []
     for frame in bundle.frames:
@@ -277,6 +281,12 @@ def _collect_bundle_blob_paths(bundle) -> list[str]:
                 if frame.depth.confidence_gcs_path:
                     paths.append(frame.depth.confidence_gcs_path)
     if bundle.HasField("room_plan"):
+        # room.json is the geometry source of truth for the LIDAR_ROOMPLAN
+        # tier, and the client sets that tier only when it actually shipped
+        # (RoomPlanWire.finalTier). A ROOMPLAN bundle without it is therefore
+        # a lost blob, never a capture that legitimately has no room.
+        if bundle.room_plan.json_gcs_path:
+            paths.append(bundle.room_plan.json_gcs_path)
         if bundle.room_plan.usdz_gcs_path:
             paths.append(bundle.room_plan.usdz_gcs_path)
     return paths

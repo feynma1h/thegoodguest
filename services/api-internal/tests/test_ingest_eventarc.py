@@ -37,7 +37,13 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 from fastapi.testclient import TestClient
 
-from roomstudio_schemas import ARKIT_ONLY, LIDAR_ARKIT, SCHEMA_VERSION, CaptureBundle
+from roomstudio_schemas import (
+    ARKIT_ONLY,
+    LIDAR_ARKIT,
+    LIDAR_ROOMPLAN,
+    SCHEMA_VERSION,
+    CaptureBundle,
+)
 
 import ingest_server as server  # noqa: E402
 from repository import InMemorySceneRepository  # noqa: E402
@@ -78,13 +84,24 @@ _EVENTARC_BODY = {"bucket": _BUCKET, "name": f"captures/{_BUNDLE_ID}/bundle.pb"}
 
 
 def _make_bundle(
-    *, bundle_id: str = _BUNDLE_ID, frame_count: int = 2, add_depth: bool = False
+    *,
+    bundle_id: str = _BUNDLE_ID,
+    frame_count: int = 2,
+    add_depth: bool = False,
+    add_roomplan: bool = False,
 ) -> bytes:
     """bundle_id must match the id in the URI the test posts — the
     validate_bundle cross-check rejects any divergence. The default matches
     the module-level _BUNDLE_URI/_EVENTARC_BODY; tests minting their own
-    per-test bundle_id must pass it here too."""
+    per-test bundle_id must pass it here too.
+
+    add_roomplan mints the LIDAR_ROOMPLAN shape the co-run ships: depth frames
+    plus a RoomPlanModel declaring both roomplan blobs."""
+    if add_roomplan:
+        add_depth = True
     tier = LIDAR_ARKIT if add_depth else ARKIT_ONLY
+    if add_roomplan:
+        tier = LIDAR_ROOMPLAN
     b = CaptureBundle()
     b.schema_version = SCHEMA_VERSION
     b.bundle_id = bundle_id
@@ -119,6 +136,10 @@ def _make_bundle(
             f.depth.intrinsics.cy = 96.0
             f.depth.intrinsics.width = 256
             f.depth.intrinsics.height = 192
+    if add_roomplan:
+        b.room_plan.json_gcs_path = "roomplan/room.json"
+        b.room_plan.usdz_gcs_path = "roomplan/room.usdz"
+        b.room_plan.roomplan_version = "test;CapturedRoom.v2;beautifyObjects"
     return b.SerializeToString()
 
 
@@ -496,6 +517,99 @@ class TestExistenceCheck:
         assert len(scenes) == 1
         assert scenes[0].status == SceneStatus.FAILED_INCOMPLETE
         assert scenes[0].missing_paths
+
+    def test_roomplan_bundle_needs_its_room_json(self, client: TestClient) -> None:
+        """Decision 0105: every declared blob must have arrived. The client
+        sets LIDAR_ROOMPLAN only when room.json actually shipped, so a
+        ROOMPLAN bundle without it is a lost upload — held here for a
+        re-upload, not dispatched onto the GPU to render the LiDAR-ARKit
+        shell the user did not scan for."""
+        bundle_bytes = _make_bundle(frame_count=2, add_roomplan=True)
+        repo = InMemorySceneRepository()
+        dispatcher = InMemoryTaskDispatcher()
+
+        def _exists(bucket: str, blob_path: str) -> bool:
+            return not blob_path.endswith("roomplan/room.json")
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", side_effect=_exists),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_task_dispatcher", dispatcher),
+            patch.object(server, "_fcm_notifier", NullFcmNotifier()),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+        ):
+            resp = _post_bundle_event(client, _BUNDLE_URI)
+
+        body = resp.json()
+        assert body["status"] == "failed_incomplete"
+        assert body["missing_paths"] == ["roomplan/room.json"]
+        # Never reaches the GPU: a degraded run burns ~1,500 GPU-seconds
+        # (decision 0098) to produce a shell the capture did not ask for.
+        assert dispatcher.tasks == []
+
+    def test_roomplan_bundle_dispatches_when_room_json_arrived(
+        self, client: TestClient
+    ) -> None:
+        """The other half of the same rule: present means proceed."""
+        bundle_bytes = _make_bundle(frame_count=2, add_roomplan=True)
+        repo = InMemorySceneRepository()
+        dispatcher = InMemoryTaskDispatcher()
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", return_value=True),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
+            patch.object(server, "_scene_repo", repo),
+            patch.object(server, "_task_dispatcher", dispatcher),
+            patch.object(server, "_fcm_notifier", NullFcmNotifier()),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+        ):
+            resp = _post_bundle_event(client, _BUNDLE_URI)
+
+        assert resp.json()["status"] == "queued"
+
+    def test_roomplan_usdz_stays_required(self, client: TestClient) -> None:
+        """The usdz half needs no special case. It is declared, so the rule
+        covers it — which is the point of stating a rule instead of listing
+        fields. If a future decision stops uploading it, it stops being
+        declared and drops out of the check on its own."""
+        bundle_bytes = _make_bundle(frame_count=2, add_roomplan=True)
+
+        def _exists(bucket: str, blob_path: str) -> bool:
+            return not blob_path.endswith("roomplan/room.usdz")
+
+        with (
+            patch.object(server, "_fetch_bundle_bytes", return_value=bundle_bytes),
+            patch.object(server, "_blob_exists", side_effect=_exists),
+            patch.object(server, "_validate_image_blobs", return_value=[]),
+            patch.object(server, "_scene_repo", InMemorySceneRepository()),
+            patch.object(server, "_task_dispatcher", InMemoryTaskDispatcher()),
+            patch.object(server, "_fcm_notifier", NullFcmNotifier()),
+            patch.object(server, "_upload_session_repo", InMemoryUploadSessionRepository()),
+        ):
+            resp = _post_bundle_event(client, _BUNDLE_URI)
+
+        assert resp.json()["missing_paths"] == ["roomplan/room.usdz"]
+
+    def test_non_roomplan_bundles_are_unaffected(self, client: TestClient) -> None:
+        """The degrade lock. A bundle with no room_plan message collects
+        exactly the paths it collected before decision 0105 — the rule only
+        ever adds what a bundle itself declares."""
+        for kwargs in ({}, {"add_depth": True}):
+            bundle = CaptureBundle()
+            bundle.ParseFromString(_make_bundle(frame_count=3, **kwargs))
+            assert not bundle.HasField("room_plan")
+            paths = server._collect_bundle_blob_paths(bundle)
+            expected = [f"frames/{i:06d}.jpg" for i in range(3)]
+            if kwargs.get("add_depth"):
+                expected = [
+                    p
+                    for i in range(3)
+                    for p in (f"frames/{i:06d}.jpg", f"depth/{i:06d}.f32")
+                ]
+            assert paths == expected
 
     def test_failed_incomplete_scene_has_user_id_from_upload_session(
         self, client: TestClient
