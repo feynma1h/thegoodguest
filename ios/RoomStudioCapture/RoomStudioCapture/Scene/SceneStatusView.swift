@@ -18,6 +18,12 @@
 ///
 /// Re-upload action for .recoverable is intentionally absent here — that front
 /// is separate. This view surfaces the count and the path list is on the model.
+///
+/// NOTE (decisions 0084 + 0116): the re-send now EXISTS, in RootFlowView (the
+/// app root) via FailureView + BlobUploadManager.resendMissingBlobs. It is not
+/// wired here, and the copy below is still accurate for this screen because
+/// this screen genuinely offers no such action — but if ContentView is ever
+/// used as the rollback path again, that is what it would be rolling back to.
 
 import os
 import SwiftUI

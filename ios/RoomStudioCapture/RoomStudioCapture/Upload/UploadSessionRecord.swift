@@ -242,6 +242,87 @@ nonisolated struct UploadSessionRecord: Codable, Sendable {
         )
     }
 
+    /// Return a new record with `newEntries` MERGED over the existing ones,
+    /// matched by relativePath, and an updated mint timestamp.
+    ///
+    /// The recovery re-send (decision 0084's coordinator) re-mints a SUBSET of
+    /// the manifest — the missing blobs plus bundle.pb — so it cannot use
+    /// `updatingSessionEntries`, which replaces the entry list wholesale and
+    /// would drop every path it did not re-mint (taking their blobStatuses with
+    /// them, and with those the Phase-1 gate's knowledge of what is already up).
+    ///
+    /// Per-blob statuses are preserved for every path, re-minted or not:
+    /// receiving a fresh URI does not mean a blob needs re-sending, and the
+    /// caller resets exactly the ones that do (`resettingBlobsToPending`).
+    /// `manifestPaths` is preserved deliberately — it is this capture's full
+    /// path-set, which the 410/staleness re-mint still re-sends in full.
+    nonisolated func mergingSessionEntries(
+        _ newEntries: [UploadSessionEntry],
+        mintTimestamp: Date
+    ) -> UploadSessionRecord {
+        var merged: [String: String] = sessionUriMap
+        for entry in newEntries { merged[entry.relativePath] = entry.sessionUri }
+        // Stable order: existing entries keep their positions, genuinely new
+        // paths append in the order the server returned them. Order carries no
+        // meaning (every lookup is by relativePath) but determinism keeps a
+        // persisted record diffable.
+        var entries = sessionEntries.map {
+            UploadSessionEntry(relativePath: $0.relativePath,
+                               sessionUri: merged[$0.relativePath] ?? $0.sessionUri)
+        }
+        let existing = Set(sessionEntries.map(\.relativePath))
+        for entry in newEntries where !existing.contains(entry.relativePath) {
+            entries.append(entry)
+        }
+        var statuses = blobStatuses
+        for entry in entries where statuses[entry.relativePath] == nil {
+            statuses[entry.relativePath] = .pending
+        }
+        return UploadSessionRecord(
+            bundleId:              bundleId,
+            tierRawValue:          tierRawValue,
+            clientMintTimestamp:   mintTimestamp,
+            sessionEntries:        entries,
+            manifestPaths:         manifestPaths,
+            blobStatuses:          statuses,
+            outputDir:             outputDir,
+            uploadPhase:           uploadPhase,
+            failureReason:         failureReason,
+            crossLaunchRetryCount: crossLaunchRetryCount
+        )
+    }
+
+    /// Return a new record with exactly `paths` reset to .pending, back in the
+    /// `.uploadingBlobs` phase.
+    ///
+    /// The recovery re-send's second half. Resetting the phase is not cosmetic:
+    /// after a completed upload the record is `.complete`, and
+    /// `enqueueBundlePb` refuses to enqueue for a `.complete` record — so
+    /// without this the re-sent blobs would land and the finalize would never
+    /// follow, which is the silent strand this whole path exists to avoid.
+    ///
+    /// bundle.pb's own status is reset by the caller passing it in `paths`: it
+    /// is always re-sent, and leaving it marked `.uploaded` would describe a
+    /// PUT that is about to be made again. It never re-enters Phase 1 either
+    /// way — `allNonBundlePbBlobsUploaded` and `enqueuePhasOneBlobs` both
+    /// exclude it by name (decision 0040).
+    nonisolated func resettingBlobsToPending(_ paths: [String]) -> UploadSessionRecord {
+        var updated = blobStatuses
+        for path in paths { updated[path] = .pending }
+        return UploadSessionRecord(
+            bundleId:              bundleId,
+            tierRawValue:          tierRawValue,
+            clientMintTimestamp:   clientMintTimestamp,
+            sessionEntries:        sessionEntries,
+            manifestPaths:         manifestPaths,
+            blobStatuses:          updated,
+            outputDir:             outputDir,
+            uploadPhase:           .uploadingBlobs,
+            failureReason:         failureReason,
+            crossLaunchRetryCount: crossLaunchRetryCount
+        )
+    }
+
     // MARK: - Phase mutation
 
     /// Return a new record with the given upload phase (and optionally a failure reason).

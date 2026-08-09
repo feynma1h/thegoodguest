@@ -1149,6 +1149,149 @@ actor BlobUploadManager {
         logger.info("[BlobUploadManager] 🔄 re-minted \(bundleId, privacy: .public): re-enqueued \(reenqueued) blob(s)")
     }
 
+    // MARK: - failed_incomplete recovery re-send (decisions 0084 + 0116)
+
+    /// What a recovery re-send attempt did.
+    enum RecoveryOutcome: Equatable {
+        /// Blob PUTs are enqueued. bundle.pb follows automatically when the
+        /// Phase-1 gate re-closes. `blobs` is how many were sent again.
+        case started(blobs: Int)
+        /// No honest re-send exists — the caller must offer a rescan instead.
+        /// Not an error: the plan refused before anything was attempted.
+        case refused(CaptureRecovery.Obstacle)
+        /// The attempt itself did not go through (no record, mint failed, save
+        /// failed, enqueue failed). Never terminal for the bundle: the files are
+        /// still here and the offer stands. Whatever was persisted before the
+        /// failure leaves the record in a resumable shape — fresh URIs, blobs
+        /// `.pending`, phase `.uploadingBlobs` — which is exactly what the
+        /// launch rehydration knows how to finish.
+        case failed(String)
+    }
+
+    /// Re-send the blobs a `failed_incomplete` scene reported missing.
+    ///
+    /// This is decision 0084's re-upload coordinator, un-blocked by decision
+    /// 0116's `force_remint`. The recovery loop it completes, end to end:
+    ///
+    ///   ingest answers `failed_incomplete` with `missing_paths`
+    ///     → this method force-re-mints those paths PLUS bundle.pb, so the dead
+    ///       (consumed, or lifecycle-swept) sessions are replaced by live ones
+    ///     → the missing blobs are re-enqueued as ordinary Phase-1 uploads
+    ///     → the existing Phase-1 gate fires when the last one lands and sends
+    ///       bundle.pb LAST (decision 0040 — nothing here re-implements that)
+    ///     → bundle.pb's arrival re-triggers Eventarc, and ingest transitions
+    ///       the existing FAILED_INCOMPLETE scene back to QUEUED with the SAME
+    ///       scene_id.
+    ///
+    /// The ordering guarantee is the reason this is so short: resetting the
+    /// missing blobs to `.pending` and handing them to `enqueuePhasOneBlobs` is
+    /// enough, because bundle.pb-last is already the machinery's own invariant.
+    /// A recovery path that enqueued bundle.pb itself would be a second
+    /// implementation of the one rule that must never have two.
+    ///
+    /// `force_remint` is set here on evidence, which is the discipline decision
+    /// 0116 asks for: a `failed_incomplete` scene naming absent paths IS the
+    /// server telling us the upload did not land. It costs one unit of the
+    /// caller's daily mint quota and no second capture.
+    ///
+    /// Idempotency and safety while running: a second call for a bundle whose
+    /// re-send is already in flight is refused by the live-task reconciliation
+    /// inside `enqueuePhasOneBlobs` (it skips any blob with a live URLSession
+    /// task), so the worst a double-tap costs is one wasted mint.
+    ///
+    /// Called by: RootFlowView, from the recoverable failure screen's primary
+    /// action. Never called automatically — see that call site for why.
+    func resendMissingBlobs(bundleId: String, missingPaths: [String]) async -> RecoveryOutcome {
+        guard let record = try? await store.load(bundleId: bundleId) else {
+            logger.info("[BlobUploadManager] ⚠ resend: no record for \(bundleId, privacy: .public)")
+            return .failed("no_record")
+        }
+        let outputDir = record.outputDir
+
+        // 1. Plan. Pure — the disk probe is the only input it takes from the world.
+        let plan = CaptureRecovery.plan(
+            missingPaths: missingPaths,
+            manifestPaths: record.manifestPaths,
+            fileExists: { FileManager.default.fileExists(
+                atPath: outputDir.appendingPathComponent($0).path) }
+        )
+        guard case .resend(let blobs) = plan else {
+            if case .rescanOnly(let obstacle) = plan {
+                logger.info("[BlobUploadManager] ⚠ resend refused for \(bundleId, privacy: .public): \(String(describing: obstacle))")
+                return .refused(obstacle)
+            }
+            return .failed("unreachable_plan")
+        }
+
+        // 2. Manifest with REAL sizes, read from disk. Same rule as the re-mint
+        //    manifest build above: never send a fabricated size — the server
+        //    mints the session against the declared length and GCS enforces it.
+        var manifestEntries: [UploadManifestEntry] = []
+        for path in CaptureRecovery.mintPaths(for: blobs) {
+            let fileURL = outputDir.appendingPathComponent(path)
+            guard
+                let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+                let size = resources.fileSize, size > 0
+            else {
+                // The plan confirmed existence moments ago, so this is a file
+                // that became unreadable in between. Not fatal for the bundle:
+                // nothing has been changed yet, and a rescan is still available.
+                logger.info("[BlobUploadManager] ✗ resend: blob unreadable at manifest build: \(path, privacy: .public)")
+                return .refused(.filesGone([path]))
+            }
+            manifestEntries.append(UploadManifestEntry(relativePath: path, expectedSizeBytes: size))
+        }
+
+        guard let mintFn = remintProvider else {
+            logger.info("[BlobUploadManager] ⚠ resend: remintProvider not wired for \(bundleId, privacy: .public)")
+            return .failed("no_remint_provider")
+        }
+        let freshEntries: [UploadSessionEntry]
+        do {
+            freshEntries = try await mintFn(bundleId, manifestEntries, true)
+        } catch {
+            logger.info("[BlobUploadManager] ⚠ resend: mint failed for \(bundleId, privacy: .public): \(error.localizedDescription)")
+            return .failed("remint_failed: \(error)")
+        }
+
+        // 3. Merge (not replace) the fresh URIs, then reset exactly the paths
+        //    being sent again. Order matters: the merge carries the mint
+        //    timestamp forward, and the reset carries the phase back — a
+        //    `.complete` record would otherwise refuse the bundle.pb finalize.
+        let resendPaths = blobs + [CaptureRecovery.bundlePbPath]
+        let updated = record
+            .mergingSessionEntries(freshEntries, mintTimestamp: clock())
+            .resettingBlobsToPending(resendPaths)
+        do {
+            try await store.save(updated)
+        } catch {
+            logger.info("[BlobUploadManager] ⚠ resend: persist failed for \(bundleId, privacy: .public): \(error.localizedDescription)")
+            return .failed("persist_failed: \(error)")
+        }
+
+        // 4. Clear the in-memory state a previous attempt left behind. This is a
+        //    DELIBERATE restart of a bundle the user asked to send again, so it
+        //    starts with a clean budget: a stale UploadContext would carry
+        //    exhausted per-blob retry counts and defer the first hiccup, and a
+        //    lingering failedBundles entry would drop every completion for the
+        //    blobs we are about to enqueue.
+        contexts[bundleId] = UploadContext()
+        failedBundles.remove(bundleId)
+        bundlePbEnqueueInFlight.remove(bundleId)
+        transientCountedThisLaunch.remove(bundleId)
+
+        // 5. Hand back to the ordinary Phase-1 machinery, which owns
+        //    bundle.pb-last.
+        do {
+            try await enqueuePhasOneBlobs(record: updated)
+        } catch {
+            logger.info("[BlobUploadManager] ✗ resend: Phase-1 enqueue failed for \(bundleId, privacy: .public): \(error)")
+            return .failed("enqueue_failed: \(error)")
+        }
+        logger.info("[BlobUploadManager] ↻ resend started for \(bundleId, privacy: .public): \(blobs.count) blob(s) + bundle.pb")
+        return .started(blobs: blobs.count)
+    }
+
     // MARK: - Terminal success handler
 
     /// Bundle upload fully complete (bundle.pb PUT returned 200/201).
