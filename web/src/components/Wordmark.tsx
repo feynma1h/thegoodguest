@@ -4,7 +4,15 @@
  * The design file renders every wordmark slot as a literal placeholder
  * ("❖ WORDMARK" in quiet tracked mono); this component honors that —
  * visibly a stand-in, deliberately quiet, because the room is the hero.
- * When the real name lands, this file is the only UI change.
+ *
+ * This is the only place the name is RENDERED AS THE MARK, but it is not the
+ * only place the string appears in user-visible text. When the real name
+ * lands, also update: app/layout.tsx (the tab title), and app/terms/page.tsx
+ * and app/privacy/page.tsx (titles, descriptions, and body copy, including the
+ * "working title" sentence in Terms §2, which stops being true). The
+ * "roomstudio:"-prefixed localStorage keys in app/page.tsx, lib/seen.ts, and
+ * components/NewRoomSheet.tsx are internal and can stay — renaming them
+ * silently resets returning visitors.
  */
 
 export default function Wordmark({

@@ -12,10 +12,9 @@
 # rendered text. It is invisible to every check in this file. Rendered text
 # has to be verified in a browser.
 #
-# VERIFICATION STATUS: every command below was run locally against this commit
-# on Node 22 (143 vitest passing, tsc clean, eslint clean, build green with
-# /privacy and /terms prerendered). What is unverified is only the GitHub
-# Actions plumbing itself, since the repo had no remote when this landed.
+# No pass counts here on purpose: a number in a workflow comment reads as a
+# claim about the run you are looking at, and this one drifted the moment the
+# suite grew. The job output is the count.
 
 name: web
 

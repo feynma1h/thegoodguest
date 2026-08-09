@@ -1,10 +1,25 @@
 # Cloud Tasks queue — perception-dispatch
 
-The `perception-dispatch` queue is created automatically by `infra/deploy_api.sh`
-(idempotent). Application code (services/api) enqueues tasks but never creates
-or configures the queue itself.
+`perception-dispatch` (location `asia-southeast1`, project `roomstudio`) is the
+one queue in the system. Three producers enqueue onto it and one service
+receives from it:
 
-## Queue configuration
+| Producer                                   | Task target               |
+|--------------------------------------------|---------------------------|
+| `api-internal` (`dispatcher.py`), at ingest | `perception-obj /process` |
+| `perception-obj` (`shell_enqueue.py`)       | `perception-obj /shell`   |
+| `perception-obj` (`compress_enqueue.py`)    | `perception-obj /compress`|
+
+The two `perception-obj` producers fire-and-forget after a scene reaches
+`ready`, so the derived-asset stages do not extend the reconstruction request.
+
+## Who creates it
+
+`infra/deploy_api_internal.sh` (step 4/10), idempotently — it describes the
+queue and creates it only if absent. No application code creates or configures
+the queue.
+
+Config, as created and as live:
 
 ```
 maxAttempts:   3
@@ -14,13 +29,11 @@ maxDoublings:  3   (30s → 60s → 120s → cap at 300s)
 target:        HTTP (not App Engine)
 ```
 
-Retry policy rationale: 3 attempts with 30s start matches the decision in
-docs/decisions/0003-async-perception-dispatch.md — bounded retry, then
-surface `failed` to iOS for user-driven retry.
+Retry policy rationale: bounded retry, then surface `failed` to the client for
+a user-driven retry, per
+`docs/decisions/0003-async-perception-dispatch.md`.
 
-## Create manually (if needed)
-
-The deploy script handles this. Use this command only for out-of-band repair:
+To repair out of band, the same command the deploy script runs:
 
 ```bash
 gcloud tasks queues create perception-dispatch \
@@ -32,45 +45,42 @@ gcloud tasks queues create perception-dispatch \
   --max-doublings=3
 ```
 
-## Environment variables in services/api
+## dispatch_deadline is set per task, not on the queue
 
-All values are set by `infra/api.env.yaml` for the deployed service.
+Each producer sets `dispatch_deadline` on the task itself. It must be at least
+`perception-obj`'s Cloud Run request timeout (900 s) — otherwise Cloud Tasks
+gives up on a request the receiver is still working on and schedules a retry
+against a scene whose lease is still held.
+`services/api-internal/tests/test_dispatcher.py` pins that relationship.
 
-| Variable                    | Value                                                    |
-|-----------------------------|----------------------------------------------------------|
-| ENVIRONMENT                 | production                                               |
-| FIRESTORE_PROJECT           | roomstudio                                               |
-| CLOUD_TASKS_PROJECT         | roomstudio                                               |
-| CLOUD_TASKS_LOCATION        | asia-southeast1                                          |
-| CLOUD_TASKS_QUEUE           | perception-dispatch                                      |
-| CLOUD_TASKS_INVOKER_SA      | tasks-invoker@roomstudio.iam.gserviceaccount.com         |
-| PERCEPTION_OBJ_PROCESS_URL  | https://perception-obj-q62kcditqa-as.a.run.app/process   |
+## The OIDC chain
 
-`CLOUD_TASKS_INVOKER_SA` is the service-account email Cloud Tasks uses to mint
-the OIDC token attached to each task delivery. The receiver (`perception-obj`)
-verifies this claim. If absent, no OIDC token is attached (appropriate for
-local dev; the receiver also skips verification when its own
-`CLOUD_TASKS_INVOKER_SA` is unset).
+`CLOUD_TASKS_INVOKER_SA` is the service account Cloud Tasks uses to mint the
+OIDC token attached to each delivery; `perception-obj` verifies that claim in
+`oidc.py`. When it is unset on the producer, no token is attached, and when it
+is unset on the receiver, verification is skipped — the local-dev path, not a
+production one.
 
-`tasks-invoker` SA must have `roles/run.invoker` on the perception-obj Cloud
-Run service. `infra/deploy_api.sh` asserts this binding on every run.
+Two bindings make the chain work, both asserted on every run of the deploy
+scripts that own them:
 
-`api-runtime` SA must have `roles/cloudtasks.enqueuer` project-wide and
-`roles/iam.serviceAccountUser` on `tasks-invoker` so it can specify the OIDC
-token SA when enqueueing. Both are asserted by `infra/deploy_api.sh`.
+- `tasks-invoker@roomstudio.iam.gserviceaccount.com` needs `roles/run.invoker`
+  on `perception-obj` (`infra/deploy_api_internal.sh`, step 3/10 — it skips the
+  binding with a notice if `perception-obj` does not exist yet, so a first-time
+  deploy runs it again afterwards).
+- Each producer's runtime SA needs `roles/cloudtasks.enqueuer` and
+  `roles/iam.serviceAccountUser` on `tasks-invoker`, so it may name that SA as
+  the token minter when enqueueing — `api-internal-runtime@` via
+  `infra/deploy_api_internal.sh`, `perception-obj-runtime@` via
+  `ensure_obj_runtime_iam` in `infra/deploy_perception.sh`.
 
-When any Cloud Tasks variable is absent (and `ENVIRONMENT` ≠ `production`),
-the ingester falls back to an in-memory dispatcher (local dev only).
+## Environment variables
 
-## Environment variables in services/perception-obj
+Not duplicated here — they drift. `api-internal`'s are in
+`infra/api-internal.env.yaml`; `perception-obj`'s are set inline by
+`infra/deploy_perception.sh` (it takes no env-vars file). Both are the values
+actually deployed.
 
-| Variable                    | Value                                                    |
-|-----------------------------|----------------------------------------------------------|
-| FIRESTORE_PROJECT           | roomstudio                                               |
-| RECEIVER_URL                | https://perception-obj-q62kcditqa-as.a.run.app           |
-| CLOUD_TASKS_INVOKER_SA      | tasks-invoker@roomstudio.iam.gserviceaccount.com         |
-| PERCEPTION_OUTPUTS_BUCKET   | roomstudio-perception-outputs                            |
-| SCENE_LEASE_TTL_SECONDS     | 300 (default)                                            |
-
-When `FIRESTORE_PROJECT` is absent, the receiver uses in-memory state (local dev).
-When `CLOUD_TASKS_INVOKER_SA` is absent, OIDC verification is skipped (local dev).
+When any Cloud Tasks variable is absent and `ENVIRONMENT` is not `production`,
+`api-internal` falls back to an in-memory dispatcher. That is a local-dev
+convenience; production startup requires the full set.
