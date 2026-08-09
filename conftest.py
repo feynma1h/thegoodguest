@@ -11,16 +11,9 @@ drifted: tools/test_backfill_scene_expiry.py was added to testpaths but not
 to the duplicate, so `pytest` from repo root collected 630 tests and the
 same command from any subdirectory collected 626 — silently, while this
 docstring promised they were equal.  A derived list cannot drift again.
-
-tools/claim1_test.py is a manual one-off script that happens to match the
-*_test.py pattern; it is not part of the automated suite.
 """
 
 from pathlib import Path
-
-_ROOTDIR = Path(__file__).resolve().parent
-
-collect_ignore = [str(_ROOTDIR / "tools" / "claim1_test.py")]
 
 
 def pytest_configure(config):
