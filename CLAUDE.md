@@ -281,7 +281,7 @@ The iOS suite is **482 tests total** (was 463; the walk-findings pass added 19 â
 
 ## Tooling conventions
 
-Default model for routine work: **Sonnet 4.6**. Switch to **Opus 4.7** for hard reasoning (coordinate-frame conversions, perception-pipeline architecture, anything where a wrong answer propagates). Haiku 4.5 is not in use yet.
+Default model for routine work: **Sonnet 5**. Switch to **Opus 5** for hard reasoning (coordinate-frame conversions, perception-pipeline architecture, anything where a wrong answer propagates). Haiku 4.5 is not in use yet. The escalation rule is the durable part; the names are bindings â€” update them together with `.claude/WORKFLOW.md` when the model family moves.
 
 Default tool for code work: **Claude Code**. Default for strategy / architecture decisions: **Claude Chat**. See `.claude/WORKFLOW.md` for the full rubric and prompt templates.
 

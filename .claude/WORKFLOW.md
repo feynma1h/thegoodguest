@@ -28,9 +28,11 @@ When in doubt: if you'd start your message with "should I…" or "is it better t
 
 ## Model choice
 
-In Claude Code, set **Sonnet 4.6** as the default. Switch to **Opus 4.7** only when reasoning depth genuinely matters — coordinate-frame conversions, perception-pipeline architecture, anything where a wrong answer propagates through a lot of code.
+The durable rule: default to the mid-tier model for routine work, and escalate to the top reasoning model only when a wrong answer propagates through a lot of code — coordinate-frame conversions, perception-pipeline architecture, contract design. The model names below are bindings under that rule, current as of 2026-08; when the family moves, update the names and keep the rule.
 
-In Claude Chat, **Opus 4.7** is fine to default to. The work you do in Chat is the kind Opus is built for. You'll burn more tokens than necessary if you also use Opus in Code for things Sonnet handles fine.
+In Claude Code, set **Sonnet 5** as the default — also the model the product itself runs (`GUEST_MODEL`, `SHELL_MATERIAL_MODEL`), so its behavior is the one this project has calibrated against. Switch to **Opus 5** when the escalation rule fires.
+
+In Claude Chat, **Opus 5** is fine to default to. The work you do in Chat is the kind the top model is built for. You'll burn more tokens than necessary if you also use it in Code for things the default handles fine.
 
 ## How to brief Claude Code
 
