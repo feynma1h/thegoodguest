@@ -2,21 +2,23 @@
 ///
 /// Responsibilities:
 ///   - Ensure a stable UID exists before any upload call (anonymous on first
-///     run; the same UID once upgraded to a linked Apple sign-in).
+///     run; the same UID once upgraded to a linked real sign-in).
 ///   - Vend fresh idTokens on demand (never cache the raw string).
-///   - Upgrade the anonymous user to a real Sign in with Apple credential by
-///     LINKING it to the existing user (decision 0051) — the UID never changes
-///     on link; every scene captured before sign-in stays reachable after.
+///   - Upgrade the anonymous user to a real credential — Sign in with Apple
+///     or Google (decisions 0051/0094/0118) — by LINKING it to the existing
+///     user: the UID never changes on link; every scene captured before
+///     sign-in stays reachable after. Both providers run through the one
+///     private link core; the web reads either (0094).
 ///
-/// Key design decisions (decisions 0036, 0051):
+/// Key design decisions (decisions 0036, 0051, 0118):
 ///   - signInIfNeeded() is idempotent: reuses currentUser if non-nil (anonymous
 ///     OR linked), never calls signInAnonymously() twice. UID churn would
 ///     orphan prior scenes at poll time — we avoid it by checking for an
 ///     existing user first.
-///   - linkAppleAccount() calls link(with:) on the EXISTING user, never
-///     signIn(with:). A successful link is asserted UID-unchanged. The only
-///     path that changes the UID is switchToExistingAccount(), which runs
-///     solely on an explicit, warned user choice after a link conflict.
+///   - linkAppleAccount()/linkGoogleAccount() call link(with:) on the EXISTING
+///     user, never signIn(with:). A successful link is asserted UID-unchanged.
+///     The only path that changes the UID is switchToExistingAccount(), which
+///     runs solely on an explicit, warned user choice after a link conflict.
 ///   - There is no sign-out on iOS: with no current user, the next launch's
 ///     signInIfNeeded() would mint a FRESH anonymous UID and orphan every
 ///     local record — exactly the churn 0036 forbids. The web app is where
@@ -52,12 +54,24 @@ final class AuthManager: ObservableObject {
     @Published private(set) var uid: String?
 
     /// True when the current user carries an Apple credential (decision 0051's
-    /// linked state). Drives the account UI; false while anonymous.
+    /// linked state). Drives per-provider account UI; false while anonymous.
     @Published private(set) var isAppleLinked = false
+
+    /// True when the current user carries a Google credential (decision 0118).
+    @Published private(set) var isGoogleLinked = false
+
+    /// Linked to any real provider — the "signed in" bit. Rooms follow the
+    /// account to the web with either provider (0094), so surfaces that ask
+    /// "is this identity safe across devices" read this, not a per-provider
+    /// flag. Derived from the two @Published flags, so observers re-render.
+    var isLinked: Bool { isAppleLinked || isGoogleLinked }
 
     /// Display email for the linked Apple credential, when Apple shared one
     /// (private-relay addresses included). Display-only — never sent anywhere.
     @Published private(set) var appleEmail: String?
+
+    /// Display email for the linked Google credential. Display-only.
+    @Published private(set) var googleEmail: String?
 
     private let logger = Logger(
         subsystem: "com.roomstudio.RoomStudioCapture", category: "Auth")
@@ -131,17 +145,17 @@ final class AuthManager: ObservableObject {
         return try await task.value
     }
 
-    // MARK: - Account linking (decision 0051)
+    // MARK: - Account linking (decisions 0051/0118)
 
-    /// Outcome of one Apple link attempt, for the sign-in UI.
-    enum AppleLinkResult {
+    /// Outcome of one link attempt (either provider), for the sign-in UI.
+    enum LinkResult {
         /// Linked to the existing user. UID verified unchanged.
         case linked
-        /// The Apple ID already belongs to a DIFFERENT account. The credential
-        /// (single-use, from the SDK) switches to it via
+        /// The provider identity already belongs to a DIFFERENT account. The
+        /// credential (single-use, from the SDK) switches to it via
         /// switchToExistingAccount — only on an explicit user choice.
         case conflict(existingAccountCredential: AuthCredential?)
-        /// User dismissed the Apple sheet; nothing changed, show nothing.
+        /// User dismissed the provider's sheet; nothing changed, show nothing.
         case canceled
         /// Link failed; current account untouched. Message is display-ready.
         case failed(message: String)
@@ -160,7 +174,24 @@ final class AuthManager: ObservableObject {
         idTokenString: String,
         rawNonce: String,
         fullName: PersonNameComponents?
-    ) async -> AppleLinkResult {
+    ) async -> LinkResult {
+        await link(credential: OAuthProvider.appleCredential(
+            withIDToken: idTokenString, rawNonce: rawNonce, fullName: fullName))
+    }
+
+    /// Upgrade the current (anonymous) user with a Google credential by
+    /// LINKING — same core, same invariants as Apple (decision 0118). The
+    /// tokens come from the GIDSignIn flow in SignInSheet; no client nonce is
+    /// involved (GIDSignIn owns its own replay protection).
+    func linkGoogleAccount(idToken: String, accessToken: String) async -> LinkResult {
+        await link(credential: GoogleAuthProvider.credential(
+            withIDToken: idToken, accessToken: accessToken))
+    }
+
+    /// The one link core both providers run through: link(with:) on the
+    /// EXISTING user, UID asserted unchanged, failures classified by the
+    /// shared AccountLinking.classifyLinkError.
+    private func link(credential: AuthCredential) async -> LinkResult {
         guard isConfigured else {
             return .failed(message: AuthError.notConfigured.localizedDescription)
         }
@@ -178,8 +209,6 @@ final class AuthManager: ObservableObject {
         }
 
         let uidBeforeLink = user.uid
-        let credential = OAuthProvider.appleCredential(
-            withIDToken: idTokenString, rawNonce: rawNonce, fullName: fullName)
         do {
             let result = try await user.link(with: credential)
             guard result.user.uid == uidBeforeLink else {
@@ -196,13 +225,13 @@ final class AuthManager: ObservableObject {
             uid = result.user.uid
             refreshLinkState()
             logger.info("""
-                auth.link linked uid=\(uidBeforeLink, privacy: .public) \
-                uid_unchanged=true
+                auth.link linked provider=\(credential.provider, privacy: .public) \
+                uid=\(uidBeforeLink, privacy: .public) uid_unchanged=true
                 """)
             return .linked
         } catch {
-            switch SignInWithApple.classifyLinkError(error) {
-            case .appleIDOwnedByAnotherAccount(let existing):
+            switch AccountLinking.classifyLinkError(error) {
+            case .ownedByAnotherAccount(let existing):
                 logger.info("auth.link conflict credential_present=\(existing != nil)")
                 return .conflict(existingAccountCredential: existing)
             case .canceled:
@@ -214,9 +243,10 @@ final class AuthManager: ObservableObject {
         }
     }
 
-    /// Sign in to the account that already owns the Apple ID — the one
-    /// deliberate exception to the no-UID-churn rule, and it only runs after
-    /// SignInSheet has shown the explicit warning and the user confirmed.
+    /// Sign in to the account that already owns the provider identity (the
+    /// Apple ID or Google account) — the one deliberate exception to the
+    /// no-UID-churn rule, and it only runs after SignInSheet has shown the
+    /// explicit warning and the user confirmed.
     /// Rooms scanned on this phone under the old anonymous UID stop being
     /// reachable from this install afterward.
     func switchToExistingAccount(_ credential: AuthCredential) async throws {
@@ -232,17 +262,28 @@ final class AuthManager: ObservableObject {
             """)
     }
 
-    /// Recompute the published Apple-link state from the current user's
-    /// provider list. Call after every auth-state mutation.
+    /// Recompute the published link state from the current user's provider
+    /// list (the pure LinkedProviders derivation). Call after every auth-state
+    /// mutation.
     private func refreshLinkState() {
         guard isConfigured, let user = Auth.auth().currentUser else {
             isAppleLinked = false
+            isGoogleLinked = false
             appleEmail = nil
+            googleEmail = nil
             return
         }
-        let apple = user.providerData.first { $0.providerID == "apple.com" }
-        isAppleLinked = apple != nil
-        appleEmail = apple?.email ?? user.email
+        let providers = LinkedProviders(providerIDs: user.providerData.map(\.providerID))
+        isAppleLinked = providers.apple
+        isGoogleLinked = providers.google
+        let apple = user.providerData.first {
+            $0.providerID == LinkedProviders.appleProviderID
+        }
+        appleEmail = providers.apple ? (apple?.email ?? user.email) : nil
+        let google = user.providerData.first {
+            $0.providerID == LinkedProviders.googleProviderID
+        }
+        googleEmail = providers.google ? (google?.email ?? user.email) : nil
     }
 
     /// Returns a fresh Firebase ID token. Never cache the return value.
