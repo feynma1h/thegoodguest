@@ -317,7 +317,7 @@ struct RootFlowView: View {
             NavigationStack {
                 ProfileView(
                     uid: auth.currentUID,
-                    isLinked: auth.isAppleLinked,
+                    isLinked: auth.isLinked,
                     onClose: { showProfile = false }
                 )
             }
@@ -425,7 +425,7 @@ struct RootFlowView: View {
             DoorwayView(onStepThrough: openWebDesk,
                         onScanAnother: rescanFromScratch,
                         onDone: endFlight,
-                        signedIntoWeb: auth.isAppleLinked,
+                        signedIntoWeb: auth.isLinked,
                         canOpenWeb: webRoomURL != nil)
 
         case .processingFailed:

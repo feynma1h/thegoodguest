@@ -10,6 +10,7 @@
 /// com.roomstudio.RoomStudioCapture.
 
 import FirebaseCore
+import GoogleSignIn
 import SwiftUI
 
 @main
@@ -65,6 +66,13 @@ struct RoomStudioCaptureApp: App {
                     // Unacknowledged records are the launch restore's inventory
                     // and are never touched. Decision 0084.
                     await CaptureReaper.shared.reapAcknowledgedAtLaunch()
+                }
+                .onOpenURL { url in
+                    // Google Sign-In's redirect back into the app (the
+                    // reversed-client-ID scheme in RoomStudioCapture-Info.plist).
+                    // Returns false for URLs that aren't GIDSignIn's — no other
+                    // scheme is registered today, so nothing else consumes them.
+                    _ = GIDSignIn.sharedInstance.handle(url)
                 }
         }
     }
