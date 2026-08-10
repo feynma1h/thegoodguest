@@ -287,11 +287,14 @@ PERCEPTION_URL=$(gcloud run services describe perception-obj \
   --region=asia-southeast1 --project=roomstudio \
   --format='value(status.url)')
 
-# Liveness check: any HTTP response (200/503/500) confirms the service is invokable.
+# Liveness check: any HTTP response (200/503/500/403) confirms the service is invokable.
 # 200 = models loaded; 503 = cold/not yet triggered (normal scale-to-zero state);
 # 500 = cached load failure in current instance (warning only — next cold container
 # retries; Phase 7 surfaces this as a hard failure). Only connection failure halts.
-# (perception-obj is --allow-unauthenticated; no auth token needed for /ready)
+# (perception-obj is platform-gated since decision 0106's flip: an unauthenticated
+# /ready gets the Cloud Run frontend's 403, which still proves reachability. A 200
+# here requires an identity token from a run.invoker principal — not needed for
+# this gate.)
 code=$(curl -s -o /tmp/ready_body -w "%{http_code}" "${PERCEPTION_URL}/ready")
 if [ -z "${code}" ] || [ "${code}" = "000" ]; then
   echo "FAIL: perception-obj /ready unreachable (got: '${code}') — connection failure or service not responding."
@@ -913,7 +916,7 @@ If this passes, iOS code can begin. Real bundles from the iOS app are expected t
 |-------------|----------------------------------------------|-------------------------|
 | api-public  | `${API_PUBLIC_URL}`                          | Firebase ID token       |
 | api-internal| `${API_INTERNAL_URL}`                        | Cloud Run IAM (OIDC)    |
-| perception-obj | `${PERCEPTION_URL}` (from Phase 0h)       | --allow-unauthenticated |
+| perception-obj | `${PERCEPTION_URL}` (from Phase 0h)       | Cloud Run IAM (run.invoker: tasks-invoker@; decision 0106) |
 
 | Phase | Script / command                             | Idempotent? |
 |-------|----------------------------------------------|-------------|

@@ -185,6 +185,17 @@ echo "=== 3/3: Deploy to Cloud Run with L4 GPU ==="
 DEPLOY_FLAGS=(--platform=managed)
 if [[ "${WHICH}" == "obj" ]]; then
     DEPLOY_FLAGS+=(--service-account="${OBJ_RUNTIME_SA}")
+    # Platform-gated (decision 0106 outcome, flipped 2026-08-10): Cloud
+    # Tasks — OIDC as tasks-invoker@, which holds run.invoker on this
+    # service (asserted post-deploy below) — is the only caller. An
+    # unauthenticated probe now gets the platform 403 and can no longer
+    # boot the L4 (the cost vector 0106 measured). App-side OIDC
+    # verification stays as defence-in-depth.
+    DEPLOY_FLAGS+=(--no-allow-unauthenticated)
+else
+    # geom is parked (photo path) and has no Cloud Tasks caller; it keeps
+    # the app-as-gate posture until it has a workload worth re-deciding.
+    DEPLOY_FLAGS+=(--allow-unauthenticated)
 fi
 gcloud run deploy "${SERVICE}" \
     --image="${IMAGE_URI}" \
@@ -201,7 +212,6 @@ gcloud run deploy "${SERVICE}" \
     --concurrency=1 \
     --timeout=900 \
     --port=8080 \
-    --allow-unauthenticated \
     --no-cpu-throttling \
     --cpu-boost \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
@@ -222,6 +232,18 @@ if [[ "${WHICH}" == "obj" ]]; then
     if [[ "${EFFECTIVE_SA}" != "${OBJ_RUNTIME_SA}" ]]; then
         echo "WARNING: expected ${OBJ_RUNTIME_SA}" >&2
     fi
+
+    # The platform is the gate (0106 outcome): the Cloud Tasks delivery
+    # identity must hold run.invoker on this service or every /process,
+    # /shell and /compress dispatch dies at the frontend with 403.
+    # Idempotent, and deliberately AFTER the deploy so a first-ever deploy
+    # (service doesn't exist yet) works; Cloud Tasks retries cover the
+    # seconds between revision-ready and this grant on that one-time path.
+    gcloud run services add-iam-policy-binding "${SERVICE}" \
+        --region="${REGION}" --project="${PROJECT_ID}" \
+        --member="serviceAccount:tasks-invoker@${PROJECT_ID}.iam.gserviceaccount.com" \
+        --role="roles/run.invoker" >/dev/null
+    echo "=== run.invoker ensured for tasks-invoker@ (platform gate, 0106) ==="
 fi
 
 # gcloud run deploy creates the revision but does NOT move traffic when the
