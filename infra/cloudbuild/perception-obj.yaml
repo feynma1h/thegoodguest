@@ -26,6 +26,19 @@ steps:
         ls -la /workspace/wheels/
 
   # ── Step 2: build image (repo root is the build context) ─────────────────
+  # Layer cache: --cache-from pulls layer metadata from the stable
+  # `:buildcache` tag; BUILDKIT_INLINE_CACHE=1 embeds cache metadata into
+  # the image we push, so the NEXT build can reuse unchanged layers.
+  # (BuildKit is already forced here for the secret mount; inline cache is
+  # the BuildKit mechanism — the classic pull-the-old-image pattern would
+  # both fetch a multi-GB image for nothing and be ignored by BuildKit.)
+  # Inline cache only exports final-stage layers, which covers this
+  # Dockerfile completely because it is single-stage; if it ever grows
+  # build stages, switch to buildx with --cache-to type=registry,mode=max.
+  # A missing :buildcache tag (first build, or a wiped repo) fails only the
+  # cache-import step — the log shows `#N ERROR: <ref>: not found` — and the
+  # BUILD proceeds uncached, re-seeding the tag (observed live on build
+  # 5ab7cb34, 2026-08-10; that ERROR line is expected there, not a failure).
   - name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
     args:
@@ -36,15 +49,28 @@ steps:
         echo "$$HF_TOKEN" > /tmp/hf_token.txt
         docker build \
           --secret id=hf_token,src=/tmp/hf_token.txt \
+          --cache-from "${_CACHE_URI}" \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
           -t "${_IMAGE_URI}" \
+          -t "${_CACHE_URI}" \
           -f services/perception-obj/Dockerfile \
           .
         rm /tmp/hf_token.txt
     secretEnv: ['HF_TOKEN']
 
-  # ── Step 3: push ──────────────────────────────────────────────────────────
+  # ── Step 3: push (both the deploy tag and the cache tag) ──────────────────
+  # :buildcache moves only when a build fully succeeds (a failed build never
+  # reaches this step), so the cache reference always points at an image
+  # whose in-Dockerfile smokes passed. Same layers as the timestamped tag —
+  # the extra tag costs no meaningful registry storage.
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_IMAGE_URI}']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        docker push '${_IMAGE_URI}'
+        docker push '${_CACHE_URI}'
 
 availableSecrets:
   secretManager:
@@ -59,6 +85,12 @@ timeout: 5400s
 
 images:
   - '${_IMAGE_URI}'
+  - '${_CACHE_URI}'
 
 substitutions:
   _IMAGE_URI: ''
+  # Stable cache tag in the same repo as the deploy images. Literal (not
+  # derived from the deploy script's variables) so a bare
+  # `gcloud builds submit --config` without extra substitutions still
+  # caches; override alongside _IMAGE_URI if the repo/region ever moves.
+  _CACHE_URI: 'asia-southeast1-docker.pkg.dev/roomstudio/roomstudio/perception-obj:buildcache'
