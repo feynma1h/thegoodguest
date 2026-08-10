@@ -557,7 +557,7 @@ export class MockApiClient implements ApiClient {
         };
     const description = action === "remove"
       ? `the ${target.label} is out of the room`
-      : `the ${target.label} is back against the wall`;
+      : `the ${target.label} is against the wall`;
     const entry: SpecEntry = {
       key: specKey(target),
       action,
