@@ -70,7 +70,7 @@ const entry = (over: Partial<SpecEntry> = {}): SpecEntry => ({
     constraints_applied: ["keeps_height"],
     reasoning: "because",
   },
-  description: "the bed is back against the wall",
+  description: "the bed is against the wall",
   origin: { turn_index: 0, client_msg_id: "c1" },
   orphaned: false,
   ...over,
