@@ -165,8 +165,10 @@ def resolve_wall_anchor(
     the person named one ("under the window").
 
     A wall relation with no anchor takes the wall the piece is ALREADY
-    nearest — a measurable reading of "push it back against the wall" that
-    the description then states plainly, rather than a wall picked by taste.
+    nearest — a measurable reading of "push it back against the wall",
+    rather than a wall picked by taste. The description does NOT echo the
+    idiom's "back": that word is revert's here (0108), so it only appears
+    when the user themselves supplied it.
     """
     if not geometry.walls:
         return Refusal("no_measured_walls")
@@ -422,7 +424,10 @@ def _solve_wall(
         description=(
             f"the {obj.name} is against the wall, {where}"
             if opening is not None or relation == "centered_on_wall"
-            else f"the {obj.name} is back against the wall"
+            # No "back": in this surface that word belongs to revert ("the
+            # room is back as measured"), and a first-time placement must not
+            # read as an undo (0108).
+            else f"the {obj.name} is against the wall"
         ),
     )
 
