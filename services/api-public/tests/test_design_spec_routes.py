@@ -232,7 +232,7 @@ def _entry(key="box:IDENT-SOFA", action="move", pos=(3.5, 0.5, 0.5)):
         if action == "move" else None,
         measured_footprint=Footprint((2.0, 0.5, 2.0), (1.0, 0.5, 0.5), 0.0),
         solver=SolverTrace("against_wall", "wall_00", ("keeps_height",), "why"),
-        description="the sofa is back against the wall",
+        description="the sofa is against the wall",
         turn_index=0, client_msg_id="c1",
     )
 
@@ -444,7 +444,7 @@ class TestTheGuestSeesTheProposedRoom:
         system = streamer.calls[0]["system"]
         assert len(system) == 3, "charter, facts, arrangement"
         assert "THE ARRANGEMENT" in system[2]["text"]
-        assert "the sofa is back against the wall" in system[2]["text"]
+        assert "the sofa is against the wall" in system[2]["text"]
         assert "cache_control" not in system[2]
         # The facts describe the MOVED room: the sofa/table distance changed.
         assert "about 1.6 m" not in system[1]["text"]

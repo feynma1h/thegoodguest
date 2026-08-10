@@ -165,6 +165,16 @@ class TestRelations:
         assert "keeps_height" in out.constraints_applied
         assert "inside_measured_floor" in out.constraints_applied
 
+    def test_a_first_time_move_never_says_back(self):
+        """"back" is revert's word in this surface ("the room is back as
+        measured"); a first-time placement asserting it reads as an undo
+        that never happened (0108, operator-ruled)."""
+        g = _room(_piece("a", "chair", 2.0, 2.0))
+        out = solve(g, key="a", relation="against_wall", anchor=None)
+        assert isinstance(out, Solution)
+        assert out.description == "the chair is against the wall"
+        assert "back" not in out.description
+
     def test_centered_on_wall_lands_on_the_midpoint(self):
         g = _room(_piece("a", "chair", 3.5, 3.5))
         out = solve(g, key="a", relation="centered_on_wall", anchor=None)
