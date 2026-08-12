@@ -30,6 +30,27 @@ export const metadata: Metadata = {
   title: "roomstudio",
   description:
     "Scan a room with your phone. Meet it again on your desk — real, in 3D, exactly as you live in it — with a guest who understands it.",
+  // Share card. The PNG bakes the placeholder name in, so it re-exports
+  // from docs/product/og-card.html when the real name lands (the og
+  // sibling of the Wordmark.tsx seam). og/twitter title + description
+  // inherit the fields above.
+  metadataBase: new URL("https://roomstudio.web.app"),
+  openGraph: {
+    type: "website",
+    url: "/",
+    images: [
+      {
+        url: "/og-card.png",
+        width: 1200,
+        height: 630,
+        alt: "Every home contains a version of itself its owner has never seen — beside the measured floor plan of a scanned room.",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    images: ["/og-card.png"],
+  },
 };
 
 export default function RootLayout({

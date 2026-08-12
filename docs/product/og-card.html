@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<!--
+  og-card.html — the source for web/public/og-card.png, the site-wide Open
+  Graph share image (1200×630). Read by a human re-exporting the card; no
+  build step consumes it.
+
+  Provenance: authored in Claude Design (2026-08-12) from a brief carrying
+  the Good Guest tokens (web/src/app/globals.css) and real geometry, then
+  flattened here from the .dc.html component (template conditionals resolved
+  to their defaults: "meet-in-3d" tagline, pill shown, window glow on).
+
+  The floor plan is NOT decoration: it is the hero room's measured floor
+  polygon (web/public/hero/room.json, scene ce68e24f) at a uniform ~82 px/m —
+  all six wall lengths verified within 0.7% of the same scale, the window
+  drawn at its real 56–90% span of its wall, and "3.02 m" derived from that
+  wall's true length (3.0233 m). If the geometry ever changes, re-derive; do
+  not invent numbers.
+
+  Re-export (exactly 1200×630) with headless Chrome:
+
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      --headless=new --disable-gpu --hide-scrollbars \
+      --window-size=1200,630 --force-device-scale-factor=1 \
+      --virtual-time-budget=10000 \
+      --screenshot=web/public/og-card.png docs/product/og-card.html
+
+  Re-export triggers: the product name landing (the eyebrow and domain bake
+  "roomstudio" into the PNG — this file is the og sibling of the
+  Wordmark.tsx one-file seam), or a copy change. Alternate tagline kept from
+  the design source: "No photos generated. No feed. Your rooms are yours."
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>og-card 1200×630</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400;1,8..60,500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f7efdf;font-family:'Instrument Sans',sans-serif;color:#3a2d22}
+</style>
+</head>
+<body>
+<div style="position:relative;width:1200px;height:630px;background:#f7efdf;overflow:hidden">
+  <div style="position:absolute;left:64px;top:64px;font:500 20px 'IBM Plex Mono',monospace;letter-spacing:.18em;color:rgba(58,45,34,.7)">❖ ROOMSTUDIO</div>
+  <div style="position:absolute;right:64px;top:64px;border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:8px 18px;font:500 20px 'Instrument Sans',sans-serif;letter-spacing:.01em;color:rgba(58,45,34,.72)">iPhone Pro · LiDAR</div>
+  <div style="position:absolute;left:64px;top:170px;width:690px;font:400 68px/1.17 'Source Serif 4',serif;letter-spacing:-.015em;color:#3a2d22">Every home contains<br>a version of itself its<br>owner has never seen.</div>
+  <div style="position:absolute;left:64px;top:442px;width:690px;font:italic 400 25px/1.5 'Source Serif 4',serif;color:#8e3b2f"><span>Scan a room with your phone. Meet it again — real, in 3D.</span></div>
+  <div style="position:absolute;left:64px;bottom:64px;font:400 20px 'IBM Plex Mono',monospace;letter-spacing:.08em;color:rgba(58,45,34,.62)">roomstudio.web.app</div>
+  <svg style="position:absolute;left:736px;top:106px" width="404" height="432" viewBox="0 0 404 432" fill="none" role="img" aria-label="Measured floor plan of a scanned room, 3.02 m window wall">
+    <defs>
+      <radialGradient id="winglow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#c9a25e" stop-opacity=".28"></stop>
+        <stop offset="55%" stop-color="#c9a25e" stop-opacity=".11"></stop>
+        <stop offset="100%" stop-color="#c9a25e" stop-opacity="0"></stop>
+      </radialGradient>
+      <clipPath id="roomclip"><polygon points="30,187.12 235.28,48 398.5,288.85 250.18,389.37 193.22,427.97 167.73,390.35"></polygon></clipPath>
+    </defs>
+    <polygon points="30,187.12 235.28,48 398.5,288.85 250.18,389.37 193.22,427.97 167.73,390.35" fill="#715b47" fill-opacity=".07"></polygon>
+    <g clip-path="url(#roomclip)"><circle cx="189.96" cy="100.46" r="62" fill="url(#winglow)"></circle></g>
+    <path d="M214.75 61.91 L235.28 48 L398.5 288.85 L250.18 389.37 L193.22 427.97 L167.73 390.35 L30 187.12 L144.96 109.21" stroke="#3a2d22" stroke-width="2" stroke-linejoin="miter" stroke-linecap="butt" fill="none"></path>
+    <path d="M143.61 107.22 L213.4 59.92 M146.31 111.2 L216.1 63.9" stroke="#3a2d22" stroke-width="1.1"></path>
+    <path d="M142.38 105.4 L147.54 113.02 M212.17 58.1 L217.33 65.72" stroke="#3a2d22" stroke-width="1.6"></path>
+    <path d="M25.51 180.5 L9.8 157.32 M230.79 41.38 L215.08 18.2 M13.17 162.29 L218.45 23.17" stroke="#3a2d22" stroke-opacity=".5" stroke-width="1"></path>
+    <path d="M12.42 166.22 L13.92 158.36 M217.7 27.1 L219.2 19.24" stroke="#3a2d22" stroke-width="1.6"></path>
+    <text x="108.52" y="81.97" transform="rotate(-34.13 108.52 81.97)" text-anchor="middle" font-family="'IBM Plex Mono',monospace" font-size="20" font-weight="500" letter-spacing=".04em" fill="#8e3b2f">3.02 m</text>
+  </svg>
+</div>
+</body>
+</html>
