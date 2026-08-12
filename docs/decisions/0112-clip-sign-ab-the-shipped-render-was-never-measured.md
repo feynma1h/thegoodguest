@@ -1,10 +1,9 @@
 # 0112 — Clip-sign A/B: the shipped render was never measured, and the numbers invert the shear story
 
 **Date:** 2026-08-10
-**Status:** Measured; A/B built behind `?clipsign=measured`. The default is
-UNCHANGED — the operator walk (`outputs/clipsign-ab/WALK.md`) is the open
-gate, per 0135's own rule that a rendering change to every room is the
-operator's to accept.
+**Status:** CLOSED 2026-08-12 — the operator walk ran and MEASURED WINS.
+The default is flipped, the toggle is deleted, and 0135's open question is
+answered-positive. Verdicts and outcome in the section at the end.
 
 ## Context
 
@@ -121,3 +120,24 @@ cutting mid-body at rotated ones.
   axes are corrected changes what the bed-style compensation looks like,
   and the spike bed's "more cut under the correct sign" case should be
   re-measured.
+
+## Outcome — the walk ran, measured wins (2026-08-12)
+
+Per-object verdicts (operator, filled slots in `outputs/clipsign-ab/
+WALK.md`): spike table MEASURED ("doesn't make sense to have a table with
+no legs"; side note recorded there — the measured table sits into the wall,
+placement not clip); spike bed similar both ways, measured "more accurate
+in its extents", remaining roughness attributed to rotation/truncation, not
+the clip; rp7 storage MEASURED; rp7 bed MEASURED; rp7 chair can't-tell/
+mixed; rp6g1 table reads the same both ways; rp6g2 same/no preference.
+Tally: 3 clear measured wins, 1 lean, 3 ties, 0 shipped wins — the two
+eyes-call objects (spike bed, rp7 chair) both landed "no worse", so nothing
+argued for the shipped sign anywhere.
+
+Executed same day: `viewerYawRad` is now unconditional (−θ, the server
+convention), `parseClipSign`/`ClipSign`/`?clipsign` and the `clipSign` prop
+are deleted, and the test pins flip — the semantic pin holds local +x at
+world (cos θ, sin θ), and a new pin asserts the applied sign differs from
+the raw yaw by exactly 2θ, so a regression to the shipped sign is loud.
+Every room now renders the clip (and the stage-2 outline) at the box
+perception measured.
