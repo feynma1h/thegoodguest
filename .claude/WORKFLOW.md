@@ -74,6 +74,46 @@ Why bad: no scope, no contract, no verification. Code will sprawl — it'll touc
 
 If the task is small enough ("rename `_pose_position` to `pose_position`"), don't ceremonialize it. Just ask. The template is for tasks big enough that drift is a real risk.
 
+## Long-running charters — for a session that should work for hours, not answer a question
+
+The template above scopes a *task*. When the work is a whole thread — a quality
+push, an investigation, a migration — scoping it as a task list is what produces
+incremental churn: the session finishes item 1, finds an adjacent defect, and
+stops to ask, because nothing told it that fixing that defect was allowed.
+
+A charter has five parts the task template does not. Write all five or the
+session will stop early.
+
+1. **The outcome, with a self-checkable acceptance test.** Not "fix the four
+   defects" but "X is true, verified by Y". If the only possible test is the
+   operator's eyes, say so explicitly and use part 4 — do not pretend a suite
+   proves it.
+2. **Autonomy grants, stated positively.** This is the part most briefs omit,
+   and its absence is why sessions stop. Spell out what the session MAY do
+   without asking: fix adjacent defects it finds, change defaults, add and
+   delete tests, re-drive scenes, spend GPU, refactor across module boundaries,
+   deploy to a candidate revision. A brief that only says what NOT to touch
+   produces a session that asks permission for everything else.
+3. **Stopping conditions, named.** Stop and ask for: anything irreversible or
+   outward-facing (a production traffic flip, a destructive delete, spending
+   the operator's quota), a genuine fork with no evidence available to settle
+   it, and the point where the only remaining check is the operator's eyes.
+   Everything else: decide, record the reasoning, keep going.
+4. **The batched-judgment protocol**, when the acceptance test is human. The
+   session does not ask one question at a time. It completes the work, prepares
+   the evidence for every decision at once — A/B renders, before/after numbers,
+   a walk file with verdict slots — and hands over ONE sitting. Batching the
+   operator's judgment is the difference between a session that runs for hours
+   and a conversation that runs all day.
+5. **A scope boundary that is not a file list.** One room, one defect class,
+   one service — something that bounds sprawl without forbidding the session
+   from following the defect where it actually lives.
+
+Everything from the task template still applies inside a charter: the contract,
+the verification command, and the standing repo standards (no AI attribution,
+no process narration in code, decisions in the code and CLAUDE.md with the
+story in `docs/decisions/`). A charter loosens *scope*, never rigour.
+
 ## How to brief Claude Chat
 
 Chat doesn't have a template because the value isn't in the structure of your prompt — it's in giving Chat enough context to push back usefully.
