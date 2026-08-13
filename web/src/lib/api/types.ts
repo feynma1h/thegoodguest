@@ -401,7 +401,7 @@ export interface SpecSolverTrace {
 
 export interface SpecEntry {
   key: string;
-  action: "move" | "remove";
+  action: "move" | "remove" | "turn";
   label: string;
   measured_transform: SpecTransform;
   proposed_transform: SpecTransform | null; // null for "remove"
@@ -409,6 +409,25 @@ export interface SpecEntry {
   solver: SpecSolverTrace | null;
   description: string;
   origin: { turn_index: number | null; client_msg_id: string | null };
+  /** Whether the person corrected which way round this piece sits. Rides
+   * independently of `action`, because a piece can be both moved and turned. */
+  facing_flipped: boolean;
+  /** WHAT THIS ENTRY OVERRULED (decision 0157), computed server-side so there
+   * is one implementation of the rule.
+   *
+   * `measurement` — perception measured the piece here and the person asked to
+   * see it elsewhere. The measurement stays on screen as its outline.
+   *
+   * `unresolved_default` — perception could not read which way round the piece
+   * sits and shipped a fixed convention, so the value the person overruled was
+   * never a measurement. There is no outline to draw: a half turn maps a
+   * rectangle onto itself, so the measured footprint is exactly where the
+   * piece already stands.
+   *
+   * Required rather than optional on purpose: an absent value would fall back
+   * to drawing an outline, which is the wrong answer, and every construction
+   * site has to say which kind of entry it is building. */
+  departs_from: "measurement" | "unresolved_default";
   /** The key no longer resolves in the current manifest — a re-drive dropped
    * the object. Reported, never silently dropped and NEVER re-pointed: a spec
    * aimed at the wrong object would move the wrong furniture and nothing in

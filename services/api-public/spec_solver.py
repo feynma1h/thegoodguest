@@ -33,15 +33,13 @@ RoomPlan boxes ship 0 movable pieces and every relation refuses — the honest
 degrade, since without a measured footprint nothing here could check
 anything.
 
-TRANSLATION ONLY, and this is a scope cut with evidence behind it. v1 never
-rotates a piece. Every box placement in production ships
-`splat_axis_resolved: false` (0080, re-measured in 0104), live axis margins
-run 0.002–0.089 against a 0.10 gate, and 0104 killed four separate attacks on
-that DOF — a cloud instrument, per-view appearance aggregation, the 180°
-partner test and a truncation-direction prior. "Turn it to face the room" is
-therefore a claim the pipeline cannot ground today, and turning a piece whose
-own axis mapping is a default would make the room worse, not better. Re-open
-when splat axis resolution does.
+THE RELATIONS TRANSLATE; THEY NEVER ROTATE. A piece put against a wall keeps
+the facing it arrived with. There is exactly one rotation in this module,
+`turn_around`, and it is a different kind of thing: not a solved angle but a
+selection between the two mappings perception enumerated and could not tell
+apart. Free rotation stays out — an arbitrary angle would move the splat
+relative to the measured box it is clipped against, and no instrument can
+ground one. See `turn_around` for the evidence.
 
 Consumers: guest_tools.py (the tool runner), tests/test_spec_solver.py.
 """
@@ -60,6 +58,12 @@ from room_geometry import (
     footprint_inside_floor,
     footprints_overlap,
 )
+from roomstudio_schemas.pose_math import quat_mul
+
+# A half turn about world +Y. RoomPlan boxes are pure-yaw (0076), so the box's
+# own vertical axis IS world up and this is the flip about the box's centre
+# line — see `turn_around`.
+_ROT_Y_PI: tuple[float, float, float, float] = (0.0, 1.0, 0.0, 0.0)
 
 # The closed relation vocabulary. Free text is deliberately excluded: it makes
 # the refusal path unenumerable, which is 0132's stated reason for a closed
@@ -91,6 +95,16 @@ class Solution:
     relation: str
     anchor_resolved_to: str
     constraints_applied: tuple[str, ...]
+    reasoning: str
+    description: str
+
+
+@dataclass(frozen=True)
+class Turn:
+    """A facing correction: the piece stands where it was measured and sits
+    the other way round in its own box. Position and scale are untouched —
+    which is why this is not a `Solution`."""
+    rotation_xyzw: tuple[float, float, float, float]
     reasoning: str
     description: str
 
@@ -550,6 +564,67 @@ def _solve_along_line(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+def turn_around(geometry: RoomGeometry, *, key: str) -> Turn | Refusal:
+    """Sit a piece the other way round in its own measured box, or refuse.
+
+    THIS IS A SELECTION, NOT A ROTATION, and the difference is the whole
+    reason it can ship where free rotation cannot. Perception enumerates the
+    extent-consistent, right-handed ways a splat's axes can map onto its box
+    and picks one; the 180°-about-box-vertical partner of that pick is another
+    member of the same enumerated set. Measured through perception's own
+    `axis_mapping_candidates` + `_partner_index`: over 1924 partner pairs the
+    partner's quaternion is `rotY(pi) (x) q_chosen` to 2.2e-16, and the
+    piece's own up axis is preserved to better than 1e-4 — a facing flip, not
+    a somersault.
+
+    WHY THE PERSON IS THE ONLY EVIDENCE. Perception's `resolve_axis_mapping`
+    scores candidates grouped by ASSIGNMENT and always ships the FIRST
+    candidate of the winning group, which is the fixed (+,+) sign. So the
+    180° sign is unresolved on every box-placed object by construction, no
+    matter what `splat_axis_resolved` says — that flag is about the
+    assignment. Five instrument families have now measured dead on this bit
+    (decisions 0081, 0104, 0156), for one shared reason: a single-view
+    reconstruction's unseen half is fabricated, and each of them asked that
+    fabricated half a question. The person living in the room can simply see
+    it.
+
+    NOTHING CAN NEWLY FAIL, so there are no geometric refusals here. A
+    rectangle maps onto itself under 180° about its own centre — measured
+    exactly, 0.00e+00 across the 21 box-placed pieces in the four preserved
+    walk rooms — so the footprint, the floor containment and every overlap
+    are bit-for-bit what they already were. The `splat_clip` volume (0104) is
+    invariant for the same reason, and its centre coincides with the object's
+    position to 4.8e-5 m, so the browser's parented SDF still cuts the
+    measured box after the flip. Every refusal below is about ELIGIBILITY.
+
+    Eligibility is `rotation_source == "roomplan_box"`, which on real data
+    coincides exactly with having a box (21/21 across those rooms). The other
+    placed pieces are `sam3d_layout`, whose sign IS pinned by signed
+    regression tests (decision 0065), or carry no rotation claim at all —
+    neither is an unresolved bit, so neither is ours to overrule.
+    """
+    obj = geometry.by_key(key)
+    if obj is None:
+        return Refusal("unknown_object", key)
+    if not obj.placed:
+        return Refusal("piece_not_placed", obj.name)
+    if obj.box is None:
+        return Refusal("piece_not_measured", obj.name)
+    if obj.rotation_source != "roomplan_box" or obj.rotation_xyzw is None:
+        return Refusal("facing_not_from_box", obj.name)
+
+    return Turn(
+        rotation_xyzw=quat_mul(_ROT_Y_PI, obj.rotation_xyzw),
+        reasoning=(
+            f"Sat the {obj.name} the other way round in its measured box — "
+            f"the 180° partner of the axis mapping the scan shipped, which "
+            f"nothing measured. Its position, its size and its footprint are "
+            f"untouched."
+        ),
+        description=f"the {obj.name} is turned around",
+    )
+
 
 def solve(
     geometry: RoomGeometry,

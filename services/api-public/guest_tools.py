@@ -16,7 +16,18 @@ lie this house cannot forgive, because no one can see it happening". A
 coordinate-taking tool does not stretch the honesty contract; it inverts it.
 
 Hence: **the guest states an INTENT in the vocabulary it can actually see; a
-server-side solver turns that into a transform or refuses.** The tool RESULT
+server-side solver turns that into a transform or refuses.**
+
+A FACING CORRECTION IS THE EXCEPTION THAT PROVES IT (decision 0157). The
+guest may not know which way a piece faces — and neither does the pipeline:
+the 180° sign of a splat inside its measured box is settled by no instrument,
+five families having now been refuted on it. So `turn` takes no direction and
+no angle. The person supplies the only evidence that exists; the room selects
+the other of the two mappings it already enumerated. It is the one place where
+the guest changes something it cannot see, and it does so on the person's
+authority rather than its own.
+
+The tool RESULT
 is the honest surface, and rule 2 extends by one word — transforms are
 verbatim too. The guest may describe a placement only using the server's
 sentence for it, for the same reason it never computes a distance. That costs
@@ -38,7 +49,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from design_spec import (
@@ -49,7 +60,7 @@ from design_spec import (
     Transform,
 )
 from room_geometry import RoomGeometry, RoomObject
-from spec_solver import RELATIONS, Refusal, Solution, solve
+from spec_solver import RELATIONS, Refusal, Solution, solve, turn_around
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +85,9 @@ TOOLS = [
             "inventing a measurement.\n\n"
             "Call this when the person asks for a change. Do NOT call it for "
             "an idea of your own: describe the idea, offer it, and wait for a "
-            "yes. Each change replaces any earlier change to the same piece.\n\n"
+            "yes. A second change to the same piece replaces the first, except "
+            "that turning it round and putting it somewhere are independent — "
+            "a piece can be both.\n\n"
             "The result tells you, per change, either that it was applied and "
             "gives you a sentence describing where the piece now stands — use "
             "THAT WORDING, do not write your own — or that it was refused and "
@@ -99,18 +112,29 @@ TOOLS = [
                             },
                             "action": {
                                 "type": "string",
-                                "enum": ["move", "remove"],
+                                "enum": ["move", "remove", "turn"],
                                 "description": (
                                     "'move' repositions the piece; 'remove' "
                                     "takes it out of the room so the person can "
-                                    "see the space without it."
+                                    "see the space without it; 'turn' sits it "
+                                    "the other way round where it stands.\n\n"
+                                    "Use 'turn' only when the person tells you a "
+                                    "piece is facing the wrong way. The scan "
+                                    "could not work out which way round a piece "
+                                    "sits, so it guessed, and they are the only "
+                                    "one who can see the answer. There is "
+                                    "exactly one turn available — the other way "
+                                    "round — and it takes no direction, no angle "
+                                    "and no anchor. Turning twice returns it to "
+                                    "the way the scan drew it."
                                 ),
                             },
                             "relation": {
                                 "type": "string",
                                 "enum": sorted(RELATIONS),
                                 "description": (
-                                    "Where to put it, for 'move' only. "
+                                    "Where to put it, for 'move' only — a turn "
+                                    "takes none. "
                                     "against_wall: flush against a wall. "
                                     "centered_on_wall: flush and centred. "
                                     "beside: alongside another piece. "
@@ -146,7 +170,12 @@ TOOLS = [
             "Put pieces back where the room was measured. Pass the object ids "
             "to undo, or \"all\" to return the whole room to exactly how it was "
             "scanned. Always available, and always cheap — say so when someone "
-            "hesitates about trying something."
+            "hesitates about trying something.\n\n"
+            "This undoes moves and removals. A piece the person told you was "
+            "facing the wrong way STAYS turned — nothing measured which way it "
+            "faces, so there is no measurement to put it back to, and they "
+            "would only have to tell you again. To undo that, turn it once "
+            "more."
         ),
         "input_schema": {
             "type": "object",
@@ -247,7 +276,7 @@ def run_propose(
                 "object_id": object_id, "applied": False, "reason": "unknown_object",
             })
             continue
-        if action not in ("move", "remove"):
+        if action not in ("move", "remove", "turn"):
             results.append({
                 "object_id": object_id, "applied": False, "reason": "unknown_action",
             })
@@ -258,6 +287,12 @@ def run_propose(
                 "object_id": object_id, "applied": False, "reason": "piece_not_placed",
             })
             continue
+
+        # A facing correction survives whatever else happens to the piece: it
+        # is something the person KNOWS about their room, not an experiment,
+        # so moving or removing a corrected piece must not quietly undo it.
+        prior = spec.by_key(obj.key)
+        was_flipped = prior is not None and prior.facing_flipped
 
         if action == "remove":
             entry = SpecEntry(
@@ -271,6 +306,78 @@ def run_propose(
                 description=f"the {obj.name} is out of the room",
                 turn_index=turn_index,
                 client_msg_id=client_msg_id,
+                facing_flipped=was_flipped,
+            )
+            spec = spec.with_entry(entry)
+            changed = True
+            descriptions.append(entry.description)
+            results.append({
+                "object_id": obj.object_id,
+                "applied": True,
+                "description": entry.description,
+            })
+            continue
+
+        if action == "turn":
+            turned = turn_around(geometry, key=obj.key)
+            if isinstance(turned, Refusal):
+                results.append({
+                    "object_id": obj.object_id,
+                    "applied": False,
+                    "reason": turned.reason,
+                    **({"detail": turned.detail} if turned.detail else {}),
+                })
+                continue
+            existing = spec.by_key(obj.key)
+            if existing is not None and existing.facing_flipped:
+                # Turning is its own inverse, so a second turn puts the piece
+                # back the way the scan drew it. Storing an entry that claims
+                # a change equal to no change would have the room reporting
+                # "1 piece turned" while nothing is turned, so the entry goes
+                # instead — and with it any move it had composed onto, which
+                # is why this reverts rather than merely un-flipping.
+                spec = spec.without({obj.key})
+                changed = True
+                description = f"the {obj.name} is back the way the scan drew it"
+                descriptions.append(description)
+                results.append({
+                    "object_id": obj.object_id,
+                    "applied": True,
+                    "description": description,
+                })
+                continue
+            # A turn composes onto whatever this piece is already doing: a
+            # moved piece keeps its proposed position, and only the facing
+            # changes. Dropping the move here would silently discard
+            # something the person asked for one turn earlier.
+            base = existing.proposed_transform if existing is not None else measured
+            entry = SpecEntry(
+                key=obj.key,
+                action=existing.action if existing is not None else "turn",
+                label=obj.name,
+                measured_transform=measured,
+                proposed_transform=Transform(
+                    position=(base or measured).position,
+                    rotation_xyzw=turned.rotation_xyzw,
+                    scale=(base or measured).scale,
+                ),
+                measured_footprint=_footprint(obj),
+                solver=(
+                    existing.solver if existing is not None
+                    else SolverTrace(
+                        relation="turn_around",
+                        anchor_resolved_to="",
+                        constraints_applied=("keeps_position", "keeps_footprint"),
+                        reasoning=turned.reasoning,
+                    )
+                ),
+                description=(
+                    turned.description if existing is None
+                    else f"{existing.description}, turned around"
+                ),
+                turn_index=turn_index,
+                client_msg_id=client_msg_id,
+                facing_flipped=True,
             )
             spec = spec.with_entry(entry)
             changed = True
@@ -304,7 +411,11 @@ def run_propose(
             measured_transform=measured,
             proposed_transform=Transform(
                 position=outcome.position,
-                rotation_xyzw=measured.rotation_xyzw,
+                rotation_xyzw=(
+                    prior.proposed_transform.rotation_xyzw
+                    if was_flipped and prior.proposed_transform is not None
+                    else measured.rotation_xyzw
+                ),
                 scale=measured.scale,
             ),
             measured_footprint=_footprint(obj),
@@ -314,9 +425,13 @@ def run_propose(
                 constraints_applied=outcome.constraints_applied,
                 reasoning=outcome.reasoning,
             ),
-            description=outcome.description,
+            description=(
+                f"{outcome.description}, still turned around"
+                if was_flipped else outcome.description
+            ),
             turn_index=turn_index,
             client_msg_id=client_msg_id,
+            facing_flipped=was_flipped,
         )
         spec = spec.with_entry(entry)
         changed = True
@@ -336,41 +451,104 @@ def run_propose(
     )
 
 
+def _revert_entries(
+    spec: DesignSpec, geometry: RoomGeometry, keys: set[str]
+) -> tuple[DesignSpec, int]:
+    """Put the named pieces back where the room was measured, KEEPING any
+    facing correction (decision 0157).
+
+    Revert restores measurements. A facing correction departs from no
+    measurement — the 180° sign of a splat inside its box is settled by
+    nothing — so there is no measured facing for a revert to restore, and
+    dropping the correction would re-introduce an error the person has
+    already told us about. The measured room really is one step away
+    (0133's invariant): a turn never left it.
+
+    So an entry that carries a facing correction is REDUCED to a pure turn
+    rather than dropped, its reasoning regenerated by the solver so the
+    sentence has one author. A piece that has since stopped being turnable —
+    a re-drive that dropped its box — cannot have that trace regenerated, and
+    is dropped rather than described in words nothing can source.
+    """
+    kept: list = []
+    reverted = 0
+    for entry in spec.entries:
+        if entry.key not in keys:
+            kept.append(entry)
+            continue
+        reverted += 1
+        if not entry.facing_flipped:
+            continue
+        turned = turn_around(geometry, key=entry.key)
+        if isinstance(turned, Refusal):
+            continue
+        kept.append(SpecEntry(
+            key=entry.key,
+            action="turn",
+            label=entry.label,
+            measured_transform=entry.measured_transform,
+            proposed_transform=Transform(
+                position=entry.measured_transform.position,
+                rotation_xyzw=turned.rotation_xyzw,
+                scale=entry.measured_transform.scale,
+            ),
+            measured_footprint=entry.measured_footprint,
+            solver=SolverTrace(
+                relation="turn_around",
+                anchor_resolved_to="",
+                constraints_applied=("keeps_position", "keeps_footprint"),
+                reasoning=turned.reasoning,
+            ),
+            description=turned.description,
+            turn_index=entry.turn_index,
+            client_msg_id=entry.client_msg_id,
+            facing_flipped=True,
+        ))
+    return replace(spec, entries=tuple(kept)), reverted
+
+
+def _revert_description(spec: DesignSpec, whole_room: bool) -> str:
+    """What a revert says it did. It must never claim the room is as measured
+    while a facing correction still stands — the person would hear that the
+    thing they told us had been thrown away."""
+    turned = sum(1 for e in spec.entries if e.facing_flipped)
+    base = "the room is back as measured" if whole_room else "put back as measured"
+    if not turned:
+        return base
+    piece = "piece" if turned == 1 else "pieces"
+    return f"{base}, with the {turned} {piece} you turned still turned"
+
+
 def run_revert(
     *, spec: DesignSpec, geometry: RoomGeometry, keys: list[str]
 ) -> ToolOutcome:
     wanted = [str(k) for k in (keys or [])]
-    if any(k.strip().lower() == "all" for k in wanted):
-        removed = len(spec.entries)
-        return ToolOutcome(
-            spec=spec.without({e.key for e in spec.entries}),
-            result={"reverted": removed, "description": "the room is back as measured"},
-            changed=removed > 0,
-            flags=[],
-            descriptions=["the room is back as measured"] if removed else [],
-        )
-    resolved: set[str] = set()
-    for k in wanted:
-        obj = _find(geometry, k)
-        if obj is not None:
-            resolved.add(obj.key)
-        elif spec.by_key(k) is not None:
-            # An ORPHANED entry can still be reverted even though its object
-            # is gone from the manifest — clearing it is exactly what a person
-            # who sees "this piece is no longer in the room" wants to do.
-            resolved.add(k)
+    whole_room = any(k.strip().lower() == "all" for k in wanted)
+    if whole_room:
+        resolved = {e.key for e in spec.entries}
+    else:
+        resolved = set()
+        for k in wanted:
+            obj = _find(geometry, k)
+            if obj is not None:
+                resolved.add(obj.key)
+            elif spec.by_key(k) is not None:
+                # An ORPHANED entry can still be reverted even though its
+                # object is gone from the manifest — clearing it is exactly
+                # what a person who sees "this piece is no longer in the room"
+                # wants to do.
+                resolved.add(k)
     hit = {e.key for e in spec.entries} & resolved
+    out, reverted = _revert_entries(spec, geometry, hit)
+    description = (
+        _revert_description(out, whole_room) if reverted else "nothing to put back"
+    )
     return ToolOutcome(
-        spec=spec.without(hit),
-        result={
-            "reverted": len(hit),
-            "description": (
-                "put back as measured" if hit else "nothing to put back"
-            ),
-        },
-        changed=bool(hit),
+        spec=out,
+        result={"reverted": reverted, "description": description},
+        changed=bool(reverted),
         flags=[],
-        descriptions=["put back as measured"] if hit else [],
+        descriptions=[description] if reverted else [],
     )
 
 
