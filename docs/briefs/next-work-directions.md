@@ -38,9 +38,46 @@ problems; an outcome-scoped one chases whatever the room needs.
   than by a file domain.
 - Iterative with the operator, not a single report at the end. Their walk
   verdicts (0080, 0085, the item-7 walk) are the standard for "reads right".
-- Capture quality is in scope: the operator's own two suggestions are design
-  inputs — per-object cleanest-frame selection for SAM 3D, and a capture-time
-  camera view with coverage guidance.
+- Capture quality is in scope. The operator's two suggestions are NOT vague
+  design inputs — each has a mechanism, and §1a below states them as the
+  defects they are. Start there: both attack class-6 truncation at its CAUSE,
+  and the upstream one is strictly better, because no selection algorithm can
+  pick a view that was never captured.
+
+### §1a — the two capture-side defects, stated with their mechanisms
+
+**(i) The reconstruction view is chosen by FILE EXISTENCE, not by quality.**
+Two selection layers exist and neither asks the question that matters.
+`census_sampling.py` picks which frames get processed at all — greedy set-cover
+whose gain is box-visibility area × in-frame fraction, gated on being
+"scoreable". That optimizes ROOM COVERAGE. Then `box_placement.py:796` picks
+which view's splat BECOMES the object: it walks the associations and takes the
+first one whose splat file exists (`if candidate_splat is not None: break`).
+No occlusion test, no sharpness test, no "how much of this object does this
+view actually see". So nothing anywhere asks *which frame shows this chair
+best* — which is exactly the absent question that ships half-rendered objects.
+Verify this reading against the code before building on it, then decide what
+"cleanest" means and measure it against the walk's known-bad objects (the
+undersized rp7 monitor, the rp6g1 monitor with no generated base).
+
+**(ii) Nothing tells the user an object has been sufficiently OBSERVED.**
+RP-7 ships a live floor plan — walls stroking in, furniture as labeled rects, a
+camera cone, coverage ticks, and a guidance relay that has never fired live
+because RoomPlan issues instructions sparsely. All of it proves an object was
+DETECTED. None of it proves the object was seen from enough angles to
+reconstruct. The operator's idea is per-object capture-sufficiency feedback —
+e.g. furniture that reads as "captured" only once it has been observed from
+enough angles, and visibly still wanting otherwise. **Design constraint to
+argue, not skip:** RP-7 deliberately REPLACED the camera preview with the floor
+plan, and CLAUDE.md flags revisiting that as "a design question, not a patch".
+A camera view with boxes over furniture therefore re-opens a considered
+decision — legitimate, but it must be argued explicitly, and the floor plan is
+an equally valid host for the same signal.
+
+**Why these are one idea:** an object is half-rendered because SAM 3D saw it
+from one partial view. (i) fixes that downstream by choosing better among the
+views you happen to hold; (ii) fixes it upstream by ensuring a good view gets
+taken at all. Same lever, two ends.
 
 **The known work-list it inherits** (do not re-derive): class-6 splat
 truncation (the named bottleneck — it causes BOTH the overflow the clip papers
@@ -65,7 +102,22 @@ tests: `f3d70236` in 8 files (`contact_priors.py`, `room_planes.py`,
 
 ---
 
-## 2. The 0115 churn investigation — scoped, not started
+## 2. The 0115 churn investigation — STEP 1 IS DONE (decision 0138). What
+##    follows is superseded except where noted.
+
+**Answered 2026-08-13 and it took the alarming branch.** `device_id` is
+byte-identical across BOTH churns — one UUID over 13 scenes, 19 days and three
+Firebase identities — so the Keychain partition was never lost. That kills the
+entitlements drop, a signing-team change and an App-ID-prefix change together.
+The mechanism is DIFFERENTIAL: something took Firebase's Keychain item and
+spared ours. The remaining explanations are all things that can happen to a
+real user with no workaround to blame, which promotes this to a launch
+blocker. Step 2's device measurement is MOOT — do not run it. Next leads are
+source-level (Firebase's own Keychain handling, its accessibility attribute,
+error paths that clear the credential), and belong to a fresh investigation.
+
+The original scoping is kept below for the reasoning that produced the test.
+
 
 The most serious open defect: the phone's Firebase anon UID changed TWICE on
 real hardware, orphaning each period's rooms. Decision 0036 makes "never churns
