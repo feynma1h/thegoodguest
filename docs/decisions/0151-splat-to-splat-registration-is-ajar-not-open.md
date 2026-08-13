@@ -66,6 +66,41 @@ drift bounded and mutual coverage measured, and should refuse rather than
 union when either fails — the same shape as every other gate in this
 pipeline.
 
+## The precondition nobody would notice: the views are too similar
+
+To be clear about what is and is not proposed: **not a multi-view
+reconstruction model.** `SAM3DModel.reconstruct` takes one RGBA image —
+Meta's documented signature — and this is entirely downstream of it,
+unioning independent single-view outputs the pipeline ALREADY produces.
+It already runs SAM 3D up to twice per box (`PERCEPTION_PLAN_VIEWS_PER_BOX`
+= 2) and discards one of the two.
+
+Which is where it nearly falls over. The angular separation between those
+two views, measured about each object's own centre:
+
+    median 33.8 degrees, n = 8 boxes
+    never more than 90 degrees
+    3 of 8 under 30 degrees — and one pair is literally the SAME FRAME
+
+So unioning what the pipeline reconstructs today would union two views of
+the same side of the object. Nearly free, and nearly useless: 0152
+measures a shipped view's mask covering a median 40% of its object, and
+two views 34 degrees apart cover very nearly the same 40%.
+
+**And the fix is not simply "more baseline", because the two requirements
+pull against each other.** Registration needs the two surfaces to OVERLAP;
+completeness needs them to differ. The pairs that registered honestly here
+are the ones already close, and the widest pair in the set (88 degrees)
+is one of the degenerate ones. There is an optimum band, not a monotone,
+and 34 degrees is very likely below it.
+
+This also rehabilitates the selection question in a shape 0146 and 0152
+never tested. Those refute "pick the best single view", ten measures deep.
+"Pick a SECOND view that sees a different side" is a different question
+with a different answer available — and the reconstruction plan currently
+picks its second view weakest-best-association first, which is about
+overlap with the box, not about seeing a different side of the object.
+
 ## Why this matters beyond the union
 
 A union of registered reconstructions has honest proportions, and 0081's
@@ -81,7 +116,10 @@ of the instruments that are measured dead.
 Nothing needs to change for it to be picked up — it is a probe result, not
 a refusal. What it wants before a build is a criterion for when a
 registration is trustworthy, validated on more than the two pairs that
-worked here.
+worked here, and a second-view rule that targets the angular band where
+registration and completeness can both be had. Both are cheap: the
+second-view rule is one sort key in `_build_reconstruction_plan`, and a
+re-drive measures whether the pair becomes unionable.
 
 If a reconstruction model arrives that consumes several views itself, or
 exposes calibrated metric scale or pose (decision 0052's standing
