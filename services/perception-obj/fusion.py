@@ -403,10 +403,23 @@ _SUPPORT_SURFACE_CLASSES = frozenset(
     ).split(",")
     if s.strip()
 )
+# The same rule in RoomPlan's own vocabulary, for the measured half of the
+# surface set. RoomPlan files every one of the SAM labels above as either
+# `table` or `storage`, so this is that list translated, not a second
+# policy — and it is the SAME question box_placement asks when it decides
+# which face of a box an under-filling splat is seated against, so it has
+# one home there rather than a copy here.
+_SUPPORT_BOX_CATEGORIES = box_placement.SURFACE_TOP_CATEGORIES
 # Percentile for a splat's top surface — the extreme max is a stray
 # gaussian, the same reason extents are percentile-clipped everywhere else.
 _SUPPORT_SPLAT_TOP_PCTL = float(
     os.environ.get("PLACEMENT_SUPPORT_SPLAT_TOP_PCTL", "98")
+)
+# Its mirror on the resting object's underside — measured 12 mm of stray
+# tail below the reviewed monitors, which the raw minimum turns into
+# 12 mm of hover.
+_SUPPORT_SPLAT_BOTTOM_PCTL = float(
+    os.environ.get("PLACEMENT_SUPPORT_SPLAT_BOTTOM_PCTL", "2")
 )
 # How far a box-anchored splat's rendered top may stand proud of the
 # measured box top before the measurement is trusted instead. Matches the
@@ -1470,7 +1483,14 @@ def _support_surfaces(
     Box-anchored surfaces are listed first and win ties: their footprint
     and centre are RoomPlan measurement, so a splat surface is consulted
     only where measurement is silent (0082's objection, answered by
-    ordering rather than ignored)."""
+    ordering rather than ignored).
+
+    A box qualifies on the same rule as a splat: the supporter must be a
+    category that HAS a top. The acceptance walk collected the bill for
+    leaving that rule off the measured half — rp7's monitor rests on the
+    top of the CHAIR tucked under its desk, 0.28 m above the desk it
+    belongs on, because a chair's box top was in reach and nearer than the
+    desk's (decision 0147)."""
     box_surfaces: list[dict] = []
     splat_surfaces: list[dict] = []
     by_box: dict[str, dict] = {}
@@ -1480,6 +1500,8 @@ def _support_surfaces(
             by_box[rb["box_id"]] = obj
 
     for bi, box in enumerate(boxes or []):
+        if (box.category or "").strip().lower() not in _SUPPORT_BOX_CATEGORIES:
+            continue
         dims = np.asarray(box.dimensions, dtype=np.float64)
         box_top = float(box.center_world[1]) + dims[1] / 2.0
         top = box_top
@@ -1538,7 +1560,11 @@ def _snap_onto_support(
     pts = _clipped_world_points(obj, ctx)
     if pts is None:
         return obj
-    bottom = float(pts[:, 1].min())
+    # Percentile-clipped at both ends of the contact, for the reason the
+    # surface top already is: the extreme point is a stray gaussian. Taken
+    # from the raw minimum, a 12 mm tail below the object lifts it 12 mm
+    # off the surface it is supposed to be resting on.
+    bottom = float(np.percentile(pts[:, 1], _SUPPORT_SPLAT_BOTTOM_PCTL))
     center = np.asarray(wt["position"], dtype=np.float64)
 
     if surfaces is None:
@@ -1549,6 +1575,7 @@ def _snap_onto_support(
              "top": float(b.center_world[1]) + float(b.dimensions[1]) / 2.0,
              "box": b}
             for bi, b in enumerate(boxes or [])
+            if (b.category or "").strip().lower() in _SUPPORT_BOX_CATEGORIES
         ]
 
     best_box = best_splat = None  # (|dy|, dy, source_id)
