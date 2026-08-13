@@ -304,6 +304,39 @@ _SUPPORT_CLASSES = frozenset(
 _SUPPORT_SNAP_M = float(os.environ.get("PLACEMENT_SUPPORT_SNAP_M", "0.35"))
 _SUPPORT_XZ_PAD_M = float(os.environ.get("PLACEMENT_SUPPORT_XZ_PAD_M", "0.15"))
 
+# Levelling (decision 0146): the classes whose relationship with the room
+# is that they rest on something level, so gravity is evidence about their
+# rotation. Deliberately the union of the two vocabularies that already
+# exist for exactly this population — the things that rest ON surfaces and
+# the things that stand ON the floor — so a class joins both rules at
+# once. Wall and hanging classes are excluded by their absence: their
+# rotation is owed to a measured wall, not to gravity.
+_LEVEL_CLASSES = frozenset(
+    s.strip().lower()
+    for s in os.environ.get(
+        "PLACEMENT_LEVEL_CLASSES",
+        "speaker,table lamp,lamp,monitor,tv,television,plant,vase,laptop,keyboard,"
+        "bed,sofa,couch,chair,stool,bench,table,desk,nightstand,cabinet,dresser,"
+        "bookshelf,shelf,sideboard,console,stand,rug",
+    ).split(",")
+    if s.strip()
+)
+# Below this there is nothing to correct; above it, no axis is near enough
+# to vertical for "which way is up" to be a reading rather than a guess
+# (the furthest a coordinate axis of any rotation can sit from the nearest
+# world axis is 54.7 degrees).
+_LEVEL_MIN_DEG = float(os.environ.get("PLACEMENT_LEVEL_MIN_DEG", "1.0"))
+_LEVEL_MAX_DEG = float(os.environ.get("PLACEMENT_LEVEL_MAX_DEG", "45.0"))
+# The correction ships only if the underside flattens by at least this
+# much — whichever of the two bars is higher, so tiny objects are not
+# levelled on rounding and large ones must show a real gain.
+_LEVEL_MIN_GAIN_M = float(os.environ.get("PLACEMENT_LEVEL_MIN_GAIN_M", "0.001"))
+_LEVEL_MIN_GAIN_FRAC = float(os.environ.get("PLACEMENT_LEVEL_MIN_GAIN_FRAC", "0.05"))
+# Principal axes and a bottom-decile percentile both want more than the
+# 600 points the containment tests are happy with.
+_LEVEL_POINT_CAP = 4000
+_LEVEL_MIN_POINTS = 64
+
 # The default scale-floor map (the rule that reads it is at
 # _LABEL_SCALE_FLOOR_M below): deliberately just the one class the
 # acceptance review measured. Floors for bed, sofa, door and wardrobe were
@@ -1300,12 +1333,12 @@ def _apply_label_scale_floor(obj: dict) -> dict:
     return out
 
 
-def _clipped_world_points(obj: dict, ctx: RefinementContext):
+def _clipped_world_points(obj: dict, ctx: RefinementContext, cap: int = 600):
     """An object's world points as RENDERED — i.e. with its declared
     `splat_clip` volume applied (decision 0104). Consumers that care what
     the user actually sees must use this; the raw points remain right for
     anything reasoning about the reconstruction itself."""
-    pts = _sampled_world_points(obj, ctx)
+    pts = _sampled_world_points(obj, ctx, cap)
     clip = obj.get("splat_clip")
     if pts is None or not clip:
         return pts
@@ -1320,6 +1353,103 @@ def _clipped_world_points(obj: dict, ctx: RefinementContext):
     local = (pts - center) @ R
     inside = np.all(np.abs(local) <= half, axis=1)
     return pts[inside] if int(inside.sum()) >= 8 else pts
+
+
+def _bottom_flatness(pts: np.ndarray) -> float:
+    """Height range of the lowest decile of an object's mass, in metres.
+
+    This is "touches at one point" as a number: a levelled object with a
+    flat underside puts its whole bottom decile at one height, while a
+    tilted one spreads it over the drop across its footprint.
+    """
+    y = np.asarray(pts, dtype=np.float64)[:, 1]
+    return float(np.percentile(y, 10.0) - np.percentile(y, 1.0))
+
+
+def _level_upright_object(obj: dict, ctx: RefinementContext) -> dict:
+    """Stand an upright-resting object up (decision 0146).
+
+    The 0104 support snap is height-only, so an object landed exactly on a
+    measured surface still meets it at whatever tilt its rotation carried:
+    the acceptance walk found four objects at the right height touching at
+    a point, and the worst of them — a soundbar that stands vertically in
+    its own capture photo — ships lying at 40 degrees.
+
+    Tilt is NOT the degree of freedom three instrument families are
+    measured dead on (0081, 0104). Those attack the splat canonical
+    frame's axis ASSIGNMENT and its 180 degree yaw sign, where the only
+    evidence is appearance or a thin single-view cloud. Tilt is rotation
+    about a HORIZONTAL axis, and it has an independent physical prior that
+    those never had: gravity, for a class of object whose whole
+    relationship with the room is that it rests on something level.
+
+    The instrument is the object's own mass — the world-frame principal
+    axes of what is RENDERED. An upright-resting object has one principal
+    axis along the world vertical (a tall speaker's length, a monitor's
+    in-plane vertical, a rug's thin axis), and the correction is the
+    minimal rotation taking that axis onto world up, so the object moves
+    by exactly the measured tilt and never further.
+
+    Two gates, because a rotation is a claim:
+      * class — only classes that rest on something level. Wall and
+        hanging classes are excluded by construction: an artwork's
+        relationship is with a measured wall (`_snap_wall_class_object`),
+        not with gravity, and levelling them measured actively WORSE.
+      * evidence — the underside must measurably flatten. A correction
+        that does not is discarded, so a mis-identified vertical axis
+        costs nothing. This is chunk D's rule (a proposed transform ships
+        only if the evidence improves) applied to rotation.
+    """
+    label = (obj.get("label") or "").strip().lower()
+    if label not in _LEVEL_CLASSES:
+        return obj
+    if obj.get("roomplan_box") or not obj.get("placed"):
+        return obj  # box rotations are RoomPlan measurement: pure yaw already
+    wt = dict(obj.get("world_transform") or {})
+    if not wt:
+        return obj
+    pts = _clipped_world_points(obj, ctx, cap=_LEVEL_POINT_CAP)
+    if pts is None or pts.shape[0] < _LEVEL_MIN_POINTS:
+        return obj
+
+    centre = pts.mean(axis=0)
+    centred = pts - centre
+    _vals, vecs = np.linalg.eigh(centred.T @ centred)
+    up = np.array([0.0, 1.0, 0.0])
+    axis = max(
+        (s * vecs[:, i] for i in range(3) for s in (1.0, -1.0)),
+        key=lambda v: float(v[1]),
+    )
+    tilt_deg = float(np.degrees(np.arccos(np.clip(float(axis[1]), -1.0, 1.0))))
+    if tilt_deg < _LEVEL_MIN_DEG or tilt_deg > _LEVEL_MAX_DEG:
+        return obj
+
+    R_level = minimal_rotation(axis, up)
+    before = _bottom_flatness(pts)
+    after = _bottom_flatness((pts - centre) @ R_level.T + centre)
+    if after > before - max(_LEVEL_MIN_GAIN_M, _LEVEL_MIN_GAIN_FRAC * before):
+        logger.info(
+            "fusion: level refused %s (%s) tilt=%.1f flatness %.4f -> %.4f",
+            obj.get("object_id"), label, tilt_deg, before, after,
+        )
+        return obj
+
+    position = np.asarray(wt["position"], dtype=np.float64)
+    rotation = quat_to_rotmat(tuple(wt["rotation_xyzw"]))
+    out = dict(obj)
+    wt["position"] = [float(c) for c in (R_level @ (position - centre) + centre)]
+    wt["rotation_xyzw"] = [float(c) for c in rotmat_to_quat(R_level @ rotation)]
+    out["world_transform"] = wt
+    quality = dict(out.get("quality") or {})
+    quality["level_correction_deg"] = round(tilt_deg, 2)
+    quality["bottom_flatness_m"] = round(after, 4)
+    out["quality"] = quality
+    out["constraints_applied"] = [*(out.get("constraints_applied") or []), "levelled"]
+    logger.info(
+        "fusion: levelled %s (%s) by %.1f deg, flatness %.4f -> %.4f",
+        obj.get("object_id"), label, tilt_deg, before, after,
+    )
+    return out
 
 
 def _support_surfaces(
@@ -2283,6 +2413,13 @@ def fuse_scene_objects_with_meta(
                     continue
                 fused[i] = _snap_wall_class_object(fused[i], walls, ctx)
                 fused[i] = _declip_floor_class_object(fused[i], walls, ctx)
+        # Levelling precedes both surface construction and the snap: a
+        # tilted object's bottom is a corner, so its contact height is only
+        # meaningful once it stands up, and a tilted support surface would
+        # otherwise hand every object resting on it a wrong top.
+        for i in range(len(fused)):
+            if fused[i].get("placed"):
+                fused[i] = _level_upright_object(fused[i], ctx)
         surfaces = _support_surfaces(fused, boxes, ctx)
         if surfaces:
             for i in range(len(fused)):
