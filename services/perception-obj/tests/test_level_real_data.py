@@ -69,6 +69,7 @@ class _Ctx:
     min_remaining_s = 0.0
     get_appearance = None
     get_rgb = None
+    get_depth = None
 
     def __init__(self, uri, pts):
         self._uri, self._pts = uri, pts

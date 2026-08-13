@@ -218,7 +218,7 @@ class TestSupportSurfaces:
         table = _obj("obj_000", "table", (0, 0, 0), uri="gs://o/table.ply",
                      roomplan_box={"box_id": "box_00"})
         desk = _obj("obj_001", "desk", (0, 0, 0), uri="gs://o/desk.ply")
-        lamp = _obj("obj_002", "table lamp", (0.0, 0.5, 0.0), uri="gs://o/lamp.ply")
+        lamp = _obj("obj_002", "table lamp", (0.0, 0.38, 0.0), uri="gs://o/lamp.ply")
         surfaces = fusion._support_surfaces([table, desk, lamp], [box], ctx)
         out = fusion._snap_onto_support(lamp, [box], ctx, surfaces)
         assert out["quality"]["support_box"] == "box_00"
@@ -229,11 +229,11 @@ class TestSupportSurfaces:
             "gs://o/lamp.ply": _grid(half=(0.05, 0.05, 0.05)),
         })
         desk = _obj("obj_001", "nightstand", (0, 0, 0), uri="gs://o/desk.ply")
-        lamp = _obj("obj_002", "table lamp", (0.0, 0.5, 0.0), uri="gs://o/lamp.ply")
+        lamp = _obj("obj_002", "table lamp", (0.0, 0.38, 0.0), uri="gs://o/lamp.ply")
         surfaces = fusion._support_surfaces([desk, lamp], [], ctx)
         out = fusion._snap_onto_support(lamp, [], ctx, surfaces)
         assert out["quality"]["support_box"] == "obj_001"
-        assert out["world_transform"]["position"][1] < 0.5
+        assert out["world_transform"]["position"][1] < 0.38
 
     def test_a_lamp_is_never_a_support_surface(self):
         ctx = Ctx({"gs://o/lamp.ply": _grid(half=(0.05, 0.05, 0.05))})
@@ -267,10 +267,10 @@ class TestSupportSurfaces:
         """The three-argument form (no surfaces) keeps v1 behaviour."""
         box = FakeBox((0, 0, 0), (1.0, 0.6, 1.0))
         ctx = Ctx({"gs://o/lamp.ply": _grid(half=(0.05, 0.05, 0.05))})
-        lamp = _obj("obj_002", "table lamp", (0.0, 0.6, 0.0), uri="gs://o/lamp.ply")
+        lamp = _obj("obj_002", "table lamp", (0.0, 0.42, 0.0), uri="gs://o/lamp.ply")
         out = fusion._snap_onto_support(lamp, [box], ctx)
         assert out["quality"]["support_box"] == "box_00"
-        assert out["world_transform"]["position"][1] == pytest.approx(0.35, abs=1e-6)
+        assert fusion._bottom_of(out, ctx) == pytest.approx(0.30, abs=0.01)
 
 
 # ---------------------------------------------------------------------------
