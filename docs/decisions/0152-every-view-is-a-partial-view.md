@@ -47,14 +47,14 @@ from anywhere a person stands.
 views were never reconstructed. Every available pair is "occluded" versus
 "differently occluded".
 
-**The measurement that does say something is absolute, not comparative.**
-How much of a box's projected footprint its own SAM mask actually covers —
-the inverse of the `overlap` the ranking uses, and computed nowhere:
-
-    median 0.40, and 13 of 15 shipped views below 0.60
-    r(coverage, shape error) = +0.262 — the wrong sign
-    the two best-covered views (0.71, 0.78) are the cupboard facing
-    backwards and the short-legged table
+**A third measurement was taken here and is WITHDRAWN — see 0154.** It
+divided each object's SAM mask by its projected box hull and read a median
+of 0.40, which was reported as "how much of the object a view shows". It
+is not: an open object cannot fill a solid box's hull from any viewpoint,
+and the measure recovers the porosity ordering (storage 0.51 > table 0.42
+> bed 0.37 > chair 0.29) and little else. 0154 redoes it from depth, where
+porosity cancels, and finds the shipped frame contributing a median 0.48
+of the surface the best available frame does.
 
 ## What we chose
 
@@ -74,9 +74,10 @@ The operator is right that the procedure is the problem and the
 measurements locate it one level up from where the brief put it: not
 *which* frame the pipeline picks, but that it picks **one**. Ten candidate
 view-quality measures have now failed to predict reconstruction quality
-(0146's seven, plus occlusion, mask clipping and mask coverage here), and
-the eleventh reading — the absolute coverage — explains why: they are all
-ranking options that are uniformly bad.
+(0146's seven, plus occlusion and mask clipping here; the tenth, mask
+coverage, is withdrawn by 0154 and replaced by a depth measure that says
+the same thing without the porosity confound). They are all ranking
+options that are uniformly bad.
 
 That makes multi-view consumption (0151) the whole game rather than one
 option among several, and it is why the sampler's 75–83% object-blind
