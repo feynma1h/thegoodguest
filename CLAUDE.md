@@ -259,6 +259,16 @@ vends the REAL minter — the matched pair, because either alone can be
 satisfied by a change that breaks the other (defaulting the seam to a fake
 would turn CI green and ship an api-public handing clients fabricated URIs).
 
+**The local `.venv` is not the perception container.** `services/perception-obj/pyproject.toml`
+declares `numpy<2`; the shared `.venv` carries **2.4.4**, and perception's 746
+tests pass on it. So a green local perception run says less about production
+than it looks like, and CLAUDE.md's "cannot share an environment" is about the
+DECLARED constraints (which is why CI splits the jobs), not about what actually
+runs — they do share one here. This also explains why the numpy-1.26
+Accelerate failure below does not reproduce locally: nothing local is on 1.26.
+A worktree has no `.venv` of its own; lanes use the main tree's interpreter by
+absolute path, which still imports the worktree's own modules.
+
 Other Python jobs at that CI run: perception-obj **passed on Linux** — the
 `test_shell_observation.py::TestMedianSelect::test_closer_frame_outweighs_far`
 failure recorded under numpy 1.26.4 did NOT reproduce, so it was macOS/
@@ -311,6 +321,18 @@ Default model for routine work: **Sonnet 5**. Switch to **Opus 5** for hard reas
 Default tool for code work: **Claude Code**. Default for strategy / architecture decisions: **Claude Chat**. See `.claude/WORKFLOW.md` for the full rubric and prompt templates.
 
 **A whole thread — a quality push, an investigation, a migration — is briefed as a CHARTER, not a task list**, per `.claude/WORKFLOW.md`. Its five parts exist because a task-scoped brief produces a session that stops at the first adjacent defect: an outcome with a self-checkable acceptance test, autonomy grants stated POSITIVELY (the part most briefs omit, and the reason sessions stall), named stopping conditions, the batched-judgment protocol when the acceptance test is the operator's eyes, and a scope boundary that is not a file list. A charter loosens scope, never rigour.
+
+**Starting a session is the orchestrator's job to make one paste long.** Whenever
+new work should run in its own session, the coordinator delivers a
+copy-pasteable prompt AND does the pre-session setup first — provision the
+worktree, symlink `web/public/dev-fixtures` from the main tree, run
+`npm install` in `web/`, copy the gitignored `GoogleService-Info.plist` for iOS
+lanes — so the session's first act is work, not environment repair. Setup traps
+that are already known: `outputs/room-quality/stage_fixed_fixtures.py` writes to
+an ABSOLUTE main-tree path, so a worktree lane stages fixtures outside itself;
+and a worktree has no `.venv`, so Python runs via the main tree's absolute
+interpreter path (verified to still import the worktree's own modules, not
+main's).
 
 **A session's ready report goes to `outputs/reports/<lane>.md`** — gitignored,
 like every other artifact under `outputs/` (walk verdicts, operator-queue logs,
