@@ -1,7 +1,10 @@
 # 0152 — every view is a partial view, and that is the regime
 
 **Date:** 2026-08-13
-**Status:** Decided — no selection change, one experiment named
+**Status:** Decided — no selection change, one experiment named. The
+"ten measures have failed" framing is qualified by 0153: all ten are
+GEOMETRIC, and sharpness — never tested here — shows a median 2x gap
+between the frame used and the best available.
 
 ## Context
 
