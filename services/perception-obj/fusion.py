@@ -316,7 +316,7 @@ _SUPPORT_SNAP_M = float(os.environ.get("PLACEMENT_SUPPORT_SNAP_M", "0.35"))
 _SUPPORT_DROP_MAX_M = float(os.environ.get("PLACEMENT_SUPPORT_DROP_MAX_M", "0.10"))
 _SUPPORT_XZ_PAD_M = float(os.environ.get("PLACEMENT_SUPPORT_XZ_PAD_M", "0.15"))
 
-# Levelling (decision 0146): the classes whose relationship with the room
+# Levelling (decision 0147): the classes whose relationship with the room
 # is that they rest on something level, so gravity is evidence about their
 # rotation. Deliberately the union of the two vocabularies that already
 # exist for exactly this population — the things that rest ON surfaces and
@@ -1536,7 +1536,7 @@ def _rank_is_distinct(ext: np.ndarray, rank: int) -> bool:
 
 
 def _level_upright_object(obj: dict, ctx: RefinementContext) -> dict:
-    """Stand an upright-resting object up (decision 0146).
+    """Stand an upright-resting object up (decision 0147).
 
     The 0104 support snap is height-only, so an object landed exactly on a
     measured surface still meets it at whatever tilt its rotation carried:
@@ -1657,7 +1657,7 @@ def _support_surfaces(
     leaving that rule off the measured half — rp7's monitor rests on the
     top of the CHAIR tucked under its desk, 0.28 m above the desk it
     belongs on, because a chair's box top was in reach and nearer than the
-    desk's (decision 0147)."""
+    desk's (decision 0148)."""
     box_surfaces: list[dict] = []
     splat_surfaces: list[dict] = []
     by_box: dict[str, dict] = {}

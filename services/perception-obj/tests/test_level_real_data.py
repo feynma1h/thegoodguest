@@ -1,4 +1,4 @@
-"""Decision 0146 — the levelling pass on the objects the acceptance walk
+"""Decision 0147 — the levelling pass on the objects the acceptance walk
 actually named, using their own shipped splats and transforms.
 
 The 2026-08-12 walk (outputs/item7-walk-2026-08-12/verdicts.md) ranked
