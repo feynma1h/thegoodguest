@@ -9,24 +9,39 @@ collateral by 0077's scoring probe). So a box-anchored object takes
 position/extent/upright/yaw from the box; SAM 3D contributes APPEARANCE
 only (the splat from the best associated view), and the one genuinely
 unknown DOF — how the splat's per-reconstruction-ARBITRARY canonical frame
-sits inside the box — is resolved by the two-tier appearance instrument at
-the BOX center, the only regime that probe verified:
+sits inside the box — splits into two bits with two different instruments:
 
-  * position precedes rotation: at the shipped (0.79 m off) center the
-    scorer prefers UPSIDE-DOWN — candidates are only ever scored at
-    box-quality centers (the pinned negative);
-  * degenerate views are SKIPPED, not averaged (the f164 close view: a
-    1.4 m view of the 2 m bed zeroes tier 1 for every box-frame candidate);
-  * the winner ships only with a clear margin (PLACEMENT_AXIS_MARGIN,
-    default 0.10, the combined margin that probe achieved on the reference
-    LiDAR capture); below it the extent-best mapping ships with
-    `splat_axis_resolved: false`;
-  * the facing guard is FLAG-ONLY (v1, the 0067 lock-6 precedent): when the
-    scorer prefers the 180°-about-vertical partner of the shipped mapping
-    (= the anti-RoomPlan facing — a cuboid's 180° yaw is a self-symmetry,
-    so the mapping partner and the box-yaw flip are the same rotation) but
-    not decisively enough to ship, `facing_flag: true` records the
-    disagreement and RoomPlan's conventional mapping ships.
+  * the ASSIGNMENT (which splat axis lies along which box axis) is scored
+    by cloud alignment against the observation's own LiDAR cloud, in world
+    space where truncation is harmless (decision 0081; every crop-space
+    appearance variant measured unable to separate any box). Candidates are
+    filtered first by the layout's up AXIS LINE, sign-agnostic
+    (PLACEMENT_AXIS_UP_MAX_DEG), and the winner ships only with a clear
+    margin (PLACEMENT_AXIS_MARGIN, default 0.10); below it the extent-best
+    mapping ships with `splat_axis_resolved: false`;
+  * the 180° SIGN, on which the cloud is near-degenerate, is READ from the
+    layout ROTATION — the only channel that saw which side the camera
+    photographed — gated on how far the chosen mapping sits from it
+    (PLACEMENT_FACING_SIGN_MAX_RESIDUAL_DEG; see `resolve_facing_sign` and
+    decision 0171). Past the gate the two systems disagree about the
+    assignment rather than the sign, the layout has no standing, and the
+    fixed (+,+) convention stands with `facing_sign_resolved: false`.
+    Reading it is not acting on it: the preference is recorded on every
+    capture and applied only under PLACEMENT_FACING_SIGN_APPLY, because it
+    is measured right on the two objects the operator reported and wrong on
+    a third, with nothing it reports separating them.
+
+The appearance instrument keeps one job: when it prefers the shipped
+mapping's 180° partner (= the anti-RoomPlan facing — a cuboid's 180° yaw is
+a self-symmetry, so the mapping partner and the box-yaw flip are the same
+rotation), `facing_flag: true` records the disagreement and nothing moves.
+It stays FLAG-ONLY (the 0067 lock-6 precedent) for a measured reason:
+0104 found it preferring the WRONG answer on both signs the operator's walk
+proved wrong. Two regime facts that probe pinned still hold for it —
+position precedes rotation (at a 0.79 m-off centre the scorer prefers
+UPSIDE-DOWN, so candidates are only ever scored at box-quality centres),
+and degenerate views are SKIPPED rather than averaged (a 1.4 m view of the
+2 m bed zeroes tier 1 for every box-frame candidate).
 
 Scale stays UNIFORM (the uniform-vs-per-axis-scale A/B on the first real
 RoomPlan rooms, decision 0080: per-axis stretch amplified truncation),
@@ -117,6 +132,29 @@ _AXIS_CLOUD_ITERS = 2
 # Below the ship margin, a partner (180°-about-vertical) preference this
 # large over the shipped default raises facing_flag (flag-only v1).
 _FACING_FLAG_MARGIN = float(os.environ.get("PLACEMENT_FACING_FLAG_MARGIN", "0.03"))
+
+# How far the chosen mapping may sit from the observation's layout rotation
+# before the layout loses standing to arbitrate the 180° sign (decision
+# 0171). Shares its value with the up-axis filter above, and for the same
+# reason: past 45° the two systems are describing different placements, not
+# two signs of one. Measured on the four walk rooms, the two populations
+# separate at 29°-70° with nothing between, so this sits in a gap.
+_FACING_SIGN_MAX_RESIDUAL_DEG = float(
+    os.environ.get("PLACEMENT_FACING_SIGN_MAX_RESIDUAL_DEG", "45")
+)
+
+# Whether a resolved sign is APPLIED or only recorded. Default off — the
+# 0080 lock-6 / 0081 flag-only precedent, and here it is not caution but a
+# measurement: of the three objects this leaf would turn on the walk rooms,
+# two are exactly the ones the operator reported facing backwards and the
+# third was already right, and no number the leaf reports separates them
+# (their residuals are 2.9°, 28.9° and 15.4° — the wrong one sits between
+# the two right ones). So it records its preference on every capture, which
+# grows the adjudicated table for free, and turns nothing until a person
+# has looked. Decision 0171.
+_FACING_SIGN_APPLY = os.environ.get("PLACEMENT_FACING_SIGN_APPLY", "0") not in (
+    "0", "false", "False", ""
+)
 
 # Suppression: a non-box object's center inside a matched box's volume
 # (padded by this) with a compatible label is a box duplicate.
@@ -451,11 +489,17 @@ class AxisCandidate:
     residual_m: list  # (dim, |scale*ext - dim|) pairs sorted by dim desc
 
 
-def splat_up_local(obs: dict) -> np.ndarray | None:
-    """The splat-local direction the observation's layout rotation calls
-    world-up, or None when the observation carries no layout rotation.
-    Reads the same fields fusion's ray path trusts (world_transform on a
-    placed depth_fit, world_rotation_xyzw on a demoted/ray observation)."""
+def splat_layout_rotation(obs: dict) -> np.ndarray | None:
+    """The observation's LAYOUT rotation as a world matrix, or None when it
+    carries none. This is SAM 3D's own statement of how the splat it
+    reconstructed sits in the room: `placement.place_object` fits the cloud
+    with `refine_similarity_nn(..., mode="translation")`, which moves the
+    object and never turns it, so the world_transform of a `sam3d_layout`
+    observation IS `rotation_world_from_layout` — the layout rotation under
+    decision 0065's conventions, unmodified.
+    Reads the same fields fusion's ray path trusts (world_transform
+    on a placed depth_fit, world_rotation_xyzw on a demoted/ray
+    observation)."""
     pl = obs.get("placement") or {}
     q = None
     if pl.get("rotation_source") == "sam3d_layout":
@@ -467,8 +511,14 @@ def splat_up_local(obs: dict) -> np.ndarray | None:
         return None
     from roomstudio_schemas.pose_math import quat_to_rotmat
 
-    R = quat_to_rotmat(tuple(q))
-    return R.T @ np.array([0.0, 1.0, 0.0])
+    return quat_to_rotmat(tuple(q))
+
+
+def splat_up_local(obs: dict) -> np.ndarray | None:
+    """The splat-local direction the observation's layout rotation calls
+    world-up, or None when the observation carries no layout rotation."""
+    R = splat_layout_rotation(obs)
+    return None if R is None else R.T @ np.array([0.0, 1.0, 0.0])
 
 
 def axis_up_angle_deg(cand: AxisCandidate, up_local: np.ndarray) -> float:
@@ -682,6 +732,72 @@ def _partner_index(candidates: list[AxisCandidate], idx: int) -> int | None:
     return None
 
 
+def resolve_facing_sign(
+    candidates: list[AxisCandidate], chosen: int, layout_rotation: np.ndarray | None
+) -> tuple[int, bool, float | None, float | None]:
+    """(preferred_index, resolved, residual_deg, separation_deg) — 0171.
+
+    Reports which sign the layout prefers. Whether that preference is acted
+    on is the caller's decision and `_FACING_SIGN_APPLY`'s default is off;
+    this function is the instrument, not the policy.
+
+    The assignment is settled by the cloud (0081); this settles the one bit
+    the cloud is near-degenerate on, the 180° sign, and it settles it from
+    the only channel that ever saw which side the camera photographed.
+
+    A reconstruction is made FROM one frame, so SAM 3D's layout rotation is
+    a statement about which way the object was facing when it was
+    photographed. Box placement re-derives orientation from the measured
+    box and discards it — and because `resolve_axis_mapping` always returns
+    the first candidate of the winning assignment, the sign that ships is
+    the fixed (+,+) convention, which lands on the layout's answer about
+    half the time. Measured on the four preserved walk rooms: the shipped
+    rotation is the layout's exact 180° partner on 8 of the 16 box
+    placements that carry a layout.
+
+    So: measure the rotation distance from the layout to each of the two
+    sign candidates and take the nearer. The RESIDUAL — the distance to
+    that nearer one — is the gate, and it is the honest one, because the
+    layout can only arbitrate a sign along an axis both systems agree on.
+    A residual near zero means the two describe the same placement and
+    differ in the one bit; a large residual means they disagree about the
+    ASSIGNMENT, where the cloud is the better instrument and the layout has
+    no standing. On real data the two cases separate with nothing in
+    between — residuals run 2.9°-28.9° on eight objects and 70°-177° on the
+    other eight — so the gate is reading a gap, not slicing a continuum.
+
+    No separate margin knob: a residual inside the gate forces a large
+    separation, since the two candidates are 180° apart (measured
+    separations are 142°-174° inside the gate and 2°-43° outside it).
+
+    Abstention is the default everywhere: no layout, no partner candidate,
+    or a residual past the gate all leave `chosen` exactly as it arrived.
+    """
+    from roomstudio_schemas.pose_math import quat_to_rotmat, rotation_angle_deg
+
+    if layout_rotation is None or not candidates:
+        return (chosen, False, None, None)
+    partner = _partner_index(candidates, chosen)
+    if partner is None:
+        return (chosen, False, None, None)
+    d_chosen = rotation_angle_deg(
+        quat_to_rotmat(tuple(candidates[chosen].rotation_xyzw)), layout_rotation
+    )
+    d_partner = rotation_angle_deg(
+        quat_to_rotmat(tuple(candidates[partner].rotation_xyzw)), layout_rotation
+    )
+    residual = min(d_chosen, d_partner)
+    separation = abs(d_chosen - d_partner)
+    if residual > _FACING_SIGN_MAX_RESIDUAL_DEG:
+        return (chosen, False, residual, separation)
+    return (
+        (chosen if d_chosen <= d_partner else partner),
+        True,
+        residual,
+        separation,
+    )
+
+
 def score_candidates_at_center(
     candidates: list[AxisCandidate],
     center: np.ndarray,
@@ -836,6 +952,7 @@ def build_box_object(
         }
 
     extents = splat_axis_extents(splat)
+    layout_rotation = splat_layout_rotation(best_view.obs)
     u_local = splat_up_local(best_view.obs)
     candidates = axis_mapping_candidates(box, extents, u_local)
     center = np.asarray(box.center_world, dtype=np.float64)
@@ -876,6 +993,21 @@ def build_box_object(
                 quality["axis_margin"] = round(margin, 4)
             if cloud_scores[chosen] is not None:
                 quality["axis_score"] = round(float(cloud_scores[chosen]), 4)
+
+    # --- Sign resolution: the layout rotation (0171). Runs whether or not
+    # scoring was affordable — it reads a channel already loaded for the up
+    # filter and costs no IO — and abstains on its own residual, so a
+    # budget-starved scene whose assignment was never vetted is protected
+    # by the gate rather than by the budget.
+    chosen_before_sign = chosen
+    preferred, facing_sign_resolved, sign_residual, sign_separation = (
+        resolve_facing_sign(candidates, chosen, layout_rotation)
+    )
+    if sign_residual is not None:
+        quality["facing_sign_residual_deg"] = round(sign_residual, 2)
+        quality["facing_sign_separation_deg"] = round(sign_separation, 2)
+    if facing_sign_resolved and _FACING_SIGN_APPLY:
+        chosen = preferred
 
     # --- Facing check (flag-only v1, semantics unchanged): the appearance
     # instrument still owns the 180°-partner leaf — the cloud is near-
@@ -947,6 +1079,18 @@ def build_box_object(
             "scale": float(cand.scale),
         },
         "splat_axis_resolved": splat_axis_resolved,
+        "facing_sign_resolved": facing_sign_resolved,
+        **(
+            {
+                "facing_sign_source": "sam3d_layout",
+                "facing_sign_preference": (
+                    "flip" if preferred != chosen_before_sign else "keep"
+                ),
+                "facing_sign_applied": bool(_FACING_SIGN_APPLY),
+            }
+            if facing_sign_resolved
+            else {}
+        ),
         "facing_flag": facing_flag,
         "box_fit_residual": cand.residual_m,
         "constraints_applied": ["roomplan_box"],

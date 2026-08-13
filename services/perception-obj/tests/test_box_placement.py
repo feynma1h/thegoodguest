@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from roomplan_room import RoomPlanBox
 from roomstudio_schemas.placement_math import prepare_mask
-from roomstudio_schemas.pose_math import quat_to_rotmat
+from roomstudio_schemas.pose_math import quat_to_rotmat, rotation_angle_deg
 
 
 @dataclass
@@ -504,6 +504,203 @@ class TestBuildBoxObject:
         )
         assert obj["placed"] is False
         assert obj["reason"] == "no_appearance"
+
+
+# ---------------------------------------------------------------------------
+# The 180-degree sign, arbitrated by the layout rotation (decision 0170)
+# ---------------------------------------------------------------------------
+
+def _layout_obs(rotation_xyzw, **kw):
+    """An observation carrying a layout rotation, the way a depth_fit
+    placement does — the channel `splat_layout_rotation` reads."""
+    obs = _obs(**kw)
+    obs["placement"] = {
+        "placed": True,
+        "rotation_source": "sam3d_layout",
+        "world_transform": {
+            "position": [0.0, 0.0, -3.0],
+            "rotation_xyzw": list(rotation_xyzw),
+            "scale": 1.0,
+        },
+    }
+    return obs
+
+
+class TestFacingSign:
+    """`resolve_facing_sign` in isolation: it may only ever choose between
+    the shipped candidate and its 180-degree partner, and it must abstain
+    rather than guess."""
+
+    def _pair(self):
+        cands = box_placement.axis_mapping_candidates(
+            _box(), np.array([1.0, 0.25, 0.5])
+        )
+        return cands, box_placement._partner_index(cands, 0)
+
+    def test_no_layout_abstains(self):
+        cands, _ = self._pair()
+        assert box_placement.resolve_facing_sign(cands, 0, None) == (0, False, None, None)
+
+    def test_no_candidates_abstains(self):
+        assert box_placement.resolve_facing_sign([], 0, np.eye(3)) == (0, False, None, None)
+
+    def test_no_partner_abstains(self):
+        """A candidate list holding only one sign of the assignment has no
+        180-degree partner, so there is no choice to make."""
+        cands, partner = self._pair()
+        only_chosen = [cands[0]] + [c for c in cands if c.assignment != cands[0].assignment]
+        R = quat_to_rotmat(cands[partner].rotation_xyzw)
+        idx, resolved, resid, sep = box_placement.resolve_facing_sign(only_chosen, 0, R)
+        assert (idx, resolved, resid, sep) == (0, False, None, None)
+
+    def test_layout_on_the_shipped_sign_keeps_it(self):
+        cands, _ = self._pair()
+        R = quat_to_rotmat(cands[0].rotation_xyzw)
+        idx, resolved, resid, sep = box_placement.resolve_facing_sign(cands, 0, R)
+        assert (idx, resolved) == (0, True)
+        assert resid == pytest.approx(0.0, abs=1e-9)
+        assert sep == pytest.approx(180.0, abs=1e-9)
+
+    def test_layout_on_the_partner_flips_to_it(self):
+        cands, partner = self._pair()
+        R = quat_to_rotmat(cands[partner].rotation_xyzw)
+        idx, resolved, resid, sep = box_placement.resolve_facing_sign(cands, 0, R)
+        assert (idx, resolved) == (partner, True)
+        assert resid == pytest.approx(0.0, abs=1e-9)
+
+    def test_layout_between_the_two_abstains(self):
+        """Equidistant from both signs, the layout has nothing to say. The
+        residual is still reported, so an abstention is legible rather than
+        silent."""
+        cands, partner = self._pair()
+        quarter = quat_to_rotmat((0.0, np.sin(np.pi / 4), 0.0, np.cos(np.pi / 4)))
+        R = quarter @ quat_to_rotmat(cands[0].rotation_xyzw)
+        idx, resolved, resid, sep = box_placement.resolve_facing_sign(cands, 0, R)
+        assert (idx, resolved) == (0, False)
+        assert resid == pytest.approx(90.0, abs=1e-6)
+        assert sep == pytest.approx(0.0, abs=1e-6)
+
+    def test_gate_is_what_separates_deciding_from_abstaining(self, monkeypatch):
+        """The same layout rotation decides or abstains purely on the gate:
+        it is the residual that carries the authority, not the preference."""
+        cands, partner = self._pair()
+        tilt = quat_to_rotmat((0.0, np.sin(np.pi / 12), 0.0, np.cos(np.pi / 12)))  # 30 deg
+        R = tilt @ quat_to_rotmat(cands[partner].rotation_xyzw)
+        monkeypatch.setattr(box_placement, "_FACING_SIGN_MAX_RESIDUAL_DEG", 45.0)
+        idx, resolved, resid, _ = box_placement.resolve_facing_sign(cands, 0, R)
+        assert (idx, resolved) == (partner, True)
+        assert resid == pytest.approx(30.0, abs=1e-6)
+        monkeypatch.setattr(box_placement, "_FACING_SIGN_MAX_RESIDUAL_DEG", 20.0)
+        idx, resolved, resid, _ = box_placement.resolve_facing_sign(cands, 0, R)
+        assert (idx, resolved) == (0, False)
+        assert resid == pytest.approx(30.0, abs=1e-6)
+
+    def test_never_changes_the_assignment(self):
+        """Whatever it decides, it decides between two candidates of the
+        SAME assignment — the DOF the cloud instrument owns is untouched."""
+        cands, _ = self._pair()
+        for k in range(len(cands)):
+            for R in (np.eye(3), quat_to_rotmat(cands[k].rotation_xyzw)):
+                idx, _r, _d, _s = box_placement.resolve_facing_sign(cands, k, R)
+                assert cands[idx].assignment == cands[k].assignment
+                assert cands[idx].signs[0] == cands[k].signs[0]
+
+
+class TestFacingSignInBuild:
+    """The leaf through `build_box_object`, where it has to leave every
+    other decision alone."""
+
+    def _scene(self, sign_index):
+        """A box whose associated observation carries a layout rotation
+        equal to candidate `sign_index` — so the leaf's answer is known."""
+        box = _box()
+        ctx, obs = _scene_with_box(box)
+        ctx.splats["gs://o/s.ply"] = _slab_cloud((1.0, 0.25, 0.5))
+        extents = box_placement.splat_axis_extents(ctx.splats["gs://o/s.ply"])
+        plain = box_placement.axis_mapping_candidates(box, extents)
+        obs = _layout_obs(plain[sign_index].rotation_xyzw)
+        ctx.masks[(0, 0)] = ctx.masks[(0, 0)]
+        assoc = box_placement.associate_observations([box], [obs], ctx)[0]
+        return box, ctx, assoc, plain
+
+    def test_records_the_preference_but_does_not_act_on_it(self):
+        """The shipped default: the disagreement is recorded and the fixed
+        convention still ships. This is the whole posture of 0171 and the
+        pin that would fail if the default were flipped by accident."""
+        box, ctx, assoc, plain = self._scene(sign_index=1)  # the (+, -) partner
+        obj = box_placement.build_box_object(
+            box=box, box_index=0, object_id="obj_000",
+            associations=assoc, ctx=ctx, allow_scoring=False,
+        )
+        assert obj["facing_sign_resolved"] is True
+        assert obj["facing_sign_source"] == "sam3d_layout"
+        assert obj["facing_sign_preference"] == "flip"
+        assert obj["facing_sign_applied"] is False
+        assert obj["quality"]["facing_sign_residual_deg"] == pytest.approx(0.0, abs=1e-6)
+        assert obj["world_transform"]["rotation_xyzw"] == list(plain[0].rotation_xyzw)
+
+    def test_flips_to_the_layouts_sign_when_applied(self, monkeypatch):
+        monkeypatch.setattr(box_placement, "_FACING_SIGN_APPLY", True)
+        box, ctx, assoc, plain = self._scene(sign_index=1)
+        obj = box_placement.build_box_object(
+            box=box, box_index=0, object_id="obj_000",
+            associations=assoc, ctx=ctx, allow_scoring=False,
+        )
+        assert obj["facing_sign_applied"] is True
+        assert obj["world_transform"]["rotation_xyzw"] == list(plain[1].rotation_xyzw)
+
+    def test_keeps_the_convention_when_the_layout_agrees(self, monkeypatch):
+        monkeypatch.setattr(box_placement, "_FACING_SIGN_APPLY", True)
+        box, ctx, assoc, plain = self._scene(sign_index=0)
+        obj = box_placement.build_box_object(
+            box=box, box_index=0, object_id="obj_000",
+            associations=assoc, ctx=ctx, allow_scoring=False,
+        )
+        assert obj["facing_sign_resolved"] is True
+        assert obj["facing_sign_preference"] == "keep"
+        assert obj["world_transform"]["rotation_xyzw"] == list(plain[0].rotation_xyzw)
+
+    def test_turns_the_object_and_nothing_else(self, monkeypatch):
+        """Position, scale and extents are the box's measurements; a sign
+        decision must not touch any of them."""
+        monkeypatch.setattr(box_placement, "_FACING_SIGN_APPLY", True)
+        box, ctx, assoc, _ = self._scene(sign_index=1)
+        turned = box_placement.build_box_object(
+            box=box, box_index=0, object_id="obj_000",
+            associations=assoc, ctx=ctx, allow_scoring=False,
+        )
+        box2, ctx2, assoc2, _ = self._scene(sign_index=1)
+        obs2 = assoc2[0].obs
+        obs2["placement"] = {}  # same scene, layout channel removed
+        kept = box_placement.build_box_object(
+            box=box2, box_index=0, object_id="obj_000",
+            associations=assoc2, ctx=ctx2, allow_scoring=False,
+        )
+        assert kept["facing_sign_resolved"] is False
+        assert "facing_sign_source" not in kept
+        assert turned["world_transform"]["position"] == kept["world_transform"]["position"]
+        assert turned["world_transform"]["scale"] == pytest.approx(
+            kept["world_transform"]["scale"]
+        )
+        assert turned["extent_m_sorted"] == kept["extent_m_sorted"]
+        assert turned["box_fit_residual"] == kept["box_fit_residual"]
+        R_t = quat_to_rotmat(tuple(turned["world_transform"]["rotation_xyzw"]))
+        R_k = quat_to_rotmat(tuple(kept["world_transform"]["rotation_xyzw"]))
+        assert rotation_angle_deg(R_t, R_k) == pytest.approx(180.0, abs=1e-6)
+
+    def test_an_observation_without_a_layout_is_untouched(self):
+        """The degrade lock: no layout channel, no sign claim, and the
+        rotation is the same fixed convention that shipped before."""
+        box, ctx, assoc = _assoc_scene()
+        obj = box_placement.build_box_object(
+            box=box, box_index=0, object_id="obj_000",
+            associations=assoc, ctx=ctx, allow_scoring=False,
+        )
+        assert obj["facing_sign_resolved"] is False
+        assert "facing_sign_source" not in obj
+        assert "facing_sign_residual_deg" not in obj["quality"]
+        cands = _cands(box, ctx)
+        assert obj["world_transform"]["rotation_xyzw"] == list(cands[0].rotation_xyzw)
 
 
 # ---------------------------------------------------------------------------

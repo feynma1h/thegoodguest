@@ -176,6 +176,24 @@ def quat_to_rotmat(q: QuatXYZW) -> np.ndarray:
     ], dtype=np.float64)
 
 
+def rotation_angle_deg(a: np.ndarray, b: np.ndarray) -> float:
+    """The geodesic angle in degrees between two 3x3 rotation matrices —
+    how far one orientation must turn, about some axis, to become the other.
+
+    This is the only rotation *distance* in the codebase, and it is a
+    distance in the metric sense: symmetric, zero exactly when the two agree,
+    and maximal (180 degrees) when they are opposite. Use it to compare two
+    independent claims about how one object sits; use per-axis dot products
+    instead when the question is about a named axis, because this collapses
+    every axis into a single number and cannot say which one disagrees.
+
+    The trace form is clamped before arccos so float error near 0 and 180
+    degrees returns the endpoint rather than a domain error.
+    """
+    cos = (float(np.trace(np.asarray(a) @ np.asarray(b).T)) - 1.0) / 2.0
+    return float(math.degrees(math.acos(max(-1.0, min(1.0, cos)))))
+
+
 def quat_average(quats: "list[QuatXYZW] | tuple[QuatXYZW, ...]") -> QuatXYZW:
     """Average a non-empty set of unit quaternions (Markley's method).
 
