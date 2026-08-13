@@ -21,6 +21,7 @@ from roomstudio_schemas.pose_math import (
     quat_norm,
     quat_to_rotmat,
     rotate_vec_by_quat,
+    rotation_angle_deg,
     rotmat_to_quat,
 )
 
@@ -208,3 +209,48 @@ def test_quat_norm_unit():
 def test_quat_norm_scaled():
     assert abs(quat_norm((0, 0, 0, 2)) - 2.0) < TOL
     assert abs(quat_norm((3, 0, 0, 4)) - 5.0) < TOL  # 3-4-5 triangle
+
+
+# -----------------------------------------------------------------------------
+# rotation_angle_deg — the one rotation distance
+# -----------------------------------------------------------------------------
+
+def test_rotation_angle_identical_is_zero():
+    R = quat_to_rotmat((SQRT2_2, 0, 0, SQRT2_2))
+    assert rotation_angle_deg(R, R) == pytest.approx(0.0, abs=1e-9)
+
+
+@pytest.mark.parametrize("axis,angle_deg", [
+    ([1, 0, 0], 30.0),
+    ([0, 1, 0], 90.0),
+    ([0, 0, 1], 150.0),
+    ([1, 1, 1], 45.0),
+])
+def test_rotation_angle_recovers_the_turn(axis, angle_deg):
+    """Turning by theta about any axis reads back as theta."""
+    axis = np.array(axis, dtype=float)
+    axis /= np.linalg.norm(axis)
+    half = math.radians(angle_deg) / 2
+    q = (*(axis * math.sin(half)), math.cos(half))
+    assert rotation_angle_deg(np.eye(3), quat_to_rotmat(q)) == pytest.approx(
+        angle_deg, abs=1e-9
+    )
+
+
+def test_rotation_angle_is_symmetric():
+    a = quat_to_rotmat((0.2, 0.3, 0.4, math.sqrt(1 - 0.29)))
+    b = quat_to_rotmat((SQRT2_2, 0, 0, SQRT2_2))
+    assert rotation_angle_deg(a, b) == pytest.approx(rotation_angle_deg(b, a))
+
+
+def test_rotation_angle_maxes_at_180():
+    """A half turn is the farthest two orientations can be, and the trace
+    form must not overshoot arccos's domain getting there."""
+    flip = np.diag([-1.0, 1.0, -1.0])  # 180 deg about world +Y
+    assert rotation_angle_deg(np.eye(3), flip) == pytest.approx(180.0, abs=1e-9)
+
+
+def test_rotation_angle_clamps_beyond_the_domain():
+    """Float error at the endpoints returns the endpoint, never NaN."""
+    nudged = np.eye(3) * (1 + 1e-12)
+    assert rotation_angle_deg(nudged, np.eye(3)) == pytest.approx(0.0, abs=1e-6)
