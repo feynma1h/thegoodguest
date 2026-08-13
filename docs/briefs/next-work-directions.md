@@ -62,9 +62,10 @@ quality.** Two selection layers exist and neither asks the question that
 matters. `census_sampling.py` picks which frames get processed at all — greedy
 set-cover whose gain is box-visibility area over still-uncovered boxes, gated
 on the view being "scoreable". That optimizes ROOM COVERAGE. Then
-`box_placement.py:798` picks which view's splat BECOMES the object: it walks
+`build_box_object` picks which view's splat BECOMES the object: it walks
 the associations and takes the first one whose splat file exists
-(`if candidate_splat is not None: break`).
+(`if candidate_splat is not None: break`). (Line numbers cited in this
+section have since moved — the 2026-08-13 session edited the file.)
 
 Verified against the code 2026-08-13, with one refinement that matters. The
 list is not unordered: `associate_observations` returns it sorted
@@ -76,8 +77,8 @@ of how much of the object's surface a view actually sees.
 
 The actionable part: `BoxAssociation` already carries `in_frame_fraction`, the
 one computed field that speaks directly to truncation. It gates scoring
-admissibility at `box_placement.py:873` and it is part of the census layer's
-own quality gate — and it plays no part in the ranking at line 798. So a view
+admissibility in the facing check and it is part of the census layer's
+own quality gate — and it plays no part in the association ranking. So a view
 with the object half out of frame can outrank a fully visible one and become
 the shipped splat. An already-measured signal, deliberately used elsewhere,
 absent exactly where the defect lands.

@@ -13,7 +13,8 @@ quality. `associate_observations` sorts a box's candidate views by
 footprint against the SAM mask — it answers *is this the same object*, not
 *does this view show it well*. `BoxAssociation` already carries
 `in_frame_fraction`, which speaks directly to truncation, gates scoring
-admissibility at `box_placement.py:873`, and plays no part in that ranking.
+admissibility in `build_box_object`'s facing check, and plays no part in
+that ranking.
 
 The brief asked for this to be measured against the walk's known-bad
 objects rather than assumed. It was, on all four preserved rooms, through
