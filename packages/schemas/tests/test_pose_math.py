@@ -17,7 +17,9 @@ import numpy as np
 import pytest
 from roomstudio_schemas.pose_math import (
     conjugate_quat,
+    quat_mul,
     quat_norm,
+    quat_to_rotmat,
     rotate_vec_by_quat,
     rotmat_to_quat,
 )
@@ -87,6 +89,48 @@ def test_rotate_then_conjugate_is_identity():
     fwd = rotate_vec_by_quat(v, q)
     back = rotate_vec_by_quat(fwd, conjugate_quat(q))
     assert all(abs(b - vi) < TOL for b, vi in zip(back, v))
+
+
+# -----------------------------------------------------------------------------
+# quat_mul — composition
+# -----------------------------------------------------------------------------
+
+def test_quat_mul_identity_is_neutral():
+    q = (0.1, 0.2, 0.3, math.sqrt(1 - 0.01 - 0.04 - 0.09))
+    identity = (0.0, 0.0, 0.0, 1.0)
+    assert all(abs(a - b) < TOL for a, b in zip(quat_mul(identity, q), q))
+    assert all(abs(a - b) < TOL for a, b in zip(quat_mul(q, identity), q))
+
+
+def test_quat_mul_with_conjugate_is_identity():
+    q = (0.1, 0.2, 0.3, math.sqrt(1 - 0.01 - 0.04 - 0.09))
+    x, y, z, w = quat_mul(q, conjugate_quat(q))
+    assert abs(w - 1.0) < TOL
+    assert max(abs(x), abs(y), abs(z)) < TOL
+
+
+def test_quat_mul_matches_matrix_composition():
+    """The composition convention, pinned against the matrix path: quat_mul(a, b)
+    applies b first. Every consumer that reorients an object by pre-multiplying a
+    world-frame rotation depends on this order being the one written down."""
+    a = (0.2, -0.4, 0.1, math.sqrt(1 - 0.04 - 0.16 - 0.01))
+    b = (-0.3, 0.5, 0.2, math.sqrt(1 - 0.09 - 0.25 - 0.04))
+    composed = quat_to_rotmat(quat_mul(a, b))
+    assert np.allclose(composed, quat_to_rotmat(a) @ quat_to_rotmat(b), atol=1e-12)
+
+
+def test_quat_mul_is_not_commutative():
+    """Guards the argument order: a symmetric implementation would pass every
+    test above and silently compose rotations the wrong way round."""
+    a = (0.2, -0.4, 0.1, math.sqrt(1 - 0.04 - 0.16 - 0.01))
+    b = (-0.3, 0.5, 0.2, math.sqrt(1 - 0.09 - 0.25 - 0.04))
+    assert max(abs(p - q) for p, q in zip(quat_mul(a, b), quat_mul(b, a))) > 0.1
+
+
+def test_quat_mul_preserves_unit_norm():
+    a = (0.2, -0.4, 0.1, math.sqrt(1 - 0.04 - 0.16 - 0.01))
+    b = (-0.3, 0.5, 0.2, math.sqrt(1 - 0.09 - 0.25 - 0.04))
+    assert abs(quat_norm(quat_mul(a, b)) - 1.0) < TOL
 
 
 # -----------------------------------------------------------------------------

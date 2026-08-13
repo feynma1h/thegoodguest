@@ -73,8 +73,27 @@ const entry = (over: Partial<SpecEntry> = {}): SpecEntry => ({
   description: "the bed is against the wall",
   origin: { turn_index: 0, client_msg_id: "c1" },
   orphaned: false,
+  facing_flipped: false,
+  departs_from: "measurement",
   ...over,
 });
+
+/** A facing correction: the piece stands where it was measured and sits the
+ * other way round in its box (decision 0157). */
+const turned = (over: Partial<SpecEntry> = {}): SpecEntry =>
+  entry({
+    action: "turn",
+    facing_flipped: true,
+    departs_from: "unresolved_default",
+    proposed_transform: {
+      position: [1, 0.5, 2],
+      rotation_xyzw: [0, 1, 0, 0],
+      scale: 1,
+    },
+    description: "the bed is turned around",
+    solver: null,
+    ...over,
+  });
 
 const doc = (entries: SpecEntry[]): DesignSpecDoc => ({
   spec_version: 1,
@@ -143,6 +162,31 @@ describe("applyDesignSpec", () => {
       doc([entry({ key: "obj:mirror_0", label: "mirror" })]),
     );
     expect(out.states).toEqual(["measured", "measured", "moved"]);
+  });
+
+  it("turns a piece in place — new rotation, same position", () => {
+    const out = applyDesignSpec(ROOM.splats, ROOM.manifest, doc([turned()]));
+    expect(out.splats[0].rotation_xyzw).toEqual([0, 1, 0, 0]);
+    expect(out.splats[0].position).toEqual([1, 0.5, 2]);
+    expect(out.states).toEqual(["turned", "measured", "measured"]);
+  });
+
+  it("draws NO outline for a piece that was only turned", () => {
+    // A half turn maps a rectangle onto itself, so the measured footprint is
+    // exactly the ground the piece is standing on. Drawing it would put a
+    // measurement line under an object that never left it (decision 0157).
+    const out = applyDesignSpec(ROOM.splats, ROOM.manifest, doc([turned()]));
+    expect(out.applied).toHaveLength(1);
+    expect(out.outlines).toEqual([]);
+  });
+
+  it("still draws the outline for a piece that was moved AND turned", () => {
+    const out = applyDesignSpec(
+      ROOM.splats, ROOM.manifest,
+      doc([entry({ facing_flipped: true })]),
+    );
+    expect(out.states).toEqual(["moved", "measured", "measured"]);
+    expect(out.outlines).toHaveLength(1);
   });
 
   it("HIDES a removal rather than dropping it — undo must stay cheap", () => {
@@ -232,6 +276,25 @@ describe("the chrome's copy", () => {
     expect(
       arrangementNote([entry(), entry({ key: "b", action: "remove" })]),
     ).toBe("1 piece moved, 1 taken out — the measured room is one step away");
+  });
+
+  it("never offers the measured room back to a room that only got corrected", () => {
+    // A turn changes nothing that was measured, so there is nothing to put
+    // back — and "one step away" would be offering to undo something the
+    // person told us about their own home (decision 0157).
+    expect(arrangementNote([turned()])).toBe(
+      "1 turned round — where you told me it faces",
+    );
+    expect(arrangementNote([turned(), turned({ key: "b" })])).toBe(
+      "2 turned round — where you told me it faces",
+    );
+  });
+
+  it("counts a moved-and-turned piece under both, and still names the way back", () => {
+    const both = entry({ facing_flipped: true });
+    expect(arrangementNote([both])).toBe(
+      "1 piece moved, 1 turned round — the measured room is one step away",
+    );
   });
 
   it("says plainly that an orphaned change is not being shown", () => {

@@ -6,6 +6,7 @@ implementation of operations on those quaternions:
 
   - rotate a vector by a unit quaternion
   - conjugate (inverse for unit quaternions)
+  - compose two rotations (Hamilton product)
   - convert a 3x3 rotation matrix to a unit quaternion
   - convert a unit quaternion to a 3x3 rotation matrix
   - average a set of unit quaternions
@@ -80,6 +81,25 @@ def conjugate_quat(q: QuatXYZW) -> QuatXYZW:
     """
     qx, qy, qz, qw = q
     return -qx, -qy, -qz, qw
+
+
+def quat_mul(a: QuatXYZW, b: QuatXYZW) -> QuatXYZW:
+    """Hamilton product `a ⊗ b`: the rotation that applies `b` first, then `a`.
+
+    Both operands and the result are (x, y, z, w). Composition order follows
+    the same convention as the matrix path — `quat_to_rotmat(quat_mul(a, b))`
+    equals `quat_to_rotmat(a) @ quat_to_rotmat(b)` — so pre-multiplying by a
+    world-frame rotation reorients an object in place, and post-multiplying
+    turns it about its own axes.
+    """
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
 
 
 def rotmat_to_quat(R: np.ndarray) -> QuatXYZW:

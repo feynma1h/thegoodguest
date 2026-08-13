@@ -46,8 +46,13 @@ export function specKey(obj: Pick<FusedObject, "object_id"> & {
 }
 
 /** What happened to one splat, parallel to `splats`. The inventory reads
- * this rather than re-deriving from labels, which collide (two chairs). */
-export type SplatState = "measured" | "moved" | "removed";
+ * this rather than re-deriving from labels, which collide (two chairs).
+ *
+ * `turned` is a piece the person corrected, not one they rearranged — it
+ * stands exactly where the scan measured it (decision 0157). A piece that was
+ * both moved and turned reads as `moved`: where it stands is the bigger claim,
+ * and the entry's own description says the rest. */
+export type SplatState = "measured" | "moved" | "removed" | "turned";
 
 export interface ProposedScene {
   splats: PositionedSplat[];
@@ -102,7 +107,11 @@ export function applyDesignSpec(
   const out = splats.map((splat, i) => {
     const key = renderableKeys[i];
     const entry = key ? byKey.get(key) : undefined;
-    if (!entry || (entry.action === "move" && !entry.proposed_transform)) {
+    if (
+      !entry ||
+      ((entry.action === "move" || entry.action === "turn") &&
+        !entry.proposed_transform)
+    ) {
       states.push("measured");
       return splat;
     }
@@ -112,7 +121,7 @@ export function applyDesignSpec(
       states.push("removed");
       return { ...splat, hidden: true };
     }
-    states.push("moved");
+    states.push(entry.action === "turn" ? "turned" : "moved");
     return {
       ...splat,
       position: entry.proposed_transform!.position,
@@ -128,9 +137,17 @@ export function applyDesignSpec(
 
   // Outlines come from the ENTRIES, in spec order, so the drawing order is
   // the order the person made the changes.
+  //
+  // A piece that was only TURNED gets none, and this is the honest answer
+  // rather than a stylistic one (decision 0157). A half turn maps a rectangle
+  // onto itself, so the measured footprint is exactly the ground the piece is
+  // standing on — drawing it would put a measurement line under an object that
+  // never left it, saying "here is where this used to be" about the spot it
+  // is currently occupying.
   const outlines: MeasuredOutline[] = [];
   for (const entry of spec.entries) {
     if (entry.orphaned || !seen.has(entry.key)) continue;
+    if (entry.departs_from !== "measurement") continue;
     if (!entry.measured_footprint) continue;
     outlines.push(entry.measured_footprint);
   }
@@ -151,15 +168,26 @@ export function applyDesignSpec(
  * what is on screen, and it must read as the product being straight with
  * you rather than as the guest narrating. Counting is the honest summary: a
  * list of descriptions belongs in the panel, not in one line.
+ *
+ * A room that has ONLY been corrected does not offer the measured room back,
+ * because it never left: a turn changes nothing that was measured (decision
+ * 0157), and "the measured room is one step away" would be offering to undo
+ * something the person told us about their own home.
  */
 export function arrangementNote(applied: SpecEntry[]): string | null {
   if (applied.length === 0) return null;
-  const moved = applied.filter((e) => e.action === "move").length;
-  const removed = applied.length - moved;
+  const rearranged = applied.filter((e) => e.departs_from === "measurement");
+  const moved = rearranged.filter((e) => e.action === "move").length;
+  const removed = rearranged.length - moved;
+  const turned = applied.filter((e) => e.facing_flipped).length;
   const parts: string[] = [];
   if (moved) parts.push(`${moved} ${moved === 1 ? "piece" : "pieces"} moved`);
   if (removed) parts.push(`${removed} taken out`);
-  return `${parts.join(", ")} — the measured room is one step away`;
+  if (turned) parts.push(`${turned} turned round`);
+  const summary = parts.join(", ");
+  return rearranged.length
+    ? `${summary} — the measured room is one step away`
+    : `${summary} — where you told me it faces`;
 }
 
 /** What the orphan notice says. Its whole job is to not pretend. */

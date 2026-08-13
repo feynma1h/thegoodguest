@@ -411,6 +411,20 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * A half turn about world up, applied to a rotation: rotY(pi) (x) q, which
+ * works out to a pure component permutation (decision 0158).
+ *
+ * The SERVER is the authority — production rotations arrive already flipped,
+ * and nothing outside this mock computes one. It is here so the offline walk
+ * shows the piece actually turning rather than a label claiming it did.
+ */
+function halfTurn(
+  [x, y, z, w]: [number, number, number, number],
+): [number, number, number, number] {
+  return [z, w, -x, -y];
+}
+
+/**
  * Canned guest replies, grounded in the fixture manifest above (sofa /
  * table / lamp placed; the plant seen but never placed). Beat + invitation
  * shape; the one distance quoted (about 1.2 m sofa↔table centers) is the
@@ -473,12 +487,19 @@ export class MockApiClient implements ApiClient {
   }
 
   /**
-   * Mock arrangements (decisions 0131/0133). Stage 2 offline: "!move" and
-   * "!remove" in a message make the guest propose, so the whole loop — the
-   * room changing, the outline appearing, the note under the composer, the
-   * one-step revert — is walkable with no backend at all. That parity is
-   * what the reveal and the composer states were built against, and it is
-   * how this flow gets looked at before it is deployed.
+   * Mock arrangements (decisions 0131/0133/0157). Stage 2 offline: "!move",
+   * "!remove" and "!turn" in a message make the guest propose, so the whole
+   * loop — the room changing, the outline appearing (or deliberately not, for
+   * a turn), the note under the composer, the one-step revert — is walkable
+   * with no backend at all. That parity is what the reveal and the composer
+   * states were built against, and it is how this flow gets looked at before
+   * it is deployed.
+   *
+   * These fixtures carry no RoomPlan boxes, so production would refuse a turn
+   * on them; the mock stands one in anyway, because its job is to make the
+   * loop walkable. What a REAL room admits is settled against the four
+   * preserved walk rooms in
+   * services/api-public/tests/test_facing_correction.py.
    *
    * The mock is a REAL solver in one respect that matters: it never invents
    * a proposed transform for a piece it has no measurement for, and every
@@ -513,11 +534,39 @@ export class MockApiClient implements ApiClient {
     return delay({ cleared });
   }
 
+  /** Put the named pieces back where they were measured, KEEPING any facing
+   * correction — the server's own revert semantics (decision 0157). A hard
+   * clear lives on `clearDesignSpec`, which is what the panel's own control
+   * calls; this is what the guest's `revert` tool does. */
+  private revertInMock(sceneId: string): number {
+    const spec = this.spec(sceneId);
+    let reverted = 0;
+    const entries: SpecEntry[] = [];
+    for (const entry of spec.entries) {
+      reverted += 1;
+      if (!entry.facing_flipped) continue;
+      entries.push({
+        ...entry,
+        action: "turn",
+        departs_from: "unresolved_default",
+        proposed_transform: {
+          ...entry.measured_transform,
+          rotation_xyzw: halfTurn(entry.measured_transform.rotation_xyzw),
+        },
+        description: `the ${entry.label} is turned around`,
+      });
+    }
+    this.specs.set(sceneId, {
+      ...spec, entries, updated_at: new Date().toISOString(),
+    });
+    return reverted;
+  }
+
   /** Propose against whatever the scene's assets actually contain, so the
    * mock cannot drift from the fixture it renders. */
   private async proposeInMock(
     sceneId: string,
-    action: "move" | "remove",
+    action: "move" | "remove" | "turn",
   ): Promise<string | null> {
     let assets: SceneAssets;
     try {
@@ -555,24 +604,48 @@ export class MockApiClient implements ApiClient {
           half_extents_m: [half, half * 0.5, half * 0.7] as [number, number, number],
           yaw_rad: 0,
         };
+    const spec = this.spec(sceneId);
+    const prior = spec.entries.find((e) => e.key === specKey(target));
+    // Turning is its own inverse: a second turn drops the entry rather than
+    // storing a change equal to no change (decision 0158).
+    if (action === "turn" && prior?.facing_flipped) {
+      this.specs.set(sceneId, {
+        ...spec,
+        entries: spec.entries.filter((e) => e.key !== prior.key),
+        updated_at: new Date().toISOString(),
+      });
+      return `the ${target.label} is back the way the scan drew it`;
+    }
+    const flipped = action === "turn" || Boolean(prior?.facing_flipped);
+    const effectiveAction = action === "turn" ? (prior?.action ?? "turn") : action;
     const description = action === "remove"
       ? `the ${target.label} is out of the room`
-      : `the ${target.label} is against the wall`;
+      : action === "turn"
+        ? `the ${target.label} is turned around`
+        : `the ${target.label} is against the wall`;
     const entry: SpecEntry = {
       key: specKey(target),
-      action,
+      action: effectiveAction,
+      facing_flipped: flipped,
+      departs_from:
+        effectiveAction === "turn" ? "unresolved_default" : "measurement",
       label: target.label,
       measured_transform: measured,
       proposed_transform: action === "remove" ? null : {
         ...measured,
-        position: [
-          measured.position[0] + 1.1,
-          measured.position[1],
-          measured.position[2] + 0.7,
-        ],
+        rotation_xyzw: flipped
+          ? halfTurn(measured.rotation_xyzw)
+          : measured.rotation_xyzw,
+        position: action === "turn"
+          ? (prior?.proposed_transform?.position ?? measured.position)
+          : [
+              measured.position[0] + 1.1,
+              measured.position[1],
+              measured.position[2] + 0.7,
+            ],
       },
       measured_footprint: footprint,
-      solver: action === "remove" ? null : {
+      solver: action === "remove" || action === "turn" ? null : {
         relation: "against_wall",
         anchor_resolved_to: "wall_00",
         constraints_applied: [
@@ -588,7 +661,6 @@ export class MockApiClient implements ApiClient {
       origin: { turn_index: this.conversation.length, client_msg_id: null },
       orphaned: false,
     };
-    const spec = this.spec(sceneId);
     this.specs.set(sceneId, {
       ...spec,
       entries: [...spec.entries.filter((e) => e.key !== entry.key), entry],
@@ -709,18 +781,18 @@ export class MockApiClient implements ApiClient {
     const existing = this.conversation.find((t) => t.client_msg_id === clientMsgId);
     const slow = text.includes("!slow");
     const errorMid = text.includes("!error");
-    const action: "move" | "remove" | null = text.includes("!remove")
+    const action: "move" | "remove" | "turn" | null = text.includes("!remove")
       ? "remove"
       : text.includes("!move")
         ? "move"
-        : text.includes("!revert")
-          ? null
+        : text.includes("!turn")
+          ? "turn"
           : null;
     const reverting = text.includes("!revert");
     const propose = action
       ? () => this.proposeInMock(sceneId, action)
       : null;
-    const revert = reverting ? () => this.clearDesignSpec(sceneId) : null;
+    const revert = reverting ? () => this.revertInMock(sceneId) : null;
     const reply = existing?.assistant_text ?? mockGuestReply(text);
     const appendTurn = (final: string) => this.appendTurn(text, final, clientMsgId);
 
@@ -736,14 +808,23 @@ export class MockApiClient implements ApiClient {
       if (propose) {
         const description = await propose();
         if (description) {
-          spoken =
-            `Done — ${description}. Its old footprint is still drawn on the ` +
-            "floor. Say the word and I'll put it straight back.";
+          // A turn leaves no footprint behind to draw — the piece is standing
+          // exactly where it was measured — so it must not be offered one.
+          // And turning something BACK is not "the other way round" again: it
+          // is the scan's own guess restored, which is a different sentence.
+          spoken = action !== "turn"
+            ? `Done — ${description}. Its old footprint is still drawn on the ` +
+              "floor. Say the word and I'll put it straight back."
+            : description.includes("back the way")
+              ? `Done — ${description}. Say the word if you want it turned ` +
+                "round again."
+              : `Done — ${description}. It hasn't moved; that's just the ` +
+                "other way round. Does that look right to you?";
           yield { type: "arrangement" };
         }
       } else if (revert) {
-        const { cleared } = await revert();
-        if (cleared > 0) {
+        const reverted = revert();
+        if (reverted > 0) {
           spoken = "Back as measured. Want to try something else?";
           yield { type: "arrangement" };
         }
