@@ -2,8 +2,16 @@
 # Deploy a perception service (geom or obj) to Cloud Run.
 #
 # Run from the repo root:
-#     ./infra/deploy_perception.sh geom    # deploy perception-geom (VGGT)
-#     ./infra/deploy_perception.sh obj     # deploy perception-obj  (SAM 3 + SAM 3D)
+#     ./infra/deploy_perception.sh geom              # deploy perception-geom (VGGT)
+#     ./infra/deploy_perception.sh obj               # deploy perception-obj, straight to 100%
+#     ./infra/deploy_perception.sh obj --candidate   # hold the new revision at 0%, smoke, then flip
+#
+# --candidate is the same shape deploy_api_public.sh and deploy_api_internal.sh
+# use: the revision is created with --no-traffic --tag=candidate, reachable on
+# its own tagged URL, and traffic moves only when you run the printed
+# update-traffic command. Prefer it for perception-obj — a revision that fails
+# at run time burns a full GPU request budget before anyone finds out, and the
+# route table (the /shell and /compress stages) is not verifiable locally.
 #
 # Prerequisites (see infra/secrets.md for details):
 #   1. HF token saved as a GCP secret named 'hf-token'
@@ -14,9 +22,18 @@
 
 set -euo pipefail
 
-if [[ $# -ne 1 || ( "$1" != "geom" && "$1" != "obj" ) ]]; then
-    echo "Usage: $0 {geom|obj}"
+if [[ $# -lt 1 || $# -gt 2 || ( "$1" != "geom" && "$1" != "obj" ) ]]; then
+    echo "Usage: $0 {geom|obj} [--candidate]"
     exit 1
+fi
+
+CANDIDATE_MODE=0
+if [[ $# -eq 2 ]]; then
+    if [[ "$2" != "--candidate" ]]; then
+        echo "Usage: $0 {geom|obj} [--candidate]"
+        exit 1
+    fi
+    CANDIDATE_MODE=1
 fi
 
 WHICH="$1"
@@ -197,6 +214,19 @@ else
     # the app-as-gate posture until it has a workload worth re-deciding.
     DEPLOY_FLAGS+=(--allow-unauthenticated)
 fi
+# Candidate mode holds the revision at 0% and gives it its own tagged URL.
+# --no-traffic is silently ignored on a first-ever service creation, so pass it
+# only when there is prior traffic to protect; the tag is useful either way.
+if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
+    if gcloud run services describe "${SERVICE}" \
+            --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+        DEPLOY_FLAGS+=(--no-traffic)
+        echo "[deploy] ${SERVICE} exists; new revision held at 0% traffic."
+    else
+        echo "[deploy] WARNING: ${SERVICE} has no prior revision; --no-traffic cannot be honored and the new revision serves 100% on creation."
+    fi
+    DEPLOY_FLAGS+=(--tag=candidate)
+fi
 gcloud run deploy "${SERVICE}" \
     --image="${IMAGE_URI}" \
     --region="${REGION}" \
@@ -251,11 +281,14 @@ fi
 # such a pin from a 2026-05 rollback: the 2026-07-21 deploy validated, was
 # instantly Retired with zero traffic, and gcloud still printed "serving 100
 # percent" — for the OLD revision). Force follow-latest explicitly; idempotent,
-# and matches this script's intent of deploying straight to 100%.
-gcloud run services update-traffic "${SERVICE}" \
-    --to-latest \
-    --region="${REGION}" \
-    --project="${PROJECT_ID}"
+# and matches the direct mode's intent of deploying straight to 100%. In
+# candidate mode the same command is the flip, run by hand after the smoke.
+if [[ "${CANDIDATE_MODE}" -eq 0 ]]; then
+    gcloud run services update-traffic "${SERVICE}" \
+        --to-latest \
+        --region="${REGION}" \
+        --project="${PROJECT_ID}"
+fi
 
 URL=$(gcloud run services describe "${SERVICE}" \
         --region="${REGION}" --project="${PROJECT_ID}" \
@@ -265,6 +298,30 @@ echo ""
 echo "=== Done ==="
 echo "Service URL: ${URL}"
 echo ""
+
+if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
+    CANDIDATE_URL=$(gcloud run services describe "${SERVICE}" \
+        --region="${REGION}" --project="${PROJECT_ID}" \
+        --format='json(status.traffic)' \
+        | jq -r '.status.traffic[] | select(.tag == "candidate") | .url // empty')
+    if [[ -z "${CANDIDATE_URL}" ]]; then
+        echo "ERROR: could not resolve the candidate revision URL from the --tag=candidate traffic entry." >&2
+        gcloud run services describe "${SERVICE}" \
+            --region="${REGION}" --project="${PROJECT_ID}" \
+            --format='yaml(status.traffic)' >&2
+        exit 1
+    fi
+    echo "Candidate URL: ${CANDIDATE_URL}"
+    echo ""
+    echo "perception-obj is platform-gated (0106), so the smoke needs an identity token:"
+    echo "  curl -H \"Authorization: Bearer \$(gcloud auth print-identity-token)\" ${CANDIDATE_URL}/health"
+    echo ""
+    echo "Then flip traffic:"
+    echo "  gcloud run services update-traffic ${SERVICE} --to-latest \\"
+    echo "    --region=${REGION} --project=${PROJECT_ID}"
+    echo ""
+fi
+
 if [[ "${WHICH}" == "geom" ]]; then
     echo "Update .env at the repo root:"
     echo "  PERCEPTION_GEOM_URL=${URL}"
