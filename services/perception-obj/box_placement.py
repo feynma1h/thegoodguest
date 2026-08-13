@@ -203,6 +203,25 @@ BOX_LABEL_FAMILIES: dict[str, frozenset[str]] = _parse_family_map(
 )
 
 
+# RoomPlan categories whose TOP is a surface other things rest on. Read
+# twice: here, to decide which end of an under-filling splat to anchor, and
+# by fusion's support pass, to decide which boxes are surfaces at all.
+# Deliberately short — `chair`, `bed` and `sofa` are the categories whose
+# absence is doing the work, and one joins on evidence from a real capture.
+SURFACE_TOP_CATEGORIES = frozenset(
+    s.strip().lower()
+    for s in os.environ.get(
+        "PLACEMENT_SURFACE_TOP_CATEGORIES", "table,storage"
+    ).split(",")
+    if s.strip()
+)
+
+# A splat filling less than this much of its box's measured height is
+# missing mass at one end, and centring it puts half the deficit at each.
+_SEAT_MIN_FILL = float(os.environ.get("PLACEMENT_BOX_SEAT_MIN_FILL", "0.85"))
+_SEAT_PCTL = 1.0
+
+
 def family_compatible(category: str | None, label: str | None) -> bool:
     if not category or not label:
         return False
@@ -899,7 +918,14 @@ def build_box_object(
     quality["axis_scored_views"] = len(scoreable_views)
 
     cand = candidates[chosen]
-    clip = splat_clip_block(box, splat, cand.rotation_xyzw, cand.scale)
+    seat = vertical_seat_offset(box, splat, cand.rotation_xyzw, cand.scale)
+    if seat is not None:
+        dy, anchor, fill = seat
+        center = center + np.array([0.0, dy, 0.0])
+        quality["vertical_seat_m"] = round(dy, 4)
+        quality["vertical_seat_anchor"] = anchor
+        quality["box_height_fill"] = round(fill, 3)
+    clip = splat_clip_block(box, splat, cand.rotation_xyzw, cand.scale, center)
     if clip is not None:
         quality["splat_clip_removed"] = clip["removed_fraction"]
     return {
@@ -933,7 +959,7 @@ def build_box_object(
 # ---------------------------------------------------------------------------
 
 def splat_clip_block(
-    box, local_points: np.ndarray, rotation_xyzw, scale: float
+    box, local_points: np.ndarray, rotation_xyzw, scale: float, position=None
 ) -> dict | None:
     """The `splat_clip` manifest block for a box-anchored object, or None
     when the splat already sits inside its measured box (decision 0104).
@@ -953,9 +979,12 @@ def splat_clip_block(
     if local_points is None or local_points.shape[0] == 0:
         return None
     R = quat_to_rotmat(tuple(rotation_xyzw))
-    world = (float(scale) * (local_points @ R.T)) + np.asarray(
-        box.center_world, dtype=np.float64
+    # The object's own position, which is the box centre unless the splat
+    # was seated against one of the box's faces (see vertical_seat_offset).
+    origin = np.asarray(
+        box.center_world if position is None else position, dtype=np.float64
     )
+    world = (float(scale) * (local_points @ R.T)) + origin
     Rb = np.asarray(box.transform[:3, :3], dtype=np.float64)
     local = (world - np.asarray(box.transform[:3, 3], dtype=np.float64)) @ Rb
     half = np.asarray(box.dimensions, dtype=np.float64) / 2.0 + _SPLAT_CLIP_MARGIN_M
@@ -971,6 +1000,59 @@ def splat_clip_block(
         "yaw_rad": round(float(box.yaw_rad), 4),
         "removed_fraction": round(fraction, 4),
     }
+
+
+def vertical_seat_offset(box, local_points: np.ndarray, rotation_xyzw, scale: float):
+    """How far to slide a box-anchored splat vertically inside its measured
+    box, or None when it fills the box's height (decision 0148).
+
+    A reconstruction that under-fills its box is missing mass at ONE end —
+    rp7's desk is a tabletop with the legs cut off at 0.42 of its measured
+    height. Centring it splits that deficit evenly, which puts the object
+    clear of the floor AND its top below the measurement: the desk floats
+    0.225 m up, and the monitor resting on its measured top hovers 0.206 m
+    over the surface anyone can see.
+
+    Which end to keep follows from what the category's top IS. A table or a
+    cabinet has a functional top surface — things rest on it, and fusion's
+    support pass hands out contact heights from it — so its top must be the
+    measured one and the missing mass hangs off the bottom. Everything
+    else (a chair, a bed, a sofa) has only one contact worth being right,
+    the floor, so it is seated on the box's floor.
+
+    Not the observation's LiDAR cloud, which is the obvious candidate and
+    measured unusable: the cloud is the VISIBLE surface, so it is
+    top-biased on every object (a chair's cloud spans 0.47 m of a 1.08 m
+    box) and matching to it would push well-fitting objects upward too.
+    The box's own two faces are measurement, and one of them is a contact.
+    """
+    span = _rendered_span(local_points, rotation_xyzw, scale, box)
+    if span is None:
+        return None
+    lo, hi = span
+    box_lo = float(box.center_world[1]) - float(box.dimensions[1]) / 2.0
+    box_hi = float(box.center_world[1]) + float(box.dimensions[1]) / 2.0
+    height = box_hi - box_lo
+    if height <= 0.0 or (hi - lo) >= _SEAT_MIN_FILL * height:
+        return None
+    topped = (box.category or "").strip().lower() in SURFACE_TOP_CATEGORIES
+    dy = (box_hi - hi) if topped else (box_lo - lo)
+    return float(dy), ("box_top" if topped else "box_floor"), float((hi - lo) / height)
+
+
+def _rendered_span(local_points, rotation_xyzw, scale, box):
+    """(lo, hi) world heights of a placed splat, percentile-clipped at both
+    ends for the reason extents are everywhere else."""
+    from roomstudio_schemas.pose_math import quat_to_rotmat
+
+    if local_points is None or local_points.shape[0] < 8:
+        return None
+    R = quat_to_rotmat(tuple(rotation_xyzw))
+    y = (float(scale) * (local_points @ R.T))[:, 1] + float(box.center_world[1])
+    return (
+        float(np.percentile(y, _SEAT_PCTL)),
+        float(np.percentile(y, 100.0 - _SEAT_PCTL)),
+    )
 
 
 def center_inside_box(position, box, margin_m: float | None = None) -> bool:

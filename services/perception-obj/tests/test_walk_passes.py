@@ -290,21 +290,62 @@ class TestSupportSnap:
         obj = _obj("obj_000", label, (xz[0], y, xz[1]), "gs://o/s.ply")
         return box, ctx, obj
 
+    def _contact(self, out, ctx):
+        """Where the object's underside lands — the same percentile the
+        snap reasons about, not the extreme point (decision 0147)."""
+        pts = fusion._sampled_world_points(out, ctx)
+        return float(np.percentile(pts[:, 1], fusion._SUPPORT_SPLAT_BOTTOM_PCTL))
+
     def test_hovering_object_rests_on_box_top(self):
         box, ctx, obj = self._scene(y=1.05)  # bottom 0.9, top of box 0.8
         out = fusion._snap_onto_support(obj, [box], ctx)
         assert "on_top_of" in out["constraints_applied"]
         assert out["quality"]["support_box"] == "box_00"
-        pts = fusion._sampled_world_points(out, ctx)
-        assert float(pts[:, 1].min()) == pytest.approx(0.8, abs=1e-6)
+        assert self._contact(out, ctx) == pytest.approx(0.8, abs=1e-6)
 
     def test_sunk_object_lifted_onto_box_top(self):
         """The spike speaker: intersecting the table, lifted onto it."""
         box, ctx, obj = self._scene(y=0.75)  # bottom 0.6 < top 0.8
         out = fusion._snap_onto_support(obj, [box], ctx)
         assert out["quality"]["support_snap_m"] == pytest.approx(0.2, abs=0.02)
-        pts = fusion._sampled_world_points(out, ctx)
-        assert float(pts[:, 1].min()) == pytest.approx(0.8, abs=1e-6)
+        assert self._contact(out, ctx) == pytest.approx(0.8, abs=1e-6)
+
+    def test_a_stray_point_below_the_object_does_not_lift_it(self):
+        """The underside is percentile-clipped for the same reason the
+        surface top is: one gaussian hanging below an object would
+        otherwise hold the whole object off the surface by its length."""
+        box, ctx, obj = self._scene(y=1.05)
+        pts = ctx.splats["gs://o/s.ply"]
+        strays = pts.copy()[:1]
+        strays[:, 1] = pts[:, 1].min() - 0.20
+        ctx.splats["gs://o/s.ply"] = np.vstack([pts, strays])
+        out = fusion._snap_onto_support(obj, [box], ctx)
+        assert self._contact(out, ctx) == pytest.approx(0.8, abs=0.005)
+
+    def test_a_chair_is_not_a_surface(self):
+        """rp7's monitor rested on the top of the chair tucked under its
+        desk, 0.28 m above the desk, because the measured half of the
+        surface set applied no class rule at all while the estimated half
+        did (decision 0147)."""
+        chair = _rp_box(center=(0.0, 0.4, 0.0), dims=(1.2, 0.8, 0.6),
+                        category="chair")
+        ctx = StubCtx(splats={"gs://o/s.ply": _cube(ext=(0.2, 0.3, 0.2))})
+        obj = _obj("obj_000", "monitor", (0.0, 1.05, 0.0), "gs://o/s.ply")
+        assert fusion._snap_onto_support(obj, [chair], ctx) is obj
+        assert fusion._support_surfaces([], [chair], ctx) == []
+
+    def test_the_lower_qualifying_surface_wins_over_a_nearer_chair(self):
+        """The whole rp7 monitor case in one table: a chair top in easy
+        reach and a desk top further away must resolve to the desk."""
+        chair = _rp_box(center=(0.0, 0.25, 0.0), dims=(1.2, 0.7, 0.6),
+                        category="chair")          # top 0.60, 0.06 away
+        desk = _rp_box(center=(0.0, 0.05, 0.0), dims=(1.6, 0.7, 0.9),
+                       category="table")           # top 0.40, 0.26 away
+        ctx = StubCtx(splats={"gs://o/s.ply": _cube(ext=(0.2, 0.3, 0.2))})
+        obj = _obj("obj_000", "monitor", (0.0, 0.80, 0.0), "gs://o/s.ply")
+        out = fusion._snap_onto_support(obj, [chair, desk], ctx)
+        assert out["quality"]["support_box"] == "box_01"
+        assert self._contact(out, ctx) == pytest.approx(0.40, abs=1e-6)
 
     def test_outside_footprint_untouched(self):
         box, ctx, obj = self._scene(y=1.05, xz=(1.0, 0.0))
