@@ -302,6 +302,18 @@ _SUPPORT_CLASSES = frozenset(
     if s.strip()
 )
 _SUPPORT_SNAP_M = float(os.environ.get("PLACEMENT_SUPPORT_SNAP_M", "0.35"))
+# The snap is deliberately ASYMMETRIC. Lifting an object out of a surface
+# it penetrates corrects an impossibility, so it may travel the full reach
+# above. LOWERING an object asserts a contact the depth fit did not find,
+# and the depth fit is a measurement — beyond a small correction the gap it
+# measured is real and the missing thing is the object's own support:
+# rp6g1's monitor was pulled 0.123 m down onto its table, hiding the fact
+# that the stand holding the screen up was never reconstructed. A screen
+# resting at its measured height with a visible gap is the honest picture;
+# a screen glued to the desk is a wrong one. Calibrated on the reviewed
+# rooms, where the blessed downward corrections are 0.06 m and the rejected
+# ones 0.12-0.19 m.
+_SUPPORT_DROP_MAX_M = float(os.environ.get("PLACEMENT_SUPPORT_DROP_MAX_M", "0.10"))
 _SUPPORT_XZ_PAD_M = float(os.environ.get("PLACEMENT_SUPPORT_XZ_PAD_M", "0.15"))
 
 # Levelling (decision 0146): the classes whose relationship with the room
@@ -327,6 +339,21 @@ _LEVEL_CLASSES = frozenset(
 # world axis is 54.7 degrees).
 _LEVEL_MIN_DEG = float(os.environ.get("PLACEMENT_LEVEL_MIN_DEG", "1.0"))
 _LEVEL_MAX_DEG = float(os.environ.get("PLACEMENT_LEVEL_MAX_DEG", "45.0"))
+# Reading which axis is up off the object's own LiDAR surface: the surface
+# must show a level object, and it must say so unambiguously. Measured on
+# the reviewed objects, the nearest axis sits 7-16 degrees off vertical
+# with the runner-up 58-72 degrees behind it, so neither gate is near real
+# data — they are there to refuse a surface that cannot answer.
+_LEVEL_CLOUD_MAX_TILT_DEG = float(
+    os.environ.get("PLACEMENT_LEVEL_CLOUD_MAX_TILT_DEG", "25.0")
+)
+_LEVEL_CLOUD_MARGIN_DEG = float(
+    os.environ.get("PLACEMENT_LEVEL_CLOUD_MARGIN_DEG", "20.0")
+)
+_LEVEL_MIN_CLOUD_POINTS = 64
+# Cloud and splat axes are matched by extent RANK, so the rank in question
+# must be separated from its neighbours in both point sets.
+_LEVEL_RANK_SEP = float(os.environ.get("PLACEMENT_LEVEL_RANK_SEP", "0.15"))
 # The correction ships only if the underside flattens by at least this
 # much — whichever of the two bars is higher, so tiny objects are not
 # levelled on rounding and large ones must show a real gain.
@@ -1422,6 +1449,13 @@ def _clipped_world_points(obj: dict, ctx: RefinementContext, cap: int = 600):
     return pts[inside] if int(inside.sum()) >= 8 else pts
 
 
+def _bottom_of(obj: dict, ctx: RefinementContext) -> float:
+    """The height at which an object meets whatever it rests on — the same
+    percentile the snap reasons about, not the extreme point."""
+    pts = _clipped_world_points(obj, ctx)
+    return float(np.percentile(pts[:, 1], _SUPPORT_SPLAT_BOTTOM_PCTL))
+
+
 def _bottom_flatness(pts: np.ndarray) -> float:
     """Height range of the lowest decile of an object's mass, in metres.
 
@@ -1431,6 +1465,74 @@ def _bottom_flatness(pts: np.ndarray) -> float:
     """
     y = np.asarray(pts, dtype=np.float64)[:, 1]
     return float(np.percentile(y, 10.0) - np.percentile(y, 1.0))
+
+
+def _principal_axes(pts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(3x3 columns = principal axes, (3,) extents), descending by extent."""
+    centred = pts - pts.mean(axis=0)
+    _vals, vecs = np.linalg.eigh(centred.T @ centred)
+    proj = centred @ vecs
+    ext = np.percentile(proj, 98.0, axis=0) - np.percentile(proj, 2.0, axis=0)
+    order = np.argsort(ext)[::-1]
+    return vecs[:, order], ext[order]
+
+
+def _upright_axis_from_cloud(obj: dict, ctx: RefinementContext):
+    """Which of an object's axes is vertical, read off its own measured
+    LiDAR surface — or None when the surface cannot say.
+
+    The splat's own mass is the wrong place to ask. Its canonical frame is
+    arbitrary per reconstruction and its extents are truncated, so "the
+    principal axis nearest vertical" is a minimal-motion heuristic, not a
+    reading: on the spike room's speaker it picks a middle axis 40 degrees
+    out and stands the speaker on an edge, when the object lies flat on its
+    largest face in the capture photo.
+
+    The observation's cloud has neither problem. It is metric, it is in the
+    world frame by construction, and it is a direct measurement of the
+    surface the object presents. On the same speaker it puts the THINNEST
+    axis 7.0 degrees off vertical with the next axis 83 degrees away — an
+    unambiguous statement that the object is lying down.
+
+    Returns (rank, tilt_deg): which extent-rank of the object is vertical,
+    and how convincingly. The splat's axis of the same rank is the one to
+    stand up. Both the cloud's confidence and the rank's distinctness are
+    gated, because a rank that is ambiguous in one point set cannot be
+    matched into the other.
+    """
+    src = obj.get("source") or {}
+    fi, mi = src.get("frame_index"), src.get("mask_index")
+    if fi is None:
+        return None
+    cloud = box_placement.observation_cloud_from_ctx(ctx, fi, mi)
+    if cloud is None or cloud.shape[0] < _LEVEL_MIN_CLOUD_POINTS:
+        return None
+    _axes, ext = _principal_axes(cloud)
+    tilts = [
+        float(np.degrees(np.arccos(np.clip(abs(_axes[1, i]), 0.0, 1.0))))
+        for i in range(3)
+    ]
+    rank = int(np.argmin(tilts))
+    nearest = tilts[rank]
+    runner_up = min(t for i, t in enumerate(tilts) if i != rank)
+    if nearest > _LEVEL_CLOUD_MAX_TILT_DEG:
+        return None  # the surface does not show a level object
+    if runner_up - nearest < _LEVEL_CLOUD_MARGIN_DEG:
+        return None  # two axes equally vertical: which one is a guess
+    if not _rank_is_distinct(ext, rank):
+        return None
+    return rank, nearest
+
+
+def _rank_is_distinct(ext: np.ndarray, rank: int) -> bool:
+    """Whether the extent at `rank` is separated from its neighbours enough
+    to be matched between two point sets by ordering alone."""
+    for j in (rank - 1, rank + 1):
+        if 0 <= j < 3:
+            hi = max(float(ext[rank]), float(ext[j]))
+            if hi <= 0 or abs(float(ext[rank]) - float(ext[j])) / hi < _LEVEL_RANK_SEP:
+                return False
+    return True
 
 
 def _level_upright_object(obj: dict, ctx: RefinementContext) -> dict:
@@ -1450,12 +1552,13 @@ def _level_upright_object(obj: dict, ctx: RefinementContext) -> dict:
     those never had: gravity, for a class of object whose whole
     relationship with the room is that it rests on something level.
 
-    The instrument is the object's own mass — the world-frame principal
-    axes of what is RENDERED. An upright-resting object has one principal
-    axis along the world vertical (a tall speaker's length, a monitor's
-    in-plane vertical, a rug's thin axis), and the correction is the
-    minimal rotation taking that axis onto world up, so the object moves
-    by exactly the measured tilt and never further.
+    Which of the object's axes is vertical is read off its own measured
+    LiDAR surface (`_upright_axis_from_cloud`), and the correction is the
+    minimal rotation taking the splat's axis of that same extent-rank onto
+    world up — so the object moves by exactly the measured tilt and never
+    further. Without a usable cloud the pass degrades to the splat's own
+    nearest-vertical axis, which is a heuristic and is bounded much more
+    tightly for that reason.
 
     Two gates, because a rotation is a claim:
       * class — only classes that rest on something level. Wall and
@@ -1480,15 +1583,24 @@ def _level_upright_object(obj: dict, ctx: RefinementContext) -> dict:
         return obj
 
     centre = pts.mean(axis=0)
-    centred = pts - centre
-    _vals, vecs = np.linalg.eigh(centred.T @ centred)
+    axes, _ext = _principal_axes(pts)
     up = np.array([0.0, 1.0, 0.0])
-    axis = max(
-        (s * vecs[:, i] for i in range(3) for s in (1.0, -1.0)),
-        key=lambda v: float(v[1]),
-    )
+    measured = _upright_axis_from_cloud(obj, ctx)
+    if measured is not None:
+        rank, _cloud_tilt = measured
+        source, limit = "lidar_cloud", 90.0
+        axis = max((axes[:, rank], -axes[:, rank]), key=lambda v: float(v[1]))
+    else:
+        # No usable surface: fall back to the splat's own nearest-vertical
+        # axis. That is minimal-motion, not a reading, so it is bounded at
+        # the furthest a coordinate axis can sit from the nearest world one.
+        source, limit = "splat_mass", _LEVEL_MAX_DEG
+        axis = max(
+            (s * axes[:, i] for i in range(3) for s in (1.0, -1.0)),
+            key=lambda v: float(v[1]),
+        )
     tilt_deg = float(np.degrees(np.arccos(np.clip(float(axis[1]), -1.0, 1.0))))
-    if tilt_deg < _LEVEL_MIN_DEG or tilt_deg > _LEVEL_MAX_DEG:
+    if tilt_deg < _LEVEL_MIN_DEG or tilt_deg > limit:
         return obj
 
     R_level = minimal_rotation(axis, up)
@@ -1509,12 +1621,13 @@ def _level_upright_object(obj: dict, ctx: RefinementContext) -> dict:
     out["world_transform"] = wt
     quality = dict(out.get("quality") or {})
     quality["level_correction_deg"] = round(tilt_deg, 2)
+    quality["level_source"] = source
     quality["bottom_flatness_m"] = round(after, 4)
     out["quality"] = quality
     out["constraints_applied"] = [*(out.get("constraints_applied") or []), "levelled"]
     logger.info(
-        "fusion: levelled %s (%s) by %.1f deg, flatness %.4f -> %.4f",
-        obj.get("object_id"), label, tilt_deg, before, after,
+        "fusion: levelled %s (%s) by %.1f deg from %s, flatness %.4f -> %.4f",
+        obj.get("object_id"), label, tilt_deg, source, before, after,
     )
     return out
 
@@ -1618,7 +1731,7 @@ def _snap_onto_support(
     # surface top already is: the extreme point is a stray gaussian. Taken
     # from the raw minimum, a 12 mm tail below the object lifts it 12 mm
     # off the surface it is supposed to be resting on.
-    bottom = float(np.percentile(pts[:, 1], _SUPPORT_SPLAT_BOTTOM_PCTL))
+    bottom = _bottom_of(obj, ctx)
     center = np.asarray(wt["position"], dtype=np.float64)
 
     if surfaces is None:
@@ -1649,7 +1762,7 @@ def _snap_onto_support(
             if not (lo[0] <= center[0] <= hi[0] and lo[1] <= center[2] <= hi[1]):
                 continue
         dy = surf["top"] - bottom
-        if abs(dy) > _SUPPORT_SNAP_M:
+        if dy > _SUPPORT_SNAP_M or -dy > _SUPPORT_DROP_MAX_M:
             continue
         slot = best_box if surf["kind"] == "box" else best_splat
         if slot is None or abs(dy) < slot[0]:
