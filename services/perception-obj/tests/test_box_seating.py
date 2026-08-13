@@ -1,5 +1,5 @@
-"""Decision 0148 — where an under-filling splat sits inside its box, and
-decision 0147 — which boxes are support surfaces at all.
+"""Decision 0148 — which boxes are support surfaces at all, and where an
+under-filling splat sits inside its box.
 
 Both come out of the same measurement. rp7's monitor rests on the top of
 the CHAIR tucked under its desk, 0.28 m above the desk, because the
