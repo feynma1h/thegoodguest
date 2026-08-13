@@ -46,6 +46,17 @@ problems; an outcome-scoped one chases whatever the room needs.
 
 ### §1a — the two capture-side defects, stated with their mechanisms
 
+> **ANSWERED 2026-08-13, both negative — decisions 0146 and 0150.** The
+> readings of the code below are correct and were re-verified: the ranking
+> really does ignore `in_frame_fraction`, and nothing really does tell the
+> user an object has been sufficiently observed. The implied fixes do not
+> work. Ranking by in-frame fraction changes 3 of 31 boxes and improves the
+> reconstruction on 3 of 8 paired comparisons; seven view features against
+> two completeness instruments are all coin flips; and the capture already
+> holds 22–156 good views of every object against a pipeline that uses one
+> or two, with supply uncorrelated to quality (r = +0.018 across a 40×
+> range). Read the two decisions before acting on anything below.
+
 **(i) The reconstruction view is chosen by CORRESPONDENCE, never by view
 quality.** Two selection layers exist and neither asks the question that
 matters. `census_sampling.py` picks which frames get processed at all — greedy
