@@ -330,9 +330,14 @@ worktree, symlink `web/public/dev-fixtures` from the main tree, run
 lanes — so the session's first act is work, not environment repair. Setup traps
 that are already known: `outputs/room-quality/stage_fixed_fixtures.py` writes to
 an ABSOLUTE main-tree path, so a worktree lane stages fixtures outside itself;
-and a worktree has no `.venv`, so Python runs via the main tree's absolute
+a worktree has no `.venv`, so Python runs via the main tree's absolute
 interpreter path (verified to still import the worktree's own modules, not
-main's).
+main's); and **only symlink `dev-fixtures` into a lane that actually views
+rooms.** That directory is **3.9 GB of real captured homes**, `next build`
+copies `public/` into `out/`, and any lane whose acceptance includes a green
+static-export build should not have it present — the deploy is protected by
+`firebase.json`'s `dev-fixtures/**` ignore, but the build is not, and 0122
+already caught a real room's splat one deploy from a public origin.
 
 **A session's ready report goes to `outputs/reports/<lane>.md`** — gitignored,
 like every other artifact under `outputs/` (walk verdicts, operator-queue logs,
