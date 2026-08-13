@@ -169,7 +169,16 @@ class RoomWall:
 @dataclass(frozen=True)
 class RoomObject:
     """One fused object, as geometry. `name` mirrors scene_facts' spoken name
-    so a tool call and a sentence refer to the same thing."""
+    so a tool call and a sentence refer to the same thing.
+
+    `rotation_source` is carried because it is the ONLY field that says how
+    much the pipeline knows about which way this piece is turned, and the
+    three values mean genuinely different things: `roomplan_box` means the
+    piece is dressed in a measured box whose 180° sign was never resolved by
+    anything (see `spec_solver.turn_around`), `sam3d_layout` means the layout
+    convention placed it and its sign IS pinned by regression (decision 0065),
+    and None means no rotation was claimed at all.
+    """
     key: str
     object_id: str
     box_identifier: str | None
@@ -178,6 +187,8 @@ class RoomObject:
     placed: bool
     box: OrientedBox | None
     position: Vec3 | None
+    rotation_xyzw: tuple[float, float, float, float] | None = None
+    rotation_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -245,6 +256,20 @@ def _vec3(value: object) -> Vec3 | None:
         return None
     if any(math.isnan(v) or math.isinf(v) for v in out):
         return None
+    return out  # type: ignore[return-value]
+
+
+def _quat(value: object) -> tuple[float, float, float, float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    try:
+        out = tuple(float(v) for v in value)
+    except (TypeError, ValueError):
+        return None
+    if any(math.isnan(v) or math.isinf(v) for v in out):
+        return None
+    if abs(math.sqrt(sum(v * v for v in out)) - 1.0) > 1e-3:
+        return None  # the bundle's unit-norm contract; a non-rotation is not one
     return out  # type: ignore[return-value]
 
 
@@ -367,6 +392,8 @@ def derive_room_geometry(
         label = str(obj.get("label") or "unidentified object")
         wt = obj.get("world_transform")
         position = _vec3(wt.get("position")) if isinstance(wt, dict) else None
+        rotation = _quat(wt.get("rotation_xyzw")) if isinstance(wt, dict) else None
+        source = obj.get("rotation_source")
         objects.append(RoomObject(
             key=spec_key(obj),
             object_id=object_id,
@@ -376,6 +403,8 @@ def derive_room_geometry(
             placed=bool(obj.get("placed")),
             box=_box(obj),
             position=position,
+            rotation_xyzw=rotation,
+            rotation_source=source if isinstance(source, str) and source else None,
         ))
 
     floor_polygon: tuple[Vec2, ...] = ()

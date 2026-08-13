@@ -35,8 +35,8 @@ from scene_facts import derive_scene_facts, render_facts_block
 # ---------------------------------------------------------------------------
 
 _PINNED = (
-    3,
-    "94dd33ea4efd08c3ad0536d7e9f576126cb69f62234122666c3fe304e62561c8",
+    4,
+    "61e36ce3b48ea122c679af9fbd5ac975f436f6e46db5ba26bffedbd60fb537ce",
 )
 
 
@@ -66,17 +66,26 @@ class TestPinnedCharter:
             "stay ideas until they say yes",  # rule 6b: suggest, never act
             "placements are verbatim too",    # rule 2a
             "conditional",                    # rule 10
+            # 0159: a facing correction is the one change the guest makes to
+            # something it cannot see, so who the authority is has to be
+            # written down rather than inferred from a tool that takes no
+            # direction.
+            "theirs to know, not yours",      # rule 6c
+            "did not give you eyes",          # rule 6c: no facing claims after
+            "turning a piece is not rearranging",  # rule 10's exclusion
         ):
             assert needle in lowered, f"charter lost capability truth: {needle}"
 
-    def test_charter_has_eleven_exemplars(self):
+    def test_charter_has_fifteen_exemplars(self):
         # 0096 added the clearance-floor and longest-dimension refusals; 0132
         # replaced the "I can't move things yet" exemplar with five covering
         # a successful move, a solver refusal, an ambiguous anchor, an
         # unprompted idea offered rather than acted on, and a conditional
-        # clearance in a rearranged room.
-        assert STATIC_CHARTER.count("Person:") == 11
-        assert STATIC_CHARTER.count("Guest:") == 11
+        # clearance in a rearranged room; 0159 added four for facings — the
+        # correction itself, the direction a turn cannot take, a piece with no
+        # second way round, and a revert that leaves a correction standing.
+        assert STATIC_CHARTER.count("Person:") == 15
+        assert STATIC_CHARTER.count("Guest:") == 15
 
     def test_charter_no_longer_claims_the_guest_cannot_move_anything(self):
         """0132 gave the guest hands. A charter still saying "eyes, not

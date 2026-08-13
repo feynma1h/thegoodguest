@@ -63,7 +63,32 @@ from datetime import datetime, timezone
 # reads this to decide, rather than guessing from which keys are present.
 SPEC_VERSION = 1
 
-ACTIONS = frozenset({"move", "remove"})
+ACTIONS = frozenset({"move", "remove", "turn"})
+
+# WHAT AN ENTRY DEPARTED FROM, and it is not decoration — three behaviours
+# read it (decision 0157).
+#
+# A `move` departs from a MEASUREMENT: perception measured the piece here and
+# the person is asking to see it there. Both are meaningful, one is true, and
+# 0131's whole answer is that the true one stays beside it.
+#
+# A `turn` departs from an UNRESOLVED DEFAULT. The 180° sign of a splat inside
+# its box is settled by no instrument — perception always ships the fixed
+# (+,+) convention — so the value the person overruled was never a
+# measurement, and treating it as one would put a guess in the field labelled
+# `measured_transform` and call it truth. That is precisely the failure this
+# document exists to make impossible.
+#
+# DERIVED, NEVER STORED: it is a function of `action`, and a second copy in
+# Firestore could disagree with the first. It rides `client_dict` the way
+# `orphaned` does — computed on the way out, never parsed back in.
+DEPARTS_FROM_MEASUREMENT = "measurement"
+DEPARTS_FROM_UNRESOLVED = "unresolved_default"
+
+
+def departs_from(entry: "SpecEntry") -> str:
+    """Which kind of claim this entry overruled. See the constants above."""
+    return DEPARTS_FROM_UNRESOLVED if entry.action == "turn" else DEPARTS_FROM_MEASUREMENT
 
 # A hard ceiling on one arrangement. Not a cost control — a product one: a
 # spec is a short list of deliberate changes, and a hundred-entry document is
@@ -169,7 +194,7 @@ class SolverTrace:
 class SpecEntry:
     """One proposed placement, carrying the measurement it departs from."""
     key: str
-    action: str                      # "move" | "remove"
+    action: str                      # "move" | "remove" | "turn"
     label: str                       # the spoken name at authoring time
     measured_transform: Transform
     proposed_transform: Transform | None   # None for "remove"
@@ -178,12 +203,21 @@ class SpecEntry:
     description: str                 # the server's sentence for this change
     turn_index: int | None
     client_msg_id: str | None
+    # Whether the person corrected which way round this piece sits. Stored
+    # rather than derived: it is provenance — the person ASSERTED this — and
+    # recovering it by comparing two quaternions for equality would make a
+    # record of what someone said depend on a float comparison. It rides
+    # independently of `action` because a piece can be both moved and turned,
+    # and losing one when the other changes would silently discard something
+    # the person told us.
+    facing_flipped: bool = False
 
     def to_doc(self) -> dict:
         return {
             "key": self.key,
             "action": self.action,
             "label": self.label,
+            "facing_flipped": self.facing_flipped,
             "measured_transform": self.measured_transform.to_doc(),
             "proposed_transform": (
                 self.proposed_transform.to_doc() if self.proposed_transform else None
@@ -218,7 +252,7 @@ class SpecEntry:
             if isinstance(doc.get("proposed_transform"), dict)
             else None
         )
-        if action == "move" and proposed is None:
+        if action in ("move", "turn") and proposed is None:
             return None
         origin = doc.get("origin") or {}
         turn_index = origin.get("turn_index")
@@ -241,6 +275,9 @@ class SpecEntry:
                 if isinstance(origin.get("client_msg_id"), str)
                 else None
             ),
+            # An entry written before facing corrections existed carries no
+            # flag and is read as unflipped, which is what it was.
+            facing_flipped=bool(doc.get("facing_flipped")),
         )
 
 
@@ -280,6 +317,10 @@ def client_dict(spec: DesignSpec, live_keys: set[str]) -> dict:
     for e in spec.entries:
         doc = e.to_doc()
         doc["orphaned"] = e.key not in live_keys
+        # Computed on the way out, never stored and never read back — the
+        # client needs it to pick a treatment, and one implementation cannot
+        # drift from itself. See `departs_from`.
+        doc["departs_from"] = departs_from(e)
         entries.append(doc)
     return {
         "spec_version": SPEC_VERSION,
@@ -304,6 +345,13 @@ def apply_to_manifest(manifest: dict, spec: DesignSpec) -> dict:
     A `remove` entry drops the object from the derived facts entirely, which
     is the honest reading: the guest should not speak about where a piece is
     when the room it is looking at does not contain it.
+
+    A `turn` changes the rotation and NOTHING else — not the position, not the
+    box's dims, and above all not the box's yaw. The box is the measurement;
+    the correction is about which way round the piece sits inside it. Nothing
+    `scene_facts` derives reads a rotation, so a turn leaves every fact the
+    guest can speak exactly as measured, which is why rule 10's conditional
+    grammar does not apply to one.
     """
     from room_geometry import spec_key  # local: keeps the import graph a DAG
 
@@ -325,6 +373,7 @@ def apply_to_manifest(manifest: dict, spec: DesignSpec) -> dict:
         wt = dict(obj.get("world_transform") or {})
         assert entry.proposed_transform is not None
         wt["position"] = list(entry.proposed_transform.position)
+        wt["rotation_xyzw"] = list(entry.proposed_transform.rotation_xyzw)
         moved["world_transform"] = wt
         box = obj.get("roomplan_box")
         if isinstance(box, dict):
