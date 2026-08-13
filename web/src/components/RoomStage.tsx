@@ -182,6 +182,16 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
   const hasShell = assets.phase === "ready" && (assets.shell?.length ?? 0) > 0;
   const changed = arrangementNote(proposed.applied);
   const orphans = orphanNote(proposed.orphaned);
+  // This control clears the whole document, corrections included, so it is
+  // labelled for what it actually does. "Back to measured" is exact while
+  // every entry departs from a measurement; once a facing correction is in
+  // the room it is not, because the facing the scan drew was never measured
+  // (decision 0157) — and a room with ONLY corrections has nothing to put
+  // back at all, so it gets no control.
+  const corrections = proposed.applied.filter((e) => e.facing_flipped).length;
+  const rearranged = proposed.applied.filter(
+    (e) => e.departs_from === "measurement",
+  ).length;
 
   const comeIn = () => {
     setFreshReveal(true);
@@ -263,12 +273,19 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
               {changed && (
                 <div className="mb-2.5 flex items-center justify-between gap-4 rounded-[12px] border border-ink/15 bg-paper/[0.96] px-4 py-2.5 shadow-float">
                   <p className="text-[12px] leading-snug text-ink/70">{changed}</p>
-                  <button
-                    onClick={revertAll}
-                    className="shrink-0 rounded-full border border-ink/20 px-3 py-1 text-[11px] text-ink/70 transition-colors hover:bg-ink/[0.06]"
-                  >
-                    back to measured
-                  </button>
+                  {rearranged > 0 && (
+                    <button
+                      onClick={revertAll}
+                      title={
+                        corrections
+                          ? "Puts every piece back as the scan drew it, including the ones you turned round."
+                          : undefined
+                      }
+                      className="shrink-0 rounded-full border border-ink/20 px-3 py-1 text-[11px] text-ink/70 transition-colors hover:bg-ink/[0.06]"
+                    >
+                      {corrections ? "back to the scan" : "back to measured"}
+                    </button>
+                  )}
                 </div>
               )}
               {orphans && (
@@ -314,7 +331,10 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
                   // State reads as words, not a badge (0057 deleted
                   // StatusBadge): "placed" is the measurement, "moved" and
                   // "taken out" are the proposal, and the difference between
-                  // them is the point.
+                  // them is the point. "turned" is neither — the piece stands
+                  // exactly where it was measured and the person told us which
+                  // way it faces (0157), so it reads as a fact about the room
+                  // rather than as something pending.
                   const state = proposed.states[i] ?? "measured";
                   return (
                     <li
@@ -335,7 +355,9 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
                           ? "taken out"
                           : state === "moved"
                             ? "moved"
-                            : "placed"}
+                            : state === "turned"
+                              ? "turned round"
+                              : "placed"}
                       </span>
                     </li>
                   );
