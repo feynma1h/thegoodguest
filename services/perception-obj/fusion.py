@@ -1044,6 +1044,60 @@ def _yaw_rotation(yaw_rad: float) -> np.ndarray:
     return np.array([[c, 0.0, -s], [0.0, 1.0, 0.0], [s, 0.0, c]])
 
 
+def _grouping_key(label: str | None) -> str:
+    """The key one physical object's observations must share (0149).
+
+    Grouping by the raw label forks an object whose label is not stable
+    across frames — and SAM's is not. rp7's monitor is detected as both
+    `monitor` and `tv` in all three frames that see it, and the same-frame
+    cross-label collapse keeps whichever scored higher IN THAT FRAME:
+    `monitor` at f7, `tv` at f114 and f385. The collapse's own contract is
+    that a collapsed group "never seeds objects under several labels",
+    which holds inside a frame and fails across them — so the label split
+    then made three views of one monitor into a one-view `monitor` and a
+    two-view `tv`, and the pipeline shipped the smallest reconstruction of
+    the three while the best was demoted by the tv scale floor.
+
+    So confusable labels share a key, and the fused object still takes its
+    NAME from its best-scoring member — nothing is renamed, and two
+    genuinely different tables stay apart because the proximity clustering
+    below separates them exactly as it always has.
+    """
+    key = (label or "").strip().lower()
+    for grp in _CROSS_LABEL_3D_GROUPS:
+        if key in grp:
+            return "grp:" + min(grp)
+    return key
+
+
+def _dedup_same_frame_per_label(
+    observations: list[dict], ctx: RefinementContext
+) -> tuple[list[dict], list[dict]]:
+    """`_dedup_same_frame`, applied within each RAW label.
+
+    Grouping by confusable family (0149) is about which observations can
+    describe one object across FRAMES. The same-frame nested-pair dedup
+    asks a different question — is this a duplicate detection of the same
+    thing in this one frame — and its test, containment of the smaller,
+    says yes to any nested pair. Run across labels it would absorb a small
+    object genuinely sitting inside a larger different-label one, which
+    the same-frame CROSS-label collapse already refuses by using
+    containment of the LARGER. Keeping this one per-label preserves both
+    tests exactly as they were written.
+    """
+    by_label: dict[str, list[dict]] = {}
+    for o in observations:
+        by_label.setdefault((o.get("label") or "").strip().lower(), []).append(o)
+    kept: list[dict] = []
+    records: list[dict] = []
+    for label in sorted(by_label):
+        k, r = _dedup_same_frame(by_label[label], ctx)
+        kept.extend(k)
+        records.extend(r)
+    kept.sort(key=lambda o: -o["score"])
+    return kept, records
+
+
 def _labels_confusable(a: str | None, b: str | None) -> bool:
     la = (a or "").strip().lower()
     lb = (b or "").strip().lower()
@@ -2345,7 +2399,7 @@ def fuse_scene_objects_with_meta(
 
     by_label: dict[str, list[dict]] = {}
     for o in observations:
-        by_label.setdefault(o["label"] or "", []).append(o)
+        by_label.setdefault(_grouping_key(o["label"]), []).append(o)
 
     for label in sorted(by_label):
         group = sorted(by_label[label], key=lambda o: -o["score"])
@@ -2355,8 +2409,8 @@ def fuse_scene_objects_with_meta(
             if not o["placement"].get("placed") and o.get("view_ray")
         ]
 
-        placed, placed_dedup = _dedup_same_frame(placed, ctx)
-        with_rays, ray_dedup = _dedup_same_frame(with_rays, ctx)
+        placed, placed_dedup = _dedup_same_frame_per_label(placed, ctx)
+        with_rays, ray_dedup = _dedup_same_frame_per_label(with_rays, ctx)
         for rec in placed_dedup + ray_dedup:
             key = (rec["frame_index"], rec["kept_mask_index"])
             dedup_counts[key] = dedup_counts.get(key, 0) + 1
