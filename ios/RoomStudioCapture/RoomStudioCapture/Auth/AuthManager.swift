@@ -137,12 +137,43 @@ final class AuthManager: ObservableObject {
         // MainActor executor), so a second caller cannot interleave and double-start.
         let task = Task { @MainActor in
             defer { self.signInTask = nil }
+            // About to mint. Record whether this install is genuinely new or
+            // has just lost an identity it used to have — the guard above
+            // cannot tell those apart (decision 0139), and the difference is
+            // the difference between a first run and silent, permanent
+            // orphaning of every scene the old UID owns. Reading only; it does
+            // not change whether we sign in. It lives inside the task because
+            // the store is an actor: awaiting it above would put a suspension
+            // between the currentUser check and the single-flight assignment,
+            // which is the double-sign-in race that assignment exists to close.
+            await self.logContinuityReading()
             let result = try await Auth.auth().signInAnonymously()
             self.uid = result.user.uid
             self.refreshLinkState()
         }
         signInTask = task
         return try await task.value
+    }
+
+    /// Gather the two independent signals and log what they say about this
+    /// launch. Never mints, never throws, never changes the sign-in decision.
+    private func logContinuityReading() async {
+        let hasDeviceIdentity = DeviceIdentity.existingDeviceId() != nil
+        let hasCaptureRecords =
+            !((try? await UploadSessionStore.shared.allBundleIds()) ?? []).isEmpty
+        let reading = IdentityContinuity.read(
+            hasFirebaseUser: false,
+            hasDeviceIdentity: hasDeviceIdentity,
+            hasCaptureRecords: hasCaptureRecords)
+        let line = """
+            auth.continuity minting anonymous user: reading=\(String(describing: reading)) \
+            device_identity=\(hasDeviceIdentity) capture_records=\(hasCaptureRecords)
+            """
+        if IdentityContinuity.isLoss(reading) {
+            logger.fault("\(line, privacy: .public)")
+        } else {
+            logger.info("\(line, privacy: .public)")
+        }
     }
 
     // MARK: - Account linking (decisions 0051/0118)
