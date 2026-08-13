@@ -55,10 +55,13 @@ metric scale or pose would let measurement graduate from prior to authority —
 i.e. a geometry-conditioned successor to SAM 3D that can take the LiDAR in.
 
 **One correction to "discard all previous rooms":** discard them as the
-QUALITY TARGET, yes. Do NOT delete the data — they are load-bearing
-regression fixtures (`247003de` referenced in 7 test files, `a7e073ae` in 5,
-`f3d70236` in 4) pinning real-data accuracy claims that are among the
-strongest evidence in the project.
+QUALITY TARGET, yes. Do NOT delete the data — they are load-bearing regression
+fixtures pinning real-data accuracy claims that are among the strongest
+evidence in the project, and they are named in production source, not only in
+tests: `f3d70236` in 8 files (`contact_priors.py`, `room_planes.py`,
+`shell_geometry.py`, `privacy.py` + 4 test modules), `247003de` in 6
+(`shell_envelope.py`, `fusion.py`, `make_shell_v3_fixtures.py` + 3 tests),
+`a7e073ae` in 4 (the stage-2 solver and geometry suites).
 
 ---
 
