@@ -46,19 +46,33 @@ problems; an outcome-scoped one chases whatever the room needs.
 
 ### §1a — the two capture-side defects, stated with their mechanisms
 
-**(i) The reconstruction view is chosen by FILE EXISTENCE, not by quality.**
-Two selection layers exist and neither asks the question that matters.
-`census_sampling.py` picks which frames get processed at all — greedy set-cover
-whose gain is box-visibility area × in-frame fraction, gated on being
-"scoreable". That optimizes ROOM COVERAGE. Then `box_placement.py:796` picks
-which view's splat BECOMES the object: it walks the associations and takes the
-first one whose splat file exists (`if candidate_splat is not None: break`).
-No occlusion test, no sharpness test, no "how much of this object does this
-view actually see". So nothing anywhere asks *which frame shows this chair
-best* — which is exactly the absent question that ships half-rendered objects.
-Verify this reading against the code before building on it, then decide what
-"cleanest" means and measure it against the walk's known-bad objects (the
-undersized rp7 monitor, the rp6g1 monitor with no generated base).
+**(i) The reconstruction view is chosen by CORRESPONDENCE, never by view
+quality.** Two selection layers exist and neither asks the question that
+matters. `census_sampling.py` picks which frames get processed at all — greedy
+set-cover whose gain is box-visibility area over still-uncovered boxes, gated
+on the view being "scoreable". That optimizes ROOM COVERAGE. Then
+`box_placement.py:798` picks which view's splat BECOMES the object: it walks
+the associations and takes the first one whose splat file exists
+(`if candidate_splat is not None: break`).
+
+Verified against the code 2026-08-13, with one refinement that matters. The
+list is not unordered: `associate_observations` returns it sorted
+`(-overlap, frame_index, mask_index)`. But `overlap` is the projected box
+footprint against the SAM mask — it answers *is this mask the same object as
+this box*, a correspondence question. It does not answer *does this view show
+the object well*. There is no occlusion test, no sharpness test, and no measure
+of how much of the object's surface a view actually sees.
+
+The actionable part: `BoxAssociation` already carries `in_frame_fraction`, the
+one computed field that speaks directly to truncation. It gates scoring
+admissibility at `box_placement.py:873` and it is part of the census layer's
+own quality gate — and it plays no part in the ranking at line 798. So a view
+with the object half out of frame can outrank a fully visible one and become
+the shipped splat. An already-measured signal, deliberately used elsewhere,
+absent exactly where the defect lands.
+
+Decide what "cleanest" means, and measure it against the walk's known-bad
+objects (the undersized rp7 monitor, the rp6g1 monitor with no generated base).
 
 **(ii) Nothing tells the user an object has been sufficiently OBSERVED.**
 RP-7 ships a live floor plan — walls stroking in, furniture as labeled rects, a
