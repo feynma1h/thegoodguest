@@ -1,8 +1,7 @@
 # 0120 — perception-obj builds cache layers via BuildKit inline cache on a stable tag
 
 **Date:** 2026-08-10
-**Status:** Built; config proven by one validation build — the speedup itself is
-measured on the next REAL build, and that measurement belongs here when it lands
+**Status:** Decided; speedup measured 2026-08-13 (see Outcome)
 
 ## Context
 
@@ -72,6 +71,21 @@ still caches; the deploy script passes nothing new.
   model bakes (SAM 3/SAM 3D snapshots, DINOv2, the conda env) sit above the
   server-code COPYs, so a code-only change should reuse every heavy layer
   and pay only COPY + smoke time.
+
+## Outcome
+
+The next real build was the room-quality ship (2026-08-13, build
+`ca372cd8-de1e-4077-af4f-d90a947c31ea`, image `20260813-222442`): a source-only
+change to `fusion.py` and `box_placement.py`, nothing above them touched.
+
+**BUILD step 10 min 23 s, 11 min 29 s wall clock, against the 58 min 39 s
+uncached baseline — 5.1×.** The prediction in the bullet above holds: every
+heavy layer was reused and the build paid COPY plus smoke time.
+
+That is the realistic case rather than a best case, because most perception
+deploys change only Python; a build that touches the conda env or a model bake
+still pays for the layers below it, and the two Dockerfile-level failures this
+repo has had (0109's node, 0090's missing COPY) were exactly those.
 
 ## What would change this decision
 
