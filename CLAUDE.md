@@ -306,6 +306,8 @@ Default model for routine work: **Sonnet 5**. Switch to **Opus 5** for hard reas
 
 Default tool for code work: **Claude Code**. Default for strategy / architecture decisions: **Claude Chat**. See `.claude/WORKFLOW.md` for the full rubric and prompt templates.
 
+**A whole thread — a quality push, an investigation, a migration — is briefed as a CHARTER, not a task list**, per `.claude/WORKFLOW.md`. Its five parts exist because a task-scoped brief produces a session that stops at the first adjacent defect: an outcome with a self-checkable acceptance test, autonomy grants stated POSITIVELY (the part most briefs omit, and the reason sessions stall), named stopping conditions, the batched-judgment protocol when the acceptance test is the operator's eyes, and a scope boundary that is not a file list. A charter loosens scope, never rigour.
+
 **A session's ready report goes to `outputs/reports/<lane>.md`** — gitignored,
 like every other artifact under `outputs/` (walk verdicts, operator-queue logs,
 adjudication output). Not pasted into a conversation, where it dies with the
