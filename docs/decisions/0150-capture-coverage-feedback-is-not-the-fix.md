@@ -1,7 +1,11 @@
 # 0150 — capture-coverage feedback is not the fix for truncation
 
 **Date:** 2026-08-13
-**Status:** Decided — do not build yet, with a named test
+**Status:** Decided — do not build yet, with a named test. The conclusion
+is upheld by 0155 for a BETTER reason than the one argued here: the best
+single frame already sits at the geometric ceiling for one viewpoint
+(median 0.31, max 0.50 of an object's surface), so guidance cannot pass
+it. Read 0155 first.
 
 ## Context
 

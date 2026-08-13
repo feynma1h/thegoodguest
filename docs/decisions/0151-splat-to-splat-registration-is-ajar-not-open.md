@@ -101,6 +101,14 @@ with a different answer available — and the reconstruction plan currently
 picks its second view weakest-best-association first, which is about
 overlap with the box, not about seeing a different side of the object.
 
+## The magnitude, measured later (0155)
+
+The best single frame covers a median 0.31 of an object's observed
+surface; the best THREE together cover 0.65. So the third viewpoint
+contributes more than the best one contains, and multi-view is not an
+optimisation over selection — it is the only thing that reaches a
+complete object, since one viewpoint is capped at 0.50 by geometry.
+
 ## Why this matters beyond the union
 
 A union of registered reconstructions has honest proportions, and 0081's
