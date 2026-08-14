@@ -282,6 +282,13 @@ Accelerate failure below does not reproduce locally: nothing local is on 1.26.
 A worktree has no `.venv` of its own; lanes use the main tree's interpreter by
 absolute path, which still imports the worktree's own modules.
 
+**`outputs/room-quality/roomlib.py` hardcodes the MAIN tree at `sys.path[0]`**
+(`REPO = Path("/Users/aubrey/projects/roomstudio")`). A worktree session that
+imports it loads MAIN's perception modules, not its own — so a trust gate can
+silently certify shipped code against itself, and test collection in a worktree
+depends on the main tree's state. Measured by lane E, 2026-08-14. Repoint REPO
+before trusting any number from it.
+
 **Suite counts depend on whether `web/public/dev-fixtures` is staged**, and two
 lanes have now reported numbers that read like regressions and were not: root/
 api-public is 790+18 with it and 715+93 without; perception is 746+0 with and
