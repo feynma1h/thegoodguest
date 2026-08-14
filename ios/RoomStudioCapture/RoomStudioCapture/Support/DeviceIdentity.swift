@@ -53,6 +53,23 @@ enum DeviceIdentity {
         return value
     }
 
+    /// The persisted device UUID, or nil if none is stored — without minting.
+    ///
+    /// This is the Keychain half of the launch continuity reading
+    /// (IdentityContinuity): it answers "is the Keychain answering us right
+    /// now, and has this install captured before?" Minting here would destroy
+    /// the signal, because every launch after the first would then look
+    /// identical to one that had captured, and it would create the item long
+    /// before a bundle needs it.
+    static func existingDeviceId() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached { return cached }
+        guard let existing = read() else { return nil }
+        cached = existing
+        return existing
+    }
+
     // MARK: - Keychain plumbing
 
     private static func read() -> String? {
