@@ -1,12 +1,19 @@
 """The guest's contract: prompt-as-code (decisions 0058, 0096, 0132).
 
 This module owns PROMPT_VERSION, the static charter (identity + honesty rules
-+ the voice exemplars), and `build_system_prompt(facts, arrangement='')`. The
-charter's exemplar set grows with each bump — the version log below records
-what each bump added. The prompt is CODE — no remote config, no environment
-drift; changing the charter without bumping PROMPT_VERSION turns
-tests/test_guest_prompt.py's pinned-hash test red, and every persisted turn
-records the reproducibility triple (facts_version, prompt_version, model).
++ the voice exemplars), the arrangement block's prose, and
+`build_system_prompt(facts, arrangement='')`. The charter's exemplar set grows
+with each bump — the version log below records what each bump added. The prompt
+is CODE — no remote config, no environment drift; changing ANY of the guest's
+instructions without bumping PROMPT_VERSION turns tests/test_guest_prompt.py's
+pinned-hash test red, and every persisted turn records the reproducibility
+triple (facts_version, prompt_version, model).
+
+The pin covers the whole instruction surface, charter and arrangement block
+alike (PROMPT_SURFACE_SHA256). It did not always: the arrangement block's
+prose sat outside it, could be reworded with no version bump and no eval
+trigger, and that is how decision 0174's defect shipped and survived two bumps
+without anyone noticing.
 
 Assembly order is fixed for caching and safety: static charter → per-scene
 facts → messages. User text NEVER enters the system prompt. cache_control
@@ -31,8 +38,10 @@ import re
 
 from scene_facts import SceneFacts, render_facts_block
 
-# Bump on ANY change to STATIC_CHARTER (the pinned-hash test enforces this),
-# then re-run the voice eval suite (tests/test_guest_voice_evals.py).
+# Bump on ANY change to the guest's instruction surface — the charter or the
+# arrangement block's prose, both covered by PROMPT_SURFACE_SHA256 below (the
+# pinned-hash test enforces this) — then re-run the voice eval suite
+# (tests/test_guest_voice_evals.py).
 # 2: sizes + clearance-floor rules (3a/3b), shell-visibility correction in
 # rule 5, and two exemplars for the new refusals (decision 0096).
 # 3: the guest gets hands (decision 0132) — rule 6 rewritten from "eyes, not
@@ -45,7 +54,11 @@ from scene_facts import SceneFacts, render_facts_block
 # unable to see one, rule 10 excludes turns from conditional grammar, and four
 # exemplars cover the correction, the direction it cannot take, the piece it
 # cannot turn, and a revert that leaves a correction standing.
-PROMPT_VERSION = 4
+# 5: the arrangement block joins this pin, and says the thing it never said —
+# that THE FACTS have already been worked out again for the arrangement, so the
+# numbers in them are the proposed room's and speaking one is quoting rather
+# than computing (decisions 0174, 0175). The charter is unchanged at this bump.
+PROMPT_VERSION = 5
 
 STATIC_CHARTER = """\
 You are the guest: a considerate visitor with a spatial designer's eye, invited into one \
@@ -241,8 +254,46 @@ room, so I can't see your bedroom from here. Open that room and its guest can sp
 it; here, I'm happy to go as deep as you like on this one.\
 """
 
-# Pinned by tests/test_guest_prompt.py: change the charter → bump PROMPT_VERSION.
-STATIC_CHARTER_SHA256 = hashlib.sha256(STATIC_CHARTER.encode("utf-8")).hexdigest()
+# The arrangement block's prose (decisions 0131, 0174). It lives in constants
+# rather than inside the renderer for one reason: it is INSTRUCTION, and every
+# instruction the guest reads belongs under the pinned hash below. A renderer
+# holding prose of its own could be reworded with no version bump and no eval
+# trigger, which is exactly how decision 0174's defect shipped and survived two
+# bumps unnoticed.
+ARRANGEMENT_PREAMBLE = """\
+THE ARRANGEMENT — changes you have made to this room, on screen now.
+
+THE FACTS above were worked out again for THIS arrangement, by the room, \
+before they reached you. Every number in them — distances, clear space, sizes \
+alike — describes the room as it stands on screen now, the moved pieces \
+included. Speaking one is quoting, not computing, so speak it plainly rather \
+than withholding it.
+
+Worked out is not measured, and you are not holding the scanned room's \
+figures — they are not in front of you. So you cannot say what a number used \
+to be, whether it has changed, that one came from the scan, or that one is a \
+measurement of the room as it now stands. Each of those tells the person \
+something about their room that you cannot see.
+
+Which leaves the grammar. Nothing has measured a piece standing where you \
+have put it, so every fact touching one of these is what WOULD be true if it \
+stayed there. Say "would", every time — that is how the person hears which \
+room you are describing.\
+"""
+
+ARRANGEMENT_FOOTER = """\
+Putting any of it back is one step, and always available. Everything not \
+listed here is exactly where the scan measured it.\
+"""
+
+# THE PIN, over everything the guest is ever instructed by: the charter and
+# the arrangement block's prose. Change any of it → bump PROMPT_VERSION and
+# re-run the voice evals. tests/test_guest_prompt.py enforces both halves.
+PROMPT_SURFACE_SHA256 = hashlib.sha256(
+    "\n\n".join(
+        (STATIC_CHARTER, ARRANGEMENT_PREAMBLE, ARRANGEMENT_FOOTER)
+    ).encode("utf-8")
+).hexdigest()
 
 
 def render_arrangement_block(entries) -> str:
@@ -250,32 +301,22 @@ def render_arrangement_block(entries) -> str:
 
     The guest reads THE FACTS for a room that already includes these changes —
     they are re-derived from the proposed arrangement, so a distance is a
-    distance in the room on screen. This block is what makes rule 10
-    actionable: it names which pieces are standing somewhere nothing measured
-    them, so the guest knows which of its own facts are conditional.
+    distance in the room on screen. Saying so is this block's first job: left
+    unsaid, the guest reads its own re-derived numbers as stale, withholds
+    them, and tells the person they came from the scan (decision 0174).
+
+    Its second job makes rule 10 actionable: it names which pieces are standing
+    somewhere nothing measured them, so the guest knows which of its own facts
+    are conditional.
 
     Descriptions are the SERVER's sentences, quoted verbatim into the prompt
-    for the same reason rule 2a asks the guest to quote them back.
+    for the same reason rule 2a asks the guest to quote them back. They are the
+    ONLY text here that is not a pinned constant.
     """
     if not entries:
         return ""
-    lines = [
-        "THE ARRANGEMENT — changes you have made to this room, on screen now.",
-        "",
-        "THE FACTS above describe the room AS IT NOW STANDS, including these. "
-        "So any fact touching one of these pieces is conditional: it is what "
-        "WOULD be true if the piece stayed here. Nothing has measured it "
-        "standing here. Say \"would\", every time.",
-        "",
-    ]
-    for e in entries:
-        lines.append(f"- {e.description}")
-    lines += [
-        "",
-        "Putting any of it back is one step, and always available. Everything "
-        "not listed here is exactly where the scan measured it.",
-    ]
-    return "\n".join(lines)
+    changes = "\n".join(f"- {e.description}" for e in entries)
+    return f"{ARRANGEMENT_PREAMBLE}\n\n{changes}\n\n{ARRANGEMENT_FOOTER}"
 
 
 def build_system_prompt(facts: SceneFacts, arrangement: str = "") -> list[dict]:
