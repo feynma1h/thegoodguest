@@ -1,9 +1,17 @@
 # 0173 — the guest reads its own re-derived facts as stale, and says so
 
 **Date:** 2026-08-14
-**Status:** Measured, diagnosed, remedy tested, DELIBERATELY NOT SHIPPED —
-out of the facing lane's scope. Pinned as a strict xfail in
-`tests/test_guest_voice_evals.py::TestRuleTenGrammar`.
+**Status:** FIXED by 0174, serving as `api-public-00040-loj` at
+PROMPT_VERSION 5. The xfail below did exactly what it was built to do: run
+against the fix it reported `[XPASS(strict)]`, and the marker is gone.
+
+Two things here read differently with the fix in hand. The defect was WORSE
+than measured: reproduced at n=8 it gave 8/8 refusals and 8/8 false
+provenance, not 5/5 and 4/5. And the remedy proposed below, written out
+verbatim, closed the original defect completely and then produced a SECOND
+false claim about the scanned room — "the same figure as before", 3 in 8 —
+which is why 0174 says one sentence more than this note does. The n=2 caution
+was right for a reason larger than sample size: n=2 could not have found that.
 
 ## Context
 
