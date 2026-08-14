@@ -109,10 +109,16 @@ charter for length must not cite these passing.
 - **An assertion that ablation DOES break.** Then the eval is evidence about
   a clause, not only about behaviour, and it can be cited as such — worth
   re-testing whenever a charter clause is proposed for deletion.
-- **0173 fixed.** The move half of the rule-10 pair XPASSes, the marker comes
-  off, and the pair starts doing the job it was built for: today the turn
-  half's green is weaker than it looks, because a guest that hedges nothing
-  also passes it.
+- **0173 fixed.** ~~The move half of the rule-10 pair XPASSes, the marker comes
+  off~~ — happened 2026-08-14 (0174). It XPASSed, the marker is off, and the
+  pair does its job again. Two of this note's shapes were load-bearing in that
+  pass and both held: the rule/habit split (the harm is asserted every sample,
+  the literal "would" is a rate at a measured 12/16), and strict-xfail as the
+  way a known failure announces its own fix. A third was added: an assertion
+  that reads 8/8 **in the other direction** against the broken code is
+  evidence about the instrument, which is what licenses asserting it
+  per-sample. A leg written without that counter-evidence — per-sample on an
+  0/8 probe — failed on its first live run.
 - **A cheaper live harness.** The suite is 18 tests and roughly two minutes of
   wall clock, which is fine at one run per bump and would not be if it ever
   became a per-push gate — the same quota reasoning that keeps iOS CI on
