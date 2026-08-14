@@ -141,6 +141,15 @@ that into permanent orphaning. Two consequences are recorded separately:
 0140 for churn 2's open trigger, 0141 for the app's inability to tell a lost
 identity from a first run.
 
+The mechanism already has one sanctioned instance in the shipped product.
+Deleting an account from the web (0095) removes the Firebase Auth user, so the
+phone holding that credential gets `USER_NOT_FOUND` on its next refresh and
+re-mints — which is the intended outcome, and `web/src/lib/account.ts` states it
+to the user as the second consequence of deleting. That instance is the reason
+the app's silent minting is not simply wrong: after a deliberate deletion it is
+exactly right. It is also the line 0141's question falls along, since the app
+cannot currently tell that case apart from an unexplained loss.
+
 Project-level anonymous-user auto-cleanup would fire this for every user on a
 schedule. It is **off** on this project (verified in the Identity Platform
 config); it must stay off, and turning it on is a decision with data loss on
