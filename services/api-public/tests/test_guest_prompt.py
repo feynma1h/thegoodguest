@@ -1,15 +1,22 @@
 """Tests for guest_prompt.py — the guest's contract (decision 0058).
 
-The load-bearing test is the pinned hash: (PROMPT_VERSION, sha256(charter))
-must move together. Changing the charter without bumping the version — or
-bumping the version without touching the charter — goes red here, and a red
-run is the signal to re-run the live voice eval suite
-(tests/test_guest_voice_evals.py).
+The load-bearing test is the pinned hash: (PROMPT_VERSION, sha256 of the
+guest's whole instruction surface) must move together. Changing any of that
+text without bumping the version — or bumping the version without touching it
+— goes red here, and a red run is the signal to re-run the live voice eval
+suite (tests/test_guest_voice_evals.py).
+
+"Whole instruction surface" is load-bearing, and is the charter PLUS the
+arrangement block's prose (decision 0175). The block used to sit outside the
+pin, which meant half the guest's instructions could be reworded with no
+version bump and no eval trigger — the structural reason decision 0174's
+defect shipped and survived two bumps unnoticed.
 
 Also pinned: build_system_prompt's assembly order and cache breakpoints
-(static → facts, both ephemeral; user text never in system), and the
-observe-only telemetry semantics (foreign-measurement allowlist = facts
-block ∪ history-window USER messages; assistant self-quotes still flag).
+(static → facts, both ephemeral; user text never in system), the arrangement
+block's assembly (no prose outside the two constants), and the observe-only
+telemetry semantics (foreign-measurement allowlist = facts block ∪
+history-window USER messages; assistant self-quotes still flag).
 
 Run from repo root:
   pytest services/api-public/tests/test_guest_prompt.py -v
@@ -18,9 +25,11 @@ from __future__ import annotations
 
 import guest_prompt
 from guest_prompt import (
+    ARRANGEMENT_FOOTER,
+    ARRANGEMENT_PREAMBLE,
+    PROMPT_SURFACE_SHA256,
     PROMPT_VERSION,
     STATIC_CHARTER,
-    STATIC_CHARTER_SHA256,
     build_system_prompt,
     ends_with_invitation,
     foreign_measurements,
@@ -30,23 +39,58 @@ from guest_prompt import (
 from scene_facts import derive_scene_facts, render_facts_block
 
 # ---------------------------------------------------------------------------
-# THE PIN. If this test fails you changed the charter: bump PROMPT_VERSION,
-# update the hash below, and re-run the voice eval suite before shipping.
+# THE PIN. If this test fails you changed something the guest reads: bump
+# PROMPT_VERSION, update the hash below, and re-run the voice eval suite
+# before shipping.
 # ---------------------------------------------------------------------------
 
 _PINNED = (
-    4,
-    "61e36ce3b48ea122c679af9fbd5ac975f436f6e46db5ba26bffedbd60fb537ce",
+    5,
+    "38f80c152e79b45491bbd9f082a37e00c1b23e781ff558b96c633e8656b93c7c",
 )
 
 
 class TestPinnedCharter:
-    def test_version_and_charter_hash_move_together(self):
-        assert (PROMPT_VERSION, STATIC_CHARTER_SHA256) == _PINNED, (
-            "STATIC_CHARTER or PROMPT_VERSION changed. If the charter changed: "
-            "bump PROMPT_VERSION, re-pin (PROMPT_VERSION, sha256) here, and "
-            "re-run tests/test_guest_voice_evals.py against the live model."
+    def test_version_and_surface_hash_move_together(self):
+        assert (PROMPT_VERSION, PROMPT_SURFACE_SHA256) == _PINNED, (
+            "The guest's instructions changed — the charter, or the "
+            "arrangement block's prose. Bump PROMPT_VERSION, re-pin "
+            "(PROMPT_VERSION, sha256) here, and re-run "
+            "tests/test_guest_voice_evals.py against the live model."
         )
+
+    def test_the_pin_covers_the_arrangement_block_too(self):
+        """0175: the block's prose is INSTRUCTION and belongs under the pin.
+
+        Asserted by construction rather than by reading the hash input — a
+        future edit that drops a constant from the digest would still pass a
+        test that only checked the digest's value.
+        """
+        import hashlib
+        for text in (STATIC_CHARTER, ARRANGEMENT_PREAMBLE, ARRANGEMENT_FOOTER):
+            mutated = "\n\n".join(
+                (t + " x" if t is text else t)
+                for t in (STATIC_CHARTER, ARRANGEMENT_PREAMBLE,
+                          ARRANGEMENT_FOOTER)
+            )
+            assert (
+                hashlib.sha256(mutated.encode("utf-8")).hexdigest()
+                != PROMPT_SURFACE_SHA256
+            ), "a change to this block would not move the pin"
+
+    def test_the_arrangement_block_carries_the_re_derivation(self):
+        """Decision 0174's fix, as a capability truth rather than a phrasing.
+
+        Without it the guest reads its own re-derived numbers as stale,
+        withholds them, and tells the person they came from the scan. Measured
+        8/8 before the fix.
+        """
+        lowered = ARRANGEMENT_PREAMBLE.lower()
+        assert "worked out again for this arrangement" in lowered
+        assert "not holding the scanned room's figures" in lowered
+        assert "quoting, not computing" in lowered
+        # Rule 10's grammar still has to be actionable from this block alone.
+        assert "would" in lowered
 
     def test_charter_carries_the_capability_truths(self):
         # The two-level can't-see-that: capability truths live in the charter.
@@ -166,22 +210,44 @@ class TestBuildSystemPrompt:
         assert blocks[0]["cache_control"] == {"type": "ephemeral"}
         assert blocks[1]["cache_control"] == {"type": "ephemeral"}
 
-    def test_arrangement_block_carries_only_server_sentences(self):
+    def _entry(self, description: str):
         from design_spec import SpecEntry, Transform
 
         measured = Transform((0.0, 0.0, 0.0), (0, 0, 0, 1), 1.0)
-        entry = SpecEntry(
+        return SpecEntry(
             key="box:X", action="move", label="bed",
             measured_transform=measured, proposed_transform=measured,
             measured_footprint=None, solver=None,
-            description="the bed is against the wall",
+            description=description,
             turn_index=0, client_msg_id="c",
         )
-        block = guest_prompt.render_arrangement_block([entry])
+
+    def test_arrangement_block_carries_only_server_sentences(self):
+        block = guest_prompt.render_arrangement_block(
+            [self._entry("the bed is against the wall")]
+        )
         assert "the bed is against the wall" in block
         # Rule 10 has to be actionable from this block alone.
         assert "would" in block.lower()
         assert guest_prompt.render_arrangement_block([]) == ""
+
+    def test_the_block_holds_no_prose_outside_the_pinned_constants(self):
+        """The structural half of decision 0175.
+
+        Pinning the constants is not enough on its own: a renderer free to add
+        a sentence of its own would reopen exactly the gap the pin closes. So
+        the rendered block must be the two constants and the server's
+        descriptions, and nothing else — asserted as EQUALITY, because a
+        containment check would pass on smuggled text.
+        """
+        entries = [self._entry("the bed is against the wall"),
+                   self._entry("the chair is beside the desk")]
+        assert guest_prompt.render_arrangement_block(entries) == (
+            f"{ARRANGEMENT_PREAMBLE}\n\n"
+            "- the bed is against the wall\n"
+            "- the chair is beside the desk\n\n"
+            f"{ARRANGEMENT_FOOTER}"
+        )
 
 
 # ---------------------------------------------------------------------------
