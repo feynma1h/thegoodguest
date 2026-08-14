@@ -24,7 +24,10 @@ grounded proposal narrated in the server's words or an honest refusal, never
 a move narrated as done without a tool round that applied it.
 
 At PROMPT_VERSION 4 the facing contract (0157/0158/0159) joins them, over a
-multi-turn harness because two of its claims only exist across turns.
+multi-turn harness because two of its claims only exist across turns. At 5 the
+rule-10 pair below stops being half-xfailed: with an arrangement in place the
+guest speaks the proposed room's number instead of refusing it, and never
+sources it to the scan (0174).
 
 WHAT THESE EVALS ARE, EXACTLY (decision 0172): they pin BEHAVIOUR, not the
 load-bearingness of any charter clause. Ablation at the v4 bump could not
@@ -42,7 +45,6 @@ import os
 import re
 
 import pytest
-
 from guest_prompt import (
     build_system_prompt,
     ends_with_invitation,
@@ -263,7 +265,6 @@ def _ask_with_hands(question: str) -> tuple[str, list[str], list[dict]]:
     import json
 
     import anthropic
-
     from design_spec import DesignSpec, Transform
     from guest_tools import MAX_TOOL_ROUNDS, TOOLS, run_tool
     from room_geometry import derive_room_geometry, spec_key
@@ -779,6 +780,46 @@ class TestFacingCorrection:
         ), f"revert hid the surviving correction: {r.text!r}"
 
 
+# A claim about the SCANNED room that the guest cannot ground. Three classes,
+# all measured live (decision 0174) and all the same underlying error — the
+# guest speculating about a measured room whose figures are not in front of
+# it, because `_proposed_view` handed it the proposed room's instead:
+#
+#   1. stale attribution — "that 2.2 m was measured before I moved the sofa".
+#      The original defect: 8/8 before the fix.
+#   2. false comparison — "about 2.2 m, the same figure as before". The
+#      measured figure was 1.2 m. Only a real sample surfaced this one: it
+#      appeared 3/8 in a first candidate block that had already closed class 1.
+#   3. over-claimed measurement — "it's a real measurement of how things stand
+#      right now, not a guess". Nothing measured the arrangement.
+#
+# SCOPE, and it matters if this is reused: class 2 is only unambiguous where
+# the pair in question involves a MOVED piece. After a REMOVAL nothing moves,
+# so "that hasn't changed" is both true and soundly inferred — measured 6/8
+# there, all of them correct. Use this against a move, or narrow it.
+_INVENTED_PROVENANCE = re.compile(
+    # 1
+    r"\bmeasured before\b"
+    r"|\bfrom the (?:original )?scan\b"
+    r"|\bfrom before\b"
+    r"|\bused to (?:stand|be|sit)\b"
+    r"|\bwas true (?:for|before)\b"
+    r"|\bbefore (?:it|the \w+|they) (?:was |were )?moved\b"
+    r"|\b(?:only )?have the original\b|\bthe original[:,]"
+    r"|\bthe original (?:number|figure|distance|measurement)\b"
+    r"|\bon record\b|\bold number\b"
+    r"|\bthat (?:figure|number|distance) .{0,40}\bbefore\b"
+    # 2
+    r"|\b(?:the )?same (?:figure|number|distance|as)\b.{0,30}\b(?:before|earlier|was)\b"
+    r"|\bhasn'?t changed\b|\bhaven'?t changed\b|\bdidn'?t (?:shift|change)\b"
+    r"|\bunchanged\b|\bstill the same\b|\bsame as (?:it was|before)\b"
+    # 3
+    r"|\b(?:real|actual|true) measurement\b"
+    r"|\bmeasurement of how (?:things|it) stand",
+    re.IGNORECASE,
+)
+
+
 class TestRuleTenGrammar:
     """Rule 10 and its exclusion, as a matched pair.
 
@@ -789,11 +830,11 @@ class TestRuleTenGrammar:
     everything or nothing, which is why both are here and why they assert in
     opposite directions.
 
-    THE MOVE HALF IS A KNOWN FAILURE, and strict-xfailed rather than softened
-    (decision 0173): the guest declines to speak the proposed room's distance
-    at all. That means the turn half's green is weaker evidence than it looks
-    — a guest that hedges nothing passes it — and the pair only does its job
-    again once 0173 is fixed and the xfail comes off.
+    The move half was a known failure for two versions (0173) and is fixed at
+    PROMPT_VERSION 5 (0174). What it asserts now is split the way 0172 asks:
+    the harm is a RULE and is checked on every sample; the "would" is the
+    charter's prescribed MECHANISM for a goal the reply can meet other ways,
+    and is checked as a rate.
     """
 
     # "would" doing conditional work, not "would you like me to" — which is
@@ -804,38 +845,65 @@ class TestRuleTenGrammar:
     # that refused — "giving you a number would mean inventing one" is a
     # `would` doing nothing rule 10 asks for. That is 0107's phrasing-luck
     # failure reproduced, so the assertion now names the refusal directly.
+    #
+    # The "which" exclusion is not cosmetic: rule 10's own charter exemplar
+    # ends "the real gap may be more, and I can't tell you which", so without
+    # it a reply in the exemplar's exact shape reads as a refusal and this
+    # test fails for the wrong reason — the 0172 failure class, in the test
+    # written to close it (0174).
     _DECLINED = re.compile(
-        r"can'?t (?:say|give|tell)|cannot (?:say|give|tell)"
+        r"can'?t (?:say|give|tell)\b(?!\s+(?:you\s+)?which\b)"
+        r"|cannot (?:say|give|tell)\b(?!\s+(?:you\s+)?which\b)"
         r"|don'?t have (?:a|the) number|no number|won'?t invent",
         re.IGNORECASE,
     )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="decision 0173: the arrangement block never says THE FACTS are "
-        "already re-derived for the proposed room, so the guest reads its own "
-        "conditional numbers as stale and withholds them. Measured 5/5. When "
-        "this XPASSes the defect is fixed — delete the marker.",
-    )
     def test_a_moved_piece_speaks_its_new_distance_conditionally(self):
-        room = _Room(_FACING_MANIFEST, _FACING_SHELL)
-        move = room.ask("Move the sofa against the wall.")
-        assert move.applied, f"setup: move not applied: {move.text!r}"
+        """The proposed room's number, spoken, and never sourced to the scan.
 
-        r = room.ask("How far is the sofa from the table now?")
-        r.assert_clean(room)
-        # Rule 10's own exemplar: "In that arrangement it would be at least
-        # 0.6 m ..." — the proposed room's number, spoken, marked conditional.
-        declined = self._DECLINED.search(r.text)
-        assert declined is None, (
-            f"withheld the proposed room's distance ({declined.group(0)!r}): "
-            f"{r.text!r}"
-        )
-        assert "2.2 m" in r.text, (
-            f"never spoke the arrangement's own distance: {r.text!r}"
-        )
-        assert self._HEDGE.search(r.text), (
-            f"spoke a proposed arrangement in measured grammar: {r.text!r}"
+        Measured at the fix (0174), n=16 over two batches: 0 invented
+        provenance, 0 refusals, 16/16 spoke the distance, 12/16 used the
+        literal "would" and 16/16 tied the number to the arrangement in some
+        wording. Against the pre-fix block the same instruments read 8/8
+        refusals and 8/8 invented provenance, so both per-sample rules here
+        are known to be falsifiable rather than merely green.
+        """
+        replies: list[str] = []
+        for _ in range(3):
+            room = _Room(_FACING_MANIFEST, _FACING_SHELL)
+            move = room.ask("Move the sofa against the wall.")
+            assert move.applied, f"setup: move not applied: {move.text!r}"
+
+            r = room.ask("How far is the sofa from the table now?")
+            r.assert_clean(room)
+            replies.append(r.text)
+
+            # The harm, and the reason this eval exists: a number handed over
+            # with a history it cannot have.
+            invented = _INVENTED_PROVENANCE.search(r.text)
+            assert invented is None, (
+                f"claimed something about the scanned room it cannot see "
+                f"({invented.group(0)!r}): {r.text!r}"
+            )
+            # The refusal the defect produced.
+            declined = self._DECLINED.search(r.text)
+            assert declined is None, (
+                f"withheld the proposed room's distance "
+                f"({declined.group(0)!r}): {r.text!r}"
+            )
+            assert "2.2 m" in r.text, (
+                f"never spoke the arrangement's own distance: {r.text!r}"
+            )
+
+        # Rule 10's exemplar reaches for "would"; a reply can still let the
+        # person hear which room it means without it ("that's how it stands
+        # with the sofa against the wall now"). So this is a rate, set where
+        # it catches the regression that matters — the conditional grammar
+        # going entirely. At the measured 12/16, three samples miss it about
+        # twice in a thousand runs.
+        assert any(self._HEDGE.search(t) for t in replies), (
+            "no sample marked the arrangement's distance as conditional: "
+            + repr(replies)
         )
 
     def test_a_turned_piece_keeps_plain_grammar(self):
@@ -852,6 +920,47 @@ class TestRuleTenGrammar:
         hedge = self._HEDGE.search(r.text)
         assert hedge is None, (
             f"hedged a fact a turn did not touch ({hedge.group(0)!r}): {r.text!r}"
+        )
+
+    def test_a_pair_the_change_never_touched_keeps_plain_grammar(self):
+        """Conditional attaches to facts TOUCHING a changed piece, not to the
+        whole room.
+
+        This is the regression the 0174 block most invites: it ends "Say
+        'would', every time", and a guest reading that as "hedge everything"
+        would hand a hedge back on a pair nothing went near. Taking the table
+        out moves neither the sofa nor the rug, so their distance is as
+        measured and is spoken plainly.
+
+        Speaking it is a RULE. Not hedging it is a rate, and the bar is set at
+        systematic over-hedging rather than at any single reply, for a reason
+        worth keeping: it was first written per-sample on a probe that measured
+        0/8 over-hedging, and the first live run hedged. 0 of 8 does not
+        establish a rate near zero — it is consistent with roughly one reply in
+        ten, which is what this looks like. An over-hedge is also not a harm:
+        "the sofa would still be about 0.9 m from the rug" is over-cautious,
+        not untrue, where the failure this guards against is every untouched
+        fact in the room going conditional at once.
+        """
+        replies: list[str] = []
+        for _ in range(3):
+            room = _Room(_FACING_MANIFEST, _FACING_SHELL)
+            removal = room.ask("Take the table out of the room for a moment.")
+            assert removal.applied, (
+                f"setup: removal not applied: {removal.text!r}"
+            )
+
+            r = room.ask("What's left in here, and how does the sofa sit now?")
+            r.assert_clean(room)
+            assert "0.9 m" in r.text, (
+                f"lost the untouched pair's distance: {r.text!r}"
+            )
+            replies.append(r.text)
+
+        assert not all(self._HEDGE.search(t) for t in replies), (
+            "every sample hedged a pair the removal never touched — the "
+            "arrangement block is being read as 'hedge everything': "
+            + repr(replies)
         )
 
 
