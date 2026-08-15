@@ -125,3 +125,63 @@ def test_it_is_not_masked_to_an_object():
     pm = placement.sam3d_pointmap(depth, None, _Intrinsics(50.0, 50.0, 3.5, 3.5))
     assert np.isfinite(pm).all()
     assert pm.shape == (8, 8, 3)
+
+
+# -----------------------------------------------------------------------------
+# The wiring: PERCEPTION_POINTMAP, off by default
+# -----------------------------------------------------------------------------
+
+class _RecordingSam3D:
+    """Stands in for SAM3DModel, recording the kwargs reconstruct was called
+    with — the kwargs, not their defaults, because whether the argument is
+    passed at all is the thing under test."""
+
+    def __init__(self):
+        self.calls = []
+
+    def reconstruct(self, pil, mask, **kwargs):
+        self.calls.append(kwargs)
+        return {"gs": object()}
+
+
+def test_the_flag_is_off_by_default():
+    """A revision that does not set PERCEPTION_POINTMAP must reconstruct
+    exactly as it did before this existed — the module reads the env once at
+    import, so this is the value a normal deploy gets."""
+    import os
+
+    import process_receiver
+
+    assert os.environ.get("PERCEPTION_POINTMAP") in (None, "0")
+    assert process_receiver._POINTMAP_FROM_LIDAR is False
+
+
+def test_no_pointmap_means_the_model_is_called_the_way_it_always_was():
+    """Not merely `pointmap=None` — the argument is absent, so a stand-in
+    written before this existed still takes the call. Twelve tests in this
+    suite proved that matters."""
+    import process_receiver
+
+    model = _RecordingSam3D()
+    process_receiver._reconstruct_with_retry(model, None, None, seed=47)
+    assert model.calls == [{"seed": 47}]
+
+
+def test_a_pointmap_reaches_both_the_first_attempt_and_the_retry():
+    """The OOM retry is a second full reconstruct (decision 0061). If it
+    dropped the point map, a retried object would be conditioned differently
+    from a first-attempt one and the run would be silently inconsistent."""
+    import process_receiver
+
+    class _FailsOnce(_RecordingSam3D):
+        def reconstruct(self, pil, mask, **kwargs):
+            super().reconstruct(pil, mask, **kwargs)
+            if len(self.calls) == 1:
+                raise RuntimeError("CUDA out of memory")
+            return {"gs": object()}
+
+    pm = np.zeros((4, 4, 3), dtype=np.float32)
+    model = _FailsOnce()
+    process_receiver._reconstruct_with_retry(model, None, None, seed=1, pointmap=pm)
+    assert len(model.calls) == 2
+    assert all(c["pointmap"] is pm for c in model.calls)
