@@ -84,8 +84,22 @@ COPY wheels/pytorch3d-*.whl /tmp/
 RUN pip install /tmp/pytorch3d-*.whl && rm /tmp/pytorch3d-*.whl
 
 # --- Meta's exact install sequence from doc/setup.md ---
-# Step 1: pytorch/cuda extra index URLs (Meta's exact env var setting)
-ENV PIP_EXTRA_INDEX_URL="https://pypi.ngc.nvidia.com https://download.pytorch.org/whl/cu121"
+# Step 1: pytorch/cuda extra index URLs.
+#
+# Meta's line also carries https://pypi.ngc.nvidia.com, which no longer exists:
+# it is NXDOMAIN as of 2026-08-16 (NVIDIA's live index is pypi.nvidia.com). An
+# extra index is consulted for EVERY package, so a dead one costs five DNS
+# retries with backoff per dependency — 764 retry warnings in one observed
+# build, enough to push a cold build past its 90-minute timeout. See
+# docs/decisions/0182.
+#
+# Dropped rather than repointed at pypi.nvidia.com, deliberately: the host has
+# been dead for some time, so every recent build already resolved everything
+# from PyPI proper (the nvidia-* pins in sam3d's requirements — nvidia-cuda-nvcc-cu12,
+# nvidia-pyindex — are all published there). Removing a dead index leaves the
+# resolver's effective source set unchanged; adding a live one that has not
+# been contributing could quietly change which wheels are selected.
+ENV PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu121"
 
 # Step 2: core deps + [dev] extra (skip [p3d] since we installed our wheel)
 RUN cd /opt/sam3d && pip install -e '.[dev]'
