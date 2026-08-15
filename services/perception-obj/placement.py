@@ -63,6 +63,7 @@ from roomstudio_schemas.placement_math import (
     MIN_CLOUD_POINTS,
     DegenerateGeometryError,
     camera_to_world,
+    depth_pointmap,
     fit_single_view,
     ray_through_pixel,
     refine_similarity_nn,
@@ -103,6 +104,42 @@ _SAM3D_CAM_TO_ARKIT_CAM = np.diag([-1.0, 1.0, -1.0])
 _NN_POLISH_ENABLED = os.environ.get("PLACEMENT_NN_POLISH", "1") == "1"
 
 _WORLD_UP = np.array([0.0, 1.0, 0.0])
+
+
+def sam3d_pointmap(
+    depth_raster: np.ndarray,
+    depth_confidence: Optional[np.ndarray],
+    depth_intrinsics,
+    min_confidence: int = 1,
+) -> np.ndarray:
+    """One frame's measured LiDAR depth as a scene point map in SAM 3D's
+    own camera frame — the input its pipeline builds with a monocular
+    depth model when it is not given one.
+
+    Returns (H, W, 3) float32 at the depth raster's native resolution,
+    metres, NaN where nothing was measured. The frame is the pytorch3d
+    camera convention (+X LEFT, +Y up, +Z forward) that
+    _SAM3D_CAM_TO_ARKIT_CAM already names — reached by applying that same
+    basis, which is its own inverse, to the ARKit camera-local map.
+
+    Deliberately NOT masked to an object: the pipeline crops around the
+    mask itself, and its scale/shift normaliser reads unmasked pixels for
+    the scene scale. Deliberately at the LiDAR's own resolution: every
+    resize downstream is nearest-neighbour, so upsampling here would only
+    move the same decision earlier. The contract is measured in
+    docs/decisions/0180.
+
+    Nothing in the serving pipeline calls this yet — passing it costs a
+    pointmap= argument in models/sam3d.py, which changes the input of
+    every reconstruction and is gated on the bench proof.
+    """
+    arkit = depth_pointmap(
+        depth_raster,
+        depth_intrinsics,
+        confidence=depth_confidence,
+        min_confidence=min_confidence,
+    )
+    return (arkit @ _SAM3D_CAM_TO_ARKIT_CAM.T).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
