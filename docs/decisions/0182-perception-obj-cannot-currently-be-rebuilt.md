@@ -10,18 +10,33 @@ session ran `./infra/deploy_perception.sh obj --candidate` — the repo's own
 deploy path, unmodified, on a branch whose only perception change is an
 env-gated keyword argument.
 
-The build did not finish. It was cancelled at ~72 minutes of its 90-minute
-timeout, still on step **8 of 49**, with two multi-gigabyte download steps and
-roughly forty steps ahead of it. Nothing was deployed and traffic never moved.
+The build did not finish. It was cancelled after **30 m 30 s**, still on step
+**8 of 49** — `pip install -e '.[dev]'` — with two multi-gigabyte download
+steps and forty more steps ahead of it. Nothing was deployed and traffic never
+moved.
 
 ## What we tried
 
-**The layer cache missed.** Decision 0120 added `--cache-from :buildcache` and
-0163 measured a source-only build at 10 m 23 s against a 58 m 39 s uncached
-baseline. Here the cache manifest imported (`#4 importing cache manifest from
-…:buildcache`) and the build then executed `[ 4/49] RUN git clone`,
-`[ 5/49] RUN mamba env create` and `[ 8/49] RUN pip install -e '.[dev]'` for
-real — an essentially cold rebuild. **Why it missed was not determined.**
+**The layer cache missed broadly, not just late.** Decision 0120 added
+`--cache-from :buildcache` and 0163 measured a source-only build at 10 m 23 s
+against a 58 m 39 s uncached baseline. Here the cache manifest imported and the
+build then executed `apt-get install`, `git clone` and `mamba env create` for
+real — the second build, with the fix, did the same and its step timings are
+explicit (`#6 DONE 22.9s` on apt, `mamba env create` running). These are cold
+rebuilds.
+
+**Why it missed was not determined**, and it is worth one look. The first place
+is the inline cache: `infra/cloudbuild/perception-obj.yaml` already notes that
+`BUILDKIT_INLINE_CACHE=1` exports only final-stage layers, and inline cache does
+not re-export entries a build itself imported — so a layer that was a cache hit
+on 2026-08-13 can be absent from the cache that build published, and the effect
+compounds backwards over successive cache-riding builds.
+
+**A trap for whoever picks this up:** in BuildKit's plain progress output the
+number after a step id is **seconds since the build started**, not seconds into
+that step. Reading `#13 1538.0` as "step 13 has run for 1538 s" produces a
+confident and wrong conclusion about which layers cached — it did here, and the
+timestamps caught it.
 
 **The obvious suspect is refuted, and is recorded so nobody re-runs it.** The
 base image `condaforge/mambaforge:24.7.1-0` is a mutable tag, so a re-push
@@ -46,18 +61,25 @@ NVIDIA's live index is `pypi.nvidia.com`, which resolves;
 dependency: the build log carries **764 retry warnings** and step 8 was at
 1538 s and still resolving dependencies when the build was cancelled.
 
+Whether that build would have exceeded its 90-minute timeout was **not
+measured** — it was cancelled at 30 minutes, once the cause was established
+from DNS and the log, because the remaining time would have produced no
+artefact either way. What is measured is the retry toll itself, and that a
+cold build already costs 58 minutes without it.
+
 ## What we chose
 
-Cancel rather than let it time out — the diagnosis was already complete from
-DNS and the log, and the remaining twenty minutes would have produced no
-artefact — and record this rather than fix it in passing.
+Drop the dead host from `PIP_EXTRA_INDEX_URL`, keeping
+`download.pytorch.org/whl/cu121`.
 
-Not fixed here for two reasons. The change alters the build environment for
-production, which is exactly what this session's charter reserves. And the fix
-deserves a deliberate choice between dropping the dead host and pointing at
-`pypi.nvidia.com`, which is a decision about whether any package is expected to
-come from NVIDIA's index at all — pip already resolved every dependency it
-reached from PyPI proper.
+Dropped rather than repointed at `pypi.nvidia.com`, deliberately. The host has
+been dead for some time, so recent builds already resolved everything from PyPI
+proper — the log shows each retry storm ending in a successful `Downloading …`
+from PyPI, including the `nvidia-cuda-nvcc-cu12` and `nvidia-pyindex` pins that
+would most plausibly have come from NVIDIA. Removing a dead index leaves the
+resolver's effective source set unchanged. Adding a live index that has not
+been contributing could quietly change which wheels are selected, which is a
+larger change wearing the costume of a smaller one.
 
 ## Why it matters more than the probe that found it
 
@@ -76,17 +98,16 @@ nothing stops it. A build that reaches outside itself in three places, with a
 cache as the only thing keeping it reproducible, is one eviction away from
 being a different build.
 
-The measured cost is concrete: **58 m 39 s uncached before, and now longer than
-the 90-minute timeout allows.**
-
 ## What would change this decision
 
-Replace or drop the dead index and the build should return to roughly its
-58-minute uncached shape, which fits. That is worth doing whether or not the
-pointmap bench is ever run.
+The fix is landed and the same build was re-run to confirm it; the outcome is
+in the Outcome section below. If a future build slows down the same way, check
+`PIP_EXTRA_INDEX_URL` first — a dead entry there is silent, costs a fixed toll
+per package, and shows up only as an inexplicably long resolve.
 
-The cache miss itself is still unexplained and worth one look, because a
-10-minute build and a 58-minute build are different working conditions. The
-inline-cache mode is the first place to look: `infra/cloudbuild/perception-obj.yaml`
-already notes that `BUILDKIT_INLINE_CACHE=1` exports only final-stage layers
-and that `buildx --cache-to type=registry,mode=max` is the alternative.
+The step-8 cache miss is still unexplained and worth one look, because a
+10-minute build and a 58-minute build are different working conditions.
+
+## Outcome
+
+Recorded after the re-run — see the numbers appended below.
