@@ -130,6 +130,63 @@ still worth having, given the 2.16×. If the truncated objects fill out, this
 becomes the most direct attack on class-6 anyone has proposed and lane D's
 scope should be revisited before it is built.
 
+## Outcome — the bench ran, and the reconstruction barely moves
+
+**Measured on a GPU, 2026-08-16.** Six objects, two rooms, control and
+treatment on the SAME candidate image, differing only in
+`PERCEPTION_POINTMAP`. Both runs' SAM 3 masks were **bit-identical to each
+other and to production's**, so objects pair by index and the control
+reproduces what shipped — its splats carry production's exact point counts.
+The pipeline accepted our tensor without complaint: `measured=0.930` on every
+object, and both scenes reached `ready`.
+
+Shape signature = principal-axis extents over the largest, rotation-invariant:
+
+| object | control | with LiDAR | Δ e2/e0 | points |
+|---|---|---|---|---|
+| rp7 desk | 0.634, 0.286 | 0.629, 0.283 | −0.003 | −0.2% |
+| rp7 chair | 0.849, 0.343 | 0.845, 0.353 | +0.010 | −2.0% |
+| rp7 monitor | 0.789, 0.093 | 0.789, 0.091 | −0.002 | +4.5% |
+| rp7 tv | 0.704, 0.106 | 0.706, 0.107 | +0.001 | −10.1% |
+| rp7 cabinet | 0.706, 0.202 | 0.700, 0.213 | +0.011 | −0.2% |
+| spike bed | 0.597, 0.241 | **0.650**, 0.239 | −0.002 | **−50.4%** |
+
+**The pre-registered prediction is refuted.** Stated before the run from the
+shipped splats and the measured boxes: if a metric point map conditions shape
+usefully, rp7's desk should move e2/e0 from 0.286 toward its box's 0.511. It
+moved to 0.283 — **1.4% of the predicted magnitude, and the wrong way.** Across
+all six the largest change on that axis is 0.011 against gaps of 0.20–0.23.
+
+**The one real signal is the bed**, chosen because 0181 measured it as the
+worst case for the guess (relief 0.677×, 0.209 m disagreement). Its e1/e0 moves
+0.597 → 0.650, closing **20% of the gap** to its box's 0.859, and it sheds
+**half its Gaussians**. So the effect is not zero and it is largest exactly
+where the guess was worst — but on one object, on one axis, and "half the mass"
+needs eyes before anyone calls it better.
+
+Point counts move −10% to +4.5% elsewhere, so the pointmap is genuinely
+consumed. The output changes; its proportions do not.
+
+**What this settles.** A measured point map is **not** a fix for class-6
+truncation. The legless desk stays legless. The conditioning path is real, the
+checkpoint is trained for it, the model reads it — and the sparse-structure
+generator weights the image far more heavily than the depth. Lane D's premise
+is **restored**: unioning views remains the live route on truncation, and this
+one is closed.
+
+What remains genuinely open is the layout half, untested here because the bench
+compared splats rather than placements: the 2.16× scale spread above is real,
+and production works around it by discarding SAM 3D's metric scale entirely.
+Whether feeding the pointmap would let that workaround be retired is a separate
+experiment, on the placement path rather than the reconstruction path.
+
+**Honest limits.** Six objects, two frames. The metric-extent readings taken
+alongside (splat PCA extents × layout scale) are descriptive only — the spike
+bed reads 3.5–3.7 m against a 2.16 m box under BOTH conditions, because the
+splat overflows its box by construction (0104, 0129), so that instrument is
+measuring overflow rather than size. And the bench compares reconstructions,
+not rendered rooms; nobody has looked at these two beds.
+
 Two limits on the numbers above, both of which a re-run should respect. MoGe ran
 here on MPS in float32; production runs it on an L4 under float16 autocast, so
 these are the shape of the error rather than the bytes production saw. And the

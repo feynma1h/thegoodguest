@@ -110,4 +110,20 @@ The step-8 cache miss is still unexplained and worth one look, because a
 
 ## Outcome
 
-Recorded after the re-run — see the numbers appended below.
+**The same build, with the dead index removed, succeeded in 62 m 48 s and
+zero retries** (against 764 in the run before it, and a step 8 that never
+finished). It deployed a candidate at 0% traffic, which then ran the bench in
+0181. The 90-minute timeout was never in danger.
+
+Two things measured on that build, both worth carrying:
+
+- **`git clone --depth 1` re-ran** — its layer is stamped with this build's own
+  time, not a cached one — and landed on **the same commit
+  `f91db411c50efee93d8db7aeb323885650f6f722`** as the serving image. Upstream
+  main has not moved since 2026-06-02, so the unpinned clone happened to be
+  harmless this time. That is luck, not a property, and it is exactly the pin
+  0180 asks for.
+- **The cache still missed** with the index fixed (`#6 DONE 22.9s` on apt,
+  `mamba env create` running), so 58–63 minutes is the real cost of a
+  perception build today. The 10-minute number in 0163 is not what to plan
+  around until the cache is understood.
