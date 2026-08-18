@@ -40,6 +40,7 @@ from roomstudio_schemas.placement_math import (
     solve_wall_contact,
     triangulate_rays,
     union_bbox,
+    depth_pointmap,
     unproject_depth,
 )
 from roomstudio_schemas.pose_math import quat_average, quat_to_rotmat, rotmat_to_quat
@@ -209,6 +210,63 @@ def test_unproject_shape_mismatch_raises():
         unproject_depth(depth, intr, mask=np.ones((4, 3), dtype=bool))
     with pytest.raises(ValueError):
         unproject_depth(depth, intr, confidence=np.ones((2, 2), dtype=np.uint8))
+
+
+# -----------------------------------------------------------------------------
+# depth_pointmap — the dense form of the same back-projection
+# -----------------------------------------------------------------------------
+
+def test_pointmap_matches_unproject_on_the_pixels_it_keeps():
+    """The two back-projections must never disagree. unproject_depth walks
+    nonzero() in row-major (v, u) order, so its Nx3 output is exactly the
+    dense map read at the same pixels in the same order."""
+    rng = np.random.default_rng(7)
+    depth = rng.uniform(0.4, 4.2, size=(12, 16))
+    depth[rng.random((12, 16)) < 0.2] = np.nan
+    depth[3, 5] = 0.0
+    conf = rng.integers(0, 3, size=(12, 16)).astype(np.uint8)
+    intr = FakeIntrinsics(fx=181.5, fy=181.5, cx=8.0, cy=6.0)
+
+    compact = unproject_depth(depth, intr, confidence=conf, min_confidence=1)
+    dense = depth_pointmap(depth, intr, confidence=conf, min_confidence=1)
+
+    keep = np.isfinite(depth) & (depth > 0.0) & (conf >= 1)
+    assert dense.shape == depth.shape + (3,)
+    assert np.allclose(dense[keep], compact, atol=1e-6)
+    assert np.isnan(dense[~keep]).all()
+    assert np.isfinite(dense[keep]).all()
+    assert compact.shape[0] == int(keep.sum())
+
+
+def test_pointmap_single_pixel_hand_computed():
+    """The same hand-computed pixel as test_unproject_single_pixel_hand_computed,
+    read at its own (v, u) rather than at index 0."""
+    depth = np.full((3, 4), np.nan)
+    depth[0, 3] = 2.0
+    intr = FakeIntrinsics(fx=100.0, fy=100.0, cx=2.0, cy=1.5)
+    pm = depth_pointmap(depth, intr)
+    assert np.allclose(pm[0, 3], [0.02, 0.03, -2.0], atol=1e-6)
+    assert np.isnan(pm[0, 0]).all()
+
+
+def test_pointmap_is_float32_and_holes_are_nan_in_all_three_components():
+    """A hole must be NaN in x, y AND z: a consumer that tests one
+    component must not see a half-valid point."""
+    depth = np.array([[1.0, np.nan], [-1.0, 2.0]])
+    intr = FakeIntrinsics(fx=10.0, fy=10.0, cx=0.5, cy=0.5)
+    pm = depth_pointmap(depth, intr)
+    assert pm.dtype == np.float32
+    assert np.isnan(pm[0, 1]).all() and np.isnan(pm[1, 0]).all()
+    assert np.isfinite(pm[0, 0]).all() and np.isfinite(pm[1, 1]).all()
+
+
+def test_pointmap_shape_mismatch_raises():
+    depth = np.ones((3, 4))
+    intr = FakeIntrinsics(fx=10.0, fy=10.0, cx=2.0, cy=1.5)
+    with pytest.raises(ValueError):
+        depth_pointmap(depth, intr, confidence=np.ones((2, 2), dtype=np.uint8))
+    with pytest.raises(ValueError):
+        depth_pointmap(np.ones((3,)), intr)
 
 
 # -----------------------------------------------------------------------------

@@ -100,6 +100,50 @@ def unproject_depth(
     return np.column_stack([x, y, z])
 
 
+def depth_pointmap(
+    depth: np.ndarray,
+    intrinsics,
+    confidence: Optional[np.ndarray] = None,
+    min_confidence: int = 1,
+) -> np.ndarray:
+    """Back-project a depth raster into a DENSE camera-local point map.
+
+    Same arithmetic and same conventions as unproject_depth, but laid out
+    per pixel rather than compacted to the kept ones: the result is
+    (H, W, 3) float32 with NaN in all three components wherever the depth
+    is missing, non-positive, or below min_confidence.
+
+    unproject_depth answers "which points did we measure"; this answers
+    "what did we measure at this pixel, and where did we measure nothing".
+    Consumers that need the second form want a raster aligned with the
+    image — a per-pixel scene point map is the input format SAM 3D Objects
+    accepts in place of its monocular depth estimate, and NaN is the value
+    it reads as "no measurement here" (see docs/decisions/0180).
+
+    The two functions are pinned against each other by the schemas suite:
+    on the pixels unproject_depth keeps, the values must be identical.
+    """
+    if depth.ndim != 2:
+        raise ValueError(f"depth_pointmap: expected (H, W) depth, got {depth.shape}")
+    h, w = depth.shape
+    keep = np.isfinite(depth) & (depth > 0.0)
+    if confidence is not None:
+        if confidence.shape != depth.shape:
+            raise ValueError(
+                f"depth_pointmap: confidence shape {confidence.shape} "
+                f"!= depth shape {depth.shape}"
+            )
+        keep &= confidence >= min_confidence
+
+    d = np.where(keep, depth, np.nan).astype(np.float64)
+    us = np.arange(w, dtype=np.float64)[None, :]
+    vs = np.arange(h, dtype=np.float64)[:, None]
+    x = (us - intrinsics.cx) * d / intrinsics.fx
+    y = -(vs - intrinsics.cy) * d / intrinsics.fy
+    z = -d
+    return np.stack([x, y, z], axis=-1).astype(np.float32)
+
+
 def camera_to_world(points: np.ndarray, pose) -> np.ndarray:
     """Transform (N, 3) camera-local points into world coordinates.
 
