@@ -327,6 +327,16 @@ The iOS suite is **544 tests total** (was 535; the uid-churn investigation added
 
 **Parallel-worktree note:** `GoogleService-Info.plist` is gitignored, so a fresh git worktree lacks it and the 4 live tests fail with a Firebase configure error that mimics a backend failure. Copy it from the main tree (`ios/RoomStudioCapture/RoomStudioCapture/`) before running the suite in a worktree; a rebuild picks it into the app bundle.
 
+**A session working in the MAIN tree on its own branch is the same hazard as
+two sessions in one tree.** The operator-sittings session was placed in the main
+tree on branch `operator-sittings` because the fixture script and dev server are
+main-tree-bound; the coordinator then switched that tree to `main` to merge
+another lane, and the session found itself on a different branch with
+uncommitted work while its own branch grew commits from elsewhere. It recovered
+by moving to a fresh branch rather than committing to `main`, which was right.
+**Give every session its own worktree, including main-tree-bound ones — symlink
+what is main-bound instead of borrowing the tree.**
+
 **Concurrent sessions MUST use separate worktrees, not the same tree.** Two iOS sessions ran in the main tree on 2026-07-25 and nearly produced a false green: one stashed two files to unblock a branch checkout while the other was mid-edit on them, so for the length of a merge the tree held the pre-edit content. Any build, test run, or `git add` in that window would have silently captured stale source, and BOTH sessions would have reported a green suite for a tree neither of them had. Nothing warns you — the suite passes, the diff looks right, and the commit that lands is whatever happened to be on disk. `git worktree` is the fix (one is already in use for `placement-quality-build`); the plist note above is its one gotcha.
 
 **Contract/CI note:** the `/upload_session` contract is frozen (decision 0035), so the live integration tests assert against a stable shape. (The earlier fail-open rationale — that fail-closed-without-CI trains operators to ignore red — is superseded: the sole-scheme decision already made these intentionally fail-closed-live.)
