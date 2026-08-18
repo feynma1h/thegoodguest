@@ -345,7 +345,15 @@ def _log_vram(scene_id: str, point: str) -> None:
         pass  # observability must never break processing
 
 
-def _reconstruct_with_retry(sam3d_model: Any, pil, mask, seed: int):
+# Feed SAM 3D the frame's measured LiDAR as its scene point map instead of
+# letting it estimate one from the RGB (decisions 0180, 0181). OFF by default:
+# it changes the input to the sparse-structure generator AND the pose decoder
+# on every reconstruction, so it is a bench flag until a proof says otherwise.
+# Inert on frames without depth.
+_POINTMAP_FROM_LIDAR = os.environ.get("PERCEPTION_POINTMAP", "0") == "1"
+
+
+def _reconstruct_with_retry(sam3d_model: Any, pil, mask, seed: int, pointmap=None):
     """One SAM 3D reconstruct with a single retry that can actually succeed.
 
     The retry MUST run after the except block exits. While an exception is
@@ -359,15 +367,19 @@ def _reconstruct_with_retry(sam3d_model: Any, pil, mask, seed: int):
     the first attempt's tensors are collectable (traceback cycles swept by
     _free_gpu_memory's gc.collect) before attempt two begins.
     """
+    # The kwarg is omitted entirely when there is no point map, so the call
+    # a normal revision makes is the call that shipped — argument for
+    # argument, for the model and for any stand-in.
+    extra = {} if pointmap is None else {"pointmap": pointmap}
     try:
-        return sam3d_model.reconstruct(pil, mask, seed=seed)
+        return sam3d_model.reconstruct(pil, mask, seed=seed, **extra)
     except Exception:
         logger.warning(
             "reconstruct attempt 1 failed; retrying once after freeing GPU memory",
             exc_info=True,
         )
     _free_gpu_memory()
-    return sam3d_model.reconstruct(pil, mask, seed=seed)
+    return sam3d_model.reconstruct(pil, mask, seed=seed, **extra)
 
 
 def _reconstruct_one_object(
@@ -461,9 +473,22 @@ def _reconstruct_one_object(
                 )
                 return None, True
 
+            pointmap = None
+            if _POINTMAP_FROM_LIDAR and depth_raster is not None:
+                import numpy as _np  # deferred with the other heavy imports
+
+                pointmap = placement_mod.sam3d_pointmap(
+                    depth_raster, depth_confidence, depth_intrinsics
+                )
+                logger.info(
+                    "pointmap scene_id=%s frame=%d obj=%d shape=%s measured=%.3f",
+                    scene_id, frame_idx, i, pointmap.shape,
+                    float(_np.isfinite(pointmap).all(axis=-1).mean()),
+                )
+
             object_started = time.monotonic()
             result = _reconstruct_with_retry(
-                sam3d_model, pil, obj["mask"], seed=42 + i
+                sam3d_model, pil, obj["mask"], seed=42 + i, pointmap=pointmap
             )
             if budget is not None:
                 budget.note_object(time.monotonic() - object_started)

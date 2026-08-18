@@ -40,9 +40,23 @@ class SAM3DModel:
         self.inference = _Sam3dInference(config_path, compile=compile)
 
     def reconstruct(
-        self, image: Image.Image, mask: np.ndarray, seed: int = 42
+        self,
+        image: Image.Image,
+        mask: np.ndarray,
+        seed: int = 42,
+        pointmap: np.ndarray | None = None,
     ) -> dict[str, Any]:
-        """Run SAM 3D on (image, mask). Returns dict with 'gs' (GaussianSplat)."""
+        """Run SAM 3D on (image, mask). Returns dict with 'gs' (GaussianSplat).
+
+        pointmap: optional (H, W, 3) float32 scene point map in metres, in
+        SAM 3D's own camera frame, NaN where nothing was measured — built by
+        placement.sam3d_pointmap from the frame's LiDAR. When it is None the
+        pipeline estimates one with a monocular depth model, which is what
+        every reconstruction here has been conditioned on; see decisions 0180
+        and 0181. Passing one changes the input to both the sparse-structure
+        generator and the pose decoder, so the call is kept in two shapes:
+        without a point map the call is byte-identical to what shipped.
+        """
         # Defensive: SAM 3 sometimes returns masks with a leading channel dim
         # (e.g. (1, H, W)). Upstream expects (H, W). Squeeze any singleton dims.
         # sam3.py already does this at the source; this is belt-and-suspenders.
@@ -67,4 +81,7 @@ class SAM3DModel:
         # creating context are runtime errors we can't risk on a GPU we
         # can't test locally.)
         with torch.no_grad():
-            return self.inference(rgba, mask, seed=seed)
+            if pointmap is None:
+                return self.inference(rgba, mask, seed=seed)
+            pm = torch.from_numpy(np.ascontiguousarray(pointmap, dtype=np.float32))
+            return self.inference(rgba, mask, seed=seed, pointmap=pm)
