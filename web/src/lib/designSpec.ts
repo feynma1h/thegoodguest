@@ -185,9 +185,16 @@ export function arrangementNote(applied: SpecEntry[]): string | null {
   if (removed) parts.push(`${removed} taken out`);
   if (turned) parts.push(`${turned} turned round`);
   const summary = parts.join(", ");
-  return rearranged.length
-    ? `${summary} — the measured room is one step away`
-    : `${summary} — where you told me it faces`;
+  if (!rearranged.length) return `${summary} — where you told me it faces`;
+  // The way back is one control away, and it takes the turns with it (0157).
+  // Saying so belongs here rather than on the button: the control's own
+  // warning lived in a `title`, which a phone never shows.
+  if (turned) {
+    return `${summary} — going back to the scan undoes the ${
+      turned === 1 ? "turn" : "turns"
+    } too`;
+  }
+  return `${summary} — the measured room is one step away`;
 }
 
 /** What the orphan notice says. Its whole job is to not pretend. */

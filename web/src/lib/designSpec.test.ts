@@ -290,10 +290,22 @@ describe("the chrome's copy", () => {
     );
   });
 
-  it("counts a moved-and-turned piece under both, and still names the way back", () => {
+  it("counts a moved-and-turned piece under both, and says the way back takes the turn", () => {
+    // The one control on offer deletes the whole spec, so it undoes the turn
+    // along with the move. That warning used to live in a `title` attribute,
+    // which a touch device never renders — so it is said here instead, where
+    // every device shows it (decision 0183).
     const both = entry({ facing_flipped: true });
     expect(arrangementNote([both])).toBe(
-      "1 piece moved, 1 turned round — the measured room is one step away",
+      "1 piece moved, 1 turned round — going back to the scan undoes the turn too",
+    );
+    expect(arrangementNote([both, turned({ key: "b" })])).toBe(
+      "1 piece moved, 2 turned round — going back to the scan undoes the turns too",
+    );
+    // A rearrangement with no correction is unchanged: nothing of the
+    // person's is at stake, so the invariant keeps its own words.
+    expect(arrangementNote([entry()])).toBe(
+      "1 piece moved — the measured room is one step away",
     );
   });
 

@@ -44,12 +44,13 @@ with index 1 the vertical extent (`_box_dict` in perception-obj's
 box_placement.py), and across 31 boxes in four rooms the triple is not sorted
 in any order — measured in room_geometry.py, which reads the same manifests.
 Perception now emits `extent_axes_m` = {up_m, horizontal_m, up_tilt_deg}
-beside `dims`, present only when the box's transform warrants it. But no
-manifest this service reads carries it yet: the field post-dates the serving
-perception image, so speaking a height waits on a re-drive AND on a
-FACTS_VERSION bump, a charter change and its voice evals — not on new
-perception capability. The splat-extent reason above is unaffected by any of
-that and still governs.
+beside `dims`, present only when the box's transform warrants it, and the
+re-driven rooms carry it: all 31 box objects across the four walk rooms ship
+`extent_axes_m.up_m`. So speaking a height is no longer waiting on perception
+or on a re-drive. It waits on a FACTS_VERSION bump, a charter change and its
+voice evals, which is the only reason this module still says "at its
+longest". The splat-extent reason above is unaffected by any of that and
+still governs.
 
 CLEARANCES. Never a restated center distance — the charter forbids exactly
 that, and it stays forbidden. What IS derivable is a rigorous lower bound:

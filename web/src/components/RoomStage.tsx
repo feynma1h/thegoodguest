@@ -276,11 +276,6 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
                   {rearranged > 0 && (
                     <button
                       onClick={revertAll}
-                      title={
-                        corrections
-                          ? "Puts every piece back as the scan drew it, including the ones you turned round."
-                          : undefined
-                      }
                       className="shrink-0 rounded-full border border-ink/20 px-3 py-1 text-[11px] text-ink/70 transition-colors hover:bg-ink/[0.06]"
                     >
                       {corrections ? "back to the scan" : "back to measured"}
