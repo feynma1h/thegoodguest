@@ -1,7 +1,7 @@
 # 0190 — the registry keeps three images, and one of them is kept by name
 
 **Date:** 2026-08-19
-**Status:** Decided
+**Status:** Decided — executed 2026-08-19
 
 ## Context
 
@@ -96,3 +96,37 @@ them preserved an option nobody would exercise, at ₹6,700 per fortnight.
   protection; that is the point to raise `keepCount` rather than rely on it.
 - If Artifact Registry ever learns which images Cloud Run is serving, the tag
   and its deploy-script step can go.
+
+## Outcome (2026-08-19)
+
+Executed with the operator's explicit approval. **51 images deleted, 51/51
+succeeded, 0 failures.** The registry now holds exactly the predicted set: 3
+`perception-obj` (114.2 GiB), 10 `api-public`, 10 `api-internal`, 1
+`perception-geom` — **24 images, 128.7 GiB, from 1,446.7 GiB.** The `api`
+package is gone entirely. The policy was then flipped out of dry-run and is
+live; it is a no-op on what remains, by construction.
+
+The load-bearing verification is not the count. `perception-obj` scales to
+zero, so after deleting 36 of its 39 images an authenticated `/health` **cold
+started in 12.99 s** and a second call answered in **0.40 s** — the first was a
+real instance start with a real image pull, which is the only thing that proves
+the delete did not strand the serving image. `/ready` returned 503
+`not_loaded`, the 0024 lazy-load posture. The rollback target's manifest fetches
+200 **by digest**, and a real 28.6 MB layer blob downloads at 200 — bytes, not
+just metadata. All four services: api-public 200 unauth, api-internal 403 / 200
+authed, perception-obj 403 unauth (0106's gate intact) / 200 authed,
+perception-geom 200.
+
+**Storage reclamation lags the delete, and the next person needs to know it.**
+Immediately after, `Repository Size` still read 1,477,656 MB and the files API
+still summed **1,376.2 GiB** against 128.7 GiB of live image content — the
+manifests are gone, the layer blobs are garbage-collected on Artifact
+Registry's own background schedule. 70.5 GiB had been reclaimed within minutes;
+the rest follows over roughly a day. So *the bill does not fall the moment the
+images disappear from `images list`*, and neither the size metric nor the file
+listing is the place to check whether the delete worked — enumeration is.
+
+One dead end worth not repeating: the `owner` field on a file is **not** a
+garbage-collection signal. It is populated only on manifest files, so a layer
+belonging to a *kept* image reads `owner: <none>` exactly like a layer belonging
+to a deleted one. Reading it as "orphaned" gives 1,335 files and a wrong story.
