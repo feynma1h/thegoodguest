@@ -276,6 +276,23 @@ if [[ "${WHICH}" == "obj" ]]; then
     echo "=== run.invoker ensured for tasks-invoker@ (platform gate, 0106) ==="
 fi
 
+# The registry cleanup policy (infra/artifact-cleanup-policy.json, decision
+# 0190) keeps only the three most recent perception-obj images plus whatever
+# carries the `serving` or `buildcache` tag. The recency rule alone would drop
+# the live image after three builds that never flip — which has happened: two
+# of the images in the registry today were built and never deployed. So the
+# `serving` tag is what makes the protection structural rather than lucky, and
+# it moves with traffic, not with the build. Forgetting to move it over-keeps
+# one stale image, which is the safe direction.
+move_serving_tag() {
+    if [[ "${WHICH}" != "obj" ]]; then
+        return 0
+    fi
+    gcloud artifacts docker tags add \
+        "${IMAGE_URI}" \
+        "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:serving"
+}
+
 # gcloud run deploy creates the revision but does NOT move traffic when the
 # service's traffic spec is pinned to a revision NAME (perception-obj carried
 # such a pin from a 2026-05 rollback: the 2026-07-21 deploy validated, was
@@ -288,6 +305,7 @@ if [[ "${CANDIDATE_MODE}" -eq 0 ]]; then
         --to-latest \
         --region="${REGION}" \
         --project="${PROJECT_ID}"
+    move_serving_tag
 fi
 
 URL=$(gcloud run services describe "${SERVICE}" \
@@ -320,6 +338,13 @@ if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
     echo "  gcloud run services update-traffic ${SERVICE} --to-latest \\"
     echo "    --region=${REGION} --project=${PROJECT_ID}"
     echo ""
+    if [[ "${WHICH}" == "obj" ]]; then
+        echo "And move the serving tag, which is what keeps the cleanup policy"
+        echo "from reclaiming the live image (decision 0190):"
+        echo "  gcloud artifacts docker tags add ${IMAGE_URI} \\"
+        echo "    ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:serving"
+        echo ""
+    fi
 fi
 
 if [[ "${WHICH}" == "geom" ]]; then
