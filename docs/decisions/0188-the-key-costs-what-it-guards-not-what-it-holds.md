@@ -44,6 +44,22 @@ GCS defaults non-public objects to `private, max-age=0`. One command settles
 it for whoever next holds a token: `curl -sI '<signed splat url>' | grep -i
 cache-control`.
 
+**Answered 2026-08-19 without a token, one step short of direct.** `gsutil stat`
+on a real outputs splat
+(`scenes/09684dde-…/frames/0000/splats/00_artwork.ply`) returns Content-Type and
+**no `Cache-Control` at all** — so the grep's finding is confirmed against the
+live bucket, not just the repo: nothing has ever set it, on any path. GCS then
+serves its documented default for an object with no `cacheControl`, which for a
+non-public object read through a signed URL is `private, max-age=0`. So the
+answer is **no, the HTTP cache does not absorb the re-fetch**, and the
+re-download this note measures is the real cost every time.
+
+Stated precisely, because the distinction matters if anyone builds on it: this
+measures the object's METADATA, and the response header is inferred from GCS's
+documented default rather than observed. The `curl` above remains the direct
+proof and is still worth one second of somebody's authed session — but nothing
+now rests on it.
+
 ## What we chose
 
 **Outlines and labels stop being structure. Each gets its own effect owning
