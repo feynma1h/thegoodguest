@@ -68,6 +68,52 @@ test_data/photos/                 9 synthetic rendered room views, for synthesis
 outputs/                          gitignored; generated artifacts
 ```
 
+## What cannot be remade
+
+`outputs/` is gitignored and looks disposable. Most of it is. Roughly 1.3 GiB
+of it is not, and **no copy exists anywhere else** — the captures bucket
+deletes at age 1 day, so GCS does not hold these:
+
+- `outputs/real-capture-*` — preserved capture bundles; the substrate the whole
+  perception thread regresses against.
+- `outputs/device-pull/` — three RP-6/7 rooms physically pulled off the 16 Pro's
+  app container. The app reaps completed captures (0084), so the phone no
+  longer has them either.
+- `outputs/roomplan-spike/` — the four-run spike RECORDING, incl. the
+  722-keyframe RGB/depth archive. **The source, not a derivative.**
+- Every `outputs/reports/*.md`, `outputs/**/verdicts.md`, and the walk packs'
+  text. Kilobytes, and they are the operator's own judgments.
+
+**The trap:** `outputs/roomplan-spike-bundle/` is NOT on that list — it is
+GENERATED from `outputs/roomplan-spike/` by `tools/convert_roomplan_spike.py`.
+The names are one word apart and the sizes are within 2 MiB (494 vs 496 MiB).
+One costs a script run to remake; the other is gone forever.
+
+Everything else under `outputs/` is regenerable, and cheaply: the probe
+artifacts replay production code over the preserved captures offline, so they
+cost CPU and no GPU — **no reconstruction lives here**, they live in the
+outputs bucket, which still holds all 12 scene dirs. Their conclusions already
+live in `docs/decisions/`; the raw artifacts exist only for re-verification.
+
+**When disk is short, look outside the repo first — that is where the free
+wins are.** `~/Library/Developer/Xcode/DerivedData` is pure Xcode build cache
+and is routinely the largest single item on the machine (16 GiB at the
+2026-08-19 pass, in a dozen per-configuration copies); deleting it does not
+touch the app installed on the phone. `npm cache clean --force` and `web/out`
+(recreated by every `next build`) are equally free. Two that are NOT free and
+want the operator's say-so: a *booted* simulator device holds GiB of installed
+apps and seeded state (`simctl erase` reclaims it but wipes the staging — the
+8 never-booted devices are 17 MiB each), and a CoreSimulator *runtime* is a
+multi-GiB re-download.
+
+Worth knowing while you are in there: `web/public/dev-fixtures` is 3.9 GiB of
+real captured homes sitting inside `web/public`, and `next build` copies
+`public/` into `out/`, so a full build doubles it. `firebase.json` ignores
+`dev-fixtures/**` on deploy, but that is one config line standing between real
+rooms and a public origin — 0122 already caught a splat one deploy away.
+Moving the fixtures outside `public/` would remove the hazard rather than
+guard it.
+
 ## What works right now
 
 - The capture-bundle contract is defined, generated, and tested. `python tools/build_test_bundle.py && python tools/inspect_bundle.py outputs/test_bundle/bundle.pb` runs clean end-to-end.
