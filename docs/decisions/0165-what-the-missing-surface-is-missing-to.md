@@ -80,12 +80,20 @@ is the registered secondary rule about concentration, firing.
 
 **Prediction 3 was falsified, and it is the most decision-relevant
 falsification.** The two named hard cases — rp7's desk and rp6g1's table, the
-operator's own repeated "legless table" complaint, which 0152 measured at 0.37
-and 0.50 box-footprint occlusion at the best frame the whole capture offers —
-come in at **0.08 and 0.16**, both under the bar. Measured from depth rather
-than from box geometry, those two objects are not occlusion-limited. Their
-largest recoverable class is `clipped`, at 0.38 and 0.40: they run off the edge
-of the frame.
+operator's own repeated "legless table" complaint — come in at **0.08 and
+0.16**, both under the bar, and their largest recoverable class is `clipped` at
+0.38 and 0.40: they run off the edge of the frame rather than standing behind
+something.
+
+**This does not refute 0152's 0.37 and 0.50; it reframes what they imply.**
+Those are the fraction of the box's projected FOOTPRINT that a nearer box
+covers. This is the share of an object's missing SURFACE that a nearer measured
+surface accounts for — a different quantity with a different denominator, and
+the two can both be right. The nearest common reading is the fraction of each
+object's whole measured surface that is foreign-occluded in the shipped frame,
+which is **0.07 and 0.14**. So a chair does obstruct a lot of the rectangle a
+desk projects into, and obstructs comparatively little of the desk's own
+missing surface, because most of that surface is missing for other reasons.
 
 Prediction 1 was also falsified in magnitude — `self` was predicted at ≥ 40%
 and is 0.253 median / 0.298 pooled. It is still the largest single named class,
