@@ -208,6 +208,7 @@ COPY services/perception-obj/room_planes.py /app/room_planes.py
 COPY services/perception-obj/roomplan_room.py /app/roomplan_room.py
 COPY services/perception-obj/contact_priors.py /app/contact_priors.py
 COPY services/perception-obj/box_placement.py /app/box_placement.py
+COPY services/perception-obj/object_color.py /app/object_color.py
 COPY services/perception-obj/shell_geometry.py /app/shell_geometry.py
 COPY services/perception-obj/shell_envelope.py /app/shell_envelope.py
 COPY services/perception-obj/shell_observation.py /app/shell_observation.py
@@ -229,6 +230,7 @@ COPY services/perception-obj/compress_enqueue.py /app/compress_enqueue.py
 # silently null every family forever, which the build must catch instead.
 RUN python -c "import placement, fusion, reproject, sampling, census_sampling, \
 budget, room_planes, roomplan_room, contact_priors, box_placement, privacy, \
+object_color, \
 shell_geometry, shell_envelope, shell_observation, shell_material, \
 shell_receiver, shell_enqueue, compress_receiver, compress_enqueue, anthropic"
 
