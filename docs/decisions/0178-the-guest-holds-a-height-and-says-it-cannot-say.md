@@ -105,3 +105,50 @@ For the size half, the gate is the evals. If speaking heights measurably
 degrades the voice — hedging lost, invitations dropped, sizes stated where
 the box is absent — the rule was load-bearing for more than its stated reason
 and should come back with the real one recorded this time.
+
+## Widened by a production walk, the same day
+
+The operator ran four turns against the deployed guest on 2026-08-14, after
+the release, and found four more defects of the same kind. They are folded
+into this revision rather than scheduled separately, because they ride the
+same FACTS_VERSION bump, the same charter revision and the same evals run,
+and because they are one disease: **the guest describes the shape of its own
+notes rather than the room the person is looking at.**
+
+**Colour, and it contradicts the screen.** Asked to move "the red chair", the
+guest answered that "no colors came through in this scan at all". That is
+false about the scan and true only about its facts: splats carry per-point
+RGB — which is why the room renders in colour in front of the person — and
+shell planes already ship measured `albedo_hex`. No manifest object carries a
+colour field. Verified on a real manifest: object keys hold no colour of any
+kind, while the first rp7 wall ships `albedo_hex` `#a8b1bc`.
+
+This is the only one of the six that needs perception. api-public never
+fetches a PLY and should not start; perception has the gaussians at
+`build_box_object` time. It also leads, because colour is how people name
+furniture.
+
+**Ordinal names.** The guest offered "a first chair, second chair, third
+chair, fourth chair, and fifth chair". By the third turn the operator was
+saying "move the first chair" — the product had taught the person to speak
+its index scheme back to it.
+
+**Unplaced pieces offered as candidates.** Three of those five chairs were
+seen but never placed, so they cannot be moved at all, and they were still
+enumerated as options for a move. A referent the guest cannot act on is not a
+referent.
+
+**A referent the previous turn already fixed.** Asked to "turn the chair
+round" immediately after moving one, the guest asked which of five — then
+proposed that very chair in its next sentence. Every action here is one
+control away from undone (0133), so the bar for asking should be high.
+
+**And the size rule blocking real work, live.** Asked which chair was
+smaller, the guest could offer only "about 1.0 m at its longest" for one and
+no size at all for the other. That is the rule this note retires, refusing
+the exact comparison it was asked for, in front of the person who ruled on
+it that morning.
+
+The re-scoped charter is at `outputs/handoffs/guest-speaks-measurements.md`
+("the guest talks about a room, not an inventory"), carrying the transcript
+verbatim as its acceptance test.
