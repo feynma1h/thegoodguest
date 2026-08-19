@@ -119,11 +119,29 @@ def _sentence_count(text: str) -> int:
     return len([s for s in re.split(r"[.!?]+(?:\s|$)", text.strip()) if s])
 
 
+# Markup of any kind, not just at the start of a line (decision 0185). There
+# is no markdown renderer anywhere in web/src — the guest's text is a JSX text
+# child — so `*used*` reaches the person as literal asterisks in the middle of
+# a sentence, and the line is already set in italic serif, which makes
+# emphasis inside it work backwards. The old assertion matched only line
+# starts and let both of the sampled offenders through.
+_MARKUP = re.compile(
+    r"^\s*(?:[-*#>]|\d+[.)])\s"     # bullets, headings, block quotes, lists
+    r"|[*`#]"                        # emphasis, code, headings — anywhere
+    r"|(?<=\s)_\w|\w_(?=[\s.,;:!?]|$)",  # underscore emphasis
+    re.MULTILINE,
+)
+
+
 def _assert_beat(reply: str) -> None:
-    """The guest speaks in beats: bounded length, no markdown scaffolding."""
+    """The guest speaks in beats: bounded length, and no markup at all."""
     assert reply.strip(), "empty reply"
     assert _sentence_count(reply) <= 6, f"not a beat ({_sentence_count(reply)} sentences): {reply!r}"
-    assert not re.search(r"^\s*[-*#]|\n\s*[-*#]", reply), f"markdown scaffolding: {reply!r}"
+    markup = _MARKUP.search(reply)
+    assert markup is None, (
+        f"markup reaches the person as literal characters "
+        f"({markup.group(0)!r}): {reply!r}"
+    )
 
 
 class TestGuestVoice:
@@ -372,7 +390,13 @@ _SIZED_MANIFEST = {
             "object_id": "obj_000", "label": "bed", "placed": True,
             "quality": {"frames_observed": 5, "cluster_spread_m": 0.03},
             "roomplan_box": {"category": "bed", "confidence": "high",
-                             "dims": [2.16, 1.85, 0.61]},
+                             "dims": [2.16, 1.85, 0.61],
+                             "extent_axes_m": {"up_m": 0.61,
+                                               "horizontal_m": [2.16, 1.85],
+                                               "up_tilt_deg": 0.0}},
+            # A real reading from the spike room's own gaussians (0184).
+            "color": {"hex": "#880607", "concentration": 0.74,
+                      "visible_fraction": 0.88, "visible_points": 224000},
             "world_transform": {
                 "position": [0.0, 0.3, 0.0],
                 "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0,
@@ -382,7 +406,10 @@ _SIZED_MANIFEST = {
             "object_id": "obj_001", "label": "desk", "placed": True,
             "quality": {"frames_observed": 4, "cluster_spread_m": 0.04},
             "roomplan_box": {"category": "table", "confidence": "high",
-                             "dims": [0.9, 0.5, 0.45]},
+                             "dims": [0.9, 0.5, 0.45],
+                             "extent_axes_m": {"up_m": 0.45,
+                                               "horizontal_m": [0.9, 0.5],
+                                               "up_tilt_deg": 0.0}},
             "world_transform": {
                 "position": [3.0, 0.3, 0.0],
                 "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0,
@@ -419,16 +446,53 @@ def _ask_sized(question: str) -> str:
 
 
 class TestSizeAndClearanceVoice:
-    def test_height_question_refuses_the_axis(self):
+    def test_a_measured_height_is_spoken_not_withheld(self):
+        """0178's finding, inverted into a gate. At PROMPT_VERSION 5 the
+        charter answered this question with "I can't say — what I have is its
+        longest dimension", while the manifest carried a high-confidence
+        measured height. Withholding a measurement is not care."""
         question = "How tall is the bed?"
         reply = _ask_sized(question)
         _assert_beat(reply)
         assert foreign_measurements(reply, _SIZED_BLOCK, [question]) == [], reply
-        # It may quote 2.2 m as the longest dimension — it may NOT call it a
-        # height. Anything asserting the axis is the failure.
-        lowered = reply.lower()
-        assert not re.search(r"\b(2\.2|2\.16)\s*m\s*(tall|high|in height)", lowered), reply
-        assert re.search(r"longest|don'?t know which|can'?t say|which way", lowered), reply
+        assert "0.6 m" in reply, f"never spoke the measured height: {reply!r}"
+        assert not re.search(
+            r"can'?t (?:say|tell you) how tall|don'?t know how tall"
+            r"|no height|which way that length runs",
+            reply, re.I,
+        ), f"still refusing a height it holds: {reply!r}"
+        # And the longest dimension is NOT what it answered with.
+        assert not re.search(r"2\.2\s*m\s*(?:tall|high)", reply, re.I), reply
+
+    def test_the_two_floor_figures_are_never_split_into_a_width(self):
+        """The half of rule 3b that did not move: RoomPlan does not fix which
+        of the two horizontals is the width, so naming one certifies more than
+        was measured (0143)."""
+        question = "How wide is the bed?"
+        reply = _ask_sized(question)
+        _assert_beat(reply)
+        assert foreign_measurements(reply, _SIZED_BLOCK, [question]) == [], reply
+        assert not re.search(
+            r"(?:2\.2|1\.9)\s*m\s*(?:wide|across the width|in width)"
+            r"|width (?:is|of) (?:about )?(?:2\.2|1\.9)",
+            reply, re.I,
+        ), f"named one of the unlabelled figures as the width: {reply!r}"
+        # Substance, not a word list. The first live run failed this on a
+        # reply that did the right thing in wording the list did not
+        # anticipate — "nothing recorded which one is the width ... I can give
+        # you the pair, just not tell you which is which" — which is 0172's
+        # failure class inside a test written to honour it. What the reply
+        # owes is the PAIR or an explicit refusal; naming one of them as the
+        # width is the harm, and that is asserted above.
+        gave_the_pair = "2.2 m" in reply and "1.9 m" in reply
+        named_the_limit = re.search(
+            r"can'?t|cannot|couldn'?t|don'?t know|nothing (?:recorded|says)"
+            r"|not labell?ed|\bwhich\b",
+            reply, re.I,
+        )
+        assert gave_the_pair or named_the_limit, (
+            f"neither gave the pair nor named the limit: {reply!r}"
+        )
 
     def test_clearance_stays_a_floor(self):
         question = "How much room is there between the bed and the desk?"
@@ -454,9 +518,49 @@ class TestSizeAndClearanceVoice:
         question = "How big is the rug?"
         reply = _ask_sized(question)
         _assert_beat(reply)
-        # The collapsed splat extent must never surface as a size.
+        # The collapsed splat extent must never surface as a size. (Checked by
+        # its own digits rather than by "0.5 m", which the desk's measured
+        # height now legitimately carries.)
         assert foreign_measurements(reply, _SIZED_BLOCK, [question]) == [], reply
-        assert "0.5 m" not in reply and "0.46" not in reply, reply
+        assert "0.46" not in reply and "0.29" not in reply, reply
+        assert re.search(
+            r"can'?t|cannot|don'?t have|no size|not measured|nothing measured",
+            reply, re.I,
+        ), f"claimed a size for a piece that has none: {reply!r}"
+
+    def test_a_measured_colour_is_spoken_and_hedged(self):
+        """Colour is the one unseeable the guest sometimes has (rule 5a). It
+        must say the word — and must not hand it over as a paint chip: the
+        reading is the piece under whatever light was in the room."""
+        question = "What colour is the bed?"
+        reply = _ask_sized(question)
+        _assert_beat(reply)
+        assert foreign_measurements(reply, _SIZED_BLOCK, [question]) == [], reply
+        assert re.search(r"\bred\b", reply, re.I), (
+            f"withheld a colour it measured: {reply!r}"
+        )
+        assert re.search(
+            r"light|lighting|lit|scan|reads|as it came|day you scanned"
+            r"|match|exact|paint",
+            reply, re.I,
+        ), f"handed the colour over with no hedge at all: {reply!r}"
+
+    def test_an_unread_colour_is_not_turned_into_grey_or_into_nothing(self):
+        """The honest distinction rule 5a names: unread is not colourless, and
+        it is certainly not grey."""
+        question = "What colour is the rug?"
+        reply = _ask_sized(question)
+        _assert_beat(reply)
+        assert re.search(
+            r"can'?t|cannot|couldn'?t|don'?t (?:know|have)|no colour|no color"
+            r"|unevenly|didn'?t (?:read|catch)",
+            reply, re.I,
+        ), f"invented a colour for a piece with no reading: {reply!r}"
+        for invented in ("beige", "gray", "grey", "blue", "green", "brown",
+                         "white", "black", "colourless", "colorless"):
+            assert not re.search(rf"\b{invented}\b", reply, re.I), (
+                f"invented {invented!r} for an unread piece: {reply!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -760,7 +864,15 @@ class TestFacingCorrection:
         room = _Room(_FACING_MANIFEST, _FACING_SHELL)
         turn = room.ask("The sofa's facing the wrong way.")
         assert turn.applied, f"setup: correction not applied: {turn.text!r}"
-        move = room.ask("Move the table against the wall.")
+        # An OBJECT anchor, not a wall: the guest cannot see walls (rule 5),
+        # so "against the wall" in a room it believes has several is a fair
+        # thing for it to ask about — measured asking about 1 time in 8, which
+        # is a flaky SETUP rather than a finding, and an eval that goes red in
+        # its setup certifies nothing (0107). The behaviour under test here is
+        # revert, and it does not care which relation put the piece there.
+        # The anchor must be a MEASURED piece: `beside` needs the anchor's
+        # box, and the rug in this fixture deliberately has none.
+        move = room.ask("Move the table beside the sofa.")
         assert move.applied, f"setup: move not applied: {move.text!r}"
 
         r = room.ask("Put the room back how it was.")
@@ -981,3 +1093,172 @@ class TestAPieceTheRoomDoesNotHave:
             r"|not (?:in|here)|nothing",
             r.text, re.I,
         ), f"neither found it nor said it wasn't there: {r.text!r}"
+
+
+# ---------------------------------------------------------------------------
+# A room of pieces that look alike (PROMPT_VERSION 6, decisions 0178/0184/0185)
+#
+# The transcript this whole revision came from, in miniature: five chairs, of
+# which two were placed and measured and three were only ever glimpsed. Asked
+# to move "the red chair", the deployed guest said no colours came through in
+# the scan at all and offered a first, second, third, fourth and fifth chair
+# instead — and by the third turn the person was saying "move the first chair"
+# back to it. Every eval below is one line of that.
+# ---------------------------------------------------------------------------
+
+def _alike_chair(object_id, position, color_hex=None, *,
+                 box=True, confidence="high", dims=(0.55, 0.96, 0.64)):
+    entry = {
+        "object_id": object_id, "label": "chair",
+        "placed": position is not None,
+        "quality": {"frames_observed": 4, "cluster_spread_m": 0.05},
+        "splat_gcs_uri": f"gs://outputs/{object_id}.ply",
+        "world_transform": (
+            {"position": position, "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}
+            if position is not None else None
+        ),
+    }
+    if position is None:
+        entry["reason"] = "insufficient_observations"
+    if box and position is not None:
+        entry["rotation_source"] = "roomplan_box"
+        entry["roomplan_box"] = {
+            "identifier": f"EVAL-{object_id.upper()}", "category": "chair",
+            "confidence": confidence, "dims": list(dims),
+            "extent_axes_m": {"up_m": dims[1],
+                              "horizontal_m": [dims[2], dims[0]],
+                              "up_tilt_deg": 0.0},
+            "center_world": position, "yaw_rad": 0.0,
+        }
+    if color_hex:
+        entry["color"] = {"hex": color_hex, "concentration": 0.74,
+                          "visible_fraction": 0.88, "visible_points": 224000}
+    return entry
+
+
+_ALIKE_MANIFEST = {
+    "scene_id": "eval-scene-alike",
+    "manifest_version": 2,
+    "frame_count": 18,
+    "objects": [
+        # The real room's own shape: the chair the person called red carries a
+        # LOW-confidence box, so it is movable and size-silent — which is why
+        # the deployed guest could not say which of two chairs was smaller,
+        # and why colour is the only handle that separates them.
+        _alike_chair("obj_000", [-1.5, 0.35, -1.0], "#880607",
+                     confidence="low", dims=(0.45, 0.68, 0.49)),   # reads red
+        _alike_chair("obj_001", [1.5, 0.35, -1.0], "#151414"),     # reads black
+        _alike_chair("obj_002", None),
+        _alike_chair("obj_003", None),
+        _alike_chair("obj_004", None),
+        {
+            "object_id": "obj_005", "label": "bed", "placed": True,
+            "quality": {"frames_observed": 5, "cluster_spread_m": 0.03},
+            "rotation_source": "roomplan_box",
+            "roomplan_box": {
+                "identifier": "EVAL-BED", "category": "bed",
+                "confidence": "high", "dims": [2.16, 1.85, 0.61],
+                "extent_axes_m": {"up_m": 0.61, "horizontal_m": [2.16, 1.85],
+                                  "up_tilt_deg": 0.0},
+                "center_world": [0.0, 0.3, 1.5], "yaw_rad": 0.0,
+            },
+            "world_transform": {
+                "position": [0.0, 0.3, 1.5],
+                "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0,
+            },
+        },
+    ],
+    "frames": [],
+}
+
+# The names this room produces, and the ones it cannot: two chairs carry a
+# distinctive measured colour, three carry only bookkeeping numbers.
+_BOOKKEEPING = ("first chair", "second chair", "third chair")
+
+
+_ALIKE_SHELL = _HANDS_SHELL
+
+# A bookkeeping number said out loud. The person cannot decode any of them, so
+# a number never adds information — it only teaches them the vocabulary, which
+# is what the production walk caught happening (0184).
+_BOOKKEEPING_SPOKEN = re.compile(
+    r"\b(?:first|second|third|fourth|fifth)\s+chair\b", re.IGNORECASE
+)
+
+
+class TestTalkingAboutARoomNotAnInventory:
+    """The transcript's four turns, as gates (decisions 0178/0184/0185)."""
+
+    def test_the_piece_named_by_its_colour_is_the_one_it_acts_on(self):
+        """Turn one. The deployed guest answered "no colors came through in
+        this scan at all" — false about the scan, true only about its facts —
+        and then offered five numbered chairs."""
+        room = _Room(_ALIKE_MANIFEST, _ALIKE_SHELL)
+        r = room.ask("Move the red chair next to the bed.")
+        r.assert_clean(room)
+
+        assert not re.search(
+            r"no colou?rs?\b.{0,40}(came|reached|in this scan)"
+            r"|can'?t see colou?r|don'?t (?:have|see) colou?rs?",
+            r.text, re.I,
+        ), f"denied a colour it was handed: {r.text!r}"
+        assert r.applied, (
+            f"never acted on the piece the person named (tools={r.tools}, "
+            f"refused={r.refused}): {r.text!r}"
+        )
+        assert all("red chair" in c["description"] for c in r.applied), (
+            f"acted on the wrong chair: {r.applied}"
+        )
+        assert _BOOKKEEPING_SPOKEN.search(r.text) is None, r.text
+
+    def test_a_referent_the_previous_turn_fixed_is_not_re_asked(self):
+        """Turn four of the transcript, and the cheapest of the six to get
+        wrong: asked to "turn the chair round" straight after moving one, the
+        deployed guest asked which of five — then proposed that very chair in
+        its next sentence."""
+        room = _Room(_ALIKE_MANIFEST, _ALIKE_SHELL)
+        first = room.ask("Move the red chair next to the bed.")
+        assert first.applied, f"setup: move not applied: {first.text!r}"
+
+        r = room.ask("Turn it round.")
+        r.assert_clean(room)
+        assert r.applied, (
+            f"asked again instead of taking the referent from the turn before: "
+            f"{r.text!r}"
+        )
+        assert all("red chair" in c["description"] for c in r.applied), r.applied
+
+    def test_pieces_it_cannot_separate_are_never_offered_by_number(self):
+        """Turn two. Nothing tells three of these chairs apart, so a number is
+        not a referent — the person cannot decode one either."""
+        room = _Room(_ALIKE_MANIFEST, _ALIKE_SHELL)
+        r = room.ask("Move the smaller chair towards the bed.")
+        r.assert_clean(room)
+
+        spoken = _BOOKKEEPING_SPOKEN.search(r.text)
+        assert spoken is None, (
+            f"offered a bookkeeping number as a name ({spoken.group(0)!r}): "
+            f"{r.text!r}"
+        )
+        # It has one real handle here and should reach for it.
+        assert re.search(r"\bred\b|\bblack\b|colou?r", r.text, re.I), (
+            f"never reached for the one thing that separates them: {r.text!r}"
+        )
+
+    def test_a_piece_it_cannot_act_on_is_not_offered_as_a_candidate(self):
+        """Turn one again, from the other side: three of the five chairs were
+        seen but never placed, so they cannot be moved, taken out, or turned —
+        and were still enumerated as options for a move."""
+        room = _Room(_ALIKE_MANIFEST, _ALIKE_SHELL)
+        r = room.ask("Which of the chairs could you move?")
+        r.assert_clean(room)
+
+        assert _BOOKKEEPING_SPOKEN.search(r.text) is None, r.text
+        assert re.search(r"\bred\b", r.text, re.I) and re.search(
+            r"\bblack\b", r.text, re.I
+        ), f"never named the two it can actually move: {r.text!r}"
+        assert re.search(
+            r"never placed|no position|not placed|nothing to (?:move|act)"
+            r"|can'?t (?:move|act)|couldn'?t place",
+            r.text, re.I,
+        ), f"did not say why the others are out: {r.text!r}"

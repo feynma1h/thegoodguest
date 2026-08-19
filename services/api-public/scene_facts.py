@@ -23,8 +23,8 @@ Fact classes (decision 0058 "Grounding", extended by 0096):
 NO orientation-derived facts: SAM 3D layout conventions are runtime-unverified
 (CLAUDE.md); position-derived facts don't share that exposure.
 
-SIZES (facts_version 2). Only `roomplan_box.dims` is spoken as a size, and
-only at box confidence high/medium. Two measured reasons:
+SIZES (facts_version 3). Only `roomplan_box` measurements are spoken as a
+size, and only at box confidence high/medium. Two measured reasons:
 
   - Splat-derived extents are not size truth. In the reference manifest a real
     meter-scale rug ships `extent_m_sorted` of 0.46 x 0.29 x 0.005 (the
@@ -38,19 +38,47 @@ only at box confidence high/medium. Two measured reasons:
     authoritative-sounding size that would attach to that wrong name follows
     the same rule.
 
-Only the LARGEST dimension is spoken, never a height or a footprint — and the
-reason recorded here was wrong. `dims` IS (x, y, z) in the box's own yaw frame
-with index 1 the vertical extent (`_box_dict` in perception-obj's
-box_placement.py), and across 31 boxes in four rooms the triple is not sorted
-in any order — measured in room_geometry.py, which reads the same manifests.
-Perception now emits `extent_axes_m` = {up_m, horizontal_m, up_tilt_deg}
-beside `dims`, present only when the box's transform warrants it, and the
-re-driven rooms carry it: all 31 box objects across the four walk rooms ship
-`extent_axes_m.up_m`. So speaking a height is no longer waiting on perception
-or on a re-drive. It waits on a FACTS_VERSION bump, a charter change and its
-voice evals, which is the only reason this module still says "at its
-longest". The splat-extent reason above is unaffected by any of that and
-still governs.
+Both gates are unchanged from facts_version 2. What changed is WHICH size:
+a measured piece now speaks its HEIGHT and its two horizontal extents, from
+`roomplan_box.extent_axes_m` (decision 0143), instead of only "at its
+longest". The old rule outlived its reason twice over — 0096 recorded the
+`dims` triple as descending-sorted with no recoverable axis semantics, 0137
+measured 31 boxes and found it is not sorted in any order with index 1 the
+vertical extent, and 0143 then had perception declare the up axis rather
+than leave anyone inferring it. A guest holding a high-confidence measured
+height and answering "I can't say" is not being careful; it is withholding a
+measurement (decision 0178).
+
+The horizontals stay UNNAMED — RoomPlan does not fix which of X/Z is long,
+so "width" and "depth" would certify more than was measured (0143). And
+`extent_axes_m` is ABSENT when the box's tilt exceeds perception's threshold,
+because a leaning box's vertical extent is not a height; that falls back to
+the honest "at its longest", never to silence.
+
+COLOR (facts_version 3, decision 0184). People name furniture by colour
+before anything else — "the red chair". Perception measures a `color` block
+per object from that object's own gaussians and ships it only when the
+visible mass concentrates around one reading; this module turns the measured
+hex into a word and, where the word is distinctive, into part of the piece's
+NAME. Two properties of the measurement decide how far the word is trusted,
+both measured across the four walked rooms (decision 0184):
+
+  - hue is stable across views; the dark achromatic band is not. All five
+    chromatic pieces read by two or more views agree on the family; the only
+    two disagreements are grey-versus-black on pieces sitting at value
+    0.11-0.48. So a hue, or an unambiguous black or white, may name a piece;
+    a mid grey may be spoken but never used to tell two pieces apart.
+  - it is the piece under the light that was in the room, not a paint chip.
+    A white cabinet reads #bdbdba. The charter carries that hedge; nothing
+    here rounds it up.
+
+NAMING. Duplicate labels used to become "first chair", "second chair", and
+the operator's own walk showed the cost: by the third turn the person was
+saying "move the first chair" back to the product (decision 0178). Colour
+replaces the ordinal wherever it distinguishes. Where nothing does, the
+ordinal survives as BOOKKEEPING and is named as such in the limits, because
+an index is not a referent — the person cannot tell which chair is the third
+one either, so offering it as a choice is offering nothing.
 
 CLEARANCES. Never a restated center distance — the charter forbids exactly
 that, and it stays forbidden. What IS derivable is a rigorous lower bound:
@@ -71,6 +99,7 @@ Consumers: public_server.py (conversation routes), guest_prompt.py
 """
 from __future__ import annotations
 
+import colorsys
 import math
 import threading
 from collections import OrderedDict
@@ -80,7 +109,10 @@ from dataclasses import dataclass
 # Bump when the derivation or rendering logic changes meaning — recorded per
 # turn (reproducibility triple: facts_version, prompt_version, model).
 # 2: sizes, size comparisons and clearance lower bounds (decision 0096).
-FACTS_VERSION = 2
+# 3: measured heights and horizontal extents in place of "at its longest"
+#    (decisions 0143/0178), per-object colour, and colour-based naming in
+#    place of ordinals (decision 0184).
+FACTS_VERSION = 3
 
 # Box confidence tiers whose dimensions may be spoken as a size. RoomPlan's
 # own grading; "low" is where the label is also unreliable (see SIZES above).
@@ -103,13 +135,39 @@ _MIN_QUOTABLE_DISTANCE_M = 0.05
 # smaller number would claim precision the fusion pipeline doesn't have.
 _SAME_HEIGHT_BAND_M = 0.15
 
+# --- Colour vocabulary (decision 0184) -------------------------------------
+# Family boundaries. Deliberately coarse: the guest says "the red chair", not
+# "the #880607 chair", and every qualifier ("dark", "muted") is a second
+# claim the measurement does not separately support.
+_COLOR_GREY_MAX_SAT = 0.18       # below this there is no hue worth naming
+_COLOR_BLACK_MAX_VALUE = 0.20    # below this a piece reads black whatever its hue
+_COLOR_WHITE_MIN_VALUE = 0.90
+
+# The stricter margins a reading must clear before its word may be used to
+# TELL TWO PIECES APART, as opposed to merely described. Measured (0184): the
+# hue families are stable across views, and the only cross-view disagreements
+# are grey-versus-black on pieces sitting either side of the black boundary —
+# so a name is allowed only where the reading is not near one.
+_COLOR_NAMEABLE_MIN_SAT = 0.35
+_COLOR_NAMEABLE_BLACK_MAX_VALUE = 0.15
+_COLOR_NAMEABLE_WHITE_MIN_VALUE = 0.92
+
+# Words that describe a surface but do not point at one. Two grey chairs are
+# not told apart by calling one of them grey.
+_COLOR_NOT_A_HANDLE = frozenset({"grey", "beige"})
+
 
 @dataclass(frozen=True)
 class InventoryItem:
     """One physical object, as the guest may speak of it.
 
-    `name` is the disambiguated spoken name ("sofa", "first chair") —
-    duplicate labels get ordinal prefixes so distance strings are unambiguous.
+    `name` is the disambiguated spoken name — the plain label where it is
+    unique ("sofa"), the label with its measured colour where that tells it
+    from its siblings ("red chair"), and only failing both an ordinal.
+
+    `named_by_bookkeeping` marks that last case. An ordinal is not a referent:
+    the person cannot tell which chair is the third one either, so the limits
+    say so and the charter forbids offering one as a choice (decision 0184).
     """
     object_id: str
     name: str
@@ -120,6 +178,10 @@ class InventoryItem:
     # Present independently of `placed` — a RoomPlan box that failed placement
     # still measured the thing.
     size_text: str | None = None
+    # The measured colour as one coarse word ("red", "grey"), or None when
+    # perception refused a reading for this object (see COLOR above).
+    color_word: str | None = None
+    named_by_bookkeeping: bool = False
 
 
 @dataclass(frozen=True)
@@ -154,27 +216,123 @@ def _format_m(value: float) -> str:
     return f"{round(value, 1):.1f}"
 
 
-def _spoken_names(objects: list[dict]) -> list[str]:
-    """Disambiguated names in object order: duplicate labels become
-    "first chair", "second chair", … (deterministic by sorted object_id)."""
+def _hex_to_rgb(value: str) -> tuple[float, float, float] | None:
+    text = str(value or "").strip().lstrip("#")
+    if len(text) != 6:
+        return None
+    try:
+        return tuple(int(text[i:i + 2], 16) / 255.0 for i in (0, 2, 4))  # type: ignore[return-value]
+    except ValueError:
+        return None
+
+
+def _color_word(rgb: tuple[float, float, float]) -> str:
+    """One coarse family word for a measured colour.
+
+    Coarse on purpose: the families are what measured stable across views
+    (decision 0184), and a tone qualifier would be a second claim resting on
+    the value alone — exactly where the cross-view disagreements sit.
+    """
+    hue, sat, value = colorsys.rgb_to_hsv(*rgb)
+    degrees = hue * 360.0
+    if value < _COLOR_BLACK_MAX_VALUE:
+        return "black"
+    if sat < _COLOR_GREY_MAX_SAT:
+        return "white" if value >= _COLOR_WHITE_MIN_VALUE else "grey"
+    if degrees < 50.0 or degrees >= 345.0:
+        # The warm band holds most furniture, and VALUE separates it: a dark
+        # warm colour is brown whatever its hue and however saturated (a
+        # wooden door reads #611c02, which "red" would badly misname), while
+        # a weakly saturated light one is beige rather than orange.
+        if value < 0.45:
+            return "brown"
+        if degrees < 15.0 or degrees >= 345.0:
+            return "red"
+        if sat < 0.40:
+            return "beige"
+        return "brown" if value < 0.62 else "orange"
+    if degrees < 70.0:
+        return "yellow" if sat >= 0.40 else "beige"
+    if degrees < 165.0:
+        return "green"
+    if degrees < 200.0:
+        return "teal"
+    if degrees < 255.0:
+        return "blue"
+    if degrees < 290.0:
+        return "purple"
+    return "pink"
+
+
+def _color_reading(obj: dict) -> tuple[str, bool] | None:
+    """(word, may_name) for one object's measured colour, or None.
+
+    `may_name` is the stricter claim: this word is far enough from every
+    family boundary, and specific enough, to tell this piece from a sibling
+    sharing its label. A mid grey describes without pointing.
+    """
+    block = obj.get("color")
+    if not isinstance(block, dict):
+        return None
+    rgb = _hex_to_rgb(block.get("hex"))
+    if rgb is None:
+        return None
+    word = _color_word(rgb)
+    _hue, sat, value = colorsys.rgb_to_hsv(*rgb)
+    if word in _COLOR_NOT_A_HANDLE:
+        may_name = False
+    elif word == "black":
+        may_name = value <= _COLOR_NAMEABLE_BLACK_MAX_VALUE
+    elif word == "white":
+        may_name = value >= _COLOR_NAMEABLE_WHITE_MIN_VALUE
+    else:
+        may_name = sat >= _COLOR_NAMEABLE_MIN_SAT
+    return word, may_name
+
+
+def _spoken_names(
+    objects: list[dict], colors: list[tuple[str, bool] | None]
+) -> tuple[list[str], list[bool]]:
+    """Names in object order, plus a flag per name marking the ones that are
+    bookkeeping rather than something a person could say.
+
+    A unique label is its own name. Duplicate labels are told apart by colour
+    where a colour word is distinctive AND unique within that label's group —
+    "the red chair" is how the person asked for it in the first place. What
+    survives both is an ordinal, and the caller reports those as bookkeeping.
+    """
     _ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth",
                  "seventh", "eighth", "ninth", "tenth"]
+    labels = [obj.get("label") or "unidentified object" for obj in objects]
     label_counts: dict[str, int] = {}
-    for obj in objects:
-        label = obj.get("label") or "unidentified object"
+    for label in labels:
         label_counts[label] = label_counts.get(label, 0) + 1
+
+    # A colour only names a piece if no sibling under the same label shares it.
+    handle_counts: dict[tuple[str, str], int] = {}
+    for label, color in zip(labels, colors, strict=True):
+        if color is not None and color[1]:
+            key = (label, color[0])
+            handle_counts[key] = handle_counts.get(key, 0) + 1
+
+    names: list[str] = []
+    bookkeeping: list[bool] = []
     seen: dict[str, int] = {}
-    names = []
-    for obj in objects:
-        label = obj.get("label") or "unidentified object"
+    for label, color in zip(labels, colors, strict=True):
         if label_counts[label] == 1:
             names.append(label)
-        else:
-            idx = seen.get(label, 0)
-            seen[label] = idx + 1
-            ordinal = _ORDINALS[idx] if idx < len(_ORDINALS) else f"{idx + 1}th"
-            names.append(f"{ordinal} {label}")
-    return names
+            bookkeeping.append(False)
+            continue
+        if color is not None and color[1] and handle_counts[(label, color[0])] == 1:
+            names.append(f"{color[0]} {label}")
+            bookkeeping.append(False)
+            continue
+        idx = seen.get(label, 0)
+        seen[label] = idx + 1
+        ordinal = _ORDINALS[idx] if idx < len(_ORDINALS) else f"{idx + 1}th"
+        names.append(f"{ordinal} {label}")
+        bookkeeping.append(True)
+    return names, bookkeeping
 
 
 def _confidence(obj: dict) -> str:
@@ -211,10 +369,48 @@ def _trusted_box_dims(obj: dict) -> tuple[float, float, float] | None:
     return d  # type: ignore[return-value]
 
 
-def _longest_extent_text(dims: tuple[float, float, float]) -> str:
-    """"about 2.2 m at its longest" — the only size claim the shipped dims
-    triple supports (module docstring, SIZES)."""
-    return f"about {_format_m(max(dims))} m at its longest"
+def _trusted_extent_axes(obj: dict) -> tuple[float, tuple[float, float]] | None:
+    """(height_m, (horizontal_a_m, horizontal_b_m)) when perception declared
+    the box's up axis for this object, else None.
+
+    Perception omits `extent_axes_m` when the box leans past its threshold
+    (decision 0143) — a leaning box's vertical extent is not a height, so the
+    caller falls back to the longest dimension rather than to silence.
+    """
+    if _trusted_box_dims(obj) is None:
+        return None  # the confidence gate governs every size claim alike
+    axes = (obj.get("roomplan_box") or {}).get("extent_axes_m")
+    if not isinstance(axes, dict):
+        return None
+    horizontals = axes.get("horizontal_m")
+    if not isinstance(horizontals, (list, tuple)) or len(horizontals) != 2:
+        return None
+    try:
+        up = float(axes["up_m"])
+        wide, deep = (float(v) for v in horizontals)
+    except (KeyError, TypeError, ValueError):
+        return None
+    values = (up, wide, deep)
+    if any(math.isnan(v) or math.isinf(v) or v <= 0 for v in values):
+        return None
+    return up, (wide, deep)
+
+
+def _size_text(obj: dict, dims: tuple[float, float, float]) -> str:
+    """The size claim for a measured piece.
+
+    A declared up axis buys a height and a footprint; the two horizontals stay
+    UNNAMED, because RoomPlan does not fix which of them is the width (0143).
+    Without one, the honest claim is still only the longest dimension.
+    """
+    axes = _trusted_extent_axes(obj)
+    if axes is None:
+        return f"about {_format_m(max(dims))} m at its longest"
+    up, (wide, deep) = axes
+    return (
+        f"about {_format_m(up)} m tall, and about {_format_m(wide)} m "
+        f"by {_format_m(deep)} m across the floor"
+    )
 
 
 def _circumradius(dims: tuple[float, float, float]) -> float:
@@ -253,7 +449,8 @@ def derive_scene_facts(manifest: dict) -> SceneFacts:
         (o for o in manifest.get("objects", []) if isinstance(o, dict)),
         key=lambda o: str(o.get("object_id") or ""),
     )
-    names = _spoken_names(objects)
+    colors = [_color_reading(obj) for obj in objects]
+    names, bookkeeping = _spoken_names(objects, colors)
 
     box_dims = [_trusted_box_dims(obj) for obj in objects]
 
@@ -264,8 +461,10 @@ def derive_scene_facts(manifest: dict) -> SceneFacts:
             placed=bool(obj.get("placed")),
             confidence=_confidence(obj),
             size_text=(
-                _longest_extent_text(box_dims[i]) if box_dims[i] else None
+                _size_text(obj, box_dims[i]) if box_dims[i] else None
             ),
+            color_word=(colors[i][0] if colors[i] else None),
+            named_by_bookkeeping=bookkeeping[i],
         )
         for i, obj in enumerate(objects)
     )
@@ -337,6 +536,20 @@ def derive_scene_facts(manifest: dict) -> SceneFacts:
             "largest to smallest, the measured pieces run: "
             + ", ".join(name for name, _ in ranked)
         )
+    # Heights rank separately: the tallest piece is often not the largest one,
+    # and comparing two spoken numbers is arithmetic the charter forbids the
+    # guest — so the comparison is derived here or it cannot be made.
+    tall = [
+        (names[i], axes[0])
+        for i, obj in enumerate(objects)
+        if (axes := _trusted_extent_axes(obj)) is not None
+    ]
+    if len(tall) >= 2:
+        by_height = sorted(tall, key=lambda t: (-t[1], t[0]))
+        size_comparisons.append(
+            f"of the pieces with a measured height, the {by_height[0][0]} is "
+            f"the tallest and the {by_height[-1][0]} is the shortest"
+        )
 
     # Clearance LOWER BOUNDS between measured boxes (module docstring).
     clearances: list[str] = []
@@ -376,10 +589,12 @@ def derive_scene_facts(manifest: dict) -> SceneFacts:
     )
 
     limits: list[str] = []
-    for item in glimpsed:
+    if glimpsed:
         limits.append(
-            f"the {item.name} was seen but never placed — it has no position, "
-            f"so no distance or height facts involve it"
+            "seen but never placed, so with no position at all — no distance "
+            "or height fact involves them, and not one of them can be moved, "
+            "taken out, or turned: "
+            + ", ".join(f"the {item.name}" for item in glimpsed)
         )
     if not inventory:
         limits.append(
@@ -409,11 +624,55 @@ def derive_scene_facts(manifest: dict) -> SceneFacts:
             "no piece in this room was measured well enough to give a size, "
             "so there are no sizes and no clearances at all"
         )
+    longest_only = [
+        item.name for item, obj in zip(inventory, objects, strict=True)
+        if item.size_text is not None and _trusted_extent_axes(obj) is None
+    ]
+    if longest_only:
+        limits.append(
+            "for these, only the LONGEST dimension is known and which way it "
+            "runs is not, so no height and no footprint: "
+            + ", ".join(f"the {n}" for n in longest_only)
+        )
     if sized:
         limits.append(
-            "for a measured piece only its LONGEST dimension is known — "
-            "which way that length runs is not, so its height, width, depth "
-            "and footprint are all unavailable"
+            "a measured piece's two across-the-floor figures are not labelled "
+            "— nothing recorded which of them is the width and which the "
+            "depth, so give them as they are written and never name one"
+        )
+
+    # Colour: what is measured, and what a colour reading is not.
+    uncolored = [item.name for item in inventory if item.color_word is None]
+    colored = [item for item in inventory if item.color_word is not None]
+    if colored and uncolored:
+        limits.append(
+            "no colour could be read for: " + ", ".join(f"the {n}" for n in uncolored)
+            + " — the scan saw them too unevenly to say, which is not the same "
+            "as their being colourless"
+        )
+    elif not colored and inventory:
+        limits.append(
+            "no piece in this room read one clear colour, so there are no "
+            "colours here at all — say that plainly rather than guessing"
+        )
+
+    # Bookkeeping names, and why they are not answers (decision 0184).
+    unnamed: dict[str, list[str]] = {}
+    for item, obj in zip(inventory, objects, strict=True):
+        if item.named_by_bookkeeping:
+            label = obj.get("label") or "unidentified object"
+            unnamed.setdefault(label, []).append(item.name)
+    if unnamed:
+        limits.append(
+            "these numbers are mine, not names — I keep same-named pieces "
+            "apart that way: "
+            + "; ".join(
+                ", ".join(f'"{n}"' for n in group) for group in unnamed.values()
+            )
+            + ". The person cannot know which one is the third, so a number is "
+            "never an answer to which of them they mean — describe the piece "
+            "instead, by what it reads as, how big it is, or what it is "
+            "nearest, and say plainly when none of that separates them"
         )
 
     return SceneFacts(
@@ -453,6 +712,7 @@ def render_facts_block(facts: SceneFacts) -> str:
         lines += [
             f"- the {item.name} — {_CONFIDENCE_PHRASE[item.confidence]}"
             + (f"; {item.size_text}" if item.size_text else "")
+            + (f"; reads {item.color_word}" if item.color_word else "")
             for item in facts.inventory
         ]
     else:

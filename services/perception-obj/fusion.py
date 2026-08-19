@@ -126,6 +126,7 @@ from typing import Any, Optional
 import box_placement
 import contact_priors
 import numpy as np
+import object_color
 import reproject
 from placement import min_axis_to_vertical_deg
 from roomstudio_schemas.placement_math import (
@@ -2626,6 +2627,14 @@ def fuse_scene_objects_with_meta(
         if obj.get("roomplan_box"):
             continue
         fused[i] = _apply_silhouette_span(fused[i], ctx)
+
+    # Colour, last (decision 0184): it reads each object's FINAL splat, and
+    # the passes above can still change which reconstruction an object ships
+    # (member reselection, cross-label dedup, box-duplicate suppression).
+    # Budget-gated like the other ctx-reading passes — a starved scene ships
+    # no colour rather than a colour for the handful of objects it reached.
+    if _budget_allows(ctx) and ctx is not None:
+        object_color.apply_object_colors(fused, ctx)
 
     placed_count = sum(1 for f in fused if f["placed"])
     logger.info(

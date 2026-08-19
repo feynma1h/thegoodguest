@@ -138,7 +138,7 @@ class TestInventory:
         )
         assert facts.inventory[0].confidence == "provisional"
 
-    def test_duplicate_labels_get_ordinals(self):
+    def test_duplicate_labels_with_nothing_to_tell_them_apart_get_ordinals(self):
         facts = derive_scene_facts(_manifest([
             _obj("obj_000", "chair", [0, 0, 0]),
             _obj("obj_001", "chair", [1, 0, 0]),
@@ -146,6 +146,151 @@ class TestInventory:
         ]))
         names = [i.name for i in facts.inventory]
         assert names == ["first chair", "second chair", "sofa"]
+        # And they are reported as bookkeeping, which is what stops them from
+        # being offered as a menu (decision 0184).
+        assert [i.named_by_bookkeeping for i in facts.inventory] == [True, True, False]
+
+
+# ---------------------------------------------------------------------------
+# Colour, and naming by it (decision 0184)
+# ---------------------------------------------------------------------------
+
+def _colored(entry: dict, hex_value: str, *, concentration: float = 0.8) -> dict:
+    entry["color"] = {
+        "hex": hex_value,
+        "concentration": concentration,
+        "visible_fraction": 0.9,
+        "visible_points": 50000,
+    }
+    return entry
+
+
+class TestColor:
+    def test_a_measured_colour_is_spoken_as_one_coarse_word(self):
+        facts = derive_scene_facts(_manifest([
+            _colored(_obj("obj_000", "chair", [0, 0, 0]), "#880607"),
+        ]))
+        assert facts.inventory[0].color_word == "red"
+        assert "reads red" in render_facts_block(facts)
+
+    def test_the_families_are_the_ones_measured_on_real_rooms(self):
+        """Every hex here is a reading this gate produced from a real walk
+        room's own gaussians (decision 0184), so the vocabulary is pinned
+        against the data it has to describe rather than against invented
+        swatches."""
+        cases = {
+            "#880607": "red",       # a7e073ae obj_006 — "the red chair"
+            "#611c02": "brown",     # a71d125f obj_008 — a wooden door
+            "#18224f": "blue",      # b667f891 obj_017 — a curtain
+            "#151414": "black",     # a7e073ae obj_023 — a speaker
+            "#bdbdba": "grey",      # a7e073ae obj_000 — a white cabinet, in
+                                    # the room's own light
+            "#978876": "beige",     # a71d125f obj_000 — a tan chair
+            "#c6c0bb": "grey",      # a7e073ae obj_012 — a pale door
+        }
+        for hex_value, expected in cases.items():
+            facts = derive_scene_facts(_manifest([
+                _colored(_obj("obj_000", "chair", [0, 0, 0]), hex_value),
+            ]))
+            assert facts.inventory[0].color_word == expected, hex_value
+
+    def test_the_warm_band_separates_on_value_not_on_hue_alone(self):
+        """Measured, and it changed the vocabulary: a wooden door reads
+        #611c02 and a red chair #880607, and their hues are 17 degrees apart
+        while their names are not adjacent at all. Value is what separates
+        them — dark warm is brown however saturated it is."""
+        for hex_value, expected in (
+            ("#880607", "red"),      # a7e073ae obj_006 — value 0.53
+            ("#611c02", "brown"),    # a71d125f obj_008 — value 0.38
+            ("#3f2c27", "brown"),    # 09684dde obj_017 — value 0.25
+            ("#422315", "brown"),    # 09684dde obj_019 — value 0.26
+        ):
+            facts = derive_scene_facts(_manifest([
+                _colored(_obj("obj_000", "chair", [0, 0, 0]), hex_value),
+            ]))
+            assert facts.inventory[0].color_word == expected, hex_value
+
+    def test_a_distinctive_colour_replaces_the_ordinal(self):
+        """The transcript's own failure: asked for "the red chair", the guest
+        offered a first, second, third, fourth and fifth chair instead."""
+        facts = derive_scene_facts(_manifest([
+            _colored(_obj("obj_000", "chair", [0, 0, 0]), "#880607"),
+            _colored(_obj("obj_001", "chair", [1, 0, 0]), "#18224f"),
+        ]))
+        assert [i.name for i in facts.inventory] == ["red chair", "blue chair"]
+        assert not any(i.named_by_bookkeeping for i in facts.inventory)
+
+    def test_a_colour_two_siblings_share_names_neither(self):
+        facts = derive_scene_facts(_manifest([
+            _colored(_obj("obj_000", "chair", [0, 0, 0]), "#880607"),
+            _colored(_obj("obj_001", "chair", [1, 0, 0]), "#8a0505"),
+            _colored(_obj("obj_002", "chair", [2, 0, 0]), "#18224f"),
+        ]))
+        assert [i.name for i in facts.inventory] == [
+            "first chair", "second chair", "blue chair"
+        ]
+
+    def test_a_mid_grey_describes_but_never_names(self):
+        """Measured (0184): hue families agree across views, and the only
+        cross-view disagreements are grey-versus-black in the dark band. So a
+        grey is spoken and never used to tell two pieces apart."""
+        facts = derive_scene_facts(_manifest([
+            _colored(_obj("obj_000", "chair", [0, 0, 0]), "#95989c"),
+            _colored(_obj("obj_001", "chair", [1, 0, 0]), "#880607"),
+        ]))
+        names = [i.name for i in facts.inventory]
+        assert names == ["first chair", "red chair"]
+        # It is still SAID — absent is not the same as grey.
+        assert facts.inventory[0].color_word == "grey"
+
+    def test_a_reading_near_the_black_boundary_never_names(self):
+        """#2c2b2b sits at value 0.17, inside the family boundary at 0.20 but
+        outside the naming margin at 0.15 — exactly where the two measured
+        cross-view disagreements live."""
+        facts = derive_scene_facts(_manifest([
+            _colored(_obj("obj_000", "chair", [0, 0, 0]), "#2c2b2b"),
+            _colored(_obj("obj_001", "chair", [1, 0, 0]), "#95989c"),
+        ]))
+        assert facts.inventory[0].color_word == "black"
+        assert [i.name for i in facts.inventory] == ["first chair", "second chair"]
+
+    def test_an_absent_or_malformed_colour_is_simply_absent(self):
+        for block in (None, {}, {"hex": "nonsense"}, {"hex": "#12"}, "red", []):
+            entry = _obj("obj_000", "chair", [0, 0, 0])
+            if block is not None:
+                entry["color"] = block
+            facts = derive_scene_facts(_manifest([entry]))
+            assert facts.inventory[0].color_word is None, block
+
+    def test_uncoloured_pieces_are_named_in_the_limits(self):
+        facts = derive_scene_facts(_manifest([
+            _colored(_obj("obj_000", "sofa", [0, 0, 0]), "#880607"),
+            _obj("obj_001", "table", [1, 0, 0]),
+        ]))
+        limit = [t for t in facts.limits if "no colour could be read" in t]
+        assert len(limit) == 1 and "the table" in limit[0]
+        # And the honest distinction: unread is not colourless.
+        assert "colourless" in limit[0]
+
+    def test_a_room_with_no_colour_at_all_says_so(self):
+        facts = derive_scene_facts(_room())
+        assert any("no colours here at all" in t for t in facts.limits), facts.limits
+
+    def test_bookkeeping_names_are_disclaimed_in_the_limits(self):
+        facts = derive_scene_facts(_manifest([
+            _obj("obj_000", "chair", [0, 0, 0]),
+            _obj("obj_001", "chair", [1, 0, 0]),
+        ]))
+        limit = [t for t in facts.limits if "these numbers are mine" in t]
+        assert len(limit) == 1
+        assert '"first chair", "second chair"' in limit[0]
+        assert "never an answer" in limit[0]
+
+    def test_colour_does_not_disturb_a_unique_label(self):
+        facts = derive_scene_facts(_manifest([
+            _colored(_obj("obj_000", "sofa", [0, 0, 0]), "#880607"),
+        ]))
+        assert facts.inventory[0].name == "sofa"
 
 
 # ---------------------------------------------------------------------------
@@ -325,9 +470,16 @@ def _boxed(
     dims: list[float],
     *,
     confidence: str = "high",
+    extent_axes: dict | None = None,
     **kw,
 ) -> dict:
-    """An object carrying a RoomPlan box — the only size source 0096 trusts."""
+    """An object carrying a RoomPlan box — the only size source 0096 trusts.
+
+    `extent_axes` is perception's declared up axis (decision 0143). Left off,
+    the object exercises the pre-0143 fallback, which is what most of this
+    suite wants: a box that leans past perception's threshold ships no
+    `extent_axes_m` at all and must still get its longest dimension.
+    """
     entry = _obj(object_id, label, position, **kw)
     entry["roomplan_box"] = {
         "box_id": f"box_{object_id[-2:]}",
@@ -335,6 +487,8 @@ def _boxed(
         "confidence": confidence,
         "dims": dims,
     }
+    if extent_axes is not None:
+        entry["roomplan_box"]["extent_axes_m"] = extent_axes
     entry["extent_m_sorted"] = sorted(dims, reverse=True)
     if position is not None:
         entry["method"] = "roomplan_box"
@@ -348,10 +502,12 @@ class TestSizes:
         )
         assert facts.inventory[0].size_text == "about 2.2 m at its longest"
 
-    def test_only_the_longest_dimension_is_ever_named(self):
-        """The shipped dims triple has no recoverable axis semantics (module
-        docstring): the bed's largest is a length, the wardrobe's a height.
-        Any height/width/footprint claim would be a coin flip."""
+    def test_without_a_declared_up_axis_only_the_longest_dimension_is_named(self):
+        """The fallback, and the reason it survives: perception omits
+        `extent_axes_m` when the box leans past its threshold, and a leaning
+        box's vertical extent is not a height (0143). Nothing may then claim
+        an axis — the bed's largest dimension is a length, the wardrobe's is
+        a height, and the triple does not say which."""
         facts = derive_scene_facts(
             _manifest([
                 _boxed("obj_000", "bed", [0, 0.3, 0], [2.1581, 1.854, 0.6109]),
@@ -365,10 +521,79 @@ class TestSizes:
         block = render_facts_block(facts)
         assert "1.9 m" in block and "1.8 m" not in block
         assert "0.7 m" not in block
-        # Those words may appear ONLY in the limit that disclaims them.
-        for line in block.splitlines():
-            if "height" in line:
-                assert "unavailable" in line
+        # And the limits say so, naming exactly the pieces it applies to.
+        limit = [t for t in facts.limits if "LONGEST" in t]
+        assert len(limit) == 1, facts.limits
+        assert "the bed" in limit[0] and "the wardrobe" in limit[0]
+
+    def test_a_declared_up_axis_speaks_the_height_and_the_footprint(self):
+        """0143 declares the up axis per box, so the height stops being a coin
+        flip — and a guest holding a high-confidence measured height and
+        saying "I can't say" is withholding a measurement (0178)."""
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed(
+                    "obj_000", "wardrobe", [3, 0.9, 0], [1.9119, 0.6845, 0.3815],
+                    extent_axes={"up_m": 1.9119,
+                                 "horizontal_m": [0.6845, 0.3815],
+                                 "up_tilt_deg": 0.0},
+                ),
+            ])
+        )
+        assert facts.inventory[0].size_text == (
+            "about 1.9 m tall, and about 0.7 m by 0.4 m across the floor"
+        )
+        # The horizontals ship UNNAMED: RoomPlan does not fix which of them
+        # is the width, so naming one would certify more than was measured.
+        block = render_facts_block(facts).lower()
+        assert "0.7 m wide" not in block and "0.4 m deep" not in block
+        assert any("never name one" in t for t in facts.limits), facts.limits
+
+    def test_the_up_axis_still_answers_to_the_confidence_gate(self):
+        """A declared axis is not a second route around the gate that decides
+        whether any size is spoken at all."""
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed(
+                    "obj_000", "refrigerator", [0, 0.9, 0], [1.6351, 0.9063, 0.678],
+                    confidence="low",
+                    extent_axes={"up_m": 1.6351,
+                                 "horizontal_m": [0.9063, 0.678],
+                                 "up_tilt_deg": 0.0},
+                ),
+            ])
+        )
+        assert facts.inventory[0].size_text is None
+
+    def test_a_malformed_extent_axes_block_falls_back_not_silent(self):
+        for broken in ({"up_m": 0.0, "horizontal_m": [1.0, 1.0]},
+                       {"up_m": 1.0, "horizontal_m": [1.0]},
+                       {"horizontal_m": [1.0, 1.0]},
+                       {"up_m": "tall", "horizontal_m": [1.0, 1.0]},
+                       []):
+            facts = derive_scene_facts(
+                _manifest([_boxed("obj_000", "bed", [0, 0.3, 0],
+                                  [2.1581, 1.854, 0.6109], extent_axes=broken)])
+            )
+            assert facts.inventory[0].size_text == "about 2.2 m at its longest", broken
+
+    def test_heights_rank_separately_from_sizes(self):
+        """The tallest piece is often not the largest, and comparing two
+        spoken numbers is arithmetic the charter forbids — so the ranking is
+        derived here or it cannot be made at all."""
+        facts = derive_scene_facts(
+            _manifest([
+                _boxed("obj_000", "bed", [0, 0.3, 0], [2.16, 1.85, 0.61],
+                       extent_axes={"up_m": 0.61, "horizontal_m": [2.16, 1.85],
+                                    "up_tilt_deg": 0.0}),
+                _boxed("obj_001", "wardrobe", [3, 0.9, 0], [0.68, 1.91, 0.38],
+                       extent_axes={"up_m": 1.91, "horizontal_m": [0.68, 0.38],
+                                    "up_tilt_deg": 0.0}),
+            ])
+        )
+        ranked = " ".join(facts.size_comparisons)
+        assert "the bed is the largest" in ranked
+        assert "the wardrobe is the tallest and the bed is the shortest" in ranked
 
     def test_splat_extents_are_never_spoken_as_a_size(self):
         """The measured reason this rule exists: a real meter-scale rug ships
@@ -506,5 +731,5 @@ class TestClearances:
 
 
 class TestFactsVersion:
-    def test_version_is_two(self):
-        assert FACTS_VERSION == 2
+    def test_version_is_three(self):
+        assert FACTS_VERSION == 3
