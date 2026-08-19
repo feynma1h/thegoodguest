@@ -6,8 +6,9 @@ hands, and the whole shape follows from one thing found by READING the
 charter rather than designing against it: **the guest cannot compute a target
 position.** Rule 5 forbids it knowing which way anything faces, the shapes of
 things, or the room's own walls and floor — "they may well be there on the
-screen in front of the person, but they did not reach you". Rule 3b says a
-size is a longest dimension with unrecoverable axis semantics.
+screen in front of the person, but they did not reach you". Rule 3b gives it a
+height and an unlabelled pair of floor figures, and no way to tell which of
+that pair runs which way.
 
 So a tool shaped `move(object, x, y, z)` would require the guest to author
 coordinates from a world in which walls, facings and footprints do not exist.
@@ -207,10 +208,34 @@ class ToolOutcome:
     descriptions: list[str]
 
 
+def _spoken_form(text: str) -> str:
+    """A spoken name reduced to what it says, so punctuation and articles
+    cannot decide whether a piece is found.
+
+    THE FACTS inventory shows the model a NAME, and this field is called
+    object_id, so the model reasonably turns "the red chair" into "red_chair".
+    Measured on the transcript's own first turn: 5 of 8 samples emitted the
+    underscored form and were refused. It is not a new gap — 2 of 8 missed on
+    the bare article under the pre-0184 ordinal names — but multi-word names
+    made it fire far more often, and a person asking for their red chair being
+    told the room does not recognise it is the worst refusal we ship.
+
+    Reduction only, never fuzzy matching: names are unique space-separated
+    words, so this can resolve more and can never resolve differently.
+    """
+    lowered = re.sub(r"[_\-]+", " ", str(text or "").lower())
+    lowered = re.sub(r"\s+", " ", lowered).strip(" .,'\"")
+    return re.sub(r"^the\s+", "", lowered)
+
+
 def _find(geometry: RoomGeometry, object_id: str) -> RoomObject | None:
-    """The model addresses pieces by manifest object_id — what THE FACTS
-    inventory shows it. The spec keys on the box identifier where one exists
-    (0131), so this is the one place the two namespaces meet."""
+    """Resolve whatever the model put in `object_id` to a piece of the room.
+
+    Three namespaces meet here and only here: the manifest object_id, the spec
+    key (the box identifier where one exists, 0131), and the spoken NAME — the
+    last of which is what THE FACTS inventory actually shows the model, which
+    is why the name path carries most of the traffic and all of the tolerance.
+    """
     want = str(object_id or "").strip()
     for obj in geometry.objects:
         if obj.object_id == want or obj.key == want:
@@ -218,9 +243,11 @@ def _find(geometry: RoomGeometry, object_id: str) -> RoomObject | None:
     # A model that answers with the spoken name instead of the id is being
     # helpful, not wrong; resolving it is cheaper than a refusal the person
     # would find baffling.
-    lowered = want.lower()
+    spoken = _spoken_form(want)
+    if not spoken:
+        return None
     for obj in geometry.objects:
-        if obj.name.lower() == lowered or obj.label.lower() == lowered:
+        if _spoken_form(obj.name) == spoken or _spoken_form(obj.label) == spoken:
             return obj
     return None
 

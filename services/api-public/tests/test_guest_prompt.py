@@ -45,8 +45,8 @@ from scene_facts import derive_scene_facts, render_facts_block
 # ---------------------------------------------------------------------------
 
 _PINNED = (
-    5,
-    "38f80c152e79b45491bbd9f082a37e00c1b23e781ff558b96c633e8656b93c7c",
+    6,
+    "e4c075164212308e572f7bd74364c228f7ce1e21126ae35e07f0e9a5ff1be435",
 )
 
 
@@ -100,9 +100,17 @@ class TestPinnedCharter:
             "one room per conversation",
             "walls and floor",
             # 0096: the two new claim classes carry their epistemics in the
-            # charter, not just in the facts block.
-            "longest dimension",
+            # charter, not just in the facts block. 0184 retires the
+            # longest-dimension-only RULE but not the case it covers — a box
+            # that leans past perception's threshold still ships no axis.
+            "at its longest",
             "floors, not measurements",
+            # 0184: what a colour reading is, what a number that is not a
+            # name is, and what an unplaced piece cannot have done to it.
+            "not a paint chip",
+            "none could be read",
+            "numbers are bookkeeping",
+            "never placed",
             # 0132: the hands rules. Each is a truth the model would
             # otherwise have to infer from the tool schema alone.
             "you never choose coordinates",   # rule 6: no invented positions
@@ -120,7 +128,7 @@ class TestPinnedCharter:
         ):
             assert needle in lowered, f"charter lost capability truth: {needle}"
 
-    def test_charter_has_fifteen_exemplars(self):
+    def test_charter_has_twenty_exemplars(self):
         # 0096 added the clearance-floor and longest-dimension refusals; 0132
         # replaced the "I can't move things yet" exemplar with five covering
         # a successful move, a solver refusal, an ambiguous anchor, an
@@ -128,8 +136,20 @@ class TestPinnedCharter:
         # clearance in a rearranged room; 0159 added four for facings — the
         # correction itself, the direction a turn cannot take, a piece with no
         # second way round, and a revert that leaves a correction standing.
-        assert STATIC_CHARTER.count("Person:") == 15
-        assert STATIC_CHARTER.count("Guest:") == 15
+        # 0184 retired the two that taught withdrawn rules (a refused height
+        # and a room with no colour in it at all) and added seven: the height
+        # answered, the width still refused, a colour spoken with its hedge, a
+        # colour that could not be read, pieces the guest cannot tell apart,
+        # pieces it cannot act on, and a referent taken from the turn before.
+        assert STATIC_CHARTER.count("Person:") == 20
+        assert STATIC_CHARTER.count("Guest:") == 20
+
+    def test_the_exemplars_do_not_teach_the_retired_size_refusal(self):
+        """0178: the guest held a high-confidence measured height and said it
+        could not say. The rule went; an exemplar demonstrating it would put
+        it straight back, which is how a charter drifts from its own rules."""
+        assert "I don't know which way that length runs" not in STATIC_CHARTER
+        assert "I honestly can't see color yet" not in STATIC_CHARTER
 
     def test_charter_no_longer_claims_the_guest_cannot_move_anything(self):
         """0132 gave the guest hands. A charter still saying "eyes, not

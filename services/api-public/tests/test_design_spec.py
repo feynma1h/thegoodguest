@@ -30,6 +30,7 @@ from design_spec import (
 )
 from guest_tools import (
     TOOLS,
+    _find,
     run_propose,
     run_revert,
     run_tool,
@@ -402,3 +403,85 @@ class TestTelemetry:
         for asked in ("move the bed over there", "can we try that?",
                       "yes please", "get rid of the chair", "sure"):
             assert not unprompted_proposal(asked, True), asked
+
+
+class TestFindingThePiece:
+    """`_find` is where the model's `object_id` meets the room, and the one
+    place a good answer can still be thrown away (decision 0185).
+
+    Fixture-free on purpose: this is the resolution the transcript's own first
+    turn depends on, and it should not skip when dev-fixtures are absent.
+    """
+
+    def _geometry(self):
+        manifest = {
+            "scene_id": "s", "manifest_version": 2, "frame_count": 9,
+            "objects": [
+                {"object_id": "obj_000", "label": "chair", "placed": True,
+                 "color": {"hex": "#880607", "concentration": 0.74,
+                           "visible_fraction": 0.9, "visible_points": 9000},
+                 "quality": {"frames_observed": 4, "cluster_spread_m": 0.05},
+                 "world_transform": {"position": [0, 0.3, 0],
+                                     "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}},
+                {"object_id": "obj_001", "label": "chair", "placed": True,
+                 "color": {"hex": "#151414", "concentration": 0.9,
+                           "visible_fraction": 0.9, "visible_points": 9000},
+                 "quality": {"frames_observed": 4, "cluster_spread_m": 0.05},
+                 "world_transform": {"position": [2, 0.3, 0],
+                                     "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}},
+                {"object_id": "obj_002", "label": "bed", "placed": True,
+                 "quality": {"frames_observed": 5, "cluster_spread_m": 0.03},
+                 "world_transform": {"position": [0, 0.3, 3],
+                                     "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}},
+            ],
+            "frames": [],
+        }
+        facts = derive_scene_facts(manifest)
+        assert [i.name for i in facts.inventory] == [
+            "red chair", "black chair", "bed"
+        ]
+        return derive_room_geometry(
+            manifest, None,
+            names={i.object_id: i.name for i in facts.inventory},
+        )
+
+    def test_the_forms_the_model_actually_emits_all_resolve(self):
+        """Measured on the transcript's first turn: 5 of 8 samples wrote
+        "red_chair" and were refused, and 2 of 8 wrote "the first chair" under
+        the pre-0184 names. The field is called object_id and THE FACTS show a
+        name, so the model normalises one into the other."""
+        geometry = self._geometry()
+        for form in ("red chair", "red_chair", "the red chair", "Red Chair",
+                     "red-chair", "  red   chair  ", "the_red_chair",
+                     "obj_000"):
+            found = _find(geometry, form)
+            assert found is not None and found.object_id == "obj_000", form
+
+    def test_it_still_refuses_a_piece_the_room_does_not_have(self):
+        geometry = self._geometry()
+        for form in ("bookshelf", "the bookshelf", "blue chair", "", "the", "_"):
+            assert _find(geometry, form) is None, form
+
+    def test_tolerance_never_moves_a_match_to_a_different_piece(self):
+        """Reduction, not fuzzy matching. Names are unique space-separated
+        words, so normalising can resolve MORE and can never resolve
+        differently — the property that made this safe to widen."""
+        geometry = self._geometry()
+        for obj in geometry.objects:
+            assert _find(geometry, obj.name) is obj
+            assert _find(geometry, obj.object_id) is obj
+        assert _find(geometry, "the bed").object_id == "obj_002"
+
+    def test_a_bare_ambiguous_label_resolves_to_the_first_piece(self):
+        """PRE-EXISTING and pinned as found, not as wanted (decision 0185).
+
+        `_find` falls back to the bare LABEL, so "chair" in a two-chair room
+        silently resolves to whichever comes first in object order rather than
+        refusing. The charter is what protects the person here — the guest asks
+        which one, and was measured doing so — but the resolver's own failure
+        mode is a silent wrong piece, which is the one thing this layer should
+        never do quietly. Left alone deliberately: it predates the colour
+        naming and changing it is a behaviour change in the tool layer.
+        """
+        geometry = self._geometry()
+        assert _find(geometry, "chair").object_id == "obj_000"
