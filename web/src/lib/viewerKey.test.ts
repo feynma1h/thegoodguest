@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import type { MeasuredOutline, ViewerLabel } from "@/components/SplatViewer";
 import type { PositionedSplat, ShellPlane } from "@/lib/api/types";
-import { rendererKey } from "@/lib/viewerKey";
+import { labelsKey, outlinesKey, rendererKey } from "@/lib/viewerKey";
 
 const splat = (over: Partial<PositionedSplat> = {}): PositionedSplat => ({
   url: "https://example.test/bed.spz",
@@ -117,25 +118,61 @@ describe("rendererKey — structure IS structure", () => {
     expect(rebaked).not.toBe(withShell);
   });
 
-  it("changes when walk badges or measured outlines change", () => {
-    const bare = rendererKey({ splats: [splat()] });
-    expect(
-      rendererKey({
-        splats: [splat()],
-        labels: [{ kind: "box", text: "1", position: [0, 1, 0] }],
-      }),
-    ).not.toBe(bare);
-    expect(
-      rendererKey({
-        splats: [splat()],
-        outlines: [
-          {
-            center_world: [1, 0.4, 2],
-            half_extents_m: [0.9, 0.3, 1.1],
-            yaw_rad: 0.4,
-          },
-        ],
-      }),
-    ).not.toBe(bare);
+});
+
+// The renderer key used to carry these too, on the reasoning that they are
+// "cheap to rebuild and rare to change" (decision 0188). Both halves were
+// wrong in the way that matters: the key is GLOBAL, so what it costs is
+// never the keyed object but everything else in the scene — and an outline
+// is not rare at all, it appears on the first proposal of a session. The
+// pair of expectations below is the guard, and it has to be a pair: an
+// outline that changes NEITHER key would satisfy the first assertion by
+// simply never being drawn.
+describe("rendererKey — decorations are not structure", () => {
+  const outline: MeasuredOutline = {
+    center_world: [1, 0.4, 2],
+    half_extents_m: [0.9, 0.3, 1.1],
+    yaw_rad: 0.4,
+  };
+  const badge: ViewerLabel = { kind: "box", text: "1", position: [0, 1, 0] };
+
+  // That the renderer key cannot CHANGE with an outline is held by the type
+  // system, not by an assertion: `ViewerKeyInput` has no such field, so
+  // putting one back is a deliberate edit rather than an accident. What a
+  // test can hold is the other half — that leaving the renderer alone did
+  // not simply stop drawing them.
+  it("gives an outline its own key, which is not a constant", () => {
+    expect(outlinesKey([outline])).not.toBe(outlinesKey(null));
+    expect(outlinesKey([outline, outline])).not.toBe(outlinesKey([outline]));
+    // Absent and empty mean the same thing: nothing to draw.
+    expect(outlinesKey([])).toBe(outlinesKey(null));
+  });
+
+  it("gives walk badges their own key, which is not a constant", () => {
+    expect(labelsKey([badge])).not.toBe(labelsKey(null));
+    expect(labelsKey([])).toBe(labelsKey(null));
+  });
+
+  it("rebuilds an outline that moved, resized or turned", () => {
+    const base = outlinesKey([outline]);
+    expect(outlinesKey([{ ...outline, center_world: [2, 0.4, 2] }])).not.toBe(base);
+    // Half-extents were absent from the old key, so an outline that changed
+    // only its size silently kept the shape it was first drawn with.
+    expect(outlinesKey([{ ...outline, half_extents_m: [1.4, 0.3, 1.1] }])).not.toBe(
+      base,
+    );
+    expect(outlinesKey([{ ...outline, yaw_rad: 1.2 }])).not.toBe(base);
+  });
+
+  it("rebuilds a badge that changed text, place or kind", () => {
+    const base = labelsKey([badge]);
+    expect(labelsKey([{ ...badge, text: "2" }])).not.toBe(base);
+    expect(labelsKey([{ ...badge, position: [0, 2, 0] }])).not.toBe(base);
+    expect(labelsKey([{ ...badge, kind: "wall" }])).not.toBe(base);
+  });
+
+  it("is unchanged by an equal-but-fresh array", () => {
+    expect(outlinesKey([{ ...outline }])).toBe(outlinesKey([outline]));
+    expect(labelsKey([{ ...badge }])).toBe(labelsKey([badge]));
   });
 });
