@@ -1,6 +1,6 @@
 # 0183 — the facing correction is a concession, not a feature
 
-**Date:** 2026-08-14
+**Date:** 2026-08-19
 **Status:** Decided
 
 ## Context
@@ -8,8 +8,8 @@
 Stage 2 shipped a facing correction on 2026-08-14: after five instrument
 families failed to settle which way round a reconstruction sits in its box,
 the person who lives in the room can say so and the room keeps the
-correction (0157, 0158, 0159). A sitting then asked the operator a narrow
-question about one control's copy.
+correction (0157, 0158, 0159). A sitting on 2026-08-19 then asked the operator a narrow question about
+one control's copy.
 
 The answer was about the feature instead: **"Facing corrections are not
 something I'd ideally want the users to do. The product should be able to do
@@ -43,7 +43,7 @@ capture forever.
 ## What this does and does not change about the instruments
 
 **Sitting 1's verdict is consistent with this, not in tension with it.** The
-operator turned the layout-rotation facing sign OFF the same day (0171 ships
+operator turned the layout-rotation facing sign OFF in the same sitting (0171 ships
 it flag-only, right 2 times in 3, with no gate that separates the miss from
 the hits). Off is not a retreat from "do it intelligently" — it is the only
 path to it. The flag keeps recording a preference on every capture, so the
