@@ -65,7 +65,7 @@ import {
   windowProgress,
 } from "@/lib/reveal";
 import { openingRect, projectToWallPlane, wallFrame } from "@/lib/shell3d";
-import { rendererKey } from "@/lib/viewerKey";
+import { labelsKey, outlinesKey, rendererKey } from "@/lib/viewerKey";
 
 interface SplatViewerProps {
   splats: PositionedSplat[];
@@ -159,6 +159,140 @@ export interface ViewerLabel {
   kind?: "box" | "tail" | "wall";
 }
 
+/* --- Decorations: things drawn into the room that come and go WHILE the
+ * renderer is alive. They are built by their own effects (decision 0188),
+ * not by the build effect, because the build effect's key is global: an
+ * outline appearing used to change it and take every splat mesh down with
+ * it, re-downloading the whole room to add five vertices to the floor.
+ *
+ * Each builder is a pure function of (three, scene, input) returning what
+ * it added, so its effect can put it back exactly. */
+
+/** The three.js module namespace, as a type only — the runtime import stays
+ * inside the build effect, so decision 0053's containment rule is intact. */
+type ThreeModule = typeof import("three");
+
+/** What a decoration effect needs to draw. Published by the build effect
+ * once the renderer exists; cleared when it is torn down. */
+interface SceneSeam {
+  three: ThreeModule;
+  scene: InstanceType<ThreeModule["Scene"]>;
+}
+
+/** One thing added to the scene, with the means to take it back out. */
+interface Decoration {
+  object: InstanceType<ThreeModule["Object3D"]>;
+  dispose: () => void;
+}
+
+/** Where a moved piece was measured (decision 0131). Its footprint stays
+ * on the floor in the contour's own line and tone, because in this room
+ * that line means MEASUREMENT — the same language the reveal used to draw
+ * the boundary. Not a badge, not a ghost of the object: the measurement,
+ * still there, one field away from the proposal both on screen and in the
+ * document. */
+function buildOutlines(
+  { three, scene }: SceneSeam,
+  outlines: MeasuredOutline[],
+): Decoration[] {
+  const built: Decoration[] = [];
+  for (const o of outlines) {
+    const [hx, , hz] = o.half_extents_m;
+    // Same inline map as three.js R_y(+θ), through the same lib/clipSign
+    // convention as the clip volume — so the outline agrees with the clip
+    // AND with the solver that produced the footprint (0135/0112). One
+    // convention, never two half-flipped surfaces.
+    const yawEff = viewerYawRad(o.yaw_rad);
+    const cos = Math.cos(yawEff);
+    const sin = Math.sin(yawEff);
+    // The box's own base, lifted a hair so it sits ON the floor rather than
+    // z-fighting it. Derived from the measurement itself, not from the
+    // shell — an outline must survive a room with no floor.
+    const y = o.center_world[1] - o.half_extents_m[1] + 0.004;
+    const corners: [number, number, number][] = (
+      [
+        [-hx, -hz],
+        [hx, -hz],
+        [hx, hz],
+        [-hx, hz],
+        [-hx, -hz],
+      ] as [number, number][]
+    ).map(([u, v]) => [
+      o.center_world[0] + u * cos + v * sin,
+      y,
+      o.center_world[2] - u * sin + v * cos,
+    ]);
+    const geometry = new three.BufferGeometry().setAttribute(
+      "position",
+      new three.Float32BufferAttribute(corners.flat(), 3),
+    );
+    const material = new three.LineBasicMaterial({
+      color: CONTOUR_COLOR,
+      transparent: true,
+      opacity: CONTOUR_FLOOR_OPACITY,
+      depthWrite: false,
+    });
+    const line = new three.Line(geometry, material);
+    scene.add(line);
+    built.push({
+      object: line,
+      dispose: () => {
+        geometry.dispose();
+        material.dispose();
+      },
+    });
+  }
+  return built;
+}
+
+/** Dev walk badges: always-on-top sprites, one per label. Canvas circle +
+ * text, no external assets (CSP holds). */
+function buildLabels(
+  { three, scene }: SceneSeam,
+  labels: ViewerLabel[],
+): Decoration[] {
+  const built: Decoration[] = [];
+  for (const l of labels) {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
+    const bg =
+      l.kind === "wall" ? "#6b5d49" : l.kind === "tail" ? "#3d6b8e" : "#c66a4a";
+    ctx.beginPath();
+    ctx.arc(64, 64, 55, 0, Math.PI * 2);
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = "#faf6ee";
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "700 58px ui-monospace, Menlo, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(l.text, 64, 68);
+    const tex = new three.CanvasTexture(canvas);
+    const mat = new three.SpriteMaterial({
+      map: tex,
+      depthTest: false,
+      transparent: true,
+    });
+    const sprite = new three.Sprite(mat);
+    sprite.position.set(...l.position);
+    sprite.scale.setScalar(l.kind === "wall" ? 0.42 : 0.3);
+    sprite.renderOrder = 999;
+    scene.add(sprite);
+    built.push({
+      object: sprite,
+      dispose: () => {
+        tex.dispose();
+        mat.dispose();
+      },
+    });
+  }
+  return built;
+}
+
 /** Async-only load outcome, stamped with the splat-set key it belongs to.
  * "Loading" is derived (no outcome for the current key yet) so effects
  * never call setState synchronously (react-hooks/set-state-in-effect). */
@@ -250,20 +384,23 @@ export default function SplatViewer({
   outlines = null,
 }: SplatViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  // The renderer key is STRUCTURE ONLY — which files are in the scene, and
-  // what fixed geometry surrounds them. Transforms are deliberately absent
-  // (decision 0133): a splat's position used to sit in this key, so moving
-  // one piece tore the renderer down and re-downloaded the whole room —
-  // 275.8 MB and 25–56 s on the reference room (0123). Transforms are now
-  // applied to live meshes by their own effect below, and a proposed move
-  // costs nothing. `clip` stays in the key because it is a different
+  // The renderer key carries only what needs a NEW RENDERER — which files
+  // are in the scene, and the fixed geometry surrounding them. Everything
+  // that changes while the renderer is alive lives elsewhere, because this
+  // key is global: whatever is in it takes the whole room down with it, and
+  // rebuilding a splat means re-downloading it (47.2 MB / 14–19 s on the
+  // reference room; 0123/0125, re-confirmed in 0188). Transforms left in
+  // decision 0133; measured outlines and walk badges left in 0188, into the
+  // decoration effects below. `clip` stays because it is a different
   // GEOMETRY of the same file (a new SDF edit), not a placement of it —
   // and because a clip volume is parented to its mesh, so it follows a
   // move for free rather than needing to be rebuilt by one.
-  const key = useMemo(
-    () => rendererKey({ splats, shell, labels, outlines }),
-    [splats, shell, labels, outlines],
-  );
+  const key = useMemo(() => rendererKey({ splats, shell }), [splats, shell]);
+  // Decoration signatures: a caller handing us an equal-but-fresh array
+  // must not rebuild anything, for the same reason the renderer key is a
+  // string rather than an identity.
+  const outlineSig = useMemo(() => outlinesKey(outlines), [outlines]);
+  const labelSig = useMemo(() => labelsKey(labels), [labels]);
   const [outcome, setOutcome] = useState<LoadOutcome | null>(null);
 
   // Callback identity must not restart the renderer; refs are written
@@ -291,6 +428,13 @@ export default function SplatViewer({
   // dependencies: an array identity change must never restart the renderer.
   const splatsRef = useRef(splats);
   const meshesRef = useRef<SplatMeshHandle[]>([]);
+  // --- The decoration seam (decision 0188). The build effect publishes the
+  // live scene here and bumps the epoch; the decoration effects below draw
+  // into it. The epoch exists because the build is ASYNC: a decoration
+  // effect that runs while the renderer is still importing three.js finds
+  // no scene, does nothing, and must be re-run once there is one.
+  const sceneRef = useRef<SceneSeam | null>(null);
+  const [sceneEpoch, setSceneEpoch] = useState(0);
   // While the object wave is playing, visibility belongs to the reveal —
   // it is mid-sentence about which pieces have arrived, and a proposal
   // must not interrupt it. Ownership returns when the wave ends.
@@ -565,103 +709,11 @@ export default function SplatViewer({
         // a rebuild.
         meshesRef.current = meshes as unknown as SplatMeshHandle[];
 
-        // --- Where a moved piece was measured (decision 0131). Its
-        // footprint stays on the floor in the contour's own line and tone,
-        // because in this room that line means MEASUREMENT — the same
-        // language the reveal used to draw the boundary. Not a badge, not a
-        // ghost of the object: the measurement, still there, one field away
-        // from the proposal both on screen and in the document.
-        const outlineParts: Array<{
-          object: InstanceType<typeof THREE.Object3D>;
-          geometry: { dispose(): void };
-          material: { dispose(): void };
-        }> = [];
-        for (const o of outlines ?? []) {
-          const [hx, , hz] = o.half_extents_m;
-          // Same inline map as three.js R_y(+θ), through the same
-          // lib/clipSign convention as the clip volume — so the outline
-          // agrees with the clip AND with the solver that produced the
-          // footprint (0135/0112). One convention, never two half-flipped
-          // surfaces.
-          const yawEff = viewerYawRad(o.yaw_rad);
-          const cos = Math.cos(yawEff);
-          const sin = Math.sin(yawEff);
-          // The box's own base, lifted a hair so it sits ON the floor rather
-          // than z-fighting it. Derived from the measurement itself, not from
-          // the shell — an outline must survive a room with no floor.
-          const y = o.center_world[1] - o.half_extents_m[1] + 0.004;
-          const corners: [number, number, number][] = (
-            [
-              [-hx, -hz],
-              [hx, -hz],
-              [hx, hz],
-              [-hx, hz],
-              [-hx, -hz],
-            ] as [number, number][]
-          ).map(([u, v]) => [
-            o.center_world[0] + u * cos + v * sin,
-            y,
-            o.center_world[2] - u * sin + v * cos,
-          ]);
-          const geometry = new THREE.BufferGeometry().setAttribute(
-            "position",
-            new THREE.Float32BufferAttribute(corners.flat(), 3),
-          );
-          const material = new THREE.LineBasicMaterial({
-            color: CONTOUR_COLOR,
-            transparent: true,
-            opacity: CONTOUR_FLOOR_OPACITY,
-            depthWrite: false,
-          });
-          const line = new THREE.Line(geometry, material);
-          scene.add(line);
-          outlineParts.push({ object: line, geometry, material });
-        }
-
-        // Dev walk badges: always-on-top sprites, one per label. Canvas
-        // circle + text, no external assets (CSP holds).
-        const labelSprites: Array<{
-          sprite: InstanceType<typeof THREE.Sprite>;
-          dispose: () => void;
-        }> = [];
-        for (const l of labels ?? []) {
-          const canvas = document.createElement("canvas");
-          canvas.width = canvas.height = 128;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) continue;
-          const bg =
-            l.kind === "wall" ? "#6b5d49" : l.kind === "tail" ? "#3d6b8e" : "#c66a4a";
-          ctx.beginPath();
-          ctx.arc(64, 64, 55, 0, Math.PI * 2);
-          ctx.fillStyle = bg;
-          ctx.fill();
-          ctx.lineWidth = 7;
-          ctx.strokeStyle = "#faf6ee";
-          ctx.stroke();
-          ctx.fillStyle = "#ffffff";
-          ctx.font = "700 58px ui-monospace, Menlo, monospace";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(l.text, 64, 68);
-          const tex = new THREE.CanvasTexture(canvas);
-          const mat = new THREE.SpriteMaterial({
-            map: tex,
-            depthTest: false,
-            transparent: true,
-          });
-          const sprite = new THREE.Sprite(mat);
-          sprite.position.set(...l.position);
-          sprite.scale.setScalar(l.kind === "wall" ? 0.42 : 0.3);
-          sprite.renderOrder = 999;
-          scene.add(sprite);
-          labelSprites.push({
-            sprite,
-            dispose: () => {
-              tex.dispose();
-              mat.dispose();
-            },
-          });
-        }
+        // Publish the decoration seam and wake the effects that own the
+        // measured outlines and the walk badges (decision 0188). They draw
+        // into this scene; nothing they do can reach the meshes above.
+        sceneRef.current = { three: THREE, scene };
+        setSceneEpoch((n) => n + 1);
 
         // --- Framing: fit the camera to the content, not the content to a
         // hardcoded camera. Object extents aren't known until meshes load,
@@ -1110,19 +1162,11 @@ export default function SplatViewer({
           renderer.domElement.removeEventListener("pointerdown", cancelEntrance);
           controls.dispose();
           meshesRef.current = [];
+          sceneRef.current = null;
           revealOwnsVisibilityRef.current = false;
           for (const m of meshes) {
             scene.remove(m);
             m.dispose?.();
-          }
-          for (const { object, geometry, material } of outlineParts) {
-            scene.remove(object);
-            geometry.dispose();
-            material.dispose();
-          }
-          for (const { sprite, dispose } of labelSprites) {
-            scene.remove(sprite);
-            dispose();
           }
           for (const { object, material, geometry } of contourParts) {
             scene.remove(object);
@@ -1158,14 +1202,21 @@ export default function SplatViewer({
 
     return () => {
       disposed = true;
+      // Cleared here and not only inside `cleanup`, which is not assigned
+      // until the build finishes: a build abandoned while its splats were
+      // still loading must not leave the decoration effects drawing into a
+      // scene nobody renders.
+      sceneRef.current = null;
+      meshesRef.current = [];
       cleanup?.();
     };
-    // `key` is the structural signature of everything this effect BUILDS —
-    // splat files, clip volumes, shell planes, badges, outlines — so the
-    // arrays those come from are deliberately NOT dependencies. Depending
-    // on `splats` by identity would restart the renderer whenever a caller
-    // recomputed the array, which is exactly what a proposal does (0133);
-    // structure is the key's job, placement is the seam's.
+    // `key` is the signature of what this effect BUILDS — splat files,
+    // clip volumes, shell planes — so the arrays those come from are
+    // deliberately NOT dependencies. Depending on `splats` by identity
+    // would restart the renderer whenever a caller recomputed the array,
+    // which is exactly what a proposal does (0133). `outlines` and
+    // `labels` are read here only to be handed to the decoration effects;
+    // they must never appear in this list (0188).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, idleOrbit]);
 
@@ -1178,6 +1229,46 @@ export default function SplatViewer({
       revealOwnsVisibilityRef.current,
     );
   }, [splats]);
+
+  // --- The decoration effects (decision 0188). Each owns its own objects
+  // end to end: it builds them into the live scene and takes exactly those
+  // back out again. Nothing here can restart the renderer, which is the
+  // entire point — an outline appearing is five vertices on the floor, and
+  // it used to cost a re-download of the room.
+  //
+  // Both read the seam at run time and do nothing when there is no scene
+  // yet; `sceneEpoch` brings them back when one is published. The seam is
+  // captured in a local so the cleanup removes from the scene it added to,
+  // never from whichever scene happens to be current later.
+  useEffect(() => {
+    const seam = sceneRef.current;
+    if (!seam) return;
+    const built = buildOutlines(seam, outlines ?? []);
+    return () => {
+      for (const d of built) {
+        seam.scene.remove(d.object);
+        d.dispose();
+      }
+    };
+    // Keyed on the SIGNATURE, not the array identity — an equal-but-fresh
+    // array from a re-rendering parent must cost nothing. Reading the array
+    // itself is safe: an effect runs with the closure of the render whose
+    // deps changed, and an unchanged signature means equal contents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outlineSig, sceneEpoch]);
+
+  useEffect(() => {
+    const seam = sceneRef.current;
+    if (!seam) return;
+    const built = buildLabels(seam, labels ?? []);
+    return () => {
+      for (const d of built) {
+        seam.scene.remove(d.object);
+        d.dispose();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labelSig, sceneEpoch]);
 
   return (
     <div
