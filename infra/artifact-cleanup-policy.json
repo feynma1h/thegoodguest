@@ -1,0 +1,34 @@
+[
+  {
+    "name": "keep-tagged-serving-and-buildcache",
+    "action": { "type": "Keep" },
+    "condition": {
+      "tagState": "TAGGED",
+      "tagPrefixes": ["serving", "buildcache"]
+    }
+  },
+  {
+    "name": "keep-recent-perception-obj",
+    "action": { "type": "Keep" },
+    "mostRecentVersions": {
+      "packageNamePrefixes": ["perception-obj"],
+      "keepCount": 3
+    }
+  },
+  {
+    "name": "keep-recent-api-services",
+    "action": { "type": "Keep" },
+    "mostRecentVersions": {
+      "packageNamePrefixes": ["api-"],
+      "keepCount": 10
+    }
+  },
+  {
+    "name": "delete-superseded",
+    "action": { "type": "Delete" },
+    "condition": {
+      "tagState": "ANY",
+      "packageNamePrefixes": ["perception-obj", "api"]
+    }
+  }
+]
