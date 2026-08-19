@@ -388,6 +388,26 @@ Default tool for code work: **Claude Code**. Default for strategy / architecture
 
 **A lane that walks the room page will 404 on `dev-fixtures`** — it is deliberately absent from worktrees (3.9 GB). The cheap fix is `tools/make_synthetic_splat.py` (~14 MB of synthetic rooms, no real capture), and the rule is DELETE THEM AFTERWARDS so nothing real or bulky can reach a build.
 
+**The coordinator rotates itself before it degrades, and does not wait to be
+told.** A coordinator accumulates every lane's context and is the one session
+nobody re-provisions, so it is the most likely place in this project for a
+stale premise to survive — which is not hypothetical: on 2026-08-19 a sitting
+session was handed a brief whose decision-number block collided with a note
+already on disk, whose "report does not exist" claim was false, and whose repo
+state had moved twice while the session ran. Each cost real time to discover.
+
+So: when the context is getting heavy, spin up a successor **proactively**
+rather than pushing through, and treat the rotation as ordinary hygiene rather
+than an admission. The successor's prompt carries only what is NOT durable —
+live repo state, which lanes are in flight and where, and the immediate next
+action. Everything else it should read from CLAUDE.md and `docs/decisions/`,
+because a prompt is written once and those are maintained. Three checks the
+outgoing coordinator owes its successor, all cheap and all learned the hard
+way: confirm the free decision numbers from `ls docs/decisions/` rather than
+the ledger in this file, state the actual branch and HEAD rather than a
+remembered one, and name any claim in the handoff that has not been verified
+this hour.
+
 **Starting a session is the orchestrator's job to make one paste long.** Whenever
 new work should run in its own session, the coordinator delivers a
 copy-pasteable prompt AND does the pre-session setup first — provision the
