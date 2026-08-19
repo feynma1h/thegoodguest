@@ -1,6 +1,6 @@
 # 0177 — the seating question is not answerable yet
 
-**Date:** 2026-08-14
+**Date:** 2026-08-19
 **Status:** Decided
 
 ## Context

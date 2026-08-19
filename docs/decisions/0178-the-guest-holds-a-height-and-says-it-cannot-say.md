@@ -1,6 +1,6 @@
 # 0178 — the guest holds a height and says it cannot say
 
-**Date:** 2026-08-14
+**Date:** 2026-08-19
 **Status:** Decided; the change itself is scheduled, not built
 
 ## Context
@@ -108,7 +108,7 @@ and should come back with the real one recorded this time.
 
 ## Widened by a production walk, the same day
 
-The operator ran four turns against the deployed guest on 2026-08-14, after
+The operator ran four turns against the deployed guest on 2026-08-19, after
 the release, and found four more defects of the same kind. They are folded
 into this revision rather than scheduled separately, because they ride the
 same FACTS_VERSION bump, the same charter revision and the same evals run,
