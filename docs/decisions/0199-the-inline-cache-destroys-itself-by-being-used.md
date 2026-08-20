@@ -118,6 +118,27 @@ only thing standing between the cache and the delete rule.
 
 ## Outcome
 
-Measured on this session's real perception build, recorded in the session
-report: see the CLAUDE.md Conventions entry beside 0182 for the number the next
-person should expect.
+**The prediction was registered before the build and it held.** `abc949ec` had
+hit, so `:buildcache` was already degraded and this session's build was
+forecast to miss at roughly 58-63 minutes. Build `e13c8a70` **missed and took
+53 m 58 s** (54 m 51 s wall) — the right side of the prediction, a few minutes
+under the band.
+
+**The fix then measured on the real Dockerfile, not just the probe.** A second
+build of the same tree, importing the registry cache the first one published,
+came back **49 of 49 steps `CACHED` in 0 m 40 s**. Every layer imported,
+including the `apt-get`/`git clone`/`mamba env create` prefix that the inline
+cache had been dropping.
+
+**Read that 40 s correctly.** It is a no-change build: identical source, so
+even the source `COPY` layers hit and the push found every layer already in the
+registry. A normal build changing `services/perception-obj/*.py` still has to
+rebuild and push from Dockerfile line 187 down, which is the historical 8-10
+minute figure. What the fix buys is not a faster hit — it is that **the hit is
+now repeatable instead of alternating**. The steady state goes from
+`8 min, 60 min, 8 min, 60 min` to `8 min` every time, and the 60-minute build
+returns only when something genuinely invalidates an early layer.
+
+So the number for the next person: **expect ~8-10 minutes for a source change,
+and treat a 60-minute build as a signal that an early layer really did change**
+— no longer as the coin-flip it used to be.
