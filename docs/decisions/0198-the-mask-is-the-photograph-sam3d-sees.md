@@ -122,6 +122,39 @@ a vertical panel. Three corrections, all measured:
    reconstruction (0065). Any follow-up bench must persist
    `extract_layout`'s output beside the splat, as production does.
 
+## Outcome — round 2 ran the bound the first item below asked for (same day)
+
+Six more targets, operator-directed: every object the unclaimed-depth
+detector flags across the four preserved rooms, plus a deliberate
+false-positive control. Trust gates perfect — six of six control
+segmentations sha256-identical to the cached stacks (the three pre-0089
+spike frames included: the bench's new person detections partition back out
+and the kept stack lands bit-identical), five of five completed control
+reconstructions reproducing their cached splats' Gaussian counts EXACTLY at
+production's seed, across an UNCACHED rebuild whose clone layers came from
+upstream HEAD — determinism across builds, so 0180's unpinned-clone worry
+did not bite here (pinning it is still right).
+
+The tally: **one clear win in seven** (round 1's desk), one modest win
+(spike's f142 table: +64% mask growth at IoU 0.607, no neighbour merged,
+and the reconstruction went from overflowing its measured box to fitting
+it), one no-change on the marquee object (the spike bed: +39k mask px,
+proportions untouched — its missing half is unphotographed, so
+class-6-by-truncation stays model-bound per 0052), two detector false
+positives where refinement harmlessly no-op'd, the false-positive control
+passing its acceptance test (the bag was NOT absorbed; +4% px), and one
+refined arm unobtainable — a deterministic OOM on a crop whose 6%-smaller
+control fits, two containers, four attempts.
+
+**What this settles:** the mask-cut class is real but rare, and the
+refinement loop is safe — variant-C prompts absorbed a neighbour zero times
+in six, so "flag broadly, refine, accept only a changed-and-valid mask" is
+a sound production shape with a small expected yield. The detector alone is
+not a defect-finder: four of six flags were clutter or unphotographed mass.
+A production build should be priced against that yield — roughly one
+recovered object per room or two, at one grounding pass plus one
+reconstruction per flag.
+
 ## What would change this decision
 
 - **n = 1 object.** Before any production build, run the same bench on two
