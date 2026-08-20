@@ -48,6 +48,16 @@ steps:
   # docker-container driver is required — the default `docker` driver cannot
   # write `type=registry` cache at all.
   #
+  # `--provenance=false --sbom=false` is load-bearing, not tidiness. buildx
+  # attaches an attestation by default, which makes the pushed artifact an
+  # OCI INDEX over {real image, attestation} — so the timestamped tag names
+  # the index while Cloud Run resolves and pins the CHILD manifest, which
+  # carries no tag. Decision 0190 protects the live image BY TAG, and
+  # move_serving_tag in deploy_perception.sh tags `${_IMAGE_URI}`; together
+  # those would tag the index and leave the digest the GPU service actually
+  # boots from untagged and deletable. Single-manifest keeps tag and pinned
+  # digest the same object, which is what 0190 assumes. Decision 0200.
+
   # `:buildcache` now holds a cache manifest rather than a runnable image.
   # Nothing deploys it, and decision 0190's cleanup policy keeps it by TAG,
   # so it stays protected. A missing or unreadable `:buildcache` fails only
@@ -62,6 +72,7 @@ steps:
         echo "$$HF_TOKEN" > /tmp/hf_token.txt
         docker buildx create --name rsbuilder --driver docker-container --use
         docker buildx build \
+          --provenance=false --sbom=false \
           --secret id=hf_token,src=/tmp/hf_token.txt \
           --cache-from "type=registry,ref=${_CACHE_URI}" \
           --cache-to "type=registry,ref=${_CACHE_URI},mode=max" \
