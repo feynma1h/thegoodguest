@@ -188,3 +188,109 @@ class TestTheNoCensusDegradeIsUntouched:
         second = [f.frame_index for f in sampling.select_frames(frames, max_frames)]
         assert first == second, name
         assert len(first) == max_frames, name
+
+
+# What the object-aware residue does to the four preserved captures
+# (decision 0202), per room: boxes, then STARVED boxes — the ones with at
+# most one qualifying view, so nothing downstream has an alternative arm to
+# prefer — then USABLE views, the qualifying views summed with each box
+# capped at the plan's own per-box limit of 2, since views past that are
+# recorded and never reconstructed.
+OBJECT_AWARE_EFFECT = {
+    #        boxes, starved before/after, usable before/after
+    "rp7": (6, 2, 0, 10, 12),
+    "rp6g1": (5, 1, 0, 9, 10),
+    "rp6g2": (11, 6, 2, 16, 20),
+    "spike": (9, 5, 0, 13, 18),
+}
+
+
+class TestObjectAwareResidue:
+    """The residue spent on second views of boxes instead of on pose
+    spread. Off by default; these run it explicitly."""
+
+    @staticmethod
+    def _select(frames, boxes, *, object_aware: bool):
+        import census_sampling as cs
+
+        before = cs.OBJECT_AWARE_RESIDUE
+        cs.OBJECT_AWARE_RESIDUE = object_aware
+        try:
+            return cs.select_frames_census(frames, boxes, 12)
+        finally:
+            cs.OBJECT_AWARE_RESIDUE = before
+
+    @staticmethod
+    def _views_per_box(frames, boxes, selected) -> list[int]:
+        _V, Q = census_sampling.box_visibility(frames, boxes)
+        pos = {f.frame_index: i for i, f in enumerate(frames)}
+        chosen = [pos[f.frame_index] for f in selected]
+        return [
+            int(sum(Q[p, bi] for p in chosen)) for bi in range(len(boxes))
+        ]
+
+    def test_it_is_off_by_default(self):
+        assert census_sampling.OBJECT_AWARE_RESIDUE is False
+
+    def test_off_reproduces_the_shipped_selection(self, capture):
+        name, payload, frames, boxes = capture
+        selected, _info = self._select(frames, boxes, object_aware=False)
+        assert [f.frame_index for f in selected] == payload[
+            "shipped_sampling"
+        ]["selected_frame_indices"], name
+
+    def test_it_feeds_starved_boxes_and_stops_at_the_plans_cap(self, capture):
+        name, _payload, frames, boxes = capture
+        n_boxes, starved_before, starved_after, usable_before, usable_after = (
+            OBJECT_AWARE_EFFECT[name]
+        )
+        assert len(boxes) == n_boxes
+
+        def measure(object_aware):
+            selected, _ = self._select(frames, boxes, object_aware=object_aware)
+            per = self._views_per_box(frames, boxes, selected)
+            return sum(v <= 1 for v in per), sum(min(v, 2) for v in per)
+
+        assert measure(False) == (starved_before, usable_before), name
+        assert measure(True) == (starved_after, usable_after), name
+
+    def test_it_never_uncovers_a_box(self, capture):
+        name, _payload, frames, boxes = capture
+        _selected, info = self._select(frames, boxes, object_aware=True)
+        assert info["uncovered_box_ids"] == [], name
+
+    def test_it_spends_no_extra_frames(self, capture):
+        name, payload, frames, boxes = capture
+        selected, _info = self._select(frames, boxes, object_aware=True)
+        assert len(selected) == payload["shipped_sampling"]["max_frames"], name
+
+    def test_it_is_deterministic(self, capture):
+        name, _payload, frames, boxes = capture
+        first, _ = self._select(frames, boxes, object_aware=True)
+        second, _ = self._select(frames, boxes, object_aware=True)
+        assert [f.frame_index for f in first] == [
+            f.frame_index for f in second
+        ], name
+
+    def test_it_says_so_in_the_manifest_block(self, capture):
+        name, _payload, frames, boxes = capture
+        _selected, on = self._select(frames, boxes, object_aware=True)
+        _selected2, off = self._select(frames, boxes, object_aware=False)
+        assert on["residue_policy"] == "object_aware_v1", name
+        assert on["views_per_box_target"] == census_sampling.VIEWS_PER_BOX_TARGET
+        assert "residue_policy" not in off, name
+
+    def test_it_does_not_reach_the_views_the_hand_fixes_used(self, capture):
+        """Recorded because it is the honest limit of this change, not a
+        bug in it. 0197 fixed rp7's chair with f275 and rp6g1's table with
+        f178, both chosen BY EYES; the residue here picks by pose spread
+        from what a box already has, and lands elsewhere. What it buys is
+        that the box HAS a second arm at all — which of an object's arms is
+        the good one is an output-side question nothing yet asks (see the
+        decision note)."""
+        name, _payload, frames, boxes = capture
+        hand_picked = {"rp7": {275}, "rp6g1": {178}}.get(name)
+        if not hand_picked:
+            pytest.skip(f"{name} has no hand-picked view on record")
+        selected, _info = self._select(frames, boxes, object_aware=True)
+        assert not (hand_picked & {f.frame_index for f in selected}), name
