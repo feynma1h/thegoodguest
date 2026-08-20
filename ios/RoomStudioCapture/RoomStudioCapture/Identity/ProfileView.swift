@@ -33,7 +33,7 @@ struct ProfileView: View {
             // screen, pushing the ID card and the sign-in action off the bottom.
             ScrollView {
                 VStack(spacing: 0) {
-                    WordmarkGlyph(size: 76, color: .rsInk, filled: true)
+                    Mark(size: 76)
                         .padding(.top, 6)
 
                     Text(isLinked ? "Signed in" : "A guest, so far")

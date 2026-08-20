@@ -12,7 +12,7 @@ struct ColdStartView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            WordmarkGlyph(size: 44)
+            Mark(size: 44)
             Text(RSBrand.name)
                 .rsFont(.display, size: 20, weight: .medium)
                 .foregroundStyle(Color.rsInk)
