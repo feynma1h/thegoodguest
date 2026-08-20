@@ -188,7 +188,7 @@ Suite **544**: 538 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
-### api-public — `api-public-00040-loj`, image `20260814-114714`
+### api-public — `api-public-00042-ruq`, image `20260821-005416`
 
 Client-facing, `--allow-unauthenticated`, with in-app Firebase JWT verification
 as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
@@ -227,7 +227,7 @@ declared-blob presence (0105). A rejection is a `failed_invalid` or
 Terminal-failure scenes are stamped with `expire_at`; revival clears it; `ready`
 is never stamped.
 
-### perception-obj — `perception-obj-00044-m5p`, image `20260813-222442`
+### perception-obj — `perception-obj-00062-hum`, image `20260821-010928`
 
 Runs as `perception-obj-runtime@` under least privilege (0090) and is
 platform-gated — only `tasks-invoker@` holds `run.invoker` (0106). Scales to
@@ -458,7 +458,11 @@ gains.
 - **`b667f891` is budget-starved.** Its census plan carries a 53-item long tail
   against the 900 s request budget, so it budget-stops every round and the
   fusion post-passes never run there. Not a placement defect — the room's
-  clutter exceeds one request.
+  clutter exceeds one request. **Measured cost, 2026-08-20:** a warm re-drive
+  on the colour image still came back `budget_stopped: true,
+  refinement_skipped: true`, and the room gained colour on 0 of 45 objects
+  while 40 of them had readable splats. The post-passes it loses are not
+  abstract.
 - **A window ships with ~30° in-plane skew.** Near-square planar objects are
   ~90°-ambiguous to the model and no instrument scores in-plane orientation.
 - **The "cabinet behind a wall" is not the declip bound** (0104). The declip pass
@@ -474,9 +478,16 @@ gains.
 
 **The guest**
 
-- **Object colour is built but reaches no production room** (0184). Perception
-  must deploy and the four walk rooms re-driven before any manifest carries a
-  `color` block. The guest is honest meanwhile by construction.
+- **Object colour ships in three of the four walk rooms, not the fourth**
+  (0184/0185; deployed 2026-08-20). rp7 8/16, rp6g1 9/20, spike 14/25 objects
+  carry a measured `color` block, and `scene_facts` turns them into spoken
+  names — spike's `red chair` is a real production referent. **rp6g2
+  (`b667f891`) has 0 of 45 and another re-drive will not change that**:
+  `apply_object_colors` runs inside the refinement pass, and that room's
+  manifest reports `budget_stopped: true, refinement_skipped: true`, so
+  colour is one of the post-passes its long tail costs it. Objects with no
+  block inside a coloured room are the confidence gate working, not a
+  failure.
 - **`guest_tools._find` falls back to the bare label**, so "chair" in a
   two-chair room silently resolves to whichever comes first rather than
   refusing. Pre-existing; the charter is what protects the person there.
@@ -533,7 +544,7 @@ gains.
   restriction, 27 APIs). The key the web app ships is properly restricted.
   Closing the gap breaks the live-authed-check path every recent api-public
   deploy uses — ship a replacement first.
-- **The registry holds 4 `perception-obj` images, not 3, and that is the policy working (0190).** The keep rule is *the 3 newest PLUS anything tagged `serving` or `buildcache`* — never "exactly 3", because a lane iterating on builds pushes the live image out of the top three, and exactly-3-by-recency would then delete the image Cloud Run is running on a scale-to-zero GPU service. On 2026-08-20 three undeployed builds landed and the live `20260813-222442` sat **4th, held only by its `serving` tag**; the policy evicted `20260816-050851` automatically when the third arrived, so the count is pinned at 4 (worst case 5) and self-maintaining. **The fix for a high count is to deploy or delete the surplus builds, never to tighten the policy.** Billing confirms the mechanism: ₹420/day at 1,446.7 GiB is ₹0.2903/GiB-day (= AR's $0.10/GB-month), Aug 19's ₹140 implies a 482 GiB daily average as GC drained, and the state after the geom retirement is 154.3 GiB ≈ **₹45/day, 89% below**. Two of those four images are undeployed and untagged, worth ~₹22/day — **untagging frees nothing; deleting the version is what reclaims it.**
+- **The registry holds 4 `perception-obj` images, not 3, and that is the policy working (0190).** The keep rule is *the 3 newest PLUS anything tagged `serving` or `buildcache`* — never "exactly 3", because a lane iterating on builds pushes the live image out of the top three, and exactly-3-by-recency would then delete the image Cloud Run is running on a scale-to-zero GPU service. On 2026-08-20 three undeployed builds landed and the live `20260813-222442` sat **4th, held only by its `serving` tag**; the policy evicted `20260816-050851` automatically when the third arrived, so the count is pinned at 4 (worst case 5) and self-maintaining. **The fix for a high count is to deploy or delete the surplus builds, never to tighten the policy.** Billing confirms the mechanism: ₹420/day at 1,446.7 GiB is ₹0.2903/GiB-day (= AR's $0.10/GB-month), Aug 19's ₹140 implies a 482 GiB daily average as GC drained, and the state after the geom retirement is 154.3 GiB ≈ **₹45/day, 89% below**. Two of those four images are undeployed and untagged, worth ~₹22/day — **untagging frees nothing; deleting the version is what reclaims it.** **Updated 2026-08-20 by the colour deploy:** the live image is now `20260821-010928` / `sha256:faa005c8…`, and the count sits temporarily above 4 for two reasons worth recognising rather than "fixing" — the first buildx build published an attestation sibling alongside the image (0200; `--provenance=false` stops that recurring), and the rollback target `d15ca00d…` is deliberately held by a `serving-rollback-00044-m5p` tag, which the Keep rule matches on PREFIX. **That hold is temporary and owed back** — drop the tag once `00062-hum` is trusted, or the image is pinned forever.
 - **Terms §9–§11 need an Indian lawyer.** Consumer Protection Act 2019 §2(46)
   can void the §11 liability cap against a consumer.
 - **App Store collateral is unstarted** except the icon: screenshots, support
@@ -747,7 +758,7 @@ app then silently mints a new anonymous uid, and every room captured under the
 old one is orphaned. Auto-cleanup would fire that for every user on a schedule.
 It is a single checkbox in the console.
 
-**Cloud Run revision numbers are NOT chronological on `perception-obj`.** The service has produced two revisions numbered 00036 (`-xer`, RP-8; `-l9l`, the 0089/0090 security+privacy deploy), one numbered 00038 (`-ses`, the 0081/0082 wave), and `perception-obj-00037-sd9` (image `20260808-200124`, the 0104 walk-classes deploy), which served 100% for two days despite a LOWER number than 00038. Do NOT read a lower revision number as a rollback — check the image tag and the traffic split (`gcloud run services describe perception-obj --region asia-southeast1`), which are the authorities. Serving now: **`perception-obj-00044-m5p`**, image `20260813-222442` (the same digest `sha256:d15ca00d…` that `00043-yiz` shipped — 00044 redeployed it on 2026-08-16 and the image never changed).
+**Cloud Run revision numbers are NOT chronological on `perception-obj`.** The service has produced two revisions numbered 00036 (`-xer`, RP-8; `-l9l`, the 0089/0090 security+privacy deploy), one numbered 00038 (`-ses`, the 0081/0082 wave), and `perception-obj-00037-sd9` (image `20260808-200124`, the 0104 walk-classes deploy), which served 100% for two days despite a LOWER number than 00038. Do NOT read a lower revision number as a rollback — check the image tag and the traffic split (`gcloud run services describe perception-obj --region asia-southeast1`), which are the authorities. Serving now: **`perception-obj-00062-hum`**, image `20260821-010928`, digest `sha256:faa005c8…` (the colour deploy, 2026-08-20). Its predecessor `00044-m5p` ran `20260813-222442` / `sha256:d15ca00d…` — the same digest `00043-yiz` shipped — and is the rollback target.
 
 **Old registry images are deleted by policy, and the live one is kept BY NAME
 (decision 0190).** `infra/artifact-cleanup-policy.json` is the source of truth
