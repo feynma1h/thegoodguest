@@ -218,6 +218,24 @@ class TestTheDetectorOnTheFrameItWasFoundOn:
             assert 0.0 <= record["own_fraction"] <= 1.0
             assert len(sig.unclaimed_vu) <= sig.considered_px
 
+    def test_the_prompt_is_the_one_the_bench_measured(self):
+        """The tightest gate available without a GPU: the prompt this
+        module emits for rp7 f114's desk is bit-for-bit the variant-C box
+        that produced 0198's measured win — `variant_C_mask_plus_unclaimed`
+        in the bench's `prompt_boxes.json`. Detector, box geometry, room
+        planes, mask stack and bbox arithmetic all have to agree for this
+        to hold."""
+        entry = next(e for e in DETECTOR_INDEX if e["frame"] == 114)
+        _b, _r, _p, _d, _dp, _c, stack = self._inputs(entry)
+        prompt = mask_refine.prompt_box_cxcywh(
+            stack[entry["mask_index"]], self._signal(entry).unclaimed_vu
+        )
+        assert prompt == pytest.approx(
+            [0.7169270833333333, 0.47673611111111114,
+             0.2859375, 0.46458333333333335],
+            abs=1e-12,
+        )
+
     def test_the_prompt_box_covers_mask_and_signal_together(self):
         entry = next(e for e in DETECTOR_INDEX if e["frame"] == 114)
         _box, _room, _pose, _dintr, _d, _c, stack = self._inputs(entry)
