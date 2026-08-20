@@ -90,6 +90,32 @@ of the shipped one and nothing from the alternative) — and **loses axis
 resolution**, `splat_axis_resolved` True → False, margin 0.1345 → 0.0656. A
 complete table whose facing is unresolved, against a slab whose facing is not.
 
+## Outcome — the chair round (same day, operator-directed)
+
+The operator asked for a cleaner view of rp7's half-rendered chair — the one
+object 0165 measured as genuinely occlusion-bound (0.49, 98% of it the desk).
+Scanned all 31 frames seeing its box at in_frame ≥ 0.85, picked **f275 by
+eyes** over the shortlist photographs (the far-side cluster shows backrest,
+seat and wheel base clear of the desk), segmented and reconstructed it on a
+bench candidate. Result: the shipped f7 arm is a hollow front shell; the
+f275 arm is a **complete office chair** — backrest, armrests, seat,
+cylinder, five-star base — extents' third axis 0.28 → 0.537 m.
+
+Three things this adds to the note above:
+
+- **The good view was never a candidate.** The chair had exactly one
+  association because f275 was never sampled — the object-blind sampler,
+  not the ranking, withheld it. The sort-key question this note refused is
+  therefore still refused correctly: the binding constraint sits a stage
+  earlier.
+- **The box-on-box occlusion proxy read 0.000 for f7 itself**, the frame we
+  know is half-blocked — it fails on tucked-under geometry. Another input
+  measure down.
+- The n=3 tally on "does a better photograph help": rp6g1's table (view),
+  rp7's desk (mask, 0198), rp7's chair (view) — every one chosen by eyes
+  plus an output-side check, never by an input score. 0162's negative
+  stands; eyes-chosen is the qualifier that separates these wins from it.
+
 ## What would change this decision
 
 - **The operator says A for rp6g1.** Then the output-side check is wrong on the
