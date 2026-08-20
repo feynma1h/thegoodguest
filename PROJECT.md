@@ -385,6 +385,51 @@ mistake available in this repo.
 - **Spark is not the render bottleneck** (0123). Parse is under 1% of the wait;
   fetch concurrency is flat from 1 to 10 because one GCS connection is capped.
 
+### The strategy those dead ends leave
+
+The dead ends above are not a scattering of failures; together they point one
+way, and every perception lane should be read against this.
+
+**1. The model is fixed and single-view.** SAM 3D takes one RGBA image. We do
+not train it and cannot make it consume several views — that is 0052's standing
+trigger and it waits on the field, not on us.
+
+**2. Everything DOWNSTREAM of the model is measured dead.** Better frame
+selection (0162), a measured depth pointmap (0181), and unioning two
+reconstructions (0166) are three unrelated mechanisms and three separate
+negatives. The shared cause is that a single-view reconstruction's unseen half
+is fabricated, so anything that interrogates or combines finished objects is
+asking a fabrication a question.
+
+**3. Everything UPSTREAM of it demonstrably works.** All three objects the
+operator named were fixed by changing what SAM 3D is *shown* — a better view
+for rp6g1's table and rp7's chair, a better mask for rp7's desk (0197/0198).
+The mask is the sharpest form of this: alpha IS the mask, so an incomplete mask
+deletes from the model's input what the photograph actually contains.
+
+**4. But an input CANNOT be scored in advance.** Eleven view measures have
+failed, and 0197 is the sharpest: the same swap gained one table a full set of
+legs and cost another the ones it had, with every input measure pointing the
+same way on both. **The effect is large and bidirectional, so no sort key is
+buildable.**
+
+**So the strategy is: change the input, and judge on the OUTPUT.** Generate
+candidate inputs — a different view, a repaired mask — reconstruct, and score
+the *result* against the object's measured RoomPlan box. The box is the only
+ground truth in this system that is not itself a fabrication: RoomPlan measured
+it. That is why the output-side check is the one instrument that has ever
+separated good from bad here, and it is what read rp6g1's table at 0.406 →
+1.004 of its box height and rp7's desk at 0.212 → 0.655.
+
+**The constraint is economics, not ideas.** Every candidate input costs a
+reconstruction. Repairing a mask costs roughly one extra reconstruction per
+flagged object — about one per room or two — which is cheap and is why it goes
+first. Sampling more views per object costs N extra reconstructions across
+every object, on a service where one room already budget-stops with a 53-item
+tail. Any proposal here must say what it costs per room before it says what it
+gains.
+
+
 ### Open defects
 
 **Perception / room quality**
