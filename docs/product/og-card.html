@@ -26,7 +26,10 @@
 
   Re-export triggers: the product name landing (the eyebrow and domain bake
   "roomstudio" into the PNG — this file is the og sibling of the
-  Wordmark.tsx one-file seam), or a copy change. Alternate tagline kept from
+  Wordmark.tsx one-file seam), a copy change, or the mark changing. The
+  eyebrow's mark is generated — it is tools/gen_mark.py's framed SVG pasted
+  inline, because this file has no build step to import it, and
+  tools/test_gen_mark.py fails if the two stop matching. Alternate tagline kept from
   the design source: "No photos generated. No feed. Your rooms are yours."
 -->
 <html lang="en">
@@ -42,7 +45,7 @@ body{margin:0;background:#f7efdf;font-family:'Instrument Sans',sans-serif;color:
 </head>
 <body>
 <div style="position:relative;width:1200px;height:630px;background:#f7efdf;overflow:hidden">
-  <div style="position:absolute;left:64px;top:64px;font:500 20px 'IBM Plex Mono',monospace;letter-spacing:.18em;color:rgba(58,45,34,.7)">❖ ROOMSTUDIO</div>
+  <div style="position:absolute;left:64px;top:64px;display:flex;align-items:center;gap:10px;font:500 20px 'IBM Plex Mono',monospace;letter-spacing:.18em;color:rgba(58,45,34,.7)"><svg width="25" height="25" viewBox="0 0 1024 1024" style="display:block" aria-hidden="true"><path d="M512 132 841.09 322 841.09 702 512 892 182.91 702 182.91 322Z" fill="#3a2d22"/><path d="M537.2 497.45 537.2 225.07 773.09 361.26 773.09 633.64Z" fill="#f7efdf"/><path d="M486.8 497.45 250.91 633.64 250.91 361.26 486.8 225.07Z" fill="#f7efdf"/><path d="M512 541.1 747.89 677.29 512 813.48 276.11 677.29Z" fill="#8e3b2f"/></svg><span>ROOMSTUDIO</span></div>
   <div style="position:absolute;right:64px;top:64px;border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:8px 18px;font:500 20px 'Instrument Sans',sans-serif;letter-spacing:.01em;color:rgba(58,45,34,.72)">iPhone Pro · LiDAR</div>
   <div style="position:absolute;left:64px;top:170px;width:690px;font:400 68px/1.17 'Source Serif 4',serif;letter-spacing:-.015em;color:#3a2d22">Every home contains<br>a version of itself its<br>owner has never seen.</div>
   <div style="position:absolute;left:64px;top:442px;width:690px;font:italic 400 25px/1.5 'Source Serif 4',serif;color:#8e3b2f"><span>Scan a room with your phone. Meet it again — real, in 3D.</span></div>

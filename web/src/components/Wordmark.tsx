@@ -7,27 +7,32 @@
  *
  * The mark is the room corner: a pointy-top hexagon divided by a three-way
  * seam into two wall faces and a floor — the captured volume, seen at true
- * 30° isometric. Same geometry as the app icon (decision 0176) and the
- * favicon re-exported from it, so a person meets one mark across the phone,
- * the tab and the site.
+ * 30° isometric. Its geometry is NOT authored here. It comes from
+ * `markGeometry.ts`, which `tools/gen_mark.py` generates from the one source
+ * every surface is cut from — the app icon, the tab icon, this wordmark and
+ * the share card. To change the mark, change the generator and re-run it;
+ * editing the paths here would fork it again.
  *
- * Outline in `currentColor`, floor in the rust accent. The icon's other two
- * surfaces are NOT filled here, and that was measured rather than assumed:
- * filling all three fails twice at this scale. At ~10px on parchment the ink
- * band swallows the interior and the mark reads as a blob; on the room
- * page's dark surface the band is darker than its background, so the
- * hexagon's silhouette disappears and the cream walls glow as a bright
- * shape. The icon can do it because it sits on its own light field. A
- * wordmark has no field. Keeping the outline on `currentColor` is what lets
- * one mark serve both tones; the floor is the one surface that can hold a
- * fixed colour, and it reads on both.
+ * The face colours are absolute and do NOT inherit `currentColor`. The mark
+ * carries its own cream and its own rust onto whatever it sits on, which is
+ * what lets it stay the same object on the phone icon, the browser tab and
+ * both of this site's surfaces. A mark whose interior is the page showing
+ * through is a different mark on every page.
  *
- * Sized at 1em, not larger. The glyph it replaced was a text character and
- * sat under the cap height; a mark set well above it reads as a logo the
- * page is presenting rather than a stand-in it is holding quietly. Judged
- * in the browser at true size in both tones — above 1em the mark dominates
- * the tracked mono, and above stroke 1.8 the seam fills in and the corner
- * stops reading.
+ * `tone` picks which of the two ink plates the mark sits on, and that is the
+ * only thing that varies:
+ *
+ *   ink   → on parchment; the framed plate, whose rim band separates the
+ *           mark from a light field.
+ *   cream → on the room page's ink surface; the frameless plate, which
+ *           circumscribes the three faces exactly so only the seams read.
+ *           Decision 0176 measured why: a full band on a dark field sits
+ *           0.11 off it and reads as a heavy ring rather than a drawn edge.
+ *
+ * Sized against the cap height of the tracked mono beside it rather than at
+ * a round em: the mark is a filled object where the surrounding text is a
+ * thin uppercase rule, so matching em would leave it reading as the larger
+ * of the two. Judged in the browser at true size in both tones.
  *
  * This is the only place the name is RENDERED AS THE MARK, but it is not the
  * only place the string appears in user-visible text. When the real name
@@ -39,6 +44,45 @@
  * silently resets returning visitors.
  */
 
+import {
+  FACES,
+  MARK_FLOOR,
+  MARK_INK,
+  MARK_WALL,
+  PLATE_FRAMED,
+  PLATE_FRAMELESS,
+} from "@/components/markGeometry";
+
+/**
+ * The mark on its own, at the given size. Exported for surfaces that show the
+ * mark without the name beside it.
+ */
+export function Mark({
+  size = "1em",
+  onDark = false,
+  className,
+}: {
+  size?: string;
+  onDark?: boolean;
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 1024 1024"
+      width={size}
+      height={size}
+      aria-hidden
+      focusable="false"
+      className={`shrink-0 ${className ?? ""}`}
+    >
+      <path d={onDark ? PLATE_FRAMELESS : PLATE_FRAMED} fill={MARK_INK} />
+      <path d={FACES[0]} fill={MARK_WALL} />
+      <path d={FACES[1]} fill={MARK_WALL} />
+      <path d={FACES[2]} fill={MARK_FLOOR} />
+    </svg>
+  );
+}
+
 export default function Wordmark({
   className,
   tone = "ink",
@@ -48,37 +92,11 @@ export default function Wordmark({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] ${
+      className={`inline-flex items-center gap-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] ${
         tone === "cream" ? "text-paper/70" : "text-ink/70"
       } ${className ?? ""}`}
     >
-      <svg
-        viewBox="0 0 20 20"
-        width="1em"
-        height="1em"
-        aria-hidden
-        focusable="false"
-        className="shrink-0"
-      >
-        {/* The floor first, so the outline and seam sit over its edges. */}
-        <path d="M10 10 2.21 14.5 10 19 17.79 14.5Z" className="fill-accent" />
-        {/* The volume, then the corner it is seen from: centre to apex is
-            where the two walls meet, centre to each lower vertex is where
-            each wall meets the floor. */}
-        <path
-          d="M10 1 17.79 5.5 17.79 14.5 10 19 2.21 14.5 2.21 5.5Z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.8}
-          strokeLinejoin="round"
-        />
-        <path
-          d="M10 10 10 1M10 10 2.21 14.5M10 10 17.79 14.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.8}
-        />
-      </svg>
+      <Mark size="13px" onDark={tone === "cream"} />
       roomstudio
     </span>
   );
