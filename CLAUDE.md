@@ -50,6 +50,9 @@ packages/api-core/                shared logic consumed by both API services
 
 tools/                            local scripts (run from repo root)
   gen_proto.sh                      regenerate Python and Swift (ios/RoomStudioCapture/RoomStudioCapture/Generated/)
+  gen_mark.py                       the product mark's ONE source — regenerates the three app
+                                      icons, favicon.ico, icon.svg, and the geometry both
+                                      wordmarks consume
   build_test_bundle.py              synthesize a bundle from test_data/photos
   inspect_bundle.py                 verify a bundle parses + smoke-checks
 
@@ -139,8 +142,8 @@ state machine, the scene read/write repositories, `UploadSessionRepository` +
 `gcs_mint_resumable_uri`, semantic manifest validation, and the capture-bundle
 test fixtures.
 
-Suites: schemas **120**, root **826 passed + 26 skipped** (with
-`web/public/dev-fixtures` staged; 718 + 94 without — always say which),
+Suites: schemas **120**, root **839 passed + 26 skipped** (with
+`web/public/dev-fixtures` staged; 764 + 101 without — always say which),
 re-enqueue **18**.
 
 ### iOS capture app — `ios/RoomStudioCapture/`
@@ -175,6 +178,9 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
 - **Surfaces.** Scene-status polling with a server-anchored elapsed clock, a
   Live Activity on Lock Screen and Dynamic Island, terminal-failure banners, and
   a mint-429 screen that names the reset time rather than sleeping.
+- **The mark.** `DesignSystem/Wordmark.swift` draws the same room corner as the
+  app icon, from the generated `MarkGeometry.swift` (0193). `RSBrand.name` stays
+  the one-file swap for the name; there is no separate mark glyph.
 - **Reclaim.** `CaptureReaper` frees a capture's record and files once the user
   has *seen* the outcome — never on mere upload success.
 
@@ -278,8 +284,13 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
 - `lib/designSpec.ts` overlays the arrangement onto the assembled scene as a
   pure pass, so the renderer never learns a proposal exists. The measurement
   survives on screen as its footprint in the contour's paper tone.
-- `Wordmark.tsx` draws the room corner and remains the one-file swap for the
-  product name, which is still a placeholder.
+- `Wordmark.tsx` draws the room corner from generated geometry and remains the
+  one-file swap for the product name, which is still a placeholder. It authors
+  no paths and no colours: `tools/gen_mark.py` is the mark's one source across
+  the app icons, the tab icon, both wordmarks and the share card (0193), and
+  `tone` picks only which ink plate it sits on. The tab icon ships twice —
+  `icon.svg` answers `prefers-color-scheme`, `favicon.ico` is the legacy
+  fallback and is framed, the variant that survives a light tab strip.
 
 Suite **216** vitest; lint, tsc, and the static-export build are green.
 
@@ -502,6 +513,10 @@ mistake available in this repo.
   product is Pro-only / LiDAR-first; the shipped ARKIT_ONLY path stays live and
   is strictly better than before, but no further merge-knob grinding. The
   non-LiDAR device is not a test target and must not shape decisions.
+- **The two lockups still set the NAME differently** — tracked uppercase mono on
+  the web, the display serif on iOS. The mark itself is identical everywhere
+  (0193); this is a typography call from the design spec §1/§10, and the right
+  time to settle it is when the real name lands.
 - **From the founding vision, still sound:** no AR overlay, no social feed, no
   photorealistic image generation, no floor plans as a product surface, no voice
   input. Desktop-first on web.
@@ -595,7 +610,7 @@ pattern `UploadSessionRepository` already uses: `public_server._mint_uri_fn`
 credential failure in CI by supplying credentials** — that turns the tests
 green while leaving them non-hermetic, which is the actual defect.
 
-Current: **root 826 passed + 26 skipped** (dev-fixtures staged), verified BOTH with ADC present and
+Current: **root 839 passed + 26 skipped** (dev-fixtures staged), verified BOTH with ADC present and
 with ADC made unavailable (`GOOGLE_APPLICATION_CREDENTIALS` unset,
 `CLOUDSDK_CONFIG` → empty dir, `GCE_METADATA_HOST` → unroutable). The
 credential-free run is also 25× faster (1.3 s vs 33 s), which is itself the
@@ -756,8 +771,10 @@ live repo state, which lanes are in flight and where, and the immediate next
 action. Everything else it should read from CLAUDE.md and `docs/decisions/`,
 because a prompt is written once and those are maintained. Three checks the
 outgoing coordinator owes its successor, all cheap and all learned the hard
-way: confirm the free decision numbers from `ls docs/decisions/` rather than
-the ledger in this file, state the actual branch and HEAD rather than a
+way: confirm the free decision numbers from `git ls-tree main --name-only
+docs/decisions/` rather than the ledger in this file — and not from a bare
+`ls`, which reads a working tree that may be behind main — state the actual
+branch and HEAD rather than a
 remembered one, and name any claim in the handoff that has not been verified
 this hour.
 
@@ -827,7 +844,7 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 **ALL THREE PARALLEL LANES MERGED 2026-08-09** (`stage2` → 0135–0137, `perception-emit`, `ios-residue`; worktrees removed, branches deleted). Merged-tree verification: root **724 passed + 10 skipped**, perception **704**, web **204**, iOS **523**, tsc clean, zero conflict markers. **What the lanes left owed, now written:** lane B's two notes are 0142 (`/compress` as a third `/process` stage rather than a sidecar) and 0143 (`extent_axes_m` declared per box, horizontals deliberately unnamed). The `dims` correction is lane C's **0137**, reached independently — there is no third note on it.
 
-**Decision numbers.** **Always derive the free list from `ls docs/decisions/`, not from this paragraph** — it has lagged three times. As of 2026-08-20, with the clipped-views and geom-retire lanes merged: **free are 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0186, 0189, 0193, 0194, 0195, 0196, 0204+**; **0199–0200 are reserved to the colour-deploy lane and 0201–0203 to object-aware-sampling**. Spent by clipped-views: **0197** (the uncropped photograph is not a better photograph) and **0198** (the mask is the photograph SAM 3D sees). Spent by geom-retire: **0192** (perception-geom is retired). **0199** was reserved to the clipped-views lane and released unused, as were **0195–0196** by disk-cleanup. Everything else through 0198 is used.
+**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged three times. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-20, with the clipped-views and geom-retire lanes merged: **free are 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0186, 0189, 0194, 0195, 0196, 0204+**; **0199–0200 are reserved to the colour-deploy lane and 0201–0203 to object-aware-sampling**. Spent by clipped-views: **0197** (the uncropped photograph is not a better photograph) and **0198** (the mask is the photograph SAM 3D sees). Spent by geom-retire: **0192** (perception-geom is retired). Spent by the brand-mark pass: **0193** (the mark is generated, not copied). **0199** was reserved to the clipped-views lane and released unused, as were **0195–0196** by disk-cleanup. Everything else through 0198 is used.
 
 Two durable lessons, both learned by collision. **Put a session's number block INSIDE the prompt body**: a block written in a chat heading once reached nobody and two lanes claimed the same numbers, and the room-quality session was handed one stale block in its prompt and a different one in its handoff. When a prompt and this file disagree, **this file and the handoff win** — a prompt is written once, these are maintained. And **two sessions sharing one tree is how a note gets dropped**: decision 0179 was lost by the sam3d-pointmap merge and restored by `546281e`, which is why the Tooling conventions now insist every session gets its own worktree.
 
