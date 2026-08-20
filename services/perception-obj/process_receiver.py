@@ -398,6 +398,7 @@ def _reconstruct_one_object(
     depth_intrinsics,
     objects_done: int = 0,
     objects_detected: int = 0,
+    mask_refiner=None,
 ) -> tuple[Optional[dict], bool]:
     """Reconstruct + place ONE detected object; the per-object body shared
     verbatim by the legacy frame loop and the census two-pass driver
@@ -410,7 +411,18 @@ def _reconstruct_one_object(
     reconstruction (budget_stopped True — the caller stops and does NOT
     cache the frame). objects_done/objects_detected only feed the
     budget_stop log line.
+
+    mask_refiner, when the census driver supplies one (decision 0201), is
+    called at most once and only after budget admission, on the fresh path
+    only: it returns (mask or None, record) and the mask — when the
+    refinement was accepted — is what SAM 3D is shown INSTEAD of the
+    segmentation's own, and what placement measures the resulting splat
+    against. The accepted mask is persisted beside the splat, so a later
+    attempt's cache hit places the same splat against the same mask. None
+    (the default, and every non-census caller) leaves this function
+    byte-identical to what shipped.
     """
+    import mask_refine  # deferred: pulls numpy
     import placement as placement_mod  # deferred with the other heavy imports
 
     frame_prefix = f"scenes/{scene_id}/frames/{frame_idx:04d}"
@@ -426,6 +438,9 @@ def _reconstruct_one_object(
         "score": obj["score"],
         "mask_index": i,
     }
+
+    mask_for_model = obj["mask"]
+    refined_mask_blob = splat_blob[: -len(".ply")] + ".mask.npz"
 
     try:
         layout = None
@@ -454,6 +469,26 @@ def _reconstruct_one_object(
                         "rotation", layout_blob,
                     )
                     layout = None
+            if mask_refine.MASK_REFINE_ENABLED:
+                # A splat reconstructed from a repaired mask must be placed
+                # against that mask, not against the segmentation's own —
+                # the sidecar is what carries it across attempts, the same
+                # way the layout sidecar carries the rotation.
+                cached_mask = _gcs_blob_exists_and_get(
+                    outputs_bucket, refined_mask_blob
+                )
+                if cached_mask is not None:
+                    import numpy as _np  # deferred with the heavy imports
+
+                    try:
+                        with _np.load(io.BytesIO(cached_mask)) as _npz:
+                            mask_for_model = _np.asarray(_npz["mask"], dtype=bool)
+                        meta["mask_refined"] = True
+                    except Exception:
+                        logger.warning(
+                            "unreadable refined-mask sidecar %s; placing "
+                            "against the segmentation mask", refined_mask_blob,
+                        )
             ply_bytes = cached_ply
             entry = {
                 **meta,
@@ -473,6 +508,17 @@ def _reconstruct_one_object(
                 )
                 return None, True
 
+            if mask_refiner is not None:
+                # Detection, prompt and judgement all live in mask_refine;
+                # what happens here is only the substitution. A refusal
+                # returns None and the segmentation's mask stands, which is
+                # what ships today.
+                refined, refine_record = mask_refiner()
+                meta["mask_refinement"] = refine_record
+                if refined is not None:
+                    mask_for_model = refined
+                    meta["mask_refined"] = True
+
             pointmap = None
             if _POINTMAP_FROM_LIDAR and depth_raster is not None:
                 import numpy as _np  # deferred with the other heavy imports
@@ -488,7 +534,7 @@ def _reconstruct_one_object(
 
             object_started = time.monotonic()
             result = _reconstruct_with_retry(
-                sam3d_model, pil, obj["mask"], seed=42 + i, pointmap=pointmap
+                sam3d_model, pil, mask_for_model, seed=42 + i, pointmap=pointmap
             )
             if budget is not None:
                 budget.note_object(time.monotonic() - object_started)
@@ -523,6 +569,15 @@ def _reconstruct_one_object(
                 f"gs://{outputs_bucket}/", splat_blob, ply_bytes,
                 "application/octet-stream"
             )
+            if meta.get("mask_refined"):
+                import numpy as _np  # deferred with the heavy imports
+
+                _buf = io.BytesIO()
+                _np.savez_compressed(_buf, mask=_np.asarray(mask_for_model, bool))
+                _gcs_upload_for_scene(
+                    f"gs://{outputs_bucket}/", refined_mask_blob,
+                    _buf.getvalue(), "application/octet-stream",
+                )
             if layout is not None:
                 # Persist the RAW rotation (+ translation/scale) beside
                 # the splat so a later attempt's cache hit keeps the
@@ -551,7 +606,7 @@ def _reconstruct_one_object(
 
         if frame is not None:
             view_ray = placement_mod.object_view_ray(
-                obj["mask"], frame.intrinsics, frame.camera_pose
+                mask_for_model, frame.intrinsics, frame.camera_pose
             )
             if view_ray is not None:
                 entry["view_ray"] = view_ray
@@ -560,7 +615,7 @@ def _reconstruct_one_object(
             entry["placement"] = placement_mod.compute_frame_placement(
                 ply_bytes=ply_bytes,
                 layout=layout,
-                mask_rgb=obj["mask"],
+                mask_rgb=mask_for_model,
                 depth_raster=depth_raster,
                 depth_confidence=depth_confidence,
                 depth_intrinsics=depth_intrinsics,
@@ -1020,7 +1075,12 @@ def _build_reconstruction_plan(
     Association runs over cached frames too (their masks.npz lazy-loads):
     a box view a prior attempt already reconstructed counts toward the
     per-box view budget, so a warm retry never re-reconstructs a covered
-    box from scratch. Returns (plan, {"info", "skipped"})."""
+    box from scratch. Returns (plan, {"info", "skipped", "box_by_key"}) —
+    box_by_key names the box each box-tier view was planned FOR, which is
+    what mask refinement needs to know whose measured volume to compare a
+    mask against (decision 0201). The long tail is deliberately absent
+    from it: an unassociated mask has no measured box, so there is nothing
+    to detect an incomplete mask against."""
     import box_placement  # deferred with the other heavy imports
     import numpy as np  # deferred
 
@@ -1072,6 +1132,7 @@ def _build_reconstruction_plan(
     plan: list[tuple[int, int, str]] = []
     planned: set[tuple[int, int]] = set()
     skipped: list[tuple[int, int]] = []
+    box_by_key: dict[tuple[int, int], int] = {}
 
     def _views_left(bi: int) -> int:
         already = sum(
@@ -1090,6 +1151,7 @@ def _build_reconstruction_plan(
                 continue
             plan.append((*key, "box_best_view"))
             planned.add(key)
+            box_by_key[key] = bi
             break
 
     # Tier 2: second views, weakest best-association first.
@@ -1113,6 +1175,7 @@ def _build_reconstruction_plan(
                 continue
             plan.append((*key, "box_second_view"))
             planned.add(key)
+            box_by_key[key] = bi
             budget_left -= 1
 
     # Policy skips: associated pass-1 views beyond the per-box budget.
@@ -1143,7 +1206,100 @@ def _build_reconstruction_plan(
         "policy_skipped": len(skipped),
         "associated_boxes": sorted(f"box_{bi:02d}" for bi in assoc_by_box),
     }
-    return plan, {"info": plan_info, "skipped": skipped}
+    return plan, {"info": plan_info, "skipped": skipped, "box_by_key": box_by_key}
+
+
+def _mask_refiner_for(
+    *, st: dict, boxes: list, room_plan, box_index, mask_index: int,
+    label: str, sam3_model: Any, scene_id: str, frame_idx: int,
+):
+    """A one-shot mask refinement for one planned box view, or None.
+
+    None — meaning "reconstruct what segmentation produced", i.e. exactly
+    what ships today — whenever the pass is off, the view is not a box
+    view (the long tail has no measured volume to compare against), or the
+    frame carries no depth. Otherwise a thunk the reconstruct path calls
+    once, AFTER budget admission, so a refusal at the budget never spends a
+    segmentation call.
+
+    Cost, stated because the charter asks for it: one image encode plus one
+    text prompt plus one box prompt, per FLAGGED box view. It adds no
+    reconstruction — the repaired mask REPLACES the original rather than
+    adding an arm — so the plan, its per-box view budget and the request
+    budget's admission are all untouched, and a starved room's long tail is
+    the same length it was. Across the four preserved captures the detector
+    flags 5 of 24 box object-views (decision 0198).
+    """
+    import mask_refine  # deferred: pulls numpy
+
+    if not mask_refine.MASK_REFINE_ENABLED or box_index is None:
+        return None
+    if st.get("depth") is None or st["depth"][0] is None:
+        return None
+
+    def _refine():
+        import numpy as np  # deferred: heavy dep, only during processing
+
+        frame = st["frame"]
+        box = boxes[box_index]
+        depth_raster, depth_confidence, depth_intrinsics = st["depth"]
+        shape = st["mask_shape"]
+        stack = np.stack([
+            st["unpack_mask"](j) for j in range(len(st["detections"]))
+        ]) if st["detections"] else None
+        suppressed = None
+        if st.get("packed_suppressed") is not None and shape[0]:
+            suppressed = np.unpackbits(st["packed_suppressed"])[
+                : shape[0] * shape[1]
+            ].reshape(shape).astype(bool)
+
+        signal = mask_refine.unclaimed_in_box(
+            box=box, room=room_plan, camera_pose=frame.camera_pose,
+            depth_raster=depth_raster, depth_confidence=depth_confidence,
+            depth_intrinsics=depth_intrinsics, mask_stack=stack,
+            mask_index=mask_index, extra_claimed=suppressed,
+        )
+        if signal is None:
+            return None, {"accepted": False, "reason": "no_usable_depth"}
+        record = signal.as_record()
+        if not signal.flagged:
+            record.update(accepted=False, reason="not_flagged")
+            return None, record
+
+        original = stack[mask_index]
+        prompt = mask_refine.prompt_box_cxcywh(original, signal.unclaimed_vu)
+        if prompt is None:
+            record.update(accepted=False, reason="no_prompt_box")
+            return None, record
+
+        ys, xs = np.nonzero(original)
+        target_bbox = [
+            float(xs.min()), float(ys.min()),
+            float(xs.max() + 1), float(ys.max() + 1),
+        ]
+        refined = sam3_model.refine_with_box(
+            st["pil"], label, prompt, target_bbox=target_bbox
+        )
+        region = mask_refine.unclaimed_region_mask(
+            signal.unclaimed_vu, original.shape, depth_raster.shape
+        )
+        hull = mask_refine.box_hull_mask(
+            box, frame.intrinsics, frame.camera_pose, original.shape
+        )
+        accepted, verdict = mask_refine.accept_refined(
+            original=original, refined=refined, mask_stack=stack,
+            mask_index=mask_index, box_hull=hull, unclaimed_region=region,
+        )
+        record.update(verdict)
+        record["box_id"] = f"box_{box_index:02d}"
+        logger.info(
+            "mask_refine scene_id=%s frame=%d mask=%d box=%s accepted=%s %s",
+            scene_id, frame_idx, mask_index, record["box_id"], accepted,
+            {k: v for k, v in record.items() if k != "box_id"},
+        )
+        return (refined if accepted else None), record
+
+    return _refine
 
 
 def _run_census_two_pass(
@@ -1153,6 +1309,7 @@ def _run_census_two_pass(
     bundle_uri: str,
     selected: list,
     boxes: list,
+    room_plan,
     outputs_bucket: str,
     sam3_model: Any,
     sam3d_model: Any,
@@ -1163,6 +1320,11 @@ def _run_census_two_pass(
     segments the sampled frames (masks.npz written per frame — it is
     complete at segmentation time); pass 2 reconstructs per the plan under
     budget admission. Returns (frame_results, budget_stopped, plan_info).
+
+    room_plan is the parsed CapturedRoom the boxes came from; mask
+    refinement reads its measured floors and walls to tell an object's own
+    unclaimed surface from the room it stands in (decision 0201). It is
+    unused when PERCEPTION_MASK_REFINE is off.
 
     Cache contract (frozen; additive only): a frame's objects.json is
     written exactly when every planned mask in it was ATTEMPTED — masks
@@ -1175,7 +1337,12 @@ def _run_census_two_pass(
     """
     import numpy as np  # deferred: heavy dep, only during processing
     from PIL import Image
-    from privacy import masks_npz_bytes, partition_detections, segmentation_prompt
+    from privacy import (
+        masks_npz_bytes,
+        partition_detections,
+        segmentation_prompt,
+        suppressed_union,
+    )
 
     prefix = _bundle_prefix(bundle_uri)
     frames_by_idx = {f.frame_index: f for f in bundle.frames}
@@ -1250,6 +1417,14 @@ def _run_census_two_pass(
         # pass-2 reconstruction; unpack on demand.
         mask_shape = detections[0]["mask"].shape if detections else (0, 0)
         packed = [np.packbits(d["mask"].astype(bool)) for d in detections]
+        # The suppressed union rides along bit-packed: a person standing in
+        # front of an object claims those pixels, and without this the
+        # detector would read them as the object's own missing surface.
+        _suppressed_union = suppressed_union(suppressed)
+        packed_suppressed = (
+            None if _suppressed_union is None
+            else np.packbits(_suppressed_union.astype(bool))
+        )
         det_meta = [
             {k: d[k] for k in ("label", "instance_idx", "bbox", "score")}
             for d in detections
@@ -1270,6 +1445,8 @@ def _run_census_two_pass(
             "unpack_mask": _unpacker(packed, mask_shape),
             "entries": {},
             "depth": None,  # fetched lazily at first pass-2 use
+            "mask_shape": mask_shape,
+            "packed_suppressed": packed_suppressed,
         }
 
     # ---- Plan + Pass 2 ----------------------------------------------------
@@ -1286,6 +1463,12 @@ def _run_census_two_pass(
                 st["depth"] = _fetch_frame_depth(st["frame"], prefix)
             depth_raster, depth_confidence, depth_intrinsics = st["depth"]
             obj = {**det, "mask": st["unpack_mask"](mask_index)}
+            refiner = _mask_refiner_for(
+                st=st, boxes=boxes, room_plan=room_plan,
+                box_index=plan_meta["box_by_key"].get((frame_idx, mask_index)),
+                mask_index=mask_index, label=det["label"],
+                sam3_model=sam3_model, scene_id=scene_id, frame_idx=frame_idx,
+            )
             entry, stopped = _reconstruct_one_object(
                 scene_id=scene_id,
                 frame_idx=frame_idx,
@@ -1301,6 +1484,7 @@ def _run_census_two_pass(
                 depth_intrinsics=depth_intrinsics,
                 objects_done=len(executed),
                 objects_detected=len(plan),
+                mask_refiner=refiner,
             )
             if stopped:
                 budget_stopped = True
@@ -1464,6 +1648,7 @@ def run_perception(
             bundle_uri=bundle_uri,
             selected=selected,
             boxes=census_boxes,
+            room_plan=room_plan,
             outputs_bucket=outputs_bucket,
             sam3_model=sam3_model,
             sam3d_model=sam3d_model,
