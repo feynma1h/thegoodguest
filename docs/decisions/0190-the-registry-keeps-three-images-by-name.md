@@ -1,7 +1,9 @@
 # 0190 — the registry keeps three images, and one of them is kept by name
 
 **Date:** 2026-08-19
-**Status:** Decided — executed 2026-08-19
+**Status:** Decided — executed 2026-08-19. `perception-geom`, which this note
+excludes from the policy, was retired the next day (0192); the exclusion is
+harmless while no such images exist and needs a KEEP rule if it is ever revived.
 
 ## Context
 
