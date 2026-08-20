@@ -270,7 +270,7 @@ the viewer may render, so measurement is never falsified to hide a splat
 artifact. `person` is a suppression-only concept — segmented, never shipped
 (0089).
 
-Suite **902 passed + 9 skipped** (`services/perception-obj/tests`, `dev-fixtures` NOT staged).
+Suite **903 passed + 9 skipped** (`services/perception-obj/tests`, `dev-fixtures` NOT staged).
 
 ### Web app — `web/`, live at https://roomstudio.web.app
 
@@ -713,8 +713,8 @@ before trusting any number from it.
 
 **Suite counts depend on whether `web/public/dev-fixtures` is staged**, and two
 lanes have now reported numbers that read like regressions and were not:
-root/api-public is 826+26 with it and 718+94 without; perception is **902+9
-without** as of 2026-08-21 (786+7 before 0201-0202 added 116) — the
+root/api-public is 826+26 with it and 718+94 without; perception is **903+9
+without** as of 2026-08-21 (786+7 before 0201-0202 added 117) — the
 fixtures-staged figure has not been re-measured since, and the last one
 recorded was 793+0. The fixture-backed tests skip silently. Always say which
 invocation a count came from.
