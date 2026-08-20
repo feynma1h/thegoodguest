@@ -6,12 +6,14 @@
 # repo root excludes test_data/ and other large non-build paths, keeping the
 # upload small.
 #
-# Two steps before the docker build:
+# Two steps:
 #   1. Download the pre-built pytorch3d wheel from GCS into /workspace/wheels/.
 #      (Compiled once by infra/build_pytorch3d_wheel.sh; avoids a 30-50 min
 #      compile during every build.)
-#   2. Build the image with BuildKit so the HF token secret can be mounted
-#      into a RUN step without baking it into a layer.
+#   2. Build the image with buildx so the HF token secret can be mounted
+#      into a RUN step without baking it into a layer, and so the layer cache
+#      can be written as a registry cache that survives being used
+#      (decision 0199). buildx pushes the image itself.
 
 steps:
   # ── Step 1: download cached pytorch3d wheel ──────────────────────────────
@@ -25,52 +27,50 @@ steps:
         gsutil cp "gs://roomstudio-build-cache/wheels/pytorch3d-*.whl" /workspace/wheels/
         ls -la /workspace/wheels/
 
-  # ── Step 2: build image (repo root is the build context) ─────────────────
-  # Layer cache: --cache-from pulls layer metadata from the stable
-  # `:buildcache` tag; BUILDKIT_INLINE_CACHE=1 embeds cache metadata into
-  # the image we push, so the NEXT build can reuse unchanged layers.
-  # (BuildKit is already forced here for the secret mount; inline cache is
-  # the BuildKit mechanism — the classic pull-the-old-image pattern would
-  # both fetch a multi-GB image for nothing and be ignored by BuildKit.)
-  # Inline cache only exports final-stage layers, which covers this
-  # Dockerfile completely because it is single-stage; if it ever grows
-  # build stages, switch to buildx with --cache-to type=registry,mode=max.
-  # A missing :buildcache tag (first build, or a wiped repo) fails only the
-  # cache-import step — the log shows `#N ERROR: <ref>: not found` — and the
-  # BUILD proceeds uncached, re-seeding the tag (observed live on build
-  # 5ab7cb34, 2026-08-10; that ERROR line is expected there, not a failure).
+  # ── Step 2: build image and push it (repo root is the build context) ─────
+  # Layer cache: a REGISTRY cache at the stable `:buildcache` ref, written by
+  # buildx with `mode=max`, and the build pushes the image itself rather than
+  # leaving it for a later `docker push` step (the docker-container driver
+  # keeps nothing in the local daemon).
+  #
+  # The predecessor here was `docker build --cache-from :buildcache
+  # --build-arg BUILDKIT_INLINE_CACHE=1`, and it self-destructed on a
+  # two-build cycle: the inline exporter writes cache records only for the
+  # layers a build actually EXECUTED, so a build that rode the cache
+  # published a cache missing every layer it had reused, and the build after
+  # it rebuilt from `apt-get` down. Measured over seven production builds and
+  # reproduced causally on a three-layer probe — cold 27 s, hit 2 s, then
+  # 28 s off the hit's own cache. Decision 0199 carries both, and 0182's
+  # unexplained step-8 miss was this.
+  #
+  # `mode=max` is what makes the export complete; the registry exporter also
+  # re-publishes records it imported, which is the half inline cannot do. The
+  # docker-container driver is required — the default `docker` driver cannot
+  # write `type=registry` cache at all.
+  #
+  # `:buildcache` now holds a cache manifest rather than a runnable image.
+  # Nothing deploys it, and decision 0190's cleanup policy keeps it by TAG,
+  # so it stays protected. A missing or unreadable `:buildcache` fails only
+  # the import — the log shows `ERROR: ... not found` — and the build
+  # proceeds uncached and re-seeds it, which is expected, not a failure.
   - name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         set -euo pipefail
-        export DOCKER_BUILDKIT=1
         echo "$$HF_TOKEN" > /tmp/hf_token.txt
-        docker build \
+        docker buildx create --name rsbuilder --driver docker-container --use
+        docker buildx build \
           --secret id=hf_token,src=/tmp/hf_token.txt \
-          --cache-from "${_CACHE_URI}" \
-          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "type=registry,ref=${_CACHE_URI}" \
+          --cache-to "type=registry,ref=${_CACHE_URI},mode=max" \
           -t "${_IMAGE_URI}" \
-          -t "${_CACHE_URI}" \
+          --push \
           -f services/perception-obj/Dockerfile \
           .
         rm /tmp/hf_token.txt
     secretEnv: ['HF_TOKEN']
-
-  # ── Step 3: push (both the deploy tag and the cache tag) ──────────────────
-  # :buildcache moves only when a build fully succeeds (a failed build never
-  # reaches this step), so the cache reference always points at an image
-  # whose in-Dockerfile smokes passed. Same layers as the timestamped tag —
-  # the extra tag costs no meaningful registry storage.
-  - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        set -euo pipefail
-        docker push '${_IMAGE_URI}'
-        docker push '${_CACHE_URI}'
 
 availableSecrets:
   secretManager:
@@ -82,10 +82,6 @@ options:
   diskSizeGb: 100
 
 timeout: 5400s
-
-images:
-  - '${_IMAGE_URI}'
-  - '${_CACHE_URI}'
 
 substitutions:
   _IMAGE_URI: ''
