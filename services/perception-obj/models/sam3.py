@@ -23,8 +23,8 @@ class SAM3Model:
         # The heavy work happens only when the first request constructs this
         # instance. See docs/decisions/0007.
         sys.path.insert(0, "/opt/sam3")
-        from sam3.model_builder import build_sam3_image_model  # noqa: PLC0415
         from sam3.model.sam3_image_processor import Sam3Processor  # noqa: PLC0415
+        from sam3.model_builder import build_sam3_image_model  # noqa: PLC0415
 
         self.model = build_sam3_image_model()
         self.processor = Sam3Processor(self.model)
@@ -103,3 +103,90 @@ class SAM3Model:
 
         objects.sort(key=lambda o: -o["score"])
         return objects
+
+    def refine_with_box(
+        self,
+        image: Image.Image,
+        label: str,
+        box_cxcywh: list[float],
+        target_bbox: list[float] | None = None,
+    ) -> np.ndarray | None:
+        """Re-segment ONE object with a positive box prompt (decision 0198).
+
+        `add_geometric_prompt` is upstream's interactive refinement: it
+        appends the box to the state's geometric prompt and re-runs
+        grounding on top of the text prompt, so the answer is still "the
+        `label` in this picture" rather than a fresh box-driven instance.
+        It has been in the image we ship since SAM 3 landed and this wrapper
+        had simply never called it.
+
+        `box_cxcywh` is normalized [cx, cy, w, h] — upstream's format, and
+        what mask_refine.prompt_box_cxcywh emits. `target_bbox` is the
+        original mask's [x0, y0, x1, y1] in pixels; the returned instance is
+        the one whose box overlaps it most, because a refined prompt can
+        return several instances of the class and only one of them is the
+        object we are repairing. Without it the highest-scoring instance is
+        taken.
+
+        Returns a 2D bool mask, or None when nothing usable came back —
+        the caller keeps the original mask, which is what ships today.
+        This re-encodes the image: the segmentation pass's inference state
+        is not held across the reconstruction pass, and holding twelve
+        frames' encoder state on the GPU costs more than re-running one.
+        """
+        try:
+            with self._autocast():
+                state = self.processor.set_image(image)
+                self.processor.set_text_prompt(state=state, prompt=label)
+                out = self.processor.add_geometric_prompt(
+                    box=list(box_cxcywh), label=True, state=state
+                )
+        except Exception:
+            logger.exception("[sam3] refine_with_box failed for label '%s'", label)
+            return None
+
+        masks = out.get("masks", []) if isinstance(out, dict) else []
+        boxes = out.get("boxes", []) if isinstance(out, dict) else []
+        scores = out.get("scores", []) if isinstance(out, dict) else []
+        if len(masks) == 0:
+            logger.info("[sam3] refine_with_box returned no instance for '%s'", label)
+            return None
+
+        best_i, best_key = None, None
+        for j in range(len(masks)):
+            box = boxes[j] if j < len(boxes) else None
+            box = box.tolist() if hasattr(box, "tolist") else box
+            score = scores[j] if j < len(scores) else 0.0
+            score = score.item() if hasattr(score, "item") else float(score)
+            key = (_bbox_iou(box, target_bbox), score) if target_bbox else (0.0, score)
+            if best_key is None or key > best_key:
+                best_i, best_key = j, key
+        if best_i is None:
+            return None
+
+        m = masks[best_i]
+        mask_np = m.cpu().numpy() if hasattr(m, "cpu") else np.asarray(m)
+        mask_np = np.squeeze(mask_np)
+        if mask_np.ndim != 2:
+            logger.warning(
+                "[sam3] refine_with_box: unexpected mask shape %s", mask_np.shape
+            )
+            return None
+        return mask_np.astype(bool)
+
+
+def _bbox_iou(a, b) -> float:
+    """IoU of two [x0, y0, x1, y1] boxes; 0.0 when either is unusable."""
+    if a is None or b is None or len(a) != 4 or len(b) != 4:
+        return 0.0
+    x0 = max(float(a[0]), float(b[0]))
+    y0 = max(float(a[1]), float(b[1]))
+    x1 = min(float(a[2]), float(b[2]))
+    y1 = min(float(a[3]), float(b[3]))
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    inter = (x1 - x0) * (y1 - y0)
+    area_a = max(0.0, float(a[2]) - float(a[0])) * max(0.0, float(a[3]) - float(a[1]))
+    area_b = max(0.0, float(b[2]) - float(b[0])) * max(0.0, float(b[3]) - float(b[1]))
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
