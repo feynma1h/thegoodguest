@@ -275,10 +275,38 @@ def _find(geometry: RoomGeometry, object_id: str) -> RoomObject | Refusal:
         if len(hits) == 1:
             return hits[0]
         if len(hits) > 1:
-            return Refusal(
-                "ambiguous_object", ", ".join(sorted(o.name for o in hits))
-            )
+            return Refusal("ambiguous_object", _candidates(hits))
     return Refusal("unknown_object")
+
+
+def _candidates(hits: list[RoomObject]) -> str:
+    """What the guest may offer the person, and an honest count of what it
+    may not.
+
+    A bookkeeping name is an ordinal scene_facts assigned because nothing
+    measured separates that piece from its siblings, and 0184 is explicit
+    that it is not a referent — the person cannot tell which chair is the
+    third one either. Listing them here would hand the guest exactly the
+    vocabulary the production walk caught it teaching people, arriving by a
+    new road: a tool result is server-authored, and rule 2a asks the guest to
+    quote those verbatim.
+
+    So the detail names only the pieces a person could have meant, and says
+    plainly how many it cannot name. Where that is all of them, the refusal
+    is the whole answer — which is the honest end of "nothing separates
+    them", not a gap in this function.
+    """
+    nameable = sorted({o.name for o in hits if not o.named_by_bookkeeping})
+    rest = len(hits) - len([o for o in hits if not o.named_by_bookkeeping])
+    label = hits[0].label
+    if not nameable:
+        return f"{len(hits)} {label}s that nothing separates"
+    if not rest:
+        return ", ".join(nameable)
+    return (
+        f"{', '.join(nameable)}, and {rest} more {label}"
+        f"{'s' if rest > 1 else ''} that nothing separates"
+    )
 
 
 def _measured(obj: RoomObject) -> Transform | None:
