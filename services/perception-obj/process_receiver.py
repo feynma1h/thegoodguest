@@ -1228,7 +1228,9 @@ def _mask_refiner_for(
     adding an arm — so the plan, its per-box view budget and the request
     budget's admission are all untouched, and a starved room's long tail is
     the same length it was. Across the four preserved captures the detector
-    flags 5 of 24 box object-views (decision 0198).
+    flags 9 of 25 planned box views on the warm observation set and 10 of 37
+    on the cold plan the flag actually runs against (decision 0201; the cold
+    figure is decision 0211's) — roughly two per room either way.
     """
     import mask_refine  # deferred: pulls numpy
 
