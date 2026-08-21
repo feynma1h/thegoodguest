@@ -128,12 +128,15 @@ final class ScenePoller: ObservableObject {
     private(set) var currentBundleId: String?
     /// True while SceneStatusView is in the view hierarchy and foregrounded.
     private(set) var isVisible: Bool = false
-    /// The bundle the ACTIVE flight cares about (set by RootFlowView.sendItHome,
+    /// The bundle the ACTIVE flight cares about (set by each root's send site,
     /// cleared by reset()). While set, notifyBundleComplete ignores completions
     /// for OTHER bundles: a previous capture's cross-launch upload finishing
     /// mid-flight would otherwise start polling the OLD bundle and render its
     /// doorway over the new capture's wait — the same class of stale-panel
     /// defect the status surface had before, in its RootFlowView-era form.
+    /// Declaring it is also what drops a previous flight's already-published
+    /// state, so neither root can narrate a finished room over a scan still on
+    /// its way up — see expectBundle.
     /// nil = no active expectation; any completion may start (the
     /// restore/re-entry path).
     private(set) var expectedBundleId: String?
@@ -237,8 +240,24 @@ final class ScenePoller: ObservableObject {
     }
 
     /// Declare which bundle the active flight is about (see expectedBundleId).
-    /// Call AFTER reset() when starting a send; reset() clears the expectation.
+    ///
+    /// Declaring a flight for a DIFFERENT bundle stands the previous one down.
+    /// Published state always belongs to some bundle, and once a new capture is
+    /// on its way the old one's state is the PREVIOUS room's — a status surface
+    /// rendering it says "Room ready" over a scan that has not left the phone.
+    /// The drop lives here rather than at each send site because it is the same
+    /// judgment notifyBundleComplete already makes on the way in: a bundle that
+    /// is not the flight has nothing to say about it. A site that reset()s first
+    /// (a full per-send teardown does) arrives here with nothing to drop, so the
+    /// order it calls in stops mattering.
+    ///
+    /// Re-declaring the SAME bundle is not a stand-down — that would kill the
+    /// live poll of the very room in flight — and neither is clearing to nil.
     func expectBundle(_ bundleId: String?) {
+        if let bundleId, let current = currentBundleId, current != bundleId {
+            logger.info("[ScenePoller] standing down \(current, privacy: .public) — flight is now \(bundleId, privacy: .public)")
+            reset()
+        }
         expectedBundleId = bundleId
     }
 

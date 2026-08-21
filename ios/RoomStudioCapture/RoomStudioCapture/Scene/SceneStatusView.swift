@@ -299,17 +299,39 @@ struct SceneStatusView: View {
         }
     }
 
-    /// Scan the persisted store for a bundle with uploadPhase == .complete.
+    /// Scan the persisted store for a bundle whose upload finished.
     /// This is the independent start path that works with or without the kick.
     private func findCompletedBundleId() async -> String? {
         guard let ids = try? await UploadSessionStore.shared.allBundleIds() else { return nil }
+        var candidates: [BundleRestore.Candidate] = []
         for id in ids {
-            if let record = try? await UploadSessionStore.shared.load(bundleId: id),
-               record.uploadPhase == .complete {
-                return id
-            }
+            guard let record = try? await UploadSessionStore.shared.load(bundleId: id) else { continue }
+            candidates.append(.init(bundleId: id,
+                                    phase: record.uploadPhase,
+                                    minted: record.clientMintTimestamp))
         }
-        return nil
+        return Self.newestCompleted(from: candidates)
+    }
+
+    /// Which completed bundle this surface adopts at launch: the NEWEST by mint
+    /// time. The scan above used to return whichever `.complete` record the store
+    /// listed first, and `allBundleIds()` promises no order — so on a path with
+    /// several finished bundles in hand this screen could open on an older room
+    /// than the one the user had just sent, which is the same lie as showing the
+    /// previous room's outcome during a fresh upload.
+    ///
+    /// `.complete` and nothing else: a record still uploading has no Scene
+    /// document yet, so polling it would 404 into "Queued for processing" for the
+    /// whole upload. That is why this cannot simply defer to BundleRestore.pick,
+    /// which deliberately admits in-flight records because the home re-entry row
+    /// it feeds is a pointer, not a claim about progress.
+    ///
+    /// Static + pure so ScenePollExpectationTests can read it as a table.
+    static func newestCompleted(from candidates: [BundleRestore.Candidate]) -> String? {
+        candidates
+            .filter { $0.phase == .complete }
+            .max { $0.minted < $1.minted }?
+            .bundleId
     }
 
     // MARK: - Display helpers
