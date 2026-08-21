@@ -65,7 +65,7 @@ stages and stored as separate blobs:
 |---|---|---|---|
 | `shell.json` | `/shell` (`shell_receiver.py`, v3) | Floor polygon, wall quads with measured and rendered geometry, heights, door and window openings, per-surface measured albedo and a confidence-gated material family | kilobytes |
 | `manifest.json` | `/process` (`fusion.py`, manifest_version 2) | The fused object array: one entry per physical object with label, world transform, RoomPlan box extents, confidence, and — where the measurement concentrates — a `color` block (0184) | tens of kilobytes |
-| `*.ply` / `*.spz` | `/process`, `/compress` | The per-object Gaussian splats. One splat is a photographically derived likeness of one of the person's possessions | hundreds of megabytes; ~5.8× smaller in the SPZ tier (0126) |
+| `*.ply` / `*.spz` | `/process`, `/compress` | The per-object Gaussian splats. One splat is a photographically derived likeness of one of the person's possessions | ~460 MB for one scene's full set; 18–44 MB for a single recognisable piece of furniture (0122); ~5.8× smaller in the SPZ tier (0126) |
 
 Two derived layers sit above them and are equally real:
 
@@ -133,7 +133,7 @@ pixels. A viewer learns you own a bed, a desk and two chairs; they see none of
 them.
 
 **Rung 3 — the room.** The splats. Your actual possessions, photographically
-derived, at hundreds of megabytes.
+derived. Two to three orders of magnitude heavier than every rung below it.
 
 The ladder is the answer to "what does sharing a room actually share": **it
 shares whichever of four already-separable artifacts the person chose, and the
@@ -461,9 +461,10 @@ A person who shares a room must be able to stop sharing it, and today they
 cannot stop *anything* at room granularity: account deletion is all-or-nothing
 (`DELETE /account`, keyed on the token's own uid), there is no per-room delete
 route among api-public's nine, and the Privacy Policy sends per-room requests
-to a human — "To delete a single room rather than everything… write to
-23singhutkarsh@gmail.com." CLAUDE.md already lists the gap as an open defect and
-calls it conspicuous for a product whose thesis is that rooms are identity.
+to a human — §7 tells a person who wants to delete a single room rather than
+everything to write to the contact address. CLAUDE.md already lists the gap as
+an open defect and calls it conspicuous for a product whose thesis is that
+rooms are identity.
 
 That gap is a mild embarrassment for a private product and a real defect for one
 that shares. **Per-room deletion is therefore a hard prerequisite of the hosted
