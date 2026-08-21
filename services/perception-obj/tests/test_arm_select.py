@@ -435,3 +435,52 @@ class TestBudgetGate:
         box, ctx, assoc = _two_arm_scene()
         obj = _build(box, ctx, assoc)
         assert obj["quality"]["arm_select"]["arms"] == 2
+
+
+class TestTheInstrumentReadsWhatShips:
+    """Both checks read extents under the CHOSEN axis mapping, and the
+    instrument reads each arm through an unscored build — so the cloud can
+    ship a mapping the instrument never saw. Measured on all sixteen arms
+    (outputs/selection/probe4_scored_vs_unscored.py), and the answer is
+    sharper than a caveat: the divergence happens once, on the one box
+    where the two checks disagree."""
+
+    def test_the_residual_the_instrument_reads_is_the_shipped_one(self):
+        diverged = [
+            (b["room"], b["box_index"], a["frame_index"])
+            for b in SWEEP for a in b["arms"]
+            if abs(a["residual_m"] - a["residual_m_shipped"]) > 5e-4
+        ]
+        assert diverged == [("spike", 3, 10)]
+
+    def test_the_one_divergence_is_the_one_disagreement(self):
+        """Not a coincidence to be tidied away: an arm whose mapping the
+        cloud overrules is an arm whose extents the instrument measured
+        under a different frame, and that is what a disagreement between
+        two extent-derived checks looks like from the inside. Refusing on
+        disagreement therefore also refuses the stale reading."""
+        disagree = {
+            (b["room"], b["box_index"]) for b in SWEEP
+            if min(_fits(b), key=lambda f: (f.fill_dist, f.index)).index
+            != min(_fits(b), key=lambda f: (f.residual_m, f.index)).index
+        }
+        diverged = {
+            (b["room"], b["box_index"]) for b in SWEEP for a in b["arms"]
+            if abs(a["residual_m"] - a["residual_m_shipped"]) > 5e-4
+        }
+        assert disagree == diverged == {("spike", 3)}
+
+    def test_the_instrument_never_loads_depth(self):
+        """Why it is left unscored rather than 'fixed': the cloud costs a
+        depth load per arm, and a ranking whose arms were each measured
+        under a mapping their own cloud chose is not comparing like with
+        like. The extent-best mapping is one rule for everyone, and it is
+        free. This ctx makes the cost loud — reading depth raises."""
+        box, ctx, assoc = _two_arm_scene()
+
+        def _explode(frame_index):
+            raise AssertionError("arm_fit read depth")
+
+        ctx.get_depth = _explode
+        fits = [box_placement.arm_fit(box, 0, "obj_000", a, ctx) for a in assoc]
+        assert [round(f.fill, 3) for f in fits] == [0.414, 1.021]

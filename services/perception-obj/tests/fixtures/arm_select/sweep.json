@@ -19,7 +19,9 @@
      "overlap": 1.0,
      "in_frame_fraction": 0.5134,
      "fill": 0.415,
-     "residual_m": 0.633
+     "residual_m": 0.633,
+     "residual_m_shipped": 0.633,
+     "axis_resolved_shipped": false
     },
     {
      "rank": 1,
@@ -28,7 +30,9 @@
      "overlap": 1.0,
      "in_frame_fraction": 1.0,
      "fill": 0.3563,
-     "residual_m": 0.7984
+     "residual_m": 0.7984,
+     "residual_m_shipped": 0.7984,
+     "axis_resolved_shipped": false
     }
    ]
   },
@@ -51,7 +55,9 @@
      "overlap": 0.991,
      "in_frame_fraction": 0.5455,
      "fill": 0.4061,
-     "residual_m": 0.7932
+     "residual_m": 0.7932,
+     "residual_m_shipped": 0.7932,
+     "axis_resolved_shipped": true
     },
     {
      "rank": 1,
@@ -60,7 +66,9 @@
      "overlap": 0.7509,
      "in_frame_fraction": 1.0,
      "fill": 1.004,
-     "residual_m": 0.3405
+     "residual_m": 0.3405,
+     "residual_m_shipped": 0.3405,
+     "axis_resolved_shipped": false
     }
    ]
   },
@@ -83,7 +91,9 @@
      "overlap": 0.9882,
      "in_frame_fraction": 0.0228,
      "fill": 0.8838,
-     "residual_m": 0.1341
+     "residual_m": 0.1341,
+     "residual_m_shipped": 0.1341,
+     "axis_resolved_shipped": true
     },
     {
      "rank": 1,
@@ -92,7 +102,9 @@
      "overlap": 0.9464,
      "in_frame_fraction": 0.1072,
      "fill": 0.8822,
-     "residual_m": 0.3476
+     "residual_m": 0.3476,
+     "residual_m_shipped": 0.3476,
+     "axis_resolved_shipped": false
     }
    ]
   },
@@ -115,7 +127,9 @@
      "overlap": 1.0,
      "in_frame_fraction": 1.0,
      "fill": 1.1692,
-     "residual_m": 0.1904
+     "residual_m": 0.1904,
+     "residual_m_shipped": 0.1904,
+     "axis_resolved_shipped": true
     },
     {
      "rank": 1,
@@ -124,7 +138,9 @@
      "overlap": 0.997,
      "in_frame_fraction": 0.645,
      "fill": 0.2231,
-     "residual_m": 0.8303
+     "residual_m": 0.8303,
+     "residual_m_shipped": 0.8303,
+     "axis_resolved_shipped": true
     }
    ]
   },
@@ -147,7 +163,9 @@
      "overlap": 1.0,
      "in_frame_fraction": 0.9825,
      "fill": 1.1502,
-     "residual_m": 0.4827
+     "residual_m": 0.4827,
+     "residual_m_shipped": 0.4827,
+     "axis_resolved_shipped": true
     },
     {
      "rank": 1,
@@ -156,7 +174,9 @@
      "overlap": 0.9,
      "in_frame_fraction": 0.4777,
      "fill": 1.9192,
-     "residual_m": 0.9097
+     "residual_m": 0.9097,
+     "residual_m_shipped": 0.9097,
+     "axis_resolved_shipped": true
     }
    ]
   },
@@ -179,7 +199,9 @@
      "overlap": 1.0,
      "in_frame_fraction": 0.8323,
      "fill": 1.0291,
-     "residual_m": 0.8941
+     "residual_m": 0.8941,
+     "residual_m_shipped": 1.5021,
+     "axis_resolved_shipped": true
     },
     {
      "rank": 1,
@@ -188,7 +210,9 @@
      "overlap": 0.9877,
      "in_frame_fraction": 0.2444,
      "fill": 0.8161,
-     "residual_m": 0.2383
+     "residual_m": 0.2383,
+     "residual_m_shipped": 0.2383,
+     "axis_resolved_shipped": false
     }
    ]
   },
@@ -211,7 +235,9 @@
      "overlap": 0.9583,
      "in_frame_fraction": 1.0,
      "fill": 1.0743,
-     "residual_m": 0.1899
+     "residual_m": 0.1899,
+     "residual_m_shipped": 0.1899,
+     "axis_resolved_shipped": false
     },
     {
      "rank": 1,
@@ -220,7 +246,9 @@
      "overlap": 0.9387,
      "in_frame_fraction": 1.0,
      "fill": 0.408,
-     "residual_m": 0.6423
+     "residual_m": 0.6423,
+     "residual_m_shipped": 0.6423,
+     "axis_resolved_shipped": true
     }
    ]
   },
@@ -243,7 +271,9 @@
      "overlap": 0.9899,
      "in_frame_fraction": 0.752,
      "fill": 0.9506,
-     "residual_m": 0.0646
+     "residual_m": 0.0646,
+     "residual_m_shipped": 0.0646,
+     "axis_resolved_shipped": false
     },
     {
      "rank": 1,
@@ -252,7 +282,9 @@
      "overlap": 0.9515,
      "in_frame_fraction": 0.0922,
      "fill": 0.9683,
-     "residual_m": 0.0518
+     "residual_m": 0.0518,
+     "residual_m_shipped": 0.0518,
+     "axis_resolved_shipped": false
     }
    ]
   }
