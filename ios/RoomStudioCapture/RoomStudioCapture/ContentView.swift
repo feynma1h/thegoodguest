@@ -58,6 +58,14 @@ struct ContentView: View {
         // Start upload session creation as soon as bundle.pb is ready.
         .onChange(of: capture.bundlePath) { _, newPath in
             guard newPath != nil else { return }
+            // Declare the flight SYNCHRONOUSLY, before the Task. This is what
+            // stands the previous room down: beginUploadSession touches poll state
+            // only at its very end, so without it the panel below kept rendering
+            // the PRIOR room's "Room ready" for the whole of this capture's upload
+            // — a finished-room claim sitting over a scan that had not left the
+            // phone yet. It also stops that room's own late completion kick from
+            // starting a poll of it here.
+            ScenePoller.shared.expectBundle(capture.bundleIdString)
             Task { await coordinator.beginUploadSession(for: capture) }
         }
         .overlay(alignment: .topTrailing) {
