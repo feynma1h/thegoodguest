@@ -25,12 +25,18 @@
 /// LiveMeshHost, fed by capture.floorPlanFeed, with the coverage ticks driven
 /// from the live census below.
 ///
-/// BUILT BUT NOT YET REACHABLE from this flow (staged, not wired): the
-/// returning-home recent-rooms strip, RoomsListView / QRBridgeView (§9) and
-/// WhySignInSheet (§8) — all three want the same GET /scenes fetch, plus trigger
-/// points — and ColdStartView (§1 — the flow opens directly at .home, and
-/// identity is minted by the app-level launch task, so nothing ever waits on a
-/// splash). These have no entry point here and appear only in their own
+/// The §8/§9 history surfaces are WIRED, all three off one RoomsStore fetch of
+/// GET /scenes: the returning-home recent-rooms strip, RoomsListView behind
+/// "all N rooms", and WhySignInSheet on the first return home with a room and
+/// an unlinked identity. A ready room's chevron is gated on
+/// NetworkConfig.webBaseURL exactly as the doorway's CTA is — with no web
+/// origin configured, rows inform rather than offer a tap that lands nowhere.
+///
+/// STILL STAGED, and not on that fetch: QRBridgeView (§9), whose blocker is
+/// deep-link infrastructure and the associated-domains entitlement, not a room
+/// list — the desk names the room in the link it hands over. And ColdStartView
+/// (§1 — the flow opens directly at .home, and identity is minted by the
+/// app-level launch task, so nothing ever waits on a splash). These have no entry point here and appear only in their own
 /// previews. §8's conflict SCREEN is not on that list: it is not built at all
 /// (decision 0216), because the count it was designed around cannot be obtained
 /// without becoming the account it asks about. SignInSheet owns the conflict.
@@ -54,6 +60,10 @@ struct RootFlowView: View {
     @StateObject private var coordinator = UploadCoordinator()
     @ObservedObject private var poller   = ScenePoller.shared
     @ObservedObject private var failures = UploadFailureMonitor.shared
+    /// What this identity has sent (GET /scenes). Feeds three surfaces — the
+    /// home strip, the rooms list, and the sign-in invitation's count — from one
+    /// fetch, so they cannot disagree about how many rooms the user has.
+    @ObservedObject private var rooms    = RoomsStore.shared
 
     @ObservedObject private var auth = AuthManager.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -62,6 +72,9 @@ struct RootFlowView: View {
     @State private var stage: Stage = .home
     @State private var showGuidance = false
     @State private var showProfile  = false
+    @State private var showRooms    = false
+    /// The §8 invitation, offered at most once (WhySignInOffer).
+    @State private var showWhySignIn = false
     /// The bundle id sent for processing — used to restart polling after a fatal
     /// poll error without depending on the current CaptureManager.
     @State private var sentBundleId: String?
@@ -272,9 +285,31 @@ struct RootFlowView: View {
                 }
                 .padding([.horizontal, .top], 20)
             }
+            // A failed rooms fetch must not simply fall back to the first-time
+            // hero: in this flow that IS the no-rooms variant, so silently
+            // showing it tells a returning user their rooms are gone. The hero
+            // still holds the space (it is true for everyone), with an honest
+            // line saying the phone could not look.
+            if homeRooms == .heroWithTrouble {
+                RoomsTroubleLine(onRetry: refreshRooms)
+                    .padding([.horizontal, .top], 20)
+            }
             HomeView(
                 onScan: { showGuidance = true },
-                onProfile: { showProfile = true }
+                onProfile: { showProfile = true },
+                hasRooms: homeRooms == .strip,
+                roomsStrip: {
+                    if case .loaded(let list, let stale) = rooms.state {
+                        RecentRoomsStrip(
+                            rooms: list,
+                            stale: stale,
+                            canOpenWeb: canOpenAnyRoomOnWeb,
+                            onOpen: openRoomOnWeb,
+                            onSeeAll: { showRooms = true },
+                            onRetry: refreshRooms
+                        )
+                    }
+                }
             )
         }
         // The banner and re-entry rows live in this wrapper, OUTSIDE HomeView's own
@@ -301,6 +336,24 @@ struct RootFlowView: View {
             await restoreUnfinishedBundle()
             await refreshSentBundlePhase()
         }
+        // Re-fires on every return to home, which is what makes a room the user
+        // just sent appear in the strip without a relaunch. Single-flighted in
+        // the store, so bouncing between home and the list cannot stack fetches.
+        .task {
+            await rooms.refresh()
+            // "After a first room" (§8) is, in this flow, the first time the
+            // user lands back on home with something to lose. The count is
+            // asserted to them, so the offer waits for a KNOWN one — a fetch
+            // that failed is not zero and not a reason to argue.
+            if WhySignInInvitation.shouldPresent(
+                rooms: rooms.state,
+                isLinked: auth.isLinked,
+                alreadyOffered: WhySignInOffer.hasOffered()
+            ) {
+                WhySignInOffer.markOffered()
+                showWhySignIn = true
+            }
+        }
         .sheet(isPresented: $showGuidance) {
             GuidanceSheet(
                 onStart: {
@@ -324,6 +377,45 @@ struct RootFlowView: View {
                 )
             }
         }
+        .sheet(isPresented: $showRooms) {
+            RoomsListView(
+                state: rooms.state,
+                canOpenWeb: canOpenAnyRoomOnWeb,
+                onOpen: openRoomOnWeb,
+                onRetry: refreshRooms,
+                onScanAnother: { showRooms = false; showGuidance = true },
+                onProfile: { showRooms = false; showProfile = true },
+                onClose: { showRooms = false }
+            )
+        }
+        .sheet(isPresented: $showWhySignIn) {
+            // The count is re-read at presentation rather than captured at the
+            // trigger: a sheet that renders a number must take it from the same
+            // store everything else reads, and if it is somehow no longer known
+            // the sheet declines to make its argument rather than inventing one.
+            if let count = rooms.state.knownCount {
+                WhySignInInvitationSheet(roomCount: count) { showWhySignIn = false }
+                    .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    // MARK: - Rooms
+
+    private var homeRooms: HomeRooms.Presentation { HomeRooms.presentation(for: rooms.state) }
+
+    /// The doorway's `canOpenWeb`, asked once for the history surfaces. Nil
+    /// webBaseURL is the deliberate state today (NetworkConfig), so this is
+    /// false and every row informs rather than offering a dead tap.
+    private var canOpenAnyRoomOnWeb: Bool { NetworkConfig.webBaseURL != nil }
+
+    private func refreshRooms() { Task { await rooms.refresh() } }
+
+    private func openRoomOnWeb(_ room: RoomSummary) {
+        guard let bundleId = room.bundleId,
+              let url = NetworkConfig.webRoomURL(bundleId: bundleId) else { return }
+        UIApplication.shared.open(url)
     }
 
     // MARK: - Post-send (driven by ScenePoller)

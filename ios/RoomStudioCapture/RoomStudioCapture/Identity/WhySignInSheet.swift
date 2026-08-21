@@ -5,9 +5,10 @@
 ///
 /// `roomCount` is required and carries no sample default: the sheet asserts it
 /// to the user ("You've got N rooms with me already"), so a default would ship
-/// an invented number the moment this is wired. The honest source is GET
-/// /scenes — the same fetch RoomsListView waits on — and until that client
-/// exists this sheet has no caller and renders only in its own preview.
+/// an invented number the moment this is wired. Its honest source is GET
+/// /scenes, by way of RoomsStore — and `WhySignInInvitation` below is what
+/// guarantees the sheet is never presented without one. A count that is merely
+/// unknown is not zero, and this sheet has no form that can say "some rooms".
 ///
 /// §8's OTHER screen, the account-conflict choice, is deliberately not here
 /// (decision 0216). It asked for a count of the rooms held by the account being
@@ -16,7 +17,8 @@
 /// conflict is put to the user by SignInSheet, with the real cost stated and
 /// nothing counted (decision 0064).
 ///
-/// Read by: nothing yet — see above.
+/// Read by: RootFlowView, on the first return home with a room and no linked
+/// identity.
 
 import SwiftUI
 
@@ -104,4 +106,71 @@ struct WhySignInSheet: View {
         .sheet(isPresented: .constant(true)) {
             WhySignInSheet(roomCount: 2).presentationDetents([.medium, .large])
         }
+}
+
+
+// MARK: - The presented form
+
+/// WhySignInSheet with its hand-off wired.
+///
+/// The sheet itself deliberately owns no identity code — "Identity has ONE real
+/// implementation" is the note in its body, and SignInSheet is it. This wrapper
+/// is the seam that keeps that true: the invitation argues, SignInSheet acts.
+/// Nested presentation is the same shape ProfileView already uses for the same
+/// hand-off, and it avoids the dismiss-then-present race that sequencing two
+/// sheets off one parent produces.
+struct WhySignInInvitationSheet: View {
+    let roomCount: Int
+    var onDismiss: () -> Void = {}
+
+    @State private var showSignIn = false
+
+    var body: some View {
+        WhySignInSheet(
+            roomCount: roomCount,
+            onSignIn: { showSignIn = true },
+            onNotNow: onDismiss
+        )
+        .sheet(isPresented: $showSignIn) { SignInSheet() }
+    }
+}
+
+// MARK: - When to offer it
+
+/// The trigger, as a table.
+///
+/// The design places this "at natural moments (after a first room…)", which in
+/// this flow is the first time the user lands back on home with a room to lose.
+/// Three things gate it, and the third is the one worth stating: the sheet's
+/// entire argument is a count, so it must not be offered while the count is
+/// unknown. `.failed` and `.loading` are both "unknown" and neither is zero —
+/// the invitation simply waits for the next launch rather than guessing.
+///
+/// Offered once, ever. It is an invitation, not a nag, and ProfileView carries
+/// the same action permanently for anyone who says "Not now".
+nonisolated enum WhySignInInvitation {
+
+    static func shouldPresent(rooms: RoomsLoadState, isLinked: Bool, alreadyOffered: Bool) -> Bool {
+        guard !isLinked, !alreadyOffered else { return false }
+        guard let count = rooms.knownCount else { return false }
+        return count >= 1
+    }
+}
+
+/// The "offered once" memory.
+///
+/// UserDefaults rather than anything derived: there is no server-side record of
+/// having been asked, and re-deriving it from the room count would re-offer the
+/// sheet on every launch for anyone who declined.
+@MainActor
+enum WhySignInOffer {
+    static let defaultsKey = "roomstudio.whySignIn.offered"
+
+    static func hasOffered(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: defaultsKey)
+    }
+
+    static func markOffered(_ defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: defaultsKey)
+    }
 }
