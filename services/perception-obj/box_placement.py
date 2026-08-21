@@ -1038,6 +1038,25 @@ def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
     if len(fits) < 2:
         return associations, None
 
+    best, record = choose_arm(fits)
+    if best.index == fits[0].index:
+        return associations, record
+    reordered = (
+        [associations[best.index]]
+        + [a for i, a in enumerate(associations) if i != best.index]
+    )
+    return reordered, record
+
+
+def choose_arm(fits: list[ArmFit]) -> tuple[ArmFit, dict]:
+    """The decision, with the measurement already made. `fits[0]` is the
+    arm that ships today.
+
+    Separated from `select_arm` because the measurement needs splats and
+    the decision needs eight numbers: the sweep those eight came from is
+    committed as a fixture, so the rule is pinned against the real rooms
+    without a gigabyte of PLY (tests/fixtures/arm_select/sweep.json).
+    """
     shipped = fits[0]
     best = shipped
     for f in fits[1:]:
@@ -1048,8 +1067,7 @@ def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
             continue  # the second check disagrees: refuse, do not weigh
         if gain > shipped.fill_dist - best.fill_dist:
             best = f  # strict, so ties keep the lower index
-
-    record = {
+    return best, {
         "arms": len(fits),
         "shipped_fill": round(shipped.fill, 4),
         "shipped_residual_m": round(shipped.residual_m, 4),
@@ -1058,13 +1076,6 @@ def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
         "chosen_residual_m": round(best.residual_m, 4),
         "fill_gain": round(shipped.fill_dist - best.fill_dist, 4),
     }
-    if best.index == shipped.index:
-        return associations, record
-    reordered = (
-        [associations[best.index]]
-        + [a for i, a in enumerate(associations) if i != best.index]
-    )
-    return reordered, record
 
 
 def build_box_object(

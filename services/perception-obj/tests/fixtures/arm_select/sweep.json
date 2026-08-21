@@ -1,0 +1,260 @@
+{
+ "boxes": [
+  {
+   "room": "rp7",
+   "scene_id": "a71d125f-0657-408a-8020-b166c689831c",
+   "box_index": 2,
+   "category": "table",
+   "dims": [
+    1.2911,
+    0.7945,
+    0.6605
+   ],
+   "walked": "keep",
+   "arms": [
+    {
+     "rank": 0,
+     "frame_index": 7,
+     "mask_index": 0,
+     "overlap": 1.0,
+     "in_frame_fraction": 0.5134,
+     "fill": 0.415,
+     "residual_m": 0.633
+    },
+    {
+     "rank": 1,
+     "frame_index": 114,
+     "mask_index": 6,
+     "overlap": 1.0,
+     "in_frame_fraction": 1.0,
+     "fill": 0.3563,
+     "residual_m": 0.7984
+    }
+   ]
+  },
+  {
+   "room": "rp6g1",
+   "scene_id": "09684dde-84fd-4600-9aa9-328edede6966",
+   "box_index": 0,
+   "category": "table",
+   "dims": [
+    1.0542,
+    0.7616,
+    0.7069
+   ],
+   "walked": "switch",
+   "arms": [
+    {
+     "rank": 0,
+     "frame_index": 57,
+     "mask_index": 0,
+     "overlap": 0.991,
+     "in_frame_fraction": 0.5455,
+     "fill": 0.4061,
+     "residual_m": 0.7932
+    },
+    {
+     "rank": 1,
+     "frame_index": 178,
+     "mask_index": 2,
+     "overlap": 0.7509,
+     "in_frame_fraction": 1.0,
+     "fill": 1.004,
+     "residual_m": 0.3405
+    }
+   ]
+  },
+  {
+   "room": "rp6g1",
+   "scene_id": "09684dde-84fd-4600-9aa9-328edede6966",
+   "box_index": 2,
+   "category": "bed",
+   "dims": [
+    1.3711,
+    0.546,
+    2.0195
+   ],
+   "walked": null,
+   "arms": [
+    {
+     "rank": 0,
+     "frame_index": 178,
+     "mask_index": 1,
+     "overlap": 0.9882,
+     "in_frame_fraction": 0.0228,
+     "fill": 0.8838,
+     "residual_m": 0.1341
+    },
+    {
+     "rank": 1,
+     "frame_index": 97,
+     "mask_index": 1,
+     "overlap": 0.9464,
+     "in_frame_fraction": 0.1072,
+     "fill": 0.8822,
+     "residual_m": 0.3476
+    }
+   ]
+  },
+  {
+   "room": "rp6g1",
+   "scene_id": "09684dde-84fd-4600-9aa9-328edede6966",
+   "box_index": 3,
+   "category": "table",
+   "dims": [
+    0.6217,
+    0.6972,
+    0.5328
+   ],
+   "walked": null,
+   "arms": [
+    {
+     "rank": 0,
+     "frame_index": 97,
+     "mask_index": 5,
+     "overlap": 1.0,
+     "in_frame_fraction": 1.0,
+     "fill": 1.1692,
+     "residual_m": 0.1904
+    },
+    {
+     "rank": 1,
+     "frame_index": 216,
+     "mask_index": 4,
+     "overlap": 0.997,
+     "in_frame_fraction": 0.645,
+     "fill": 0.2231,
+     "residual_m": 0.8303
+    }
+   ]
+  },
+  {
+   "room": "spike",
+   "scene_id": "a7e073ae-d3c6-4f5d-8137-a6a47028cd0a",
+   "box_index": 0,
+   "category": "storage",
+   "dims": [
+    0.9487,
+    0.8152,
+    0.5764
+   ],
+   "walked": null,
+   "arms": [
+    {
+     "rank": 0,
+     "frame_index": 398,
+     "mask_index": 4,
+     "overlap": 1.0,
+     "in_frame_fraction": 0.9825,
+     "fill": 1.1502,
+     "residual_m": 0.4827
+    },
+    {
+     "rank": 1,
+     "frame_index": 354,
+     "mask_index": 4,
+     "overlap": 0.9,
+     "in_frame_fraction": 0.4777,
+     "fill": 1.9192,
+     "residual_m": 0.9097
+    }
+   ]
+  },
+  {
+   "room": "spike",
+   "scene_id": "a7e073ae-d3c6-4f5d-8137-a6a47028cd0a",
+   "box_index": 3,
+   "category": "bed",
+   "dims": [
+    1.854,
+    0.6109,
+    2.1581
+   ],
+   "walked": null,
+   "arms": [
+    {
+     "rank": 0,
+     "frame_index": 10,
+     "mask_index": 0,
+     "overlap": 1.0,
+     "in_frame_fraction": 0.8323,
+     "fill": 1.0291,
+     "residual_m": 0.8941
+    },
+    {
+     "rank": 1,
+     "frame_index": 354,
+     "mask_index": 0,
+     "overlap": 0.9877,
+     "in_frame_fraction": 0.2444,
+     "fill": 0.8161,
+     "residual_m": 0.2383
+    }
+   ]
+  },
+  {
+   "room": "spike",
+   "scene_id": "a7e073ae-d3c6-4f5d-8137-a6a47028cd0a",
+   "box_index": 5,
+   "category": "table",
+   "dims": [
+    0.7877,
+    0.7322,
+    0.5461
+   ],
+   "walked": null,
+   "arms": [
+    {
+     "rank": 0,
+     "frame_index": 171,
+     "mask_index": 1,
+     "overlap": 0.9583,
+     "in_frame_fraction": 1.0,
+     "fill": 1.0743,
+     "residual_m": 0.1899
+    },
+    {
+     "rank": 1,
+     "frame_index": 171,
+     "mask_index": 4,
+     "overlap": 0.9387,
+     "in_frame_fraction": 1.0,
+     "fill": 0.408,
+     "residual_m": 0.6423
+    }
+   ]
+  },
+  {
+   "room": "spike",
+   "scene_id": "a7e073ae-d3c6-4f5d-8137-a6a47028cd0a",
+   "box_index": 6,
+   "category": "chair",
+   "dims": [
+    0.4537,
+    0.6819,
+    0.4912
+   ],
+   "walked": null,
+   "arms": [
+    {
+     "rank": 0,
+     "frame_index": 142,
+     "mask_index": 0,
+     "overlap": 0.9899,
+     "in_frame_fraction": 0.752,
+     "fill": 0.9506,
+     "residual_m": 0.0646
+    },
+    {
+     "rank": 1,
+     "frame_index": 568,
+     "mask_index": 0,
+     "overlap": 0.9515,
+     "in_frame_fraction": 0.0922,
+     "fill": 0.9683,
+     "residual_m": 0.0518
+    }
+   ]
+  }
+ ]
+}
