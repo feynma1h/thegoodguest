@@ -290,6 +290,10 @@ def _ask_with_hands(question: str) -> tuple[str, list[str], list[dict]]:
     geometry = derive_room_geometry(
         _HANDS_MANIFEST, _HANDS_SHELL,
         names={i.object_id: i.name for i in _HANDS_FACTS.inventory},
+        bookkeeping_ids={
+            i.object_id for i in _HANDS_FACTS.inventory
+            if i.named_by_bookkeeping
+        },
     )
     measured = {
         spec_key(o): t
@@ -652,6 +656,10 @@ class _Room:
         self.geometry = derive_room_geometry(
             manifest, shell,
             names={i.object_id: i.name for i in measured_facts.inventory},
+            bookkeeping_ids={
+                i.object_id for i in measured_facts.inventory
+                if i.named_by_bookkeeping
+            },
         )
         self.measured = {
             spec_key(o): t
@@ -663,12 +671,19 @@ class _Room:
         self.client = None
 
     def _view(self) -> tuple[object, str]:
-        from design_spec import apply_to_manifest
+        from design_spec import apply_to_manifest, moved_object_ids
 
         if not self.spec.entries:
             facts = derive_scene_facts(self.manifest)
             return facts, ""
-        facts = derive_scene_facts(apply_to_manifest(self.manifest, self.spec))
+        # Both arguments, exactly as `_proposed_view` passes them (0214).
+        # Dropping the second here would leave these evals grading a facts
+        # block production does not ship — and the block they would grade is
+        # the one whose provenance line 0174 measured 8/8 wrong.
+        facts = derive_scene_facts(
+            apply_to_manifest(self.manifest, self.spec),
+            moved_object_ids=moved_object_ids(self.manifest, self.spec),
+        )
         return facts, render_arrangement_block(self.spec.entries)
 
     def ask(self, question: str) -> _Reply:
@@ -1243,6 +1258,36 @@ class TestTalkingAboutARoomNotAnInventory:
         # It has one real handle here and should reach for it.
         assert re.search(r"\bred\b|\bblack\b|colou?r", r.text, re.I), (
             f"never reached for the one thing that separates them: {r.text!r}"
+        )
+
+    def test_a_bare_shared_label_is_asked_about_rather_than_acted_on(self):
+        """Decision 0213, from the guest's side. The resolver now refuses a
+        reference two pieces answer to instead of taking whichever sorted
+        first, so this asks what the guest DOES with that refusal: it must
+        not narrate a move, and it must come back with the one thing that
+        actually separates them.
+
+        The tool-layer half is pinned offline in test_design_spec.py. This is
+        the half no offline test can reach — whether a machine refusal
+        becomes a question a person can answer.
+        """
+        room = _Room(_ALIKE_MANIFEST, _ALIKE_SHELL)
+        r = room.ask("Move the chair next to the bed.")
+        r.assert_clean(room)
+
+        assert not r.applied, (
+            f"moved a chair without knowing which one was meant: {r.applied}"
+        )
+        done = _DONE_CLAIM.search(r.text)
+        assert done is None, (
+            f"narrated a move it did not make ({done.group(0)!r}): {r.text!r}"
+        )
+        assert _BOOKKEEPING_SPOKEN.search(r.text) is None, (
+            f"offered a number the person cannot decode: {r.text!r}"
+        )
+        assert re.search(r"\bred\b|\bblack\b|colou?r", r.text, re.I), (
+            f"asked which chair without naming the one handle that separates "
+            f"them: {r.text!r}"
         )
 
     def test_a_piece_it_cannot_act_on_is_not_offered_as_a_candidate(self):

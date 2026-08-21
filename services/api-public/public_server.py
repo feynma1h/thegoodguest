@@ -1701,7 +1701,14 @@ async def _tool_session(scene, user_id: str, client_msg_id: str, turn_index: int
         shell = _scene_shell(scene)
         facts = derive_scene_facts(manifest)
         names = {i.object_id: i.name for i in facts.inventory}
-        state["geometry"] = derive_room_geometry(manifest, shell, names=names)
+        # Which of those names are ordinals rather than referents (0184), so
+        # an ambiguous-reference refusal never offers one as a choice.
+        bookkeeping = {
+            i.object_id for i in facts.inventory if i.named_by_bookkeeping
+        }
+        state["geometry"] = derive_room_geometry(
+            manifest, shell, names=names, bookkeeping_ids=bookkeeping
+        )
         state["measured"] = {
             spec_key(o): t
             for o in manifest.get("objects", [])
