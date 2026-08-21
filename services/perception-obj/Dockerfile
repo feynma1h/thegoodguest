@@ -208,6 +208,7 @@ COPY services/perception-obj/room_planes.py /app/room_planes.py
 COPY services/perception-obj/roomplan_room.py /app/roomplan_room.py
 COPY services/perception-obj/contact_priors.py /app/contact_priors.py
 COPY services/perception-obj/box_placement.py /app/box_placement.py
+COPY services/perception-obj/mask_refine.py /app/mask_refine.py
 COPY services/perception-obj/object_color.py /app/object_color.py
 COPY services/perception-obj/shell_geometry.py /app/shell_geometry.py
 COPY services/perception-obj/shell_envelope.py /app/shell_envelope.py
