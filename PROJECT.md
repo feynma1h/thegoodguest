@@ -513,6 +513,17 @@ gains.
   call rather than a lane's.
 - **Two voice evals carry known flakiness** — one setup asks about an ambiguous
   wall roughly 1 time in 8.
+- **`FACTS_VERSION 4` and the ambiguity refusal are MERGED BUT UNPROVEN against
+  a live model** (0213/0214, merged 2026-08-21). The voice evals are
+  fail-closed-live and need an `ANTHROPIC_API_KEY`; the lane had none and
+  neither did the coordinator, so they are **not green and not red — they never
+  ran**. The unit suite covers the resolver (370 + 102 in `api-public`), which
+  is a different question from whether the guest speaks the refusal well. The
+  lane fixed two real harness bugs while in there — both were grading a guest
+  production does not ship — and added one eval for the new refusal, so the
+  coverage is written and waiting on one run. **This is a deploy gate, not a
+  merge gate:** the code is on `main` and must not reach `api-public` until the
+  evals run once with a key.
 
 **iOS**
 
