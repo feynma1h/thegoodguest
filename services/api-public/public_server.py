@@ -136,6 +136,7 @@ from design_spec import (
     Transform,
     apply_to_manifest,
     client_dict as spec_client_dict,
+    moved_object_ids,
 )
 from guest_prompt import (
     PROMPT_VERSION,
@@ -1576,11 +1577,19 @@ def _proposed_view(scene, spec: DesignSpec):
 
     An empty spec returns the CACHED measured facts unchanged, so a room
     nobody has rearranged costs exactly what stage 1 cost.
+
+    The facts derived here are told which pieces have MOVED, so their own
+    provenance line stops calling a proposed position measured (0214). Before
+    that the arrangement block was the only correction, which made it
+    load-bearing rather than the reinforcement it was written as.
     """
     if not spec.entries:
         return _scene_facts_for(scene), ""
     manifest = _scene_manifest(scene)
-    facts = derive_scene_facts(apply_to_manifest(manifest, spec))
+    facts = derive_scene_facts(
+        apply_to_manifest(manifest, spec),
+        moved_object_ids=moved_object_ids(manifest, spec),
+    )
     return facts, render_arrangement_block(spec.entries)
 
 
