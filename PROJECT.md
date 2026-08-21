@@ -278,7 +278,8 @@ the viewer may render, so measurement is never falsified to hide a splat
 artifact. `person` is a suppression-only concept — segmented, never shipped
 (0089).
 
-Suite **945 passed + 9 skipped** (`services/perception-obj/tests`, `dev-fixtures` NOT staged;
+Suite **952 passed + 2 skipped** with `web/public/dev-fixtures` staged and
+**945 + 9** without (`services/perception-obj/tests`;
 903 + 9 before 0204-0205 added 42).
 
 ### Web app — `web/`, live at https://roomstudio.web.app
@@ -751,11 +752,13 @@ before trusting any number from it.
 
 **Suite counts depend on whether `web/public/dev-fixtures` is staged**, and two
 lanes have now reported numbers that read like regressions and were not:
-root/api-public is 826+26 with it and 718+94 without; perception is **903+9
-without** as of 2026-08-21 (786+7 before 0201-0202 added 117) — the
-fixtures-staged figure has not been re-measured since, and the last one
-recorded was 793+0. The fixture-backed tests skip silently. Always say which
-invocation a count came from.
+root is **862+27** with it, and perception is **952+2** with it against
+**945+9** without — both re-measured 2026-08-21, which closes the gap this
+paragraph carried for weeks (the last fixtures-staged perception figure on
+record was 793+0). The seven-test spread IS the fixture-backed set, and it
+skips silently, so a worktree lane reporting the lower number is correct
+rather than regressed — two lanes have now reported exactly that and been
+misread. Always say which invocation a count came from.
 
 Other Python jobs at that CI run: perception-obj **passed on Linux** — the
 `test_shell_observation.py::TestMedianSelect::test_closer_frame_outweighs_far`
