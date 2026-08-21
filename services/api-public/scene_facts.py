@@ -103,7 +103,7 @@ import colorsys
 import math
 import threading
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 
 # Bump when the derivation or rendering logic changes meaning — recorded per
@@ -112,7 +112,9 @@ from dataclasses import dataclass
 # 3: measured heights and horizontal extents in place of "at its longest"
 #    (decisions 0143/0178), per-object colour, and colour-based naming in
 #    place of ordinals (decision 0184).
-FACTS_VERSION = 3
+# 4: provenance tells the truth about a rearranged room (decision 0214) — it
+#    no longer says a moved piece's position was measured.
+FACTS_VERSION = 4
 
 # Box confidence tiers whose dimensions may be spoken as a size. RoomPlan's
 # own grading; "low" is where the label is also unreliable (see SIZES above).
@@ -290,6 +292,16 @@ def _color_reading(obj: dict) -> tuple[str, bool] | None:
     return word, may_name
 
 
+def _and_list(names: list[str]) -> str:
+    """"the a", "the a and the b", "the a, the b and the c" — the file's
+    other lists are machine-ish enumerations under a colon; this one sits
+    mid-sentence and has to read as English."""
+    tagged = [f"the {n}" for n in names]
+    if len(tagged) == 1:
+        return tagged[0]
+    return ", ".join(tagged[:-1]) + " and " + tagged[-1]
+
+
 def _spoken_names(
     objects: list[dict], colors: list[tuple[str, bool] | None]
 ) -> tuple[list[str], list[bool]]:
@@ -440,10 +452,25 @@ def _position(obj: dict) -> tuple[float, float, float] | None:
     return (x, y, z)
 
 
-def derive_scene_facts(manifest: dict) -> SceneFacts:
+def derive_scene_facts(
+    manifest: dict, *, moved_object_ids: Collection[str] = ()
+) -> SceneFacts:
     """Pure derivation: manifest (v2 dict) → SceneFacts. Deterministic —
     objects are processed in sorted-object_id order and nothing here reads
-    a clock, environment, or random source."""
+    a clock, environment, or random source.
+
+    `moved_object_ids` names the pieces standing somewhere nothing measured
+    them, and exists so the PROVENANCE can say so (decision 0214). The
+    conversation re-derives facts over a manifest with an arrangement applied
+    (`design_spec.apply_to_manifest`), and every number that comes back is
+    then a number about a room the scan never saw. It is a set of ids rather
+    than of names because a removal can rename a survivor — drop one of two
+    chairs and "first chair" becomes "chair" — so the only stable handle
+    between the arrangement and these facts is the manifest's own id.
+
+    Empty is the measured room, and its facts are byte-identical to what
+    they were before this parameter existed.
+    """
     scene_id = str(manifest.get("scene_id") or "")
     objects = sorted(
         (o for o in manifest.get("objects", []) if isinstance(o, dict)),
@@ -582,11 +609,31 @@ def derive_scene_facts(manifest: dict) -> SceneFacts:
         if isinstance(frame_count, (int, float)) and frame_count
         else "a scan"
     )
-    provenance = (
-        f"These facts were measured from {frames_part} of this one room. "
-        f"{placed_count} piece{'s' if placed_count != 1 else ''} placed with "
-        f"a measured position; {len(glimpsed)} seen but never placed."
-    )
+    wanted_ids = frozenset(moved_object_ids)
+    moved = [item.name for item in inventory if item.object_id in wanted_ids]
+    if moved:
+        # The room on screen is not the room the scan measured, and this line
+        # is the only place the guest is told where its numbers came from
+        # (decision 0214). Saying "measured" here and correcting it further
+        # down was what made the arrangement block load-bearing.
+        have, them, they, stand = (
+            ("have", "them", "they", "stand") if len(moved) > 1
+            else ("has", "it", "it", "stands")
+        )
+        provenance = (
+            f"These facts describe this one room as it stands on screen. "
+            f"{frames_part.capitalize()} measured the room; {_and_list(moved)} "
+            f"{have} been moved since, so nothing measured {them} where "
+            f"{they} now {stand}. "
+            f"{placed_count} piece{'s' if placed_count != 1 else ''} placed; "
+            f"{len(glimpsed)} seen but never placed."
+        )
+    else:
+        provenance = (
+            f"These facts were measured from {frames_part} of this one room. "
+            f"{placed_count} piece{'s' if placed_count != 1 else ''} placed with "
+            f"a measured position; {len(glimpsed)} seen but never placed."
+        )
 
     limits: list[str] = []
     if glimpsed:

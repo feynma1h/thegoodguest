@@ -27,6 +27,7 @@ from design_spec import (
     Transform,
     apply_to_manifest,
     client_dict,
+    moved_object_ids,
 )
 from guest_tools import (
     TOOLS,
@@ -214,6 +215,78 @@ class TestApplyToManifest:
         assert before.distances != after.distances, (
             "moving a piece must change the distances the guest reads"
         )
+
+
+class TestMovedObjectIds:
+    """Which pieces the scan never saw where they now stand (decision 0214).
+
+    Fixture-free, like `TestFindingThePiece`: this decides what the guest is
+    told about the provenance of every number in a rearranged room, and it
+    should not skip when dev-fixtures are absent.
+    """
+
+    _MANIFEST = {
+        "scene_id": "s", "manifest_version": 2, "frame_count": 9,
+        "objects": [
+            {"object_id": "obj_000", "label": "sofa", "placed": True,
+             "world_transform": {"position": [0, 0.3, 0],
+                                 "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}},
+            {"object_id": "obj_001", "label": "table", "placed": True,
+             "world_transform": {"position": [2, 0.3, 0],
+                                 "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}},
+        ],
+        "frames": [],
+    }
+
+    def _spec(self, **kw):
+        # `obj:` because these objects carry no RoomPlan box — see spec_key.
+        return DesignSpec("s", "u").with_entry(_entry(key="obj:obj_000", **kw))
+
+    def test_an_empty_spec_names_nothing(self):
+        assert moved_object_ids(self._MANIFEST, DesignSpec("s", "u")) == frozenset()
+
+    def test_a_move_is_named(self):
+        assert moved_object_ids(self._MANIFEST, self._spec()) == {"obj_000"}
+
+    def test_a_removal_is_not(self):
+        """The piece is gone from the derived room, so there is no fact left
+        to attribute to it."""
+        spec = self._spec(action="remove", proposed_transform=None)
+        assert moved_object_ids(self._MANIFEST, spec) == frozenset()
+
+    def test_a_turn_is_not(self):
+        """Nothing `scene_facts` derives reads a rotation, so a turn leaves
+        every fact the guest can speak exactly as measured — the same reason
+        rule 10's conditional grammar does not apply to one."""
+        spec = self._spec(action="turn", proposed_transform=Transform(
+            (1.0, 0.5, 2.0), (0, 1, 0, 0), 1.0))
+        assert moved_object_ids(self._MANIFEST, spec) == frozenset()
+
+    def test_a_turn_composed_onto_a_move_is_still_a_move(self):
+        """`run_propose` keeps the move's action when a turn composes onto
+        it, and the piece is still standing somewhere nothing measured."""
+        spec = self._spec(proposed_transform=Transform(
+            (3.0, 0.5, 1.0), (0, 1, 0, 0), 1.0))
+        assert moved_object_ids(self._MANIFEST, spec) == {"obj_000"}
+
+    def test_an_orphaned_entry_names_nothing(self):
+        """A key that stops resolving is surfaced elsewhere, never dropped —
+        but it points at no object here, so it cannot claim one is moved."""
+        spec = DesignSpec("s", "u").with_entry(_entry(key="box:GONE"))
+        assert moved_object_ids(self._MANIFEST, spec) == frozenset()
+
+    def test_it_agrees_with_what_apply_to_manifest_did(self):
+        """The pair has to read the same spec the same way: every id named
+        here is present in the applied room, and carries the proposed
+        position rather than the measured one."""
+        spec = self._spec()
+        applied = apply_to_manifest(self._MANIFEST, spec)
+        named = moved_object_ids(self._MANIFEST, spec)
+        assert named
+        for object_id in named:
+            obj = next(o for o in applied["objects"]
+                       if o["object_id"] == object_id)
+            assert obj["world_transform"]["position"] == [3.0, 0.5, 1.0]
 
 
 # ---------------------------------------------------------------------------
