@@ -26,14 +26,16 @@
 /// from the live census below.
 ///
 /// BUILT BUT NOT YET REACHABLE from this flow (staged, not wired): the
-/// returning-home recent-rooms strip and RoomsListView / QRBridgeView (§9, need a
-/// GET /scenes fetch + trigger points), WhySignInSheet / AccountConflictView
-/// (§8 — BOTH are unreachable: SignInSheet handles the conflict with two stock
-/// `.alert`s and never presents AccountConflictView), and ColdStartView (§1 — the flow
-/// opens directly at .home, and identity is minted by the app-level launch task,
-/// so nothing ever waits on a splash). These have no entry point here and appear
-/// only in their own previews. ReviewView's THIN-COVERAGE variant belongs to this
-/// list too: `thinCoverage` is never passed true below. A coverage signal does
+/// returning-home recent-rooms strip, RoomsListView / QRBridgeView (§9) and
+/// WhySignInSheet (§8) — all three want the same GET /scenes fetch, plus trigger
+/// points — and ColdStartView (§1 — the flow opens directly at .home, and
+/// identity is minted by the app-level launch task, so nothing ever waits on a
+/// splash). These have no entry point here and appear only in their own
+/// previews. §8's conflict SCREEN is not on that list: it is not built at all
+/// (decision 0216), because the count it was designed around cannot be obtained
+/// without becoming the account it asks about. SignInSheet owns the conflict.
+/// ReviewView's THIN-COVERAGE variant belongs to the staged list too:
+/// `thinCoverage` is never passed true below. A coverage signal does
 /// exist — the live census drives the FLOOR/WALLS/CORNERS ticks on the capture
 /// screen — but promoting it to a quality VERDICT is a copy claim deliberately
 /// left unwired, so the "I've got the bones, but a few gaps" treatment renders
