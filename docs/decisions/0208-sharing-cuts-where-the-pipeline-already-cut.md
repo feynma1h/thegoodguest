@@ -66,6 +66,25 @@ segmented on a suppression-armed revision.** A pre-0089 scene must be re-driven
 first, and a warm re-drive does not re-segment (0122's own trigger), so this is
 GPU work rather than a flag.
 
+**That rule is not checkable from a room's own data today.** The manifest
+records no suppression provenance — `process_receiver.py` writes `scene_id`,
+versions, frame counts, `sampling`, `objects` and `frames`, and nothing about
+whether the frames were ever asked about people; the per-frame `suppressed`
+union lives in `masks.npz`, which the serving path never reads. 0122 settled the
+hero by hand, comparing segmentation and bake timestamps against a revision's
+deploy time — adequate for one curated fixture, inadequate for a feature every
+person can invoke. Two ways to close it, and a share path needs one:
+
+- **A conservative `created_at` gate**, available with no pipeline change:
+  a scene created after the first suppression-armed revision deployed had no
+  frame cache of its own to inherit pre-0089 masks from, so it was necessarily
+  segmented with suppression armed. `created_at` is already in the client-facing
+  scene shape (`_scene_to_client_dict`). The gate is one-directional — it
+  refuses some eligible older rooms that were re-driven cold — and refusing an
+  eligible room is the safe error.
+- **A suppression provenance field on the manifest**, the durable fix, which
+  makes the gate exact rather than conservative.
+
 ## Why
 
 **The seam is structural, so the privacy property is structural.** A rung is not

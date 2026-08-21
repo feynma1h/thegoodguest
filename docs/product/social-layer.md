@@ -91,8 +91,10 @@ route can produce one.**
 
 The shell and the objects are already separate files, written by separate
 stages, and separately optional to a client — the assets route treats a missing
-shell as a degrade rather than an error, and the viewer renders a shell with
-zero objects without special-casing.
+or unreachable shell as a degrade to null rather than an error
+(`public_server.py:1365`), and a shell with zero objects already plays a
+correct, shorter reveal with no special-casing, because `planReveal`'s
+`nothingToPlay` requires both to be empty (0122).
 
 That seam is not a privacy abstraction invented here. **It has already been cut
 once, in production, for exactly this reason.** Decision 0122 put a real
@@ -196,6 +198,29 @@ inventory. **That rule generalises, and it is load-bearing for every rung:**
 Note the shape of the exposure: this rule matters *most* at rungs 0 and 1,
 where intuition says the risk is lowest. A person contaminates a wall's
 measured albedo, and the shell is exactly what rungs 0 and 1 ship.
+
+**The rule is not currently checkable from a room's own data.** The manifest
+records no suppression provenance — `process_receiver.py`'s manifest dict
+carries `scene_id`, versions, frame counts, `sampling`, `objects` and `frames`,
+and nothing that says whether this scene's frames were ever asked about people.
+Suppression is logged per frame and stored as a `suppressed` union inside
+`masks.npz`, neither of which the serving path reads. 0122 established the
+hero's eligibility by hand instead, comparing the scene's segmentation and bake
+timestamps against a revision's deploy time.
+
+A manual forensic check is adequate for one curated fixture and inadequate for a
+feature every person can invoke, so a share path needs one of two things:
+
+- **A conservative date gate**, available today with no pipeline change: a scene
+  whose `created_at` is later than the deploy of the first suppression-armed
+  revision was necessarily segmented with suppression armed, because it had no
+  frame cache of its own to inherit pre-0089 masks from. It is one-directional —
+  it will refuse some eligible older rooms that were re-driven cold — and
+  refusing an eligible room is the safe error.
+- **A suppression provenance field on the manifest**, which is the durable fix
+  and makes the gate exact rather than conservative.
+
+Either is a dependency of the first increment; neither is optional.
 
 ### 3.4 What the Terms already permit, and what they do not
 
@@ -331,7 +356,8 @@ built.
 This matters because a measured diff is honest in a way an aesthetic diff is
 not. The product can defend "the bed is 1.4 m from where it was" against a
 RoomPlan box; it cannot defend "this arrangement is better," and the guest's
-charter already forbids it from claiming what it cannot ground.
+charter already forbids claiming what it cannot ground — "you cannot see it —
+say so plainly rather than guessing" (`services/api-public/guest_prompt.py`).
 
 ### 5.4 What a lineage costs
 
@@ -400,16 +426,21 @@ receives it.
 
 - **The room page's data.** Already there — the room page fetches manifest and
   shell today via `/scenes/{id}/assets`.
-- **The eligibility rule (§3.3).** A pre-0089 scene must not produce a card
-  until it is re-driven. This is the one dependency that can require GPU work
-  on an existing room, and it is the easiest to forget because the card carries
-  no splats and therefore looks unrelated to segmentation.
+- **The eligibility rule (§3.3), and a way to evaluate it.** A pre-0089 scene
+  must not produce a card until it is re-driven, and the rule is not currently
+  checkable from a room's own data — so the increment carries either the
+  conservative `created_at` gate or the manifest provenance field. This is the
+  one dependency that can require GPU work on an existing room, and it is the
+  easiest to forget, because the card carries no splats and therefore looks
+  unrelated to segmentation.
 - **A rendering path to a raster.** The og-card is exported by headless Chrome
   from a hand-authored file; the card must render in the person's browser
   instead. That is the one genuinely new piece of engineering, and it is
   contained.
-- **Nothing else.** No backend change, no schema change, no policy change, no
-  new route.
+- **Nothing else.** No new route, no new trust boundary, no new storage, no
+  licence or policy amendment. The eligibility gate above is the only question
+  that reaches past the browser, and its cheaper form reaches only as far as a
+  field the scene list already returns.
 
 **The name is a design call, not a fixture.** "Calling card" sits in the Good
 Guest register (0072) — the thing a guest leaves behind — and avoids colliding
