@@ -3,6 +3,12 @@
 /// is set, a DIFFERENT bundle's completion kick must not start polling — a
 /// previous capture's resumed upload finishing cross-launch would otherwise
 /// render its doorway over the new capture's wait.
+///
+/// Plus the stand-down that is the same judgment on the way OUT: declaring a
+/// flight for a different bundle drops what the previous one published, so no
+/// surface can render a finished room over a scan still on its way up. That
+/// lives in expectBundle rather than at the send sites because a rule spelled
+/// out at each site is a rule one site can be written without.
 
 import XCTest
 @testable import RoomStudioCapture
@@ -90,5 +96,145 @@ final class ScenePollExpectationTests: XCTestCase {
         poller.notifyBundleComplete(bundleId: "new-bundle")
 
         XCTAssertEqual(poller.pollState, .idle, "visibility gate stays the outer guard")
+    }
+
+    // MARK: - Standing the previous room down
+
+    /// Drive a poller to a finished room, the state a status surface renders as
+    /// "Room ready".
+    private func pollerHoldingAFinishedRoom(_ bundleId: String) async -> ScenePoller {
+        let poller = makePoller()
+        poller.setVisible(true)
+        poller.start(bundleId: bundleId)
+        await poller._runTask?.value
+        return poller
+    }
+
+    func test_newFlight_dropsThePreviousRoomsTerminalStatus() async {
+        let poller = await pollerHoldingAFinishedRoom("room-one")
+        guard case .succeeded = poller.pollState else {
+            return XCTFail("setup: expected a finished room, got \(poller.pollState)")
+        }
+
+        // All a send site does when the next capture's bundle is ready.
+        poller.expectBundle("room-two")
+
+        XCTAssertEqual(poller.pollState, .idle,
+                       "a fresh send must not leave the previous room's outcome on screen")
+        XCTAssertNil(poller.currentBundleId,
+                     "nor leave the surface able to act on the previous room")
+    }
+
+    func test_newFlight_alsoDropsAPreviousRoomsFailure() async {
+        // Every terminal state is the previous room's, not just the happy one.
+        let failed: [String: Any] = [
+            "scene_id": "s1", "bundle_id": "b1", "status": "failed",
+            "result_uri": "", "missing_paths": [],
+            "created_at": ISO8601DateFormatter().string(from: Date()),
+            "updated_at": ISO8601DateFormatter().string(from: Date()),
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: failed)
+        let poller = ScenePoller(now: { Date() }, sleep: { _ in },
+                                 performGET: { _, _ in .success((200, data)) },
+                                 tokenProvider: { "token" })
+        poller.setVisible(true)
+        poller.start(bundleId: "room-one")
+        await poller._runTask?.value
+        guard case .failedTerminal = poller.pollState else {
+            return XCTFail("setup: expected a failed room, got \(poller.pollState)")
+        }
+
+        poller.expectBundle("room-two")
+
+        XCTAssertEqual(poller.pollState, .idle)
+    }
+
+    func test_redeclaringTheSameFlight_doesNotKillItsOwnPoll() {
+        // The stand-down keys on a DIFFERENT bundle. Re-declaring the one in
+        // flight — a send site called twice, a restore racing a send — must not
+        // drop the live poll of the very room being waited on.
+        let poller = makePoller()
+        poller.setVisible(true)
+        poller.expectBundle("room-one")
+        poller.notifyBundleComplete(bundleId: "room-one")
+        guard case .polling = poller.pollState else {
+            return XCTFail("setup: expected a live poll, got \(poller.pollState)")
+        }
+
+        poller.expectBundle("room-one")
+
+        guard case .polling = poller.pollState else {
+            return XCTFail("re-declaring the same flight must not stand it down")
+        }
+        XCTAssertEqual(poller.currentBundleId, "room-one")
+        poller.reset()
+    }
+
+    func test_clearingTheExpectation_doesNotStandDownALivePoll() {
+        // nil means "no active flight", not "the room in flight is over".
+        let poller = makePoller()
+        poller.setVisible(true)
+        poller.expectBundle("room-one")
+        poller.notifyBundleComplete(bundleId: "room-one")
+
+        poller.expectBundle(nil)
+
+        guard case .polling = poller.pollState else {
+            return XCTFail("clearing an expectation must not drop the poll")
+        }
+        poller.reset()
+    }
+
+    func test_afterStandDown_thePreviousRoomsOwnCompletionCannotResurrectIt() async {
+        // The old bundle's blobs can still be finishing when the next capture is
+        // sent — a resumed cross-launch upload. Its kick must not put the room
+        // that is already done back on top of the one now going up.
+        let poller = await pollerHoldingAFinishedRoom("room-one")
+
+        poller.expectBundle("room-two")
+        poller.notifyBundleComplete(bundleId: "room-one")
+
+        XCTAssertEqual(poller.pollState, .idle)
+        XCTAssertNil(poller.currentBundleId)
+    }
+
+    // MARK: - Which finished bundle a launch adopts
+
+    private func candidate(_ id: String, _ phase: UploadPhase, minted: TimeInterval) -> BundleRestore.Candidate {
+        .init(bundleId: id, phase: phase, minted: Date(timeIntervalSince1970: minted))
+    }
+
+    func test_newestCompleted_picksNewest_notStoreOrder() {
+        // allBundleIds() promises no order, so an oldest-first listing must not
+        // decide which room the screen opens on.
+        let candidates = [
+            candidate("older", .complete, minted: 1_000),
+            candidate("newest", .complete, minted: 3_000),
+            candidate("middle", .complete, minted: 2_000),
+        ]
+        XCTAssertEqual(SceneStatusView.newestCompleted(from: candidates), "newest")
+    }
+
+    func test_newestCompleted_ignoresRecordsStillUploading() {
+        // A newer record whose upload has not finished has no Scene document to
+        // poll; adopting it would render "Queued for processing" for the whole
+        // upload. The finished room is the honest answer.
+        let candidates = [
+            candidate("finished", .complete, minted: 1_000),
+            candidate("in-flight", .uploadingBlobs, minted: 9_000),
+        ]
+        XCTAssertEqual(SceneStatusView.newestCompleted(from: candidates), "finished")
+    }
+
+    func test_newestCompleted_nothingFinished_isNil() {
+        let candidates = [
+            candidate("in-flight", .uploadingBlobs, minted: 9_000),
+            candidate("dead", .failed, minted: 8_000),
+        ]
+        XCTAssertNil(SceneStatusView.newestCompleted(from: candidates))
+    }
+
+    func test_newestCompleted_emptyStore_isNil() {
+        XCTAssertNil(SceneStatusView.newestCompleted(from: []))
     }
 }
