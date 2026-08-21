@@ -389,6 +389,35 @@ def apply_to_manifest(manifest: dict, spec: DesignSpec) -> dict:
     return out
 
 
+def moved_object_ids(manifest: dict, spec: DesignSpec) -> frozenset[str]:
+    """Which of the manifest's objects are standing somewhere nothing
+    measured them, once `apply_to_manifest` has run (decision 0214).
+
+    It lives beside `apply_to_manifest` because it is the same reading of the
+    same spec — that function builds the room, this one says which pieces in
+    it the scan never saw there — and splitting them across modules is how
+    the two drift apart.
+
+    Only a `move` qualifies. A `remove` leaves the room without the piece at
+    all, so there is nothing left to attribute; a `turn` changes a rotation
+    and nothing `scene_facts` derives reads one, which is the same reason
+    rule 10's conditional grammar does not apply to one either. A turn
+    composed onto a move keeps the move's action, so it is still caught.
+    """
+    from room_geometry import spec_key  # local: keeps the import graph a DAG
+
+    if not spec.entries:
+        return frozenset()
+    out = set()
+    for obj in manifest.get("objects", []):
+        if not isinstance(obj, dict):
+            continue
+        entry = spec.by_key(spec_key(obj))
+        if entry is not None and entry.action == "move":
+            out.add(str(obj.get("object_id") or ""))
+    return frozenset(out)
+
+
 # ---------------------------------------------------------------------------
 # Repository
 # ---------------------------------------------------------------------------
