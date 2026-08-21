@@ -53,7 +53,15 @@ Association projects each box's footprint into each sampled frame (poses +
 intrinsics) and matches SAM masks by footprint overlap + a RoomPlan↔SAM
 label-family map; greedy best-match, deterministic. Every associated
 observation is CONSUMED by its box — one object per box by construction
-(the operator's one-object-one-reconstruction corollary). Boxes with no
+(the operator's one-object-one-reconstruction corollary).
+
+WHICH of a box's associations supplies the appearance is a separate
+question from which observations it consumes, and the overlap sort does not
+answer it: overlap describes the box's projected footprint, not how well
+the object was photographed, so it belongs to the family of input measures
+0197 retired. `select_arm` answers it on the OUTPUT side instead, against
+the one measurement in this system that is not itself a fabrication — the
+box — and ships behind PERCEPTION_ARM_SELECT, default off (decision 0204). Boxes with no
 associated splat ship as honest inventory (`placed: false, reason
 "no_appearance"`, box geometry carried); unmatched observations flow to
 the existing pipeline untouched.
@@ -258,6 +266,31 @@ SURFACE_TOP_CATEGORIES = frozenset(
 # missing mass at one end, and centring it puts half the deficit at each.
 _SEAT_MIN_FILL = float(os.environ.get("PLACEMENT_BOX_SEAT_MIN_FILL", "0.85"))
 _SEAT_PCTL = 1.0
+
+# --- Arm selection (decision 0204) -----------------------------------------
+# Whether an object's shipped reconstruction is CHOSEN among the arms it
+# already has, or taken as the first association carrying a splat. Default
+# off: the instrument below is measured on eight boxes and walked on two,
+# and 0197 named an operator sitting as the gate before it turns anything.
+_ARM_SELECT = os.environ.get("PERCEPTION_ARM_SELECT", "0") not in (
+    "0", "false", "False", ""
+)
+
+# How much closer to spanning its measured box a challenger must render
+# before it displaces the shipped arm. 0197 swept every multi-arm box in
+# the four preserved rooms and the gains are bimodal: 0.000 six times, then
+# 0.017, then 0.590. This sits at the GEOMETRIC CENTRE of that gap
+# (sqrt(0.017 * 0.590) = 0.100), so it is fitted to neither end — 5.7x
+# above the noise it must refuse and 5.9x below the case it must accept.
+_ARM_FILL_MARGIN = float(
+    os.environ.get("PERCEPTION_ARM_SELECT_FILL_MARGIN", "0.10")
+)
+
+# Arms scored per box, best-associated first. Each costs one splat parse
+# and nothing else — no cloud, no appearance, no GPU — but a room whose
+# sampler was told to spend its residue on boxes (0202) can hand a single
+# box many, and the budget this pass spends is not its own.
+_ARM_SELECT_MAX = int(os.environ.get("PERCEPTION_ARM_SELECT_MAX", "4"))
 
 
 def family_compatible(category: str | None, label: str | None) -> bool:
@@ -906,6 +939,134 @@ def _box_dict(box, box_index: int) -> dict:
     return block
 
 
+# ---------------------------------------------------------------------------
+# Arm selection — which of an object's reconstructions ships (decision 0204)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ArmFit:
+    """One already-reconstructed arm, measured against its box."""
+
+    index: int  # position in the association sort; 0 is what ships today
+    fill: float  # rendered vertical span / the box's MEASURED height
+    residual_m: float  # sum |scale*extent - dim| over the three box axes
+
+    @property
+    def fill_dist(self) -> float:
+        """Distance from spanning the box exactly. Overshoot is penalised
+        the same as truncation: mass outside the measurement is not legs."""
+        return abs(self.fill - 1.0)
+
+
+def arm_fit(box, box_index: int, object_id: str, assoc, ctx) -> ArmFit | None:
+    """0197's two output-side checks for one arm, or None when it cannot be
+    placed at all.
+
+    Placed by production's own `build_box_object` with scoring OFF, which is
+    the call 0197 measured the instrument under — a single-arm list has no
+    partner views to score and the extent-best mapping is what an unscored
+    box ships anyway. So this is the measured instrument rather than a
+    relative of it, and it costs one splat parse: no cloud, no appearance,
+    no GPU. `allow_scoring=False` is also the recursion guard — the scored
+    path is the only one that selects.
+    """
+    pts = ctx.get_splat(assoc.obs["splat_gcs_uri"])
+    if pts is None:
+        return None
+    entry = build_box_object(
+        box=box, box_index=box_index, object_id=object_id,
+        associations=[assoc], ctx=ctx, allow_scoring=False,
+    )
+    wt = entry.get("world_transform")
+    height = float(box.dimensions[1])
+    if not wt or height <= 0.0:
+        return None
+    span = _rendered_span(pts, wt["rotation_xyzw"], float(wt["scale"]), box)
+    if span is None:
+        return None
+    return ArmFit(
+        index=-1,
+        fill=float((span[1] - span[0]) / height),
+        residual_m=float(sum(entry.get("box_fit_residual") or [0.0])),
+    )
+
+
+def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
+    """Move the best-rendering arm to the front of `associations`, or leave
+    the order alone. Returns `(associations, record | None)`.
+
+    Today the first association carrying a splat ships, and the sort is by
+    mask-hull overlap — an INPUT measure, computed before any reconstruction
+    exists, and a close relative of the family 0197 retired. The second arm
+    is reconstructed, uploaded, and never looked at. This looks at it.
+
+    The claim is narrow and is the reason it can be made at all: the arm
+    EXISTS, so it can be scored against something that is not itself a
+    fabrication. The RoomPlan box is that thing — measured, not derived from
+    any splat, and already trusted this way (0104 clips to it, 0148 seats
+    against its faces). A reconstruction spanning 0.41 of its measured
+    height is missing mass that one spanning 1.00 of it is not, whichever
+    photograph produced it.
+
+    Two output-side checks, both smaller-is-better, and BOTH must prefer the
+    challenger:
+
+      * `fill_dist` — how far the rendered span sits from the box's height —
+        must improve by `_ARM_FILL_MARGIN`;
+      * `residual_m` — the axis fit the entry already ships — must improve
+        at all.
+
+    Requiring agreement rather than combining them is what the measurement
+    asks for. Over the eight multi-arm boxes in the four preserved rooms the
+    two agree on seven; the eighth is the spike bed, where fill prefers the
+    shipped arm and the residual prefers the other, and nobody has looked at
+    either. A disagreement there is not a tie to be broken by weights, it is
+    the instrument saying it cannot tell — the 0081 margin-gate posture, one
+    stage later.
+
+    Move-to-front rather than replacement, so only the chosen arm changes:
+    `frames_observed` still counts every association and the facing check
+    still scores every view it would have.
+    """
+    fits: list[ArmFit] = []
+    for i, a in enumerate(associations):
+        if len(fits) >= _ARM_SELECT_MAX:
+            break
+        f = arm_fit(box, box_index, object_id, a, ctx)
+        if f is not None:
+            fits.append(ArmFit(index=i, fill=f.fill, residual_m=f.residual_m))
+    if len(fits) < 2:
+        return associations, None
+
+    shipped = fits[0]
+    best = shipped
+    for f in fits[1:]:
+        gain = shipped.fill_dist - f.fill_dist
+        if gain < _ARM_FILL_MARGIN:
+            continue  # inside the noise the sweep measured
+        if f.residual_m >= shipped.residual_m:
+            continue  # the second check disagrees: refuse, do not weigh
+        if gain > shipped.fill_dist - best.fill_dist:
+            best = f  # strict, so ties keep the lower index
+
+    record = {
+        "arms": len(fits),
+        "shipped_fill": round(shipped.fill, 4),
+        "shipped_residual_m": round(shipped.residual_m, 4),
+        "chosen_rank": best.index,
+        "chosen_fill": round(best.fill, 4),
+        "chosen_residual_m": round(best.residual_m, 4),
+        "fill_gain": round(shipped.fill_dist - best.fill_dist, 4),
+    }
+    if best.index == shipped.index:
+        return associations, record
+    reordered = (
+        [associations[best.index]]
+        + [a for i, a in enumerate(associations) if i != best.index]
+    )
+    return reordered, record
+
+
 def build_box_object(
     *,
     box,
@@ -918,6 +1079,17 @@ def build_box_object(
     """One manifest object from one RoomPlan box. Never raises: any missing
     evidence degrades (extent-best mapping, or the honest no_appearance
     inventory entry)."""
+    # Which arm ships, when the object has more than one (decision 0204).
+    # Gated on the flag AND on `allow_scoring`, which is both the recursion
+    # guard and the budget one: a starved scene loses this the way it loses
+    # every other post-pass, and no preserved room pays for that — rp6g2,
+    # the one room that budget-stops, has no multi-arm box at all.
+    arm_record = None
+    if _ARM_SELECT and allow_scoring:
+        associations, arm_record = select_arm(
+            box=box, box_index=box_index, object_id=object_id,
+            associations=associations, ctx=ctx,
+        )
     entry_base = {
         "object_id": object_id,
         "label": box.category,
@@ -964,6 +1136,8 @@ def build_box_object(
     }
     quality["axis_candidates"] = len(candidates)
     quality["axis_up_filtered"] = u_local is not None
+    if arm_record is not None:
+        quality["arm_select"] = arm_record
 
     # --- Assignment resolution: cloud-alignment instrument (0081). ------
     # The appearance instrument measured unable to separate ANY box on the
