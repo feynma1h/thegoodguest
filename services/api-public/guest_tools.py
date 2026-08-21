@@ -296,8 +296,9 @@ def _candidates(hits: list[RoomObject]) -> str:
     is the whole answer — which is the honest end of "nothing separates
     them", not a gap in this function.
     """
-    nameable = sorted({o.name for o in hits if not o.named_by_bookkeeping})
-    rest = len(hits) - len([o for o in hits if not o.named_by_bookkeeping])
+    named = [o for o in hits if not o.named_by_bookkeeping]
+    nameable = sorted({o.name for o in named})
+    rest = len(hits) - len(named)
     label = hits[0].label
     if not nameable:
         return f"{len(hits)} {label}s that nothing separates"
