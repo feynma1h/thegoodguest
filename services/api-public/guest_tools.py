@@ -228,13 +228,34 @@ def _spoken_form(text: str) -> str:
     return re.sub(r"^the\s+", "", lowered)
 
 
-def _find(geometry: RoomGeometry, object_id: str) -> RoomObject | None:
-    """Resolve whatever the model put in `object_id` to a piece of the room.
+def _find(geometry: RoomGeometry, object_id: str) -> RoomObject | Refusal:
+    """Resolve whatever the model put in `object_id` to a piece of the room,
+    or refuse.
 
     Three namespaces meet here and only here: the manifest object_id, the spec
     key (the box identifier where one exists, 0131), and the spoken NAME — the
     last of which is what THE FACTS inventory actually shows the model, which
     is why the name path carries most of the traffic and all of the tolerance.
+
+    TWO CANDIDATES REFUSE RATHER THAN PICK (decision 0213). The name path
+    falls back to the bare LABEL, and a label is shared: "chair" in a
+    two-chair room used to resolve to whichever object sorted first, and
+    nothing anywhere told the person which one it had picked. That is the one
+    failure this layer must never have — a wrong piece moves on screen and
+    reads as the room being wrong. The discipline and the tiering are
+    `spec_solver.resolve_object_anchor`'s, which has refused ambiguous
+    ANCHORS since 0132; the subject of a change simply never got the same
+    treatment.
+
+    Tiers are tried in order and the first that hits anything decides, so a
+    name that is exact for one piece is never lost to a label two pieces
+    share: "red chair" resolves where "chair" refuses.
+
+    UNPLACED PIECES ARE CANDIDATES HERE, unlike in `resolve_object_anchor`,
+    which considers only what it can measure against. A glimpsed piece is
+    something the person can still refer to, and resolving it earns the
+    specific `piece_not_placed` refusal below rather than the baffling
+    `unknown_object`.
     """
     want = str(object_id or "").strip()
     for obj in geometry.objects:
@@ -245,11 +266,19 @@ def _find(geometry: RoomGeometry, object_id: str) -> RoomObject | None:
     # would find baffling.
     spoken = _spoken_form(want)
     if not spoken:
-        return None
-    for obj in geometry.objects:
-        if _spoken_form(obj.name) == spoken or _spoken_form(obj.label) == spoken:
-            return obj
-    return None
+        return Refusal("unknown_object")
+    for match in (
+        lambda o: _spoken_form(o.name) == spoken,
+        lambda o: _spoken_form(o.label) == spoken,
+    ):
+        hits = [o for o in geometry.objects if match(o)]
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            return Refusal(
+                "ambiguous_object", ", ".join(sorted(o.name for o in hits))
+            )
+    return Refusal("unknown_object")
 
 
 def _measured(obj: RoomObject) -> Transform | None:
@@ -297,12 +326,16 @@ def run_propose(
     for raw in changes[:4]:
         object_id = str((raw or {}).get("object_id") or "")
         action = str((raw or {}).get("action") or "")
-        obj = _find(geometry, object_id)
-        if obj is None:
+        found = _find(geometry, object_id)
+        if isinstance(found, Refusal):
             results.append({
-                "object_id": object_id, "applied": False, "reason": "unknown_object",
+                "object_id": object_id,
+                "applied": False,
+                "reason": found.reason,
+                **({"detail": found.detail} if found.detail else {}),
             })
             continue
+        obj = found
         if action not in ("move", "remove", "turn"):
             results.append({
                 "object_id": object_id, "applied": False, "reason": "unknown_action",
@@ -550,29 +583,49 @@ def run_revert(
     *, spec: DesignSpec, geometry: RoomGeometry, keys: list[str]
 ) -> ToolOutcome:
     wanted = [str(k) for k in (keys or [])]
+    refused: list[dict] = []
     whole_room = any(k.strip().lower() == "all" for k in wanted)
     if whole_room:
         resolved = {e.key for e in spec.entries}
     else:
         resolved = set()
         for k in wanted:
-            obj = _find(geometry, k)
-            if obj is not None:
-                resolved.add(obj.key)
-            elif spec.by_key(k) is not None:
+            found = _find(geometry, k)
+            if not isinstance(found, Refusal):
+                resolved.add(found.key)
+                continue
+            if spec.by_key(k) is not None:
                 # An ORPHANED entry can still be reverted even though its
                 # object is gone from the manifest — clearing it is exactly
                 # what a person who sees "this piece is no longer in the room"
                 # wants to do.
                 resolved.add(k)
+                continue
+            if found.reason == "ambiguous_object":
+                # The same discipline as propose (0213): putting the wrong
+                # piece back is as wrong as moving the wrong piece. Silence
+                # would be worse here than in propose, because "nothing to
+                # put back" is a lie in this case — there IS something, and
+                # the room simply cannot tell which of them was meant.
+                refused.append({
+                    "key": k, "reason": found.reason, "detail": found.detail,
+                })
     hit = {e.key for e in spec.entries} & resolved
     out, reverted = _revert_entries(spec, geometry, hit)
-    description = (
-        _revert_description(out, whole_room) if reverted else "nothing to put back"
-    )
+    if reverted:
+        description = _revert_description(out, whole_room)
+    elif refused:
+        description = ""
+    else:
+        description = "nothing to put back"
+    result: dict = {"reverted": reverted}
+    if description:
+        result["description"] = description
+    if refused:
+        result["refused"] = refused
     return ToolOutcome(
         spec=out,
-        result={"reverted": reverted, "description": description},
+        result=result,
         changed=bool(reverted),
         flags=[],
         descriptions=[description] if reverted else [],
@@ -667,6 +720,11 @@ def log_turn_tools(
         for r in results
         for c in (r.get("changes") or [])
         if not c.get("applied")
+    ] + [
+        # revert refuses too, since 0213 — and an ambiguous reference is
+        # exactly the thing worth counting in production, because it is the
+        # one refusal shape no real conversation has ever produced.
+        c.get("reason") for r in results for c in (r.get("refused") or [])
     ]
     logger.info(
         "conversation_tools scene_id=%s at=%s rounds=%d applied=%d refused=%s flags=%s",
