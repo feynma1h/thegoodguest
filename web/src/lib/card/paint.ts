@@ -46,18 +46,24 @@ const FALLBACK: PaintFonts = {
  * app/layout.tsx, so this is the only correct source.
  */
 export function resolveFonts(doc: Document): PaintFonts {
-  const el = doc.body ?? doc.documentElement;
-  if (!el || typeof getComputedStyle !== "function") return FALLBACK;
-  const style = getComputedStyle(el);
-  const pick = (name: string, fallback: string) => {
-    const value = style.getPropertyValue(name).trim();
-    return value.length > 0 ? value : fallback;
-  };
-  return {
-    serif: pick("--font-source-serif", FALLBACK.serif),
-    sans: pick("--font-instrument-sans", FALLBACK.sans),
-    mono: pick("--font-plex-mono", FALLBACK.mono),
-  };
+  // Degrades rather than throws: a card set in system faces is a worse
+  // card, and a card that never paints is no card at all.
+  try {
+    const el = doc.body ?? doc.documentElement;
+    if (!el || typeof getComputedStyle !== "function") return FALLBACK;
+    const style = getComputedStyle(el);
+    const pick = (name: string, fallback: string) => {
+      const value = style.getPropertyValue(name)?.trim() ?? "";
+      return value.length > 0 ? value : fallback;
+    };
+    return {
+      serif: pick("--font-source-serif", FALLBACK.serif),
+      sans: pick("--font-instrument-sans", FALLBACK.sans),
+      mono: pick("--font-plex-mono", FALLBACK.mono),
+    };
+  } catch {
+    return FALLBACK;
+  }
 }
 
 function fontString(op: TextOp, fonts: PaintFonts): string {
