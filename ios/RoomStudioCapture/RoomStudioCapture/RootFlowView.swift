@@ -289,11 +289,9 @@ struct RootFlowView: View {
             // hero: in this flow that IS the no-rooms variant, so silently
             // showing it tells a returning user their rooms are gone. The hero
             // still holds the space (it is true for everyone), with an honest
-            // line saying the phone could not look.
-            if homeRooms == .heroWithTrouble {
-                RoomsTroubleLine(onRetry: refreshRooms)
-                    .padding([.horizontal, .top], 20)
-            }
+            // line saying the phone could not look — carried in HomeView's
+            // `notice` slot so it shares the scroll area rather than squeezing
+            // the pinned scan action.
             HomeView(
                 onScan: { showGuidance = true },
                 onProfile: { showProfile = true },
@@ -308,6 +306,11 @@ struct RootFlowView: View {
                             onSeeAll: { showRooms = true },
                             onRetry: refreshRooms
                         )
+                    }
+                },
+                notice: {
+                    if homeRooms == .heroWithTrouble {
+                        RoomsTroubleLine(onRetry: refreshRooms)
                     }
                 }
             )

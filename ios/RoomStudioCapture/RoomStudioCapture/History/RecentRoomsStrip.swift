@@ -114,25 +114,43 @@ struct RecentRoomsStrip: View {
 struct RoomsTroubleLine: View {
     var onRetry: () -> Void = {}
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "wifi.exclamationmark")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color.rsInkFaint)
-            Text("I couldn't check your rooms just now.")
-                .font(RSFont.ui(.footnote))
-                .foregroundStyle(Color.rsInkMuted)
-                .fixedSize(horizontal: false, vertical: true)
-                .multilineTextAlignment(.leading)
-            Spacer(minLength: 6)
-            Button(action: onRetry) { Text("Try again") }
-                .font(RSFont.ui(.footnote, weight: .semibold))
-                .foregroundStyle(Color.rsInk)
+        VStack(alignment: .leading, spacing: 10) {
+            // .top, not centred: at accessibility sizes the message wraps to
+            // four lines and a vertically centred glyph came to rest in the
+            // middle of them, reading as punctuation rather than as an icon.
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: "wifi.exclamationmark")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.rsInkFaint)
+                    .frame(height: 18)
+                Text("I couldn't check your rooms just now.")
+                    .font(RSFont.ui(.footnote))
+                    .foregroundStyle(Color.rsInkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                if !typeSize.isAccessibilitySize {
+                    Spacer(minLength: 6)
+                    retry
+                }
+            }
+            // Below the message once the message needs the whole width, rather
+            // than beside it as a two-line stub in a column of its own.
+            if typeSize.isAccessibilitySize { retry }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .background(Color.rsSurface.opacity(0.9), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.rsHairline, lineWidth: 1))
+    }
+
+    private var retry: some View {
+        Button(action: onRetry) { Text("Try again") }
+            .font(RSFont.ui(.footnote, weight: .semibold))
+            .foregroundStyle(Color.rsInk)
     }
 }
 

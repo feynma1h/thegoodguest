@@ -172,20 +172,27 @@ struct RoomsListView: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// Capped and top-aligned, found by screenshot: at AX5 the uncapped title
+    /// wrapped to two lines and the back chevron — vertically centred against
+    /// the wrapped block — came to rest between them, reading as a stray glyph
+    /// inside the heading rather than as the way out of the screen.
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             if let onClose {
                 Button(action: onClose) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(Color.rsInkMuted)
+                        .frame(width: 32, height: 32)
                 }
                 .accessibilityLabel("Back")
             }
             Text("Your rooms")
-                .rsFont(.display, size: 22, weight: .medium)
+                .rsFont(.display, size: 22, weight: .medium, maxSize: 30)
                 .foregroundStyle(Color.rsInk)
-            Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minHeight: 32, alignment: .center)
+            Spacer(minLength: 6)
             Button(action: onProfile) {
                 Image(systemName: "person.crop.circle")
                     .font(.system(size: 18))
