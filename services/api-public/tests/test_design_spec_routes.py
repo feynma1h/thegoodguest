@@ -449,6 +449,41 @@ class TestTheGuestSeesTheProposedRoom:
         # The facts describe the MOVED room: the sofa/table distance changed.
         assert "about 1.6 m" not in system[1]["text"]
 
+    def test_the_facts_stop_calling_a_moved_piece_measured(self, client):
+        """Decision 0214, end to end through the real turn. The facts block's
+        own provenance line is the only place the guest is told where its
+        numbers came from, and it used to say "measured" over a room the
+        scan never saw — corrected downstream by the arrangement block, which
+        made that block load-bearing rather than belt-and-braces.
+        """
+        scene, repo = _scene(), InMemoryDesignSpecRepository()
+        repo.put(DesignSpec(scene.scene_id, _UID).with_entry(_entry()), now=_NOW)
+        streamer = ToolCallingStreamer([(["ok"], [])])
+        with _wired(scene, spec_repo=repo, streamer=streamer):
+            _turn(client, scene, "how does it sit now?")
+        facts = streamer.calls[0]["system"][1]["text"]
+        assert "These facts were measured from" not in facts
+        assert "the sofa has been moved since" in facts
+        assert "nothing measured it where it now stands" in facts
+
+    def test_a_removal_alone_leaves_the_provenance_measured(self, client):
+        """A remove takes the piece out of the derived facts entirely, so
+        every fact that survives is still one the scan measured. Naming it as
+        unmeasured would hedge facts nothing touched — the regression 0174
+        recorded when it made the same distinction for rule 10's grammar.
+        """
+        scene, repo = _scene(), InMemoryDesignSpecRepository()
+        repo.put(
+            DesignSpec(scene.scene_id, _UID).with_entry(_entry(action="remove")),
+            now=_NOW,
+        )
+        streamer = ToolCallingStreamer([(["ok"], [])])
+        with _wired(scene, spec_repo=repo, streamer=streamer):
+            _turn(client, scene, "how does it sit now?")
+        facts = streamer.calls[0]["system"][1]["text"]
+        assert "These facts were measured from" in facts
+        assert "has been moved since" not in facts
+
     def test_no_arrangement_costs_exactly_what_stage_one_cost(self, client):
         scene = _scene()
         streamer = ToolCallingStreamer([(["ok"], [])])

@@ -43,6 +43,7 @@ Consumers: spec_solver.py, guest_tools.py.
 from __future__ import annotations
 
 import math
+from collections.abc import Collection
 from dataclasses import dataclass
 
 Vec3 = tuple[float, float, float]
@@ -189,6 +190,11 @@ class RoomObject:
     position: Vec3 | None
     rotation_xyzw: tuple[float, float, float, float] | None = None
     rotation_source: str | None = None
+    # True when `name` is an ordinal scene_facts assigned because nothing
+    # measured tells this piece from its siblings. It is BOOKKEEPING, not a
+    # referent — the person cannot tell which chair is the third one either
+    # (decision 0184) — so a refusal must not offer it as a choice.
+    named_by_bookkeeping: bool = False
 
 
 @dataclass(frozen=True)
@@ -366,12 +372,14 @@ def derive_room_geometry(
     shell: dict | None,
     *,
     names: dict[str, str] | None = None,
+    bookkeeping_ids: Collection[str] | None = None,
 ) -> RoomGeometry:
     """Pure derivation: the two fetched documents → the solver's world.
 
     `names` maps object_id → the spoken name scene_facts derived, so the
     solver's refusals and descriptions call things what the guest calls them.
-    Absent, labels are used verbatim.
+    Absent, labels are used verbatim. `bookkeeping_ids` marks which of those
+    names are ordinals rather than referents — see `RoomObject`.
 
     Degrades rather than raising, everywhere: a missing shell yields no floor
     and no walls (and the solver then refuses wall relations by its own rule),
@@ -400,6 +408,7 @@ def derive_room_geometry(
             box_identifier=ident if isinstance(ident, str) and ident else None,
             name=(names or {}).get(object_id, label),
             label=label,
+            named_by_bookkeeping=object_id in (bookkeeping_ids or ()),
             placed=bool(obj.get("placed")),
             box=_box(obj),
             position=position,

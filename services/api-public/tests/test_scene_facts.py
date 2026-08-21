@@ -731,5 +731,79 @@ class TestClearances:
 
 
 class TestFactsVersion:
-    def test_version_is_three(self):
-        assert FACTS_VERSION == 3
+    def test_version_is_four(self):
+        """A deliberate pin, not a tautology: FACTS_VERSION is the cache key
+        AND half of every persisted turn's reproducibility triple, so it must
+        never move as a side effect of an edit."""
+        assert FACTS_VERSION == 4
+
+
+class TestRearrangedProvenance:
+    """The provenance line is the ONLY place the guest is told where its
+    numbers came from, and in a rearranged room it used to say they were
+    measured when `_proposed_view` had re-derived them from a move
+    (decision 0214). 0174 corrected that downstream in the arrangement block,
+    which made that block load-bearing rather than belt-and-braces.
+    """
+
+    def test_the_measured_room_is_untouched_byte_for_byte(self):
+        """The whole of FACTS_VERSION 4's difference is confined to rooms
+        that have been rearranged. A room nobody has touched must read
+        exactly as it did at 3 — most rooms are that room."""
+        assert derive_scene_facts(_room()).provenance == (
+            "These facts were measured from a scan of 42 frames of this one "
+            "room. 3 pieces placed with a measured position; 1 seen but "
+            "never placed."
+        )
+
+    def test_no_moved_ids_is_the_measured_room(self):
+        assert (
+            derive_scene_facts(_room(), moved_object_ids=())
+            == derive_scene_facts(_room())
+        )
+
+    def test_a_moved_piece_is_not_claimed_as_measured(self):
+        facts = derive_scene_facts(_room(), moved_object_ids={"obj_000"})
+        assert facts.provenance == (
+            "These facts describe this one room as it stands on screen. "
+            "A scan of 42 frames measured the room; the sofa has been "
+            "moved since, so nothing measured it where it now stands. "
+            "3 pieces placed; 1 seen but never placed."
+        )
+        assert "were measured from" not in facts.provenance
+        assert "with a measured position" not in facts.provenance
+
+    def test_it_names_every_moved_piece_and_agrees_with_itself(self):
+        facts = derive_scene_facts(
+            _room(), moved_object_ids={"obj_000", "obj_001"}
+        )
+        assert (
+            "the sofa and the table have been moved since, so nothing "
+            "measured them where they now stand"
+        ) in facts.provenance
+
+    def test_the_names_are_the_ones_the_guest_speaks_not_the_ids(self):
+        """Ids are the handle because a removal renames a survivor; what the
+        line SAYS has to be the spoken name, or it points at nothing the
+        person could have said."""
+        facts = derive_scene_facts(_room(), moved_object_ids={"obj_002"})
+        assert "the lamp has been moved" in facts.provenance
+        assert "obj_002" not in facts.provenance
+
+    def test_an_id_the_room_does_not_have_names_nothing(self):
+        """Degrades to the measured line rather than raising: a conversation
+        is never taken down by a stale key."""
+        assert (
+            derive_scene_facts(_room(), moved_object_ids={"obj_999"}).provenance
+            == derive_scene_facts(_room()).provenance
+        )
+
+    def test_the_census_stays_true(self):
+        facts = derive_scene_facts(_room(), moved_object_ids={"obj_000"})
+        assert "3 pieces placed; 1 seen but never placed." in facts.provenance
+
+    def test_it_is_still_pure_and_deterministic(self):
+        a = derive_scene_facts(_room(), moved_object_ids={"obj_001", "obj_000"})
+        b = derive_scene_facts(_room(), moved_object_ids={"obj_000", "obj_001"})
+        assert a == b
+        assert render_facts_block(a) == render_facts_block(b)

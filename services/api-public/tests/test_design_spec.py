@@ -27,6 +27,7 @@ from design_spec import (
     Transform,
     apply_to_manifest,
     client_dict,
+    moved_object_ids,
 )
 from guest_tools import (
     TOOLS,
@@ -39,6 +40,7 @@ from guest_tools import (
 )
 from room_geometry import derive_room_geometry, spec_key
 from scene_facts import derive_scene_facts
+from spec_solver import Refusal
 
 _FIXTURES = Path(__file__).resolve().parents[3] / "web/public/dev-fixtures"
 NOW = datetime(2026, 8, 9, tzinfo=timezone.utc)
@@ -213,6 +215,78 @@ class TestApplyToManifest:
         assert before.distances != after.distances, (
             "moving a piece must change the distances the guest reads"
         )
+
+
+class TestMovedObjectIds:
+    """Which pieces the scan never saw where they now stand (decision 0214).
+
+    Fixture-free, like `TestFindingThePiece`: this decides what the guest is
+    told about the provenance of every number in a rearranged room, and it
+    should not skip when dev-fixtures are absent.
+    """
+
+    _MANIFEST = {
+        "scene_id": "s", "manifest_version": 2, "frame_count": 9,
+        "objects": [
+            {"object_id": "obj_000", "label": "sofa", "placed": True,
+             "world_transform": {"position": [0, 0.3, 0],
+                                 "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}},
+            {"object_id": "obj_001", "label": "table", "placed": True,
+             "world_transform": {"position": [2, 0.3, 0],
+                                 "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}},
+        ],
+        "frames": [],
+    }
+
+    def _spec(self, **kw):
+        # `obj:` because these objects carry no RoomPlan box — see spec_key.
+        return DesignSpec("s", "u").with_entry(_entry(key="obj:obj_000", **kw))
+
+    def test_an_empty_spec_names_nothing(self):
+        assert moved_object_ids(self._MANIFEST, DesignSpec("s", "u")) == frozenset()
+
+    def test_a_move_is_named(self):
+        assert moved_object_ids(self._MANIFEST, self._spec()) == {"obj_000"}
+
+    def test_a_removal_is_not(self):
+        """The piece is gone from the derived room, so there is no fact left
+        to attribute to it."""
+        spec = self._spec(action="remove", proposed_transform=None)
+        assert moved_object_ids(self._MANIFEST, spec) == frozenset()
+
+    def test_a_turn_is_not(self):
+        """Nothing `scene_facts` derives reads a rotation, so a turn leaves
+        every fact the guest can speak exactly as measured — the same reason
+        rule 10's conditional grammar does not apply to one."""
+        spec = self._spec(action="turn", proposed_transform=Transform(
+            (1.0, 0.5, 2.0), (0, 1, 0, 0), 1.0))
+        assert moved_object_ids(self._MANIFEST, spec) == frozenset()
+
+    def test_a_turn_composed_onto_a_move_is_still_a_move(self):
+        """`run_propose` keeps the move's action when a turn composes onto
+        it, and the piece is still standing somewhere nothing measured."""
+        spec = self._spec(proposed_transform=Transform(
+            (3.0, 0.5, 1.0), (0, 1, 0, 0), 1.0))
+        assert moved_object_ids(self._MANIFEST, spec) == {"obj_000"}
+
+    def test_an_orphaned_entry_names_nothing(self):
+        """A key that stops resolving is surfaced elsewhere, never dropped —
+        but it points at no object here, so it cannot claim one is moved."""
+        spec = DesignSpec("s", "u").with_entry(_entry(key="box:GONE"))
+        assert moved_object_ids(self._MANIFEST, spec) == frozenset()
+
+    def test_it_agrees_with_what_apply_to_manifest_did(self):
+        """The pair has to read the same spec the same way: every id named
+        here is present in the applied room, and carries the proposed
+        position rather than the measured one."""
+        spec = self._spec()
+        applied = apply_to_manifest(self._MANIFEST, spec)
+        named = moved_object_ids(self._MANIFEST, spec)
+        assert named
+        for object_id in named:
+            obj = next(o for o in applied["objects"]
+                       if o["object_id"] == object_id)
+            assert obj["world_transform"]["position"] == [3.0, 0.5, 1.0]
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +479,19 @@ class TestTelemetry:
             assert not unprompted_proposal(asked, True), asked
 
 
+def _geometry_as_the_server_builds_it(manifest: dict, facts) -> object:
+    """The geometry exactly as `public_server._load` builds it, bookkeeping
+    flags included. Building it any other way here would test a resolver
+    production does not run."""
+    return derive_room_geometry(
+        manifest, None,
+        names={i.object_id: i.name for i in facts.inventory},
+        bookkeeping_ids={
+            i.object_id for i in facts.inventory if i.named_by_bookkeeping
+        },
+    )
+
+
 class TestFindingThePiece:
     """`_find` is where the model's `object_id` meets the room, and the one
     place a good answer can still be thrown away (decision 0185).
@@ -440,10 +527,7 @@ class TestFindingThePiece:
         assert [i.name for i in facts.inventory] == [
             "red chair", "black chair", "bed"
         ]
-        return derive_room_geometry(
-            manifest, None,
-            names={i.object_id: i.name for i in facts.inventory},
-        )
+        return _geometry_as_the_server_builds_it(manifest, facts)
 
     def test_the_forms_the_model_actually_emits_all_resolve(self):
         """Measured on the transcript's first turn: 5 of 8 samples wrote
@@ -460,7 +544,9 @@ class TestFindingThePiece:
     def test_it_still_refuses_a_piece_the_room_does_not_have(self):
         geometry = self._geometry()
         for form in ("bookshelf", "the bookshelf", "blue chair", "", "the", "_"):
-            assert _find(geometry, form) is None, form
+            found = _find(geometry, form)
+            assert isinstance(found, Refusal), form
+            assert found.reason == "unknown_object", form
 
     def test_tolerance_never_moves_a_match_to_a_different_piece(self):
         """Reduction, not fuzzy matching. Names are unique space-separated
@@ -472,16 +558,156 @@ class TestFindingThePiece:
             assert _find(geometry, obj.object_id) is obj
         assert _find(geometry, "the bed").object_id == "obj_002"
 
-    def test_a_bare_ambiguous_label_resolves_to_the_first_piece(self):
-        """PRE-EXISTING and pinned as found, not as wanted (decision 0185).
+    def test_a_bare_ambiguous_label_refuses_and_names_the_candidates(self):
+        """The defect this class was written to pin, now fixed (0213).
 
-        `_find` falls back to the bare LABEL, so "chair" in a two-chair room
-        silently resolves to whichever comes first in object order rather than
-        refusing. The charter is what protects the person here — the guest asks
-        which one, and was measured doing so — but the resolver's own failure
-        mode is a silent wrong piece, which is the one thing this layer should
-        never do quietly. Left alone deliberately: it predates the colour
-        naming and changing it is a behaviour change in the tool layer.
+        "chair" in a two-chair room used to resolve to whichever object
+        sorted first, silently. It now refuses with both spoken names, which
+        is what lets the guest ask a question the person can actually answer.
         """
         geometry = self._geometry()
-        assert _find(geometry, "chair").object_id == "obj_000"
+        for form in ("chair", "the chair", "  Chair ", "the_chair"):
+            found = _find(geometry, form)
+            assert isinstance(found, Refusal), form
+            assert found.reason == "ambiguous_object", form
+            assert found.detail == "black chair, red chair", form
+
+    def test_colour_is_what_separates_them(self):
+        """Acceptance criterion 2. The tiers exist so that an exact NAME is
+        never thrown away by a LABEL two pieces share — "red chair" resolves
+        in the same room where "chair" refuses."""
+        geometry = self._geometry()
+        assert _find(geometry, "red chair").object_id == "obj_000"
+        assert _find(geometry, "black chair").object_id == "obj_001"
+        assert isinstance(_find(geometry, "chair"), Refusal)
+
+    def test_the_refusal_reaches_the_guest_as_a_refusal(self):
+        """The whole point: `propose` must not act. A silent wrong piece is
+        the one failure that reads to the person as the room being wrong."""
+        geometry = self._geometry()
+        out = run_propose(
+            spec=DesignSpec("s", "u"),
+            geometry=geometry,
+            manifest_transforms={},
+            changes=[{"object_id": "chair", "action": "remove"}],
+            turn_index=0,
+            client_msg_id="m",
+        )
+        assert out.changed is False
+        assert out.spec.entries == ()
+        change = out.result["changes"][0]
+        assert change["applied"] is False
+        assert change["reason"] == "ambiguous_object"
+        assert change["detail"] == "black chair, red chair"
+
+    def test_revert_refuses_the_same_reference_rather_than_picking(self):
+        """And does not then say "nothing to put back", which would be a lie:
+        there is something, the room cannot tell which."""
+        geometry = self._geometry()
+        moved = run_propose(
+            spec=DesignSpec("s", "u"),
+            geometry=geometry,
+            manifest_transforms={},
+            changes=[{"object_id": "red chair", "action": "remove"},
+                     {"object_id": "black chair", "action": "remove"}],
+            turn_index=0,
+            client_msg_id="m",
+        )
+        assert len(moved.spec.entries) == 2
+        out = run_revert(spec=moved.spec, geometry=geometry, keys=["chair"])
+        assert out.changed is False
+        assert out.result["reverted"] == 0
+        assert "description" not in out.result
+        assert out.result["refused"] == [
+            {"key": "chair", "reason": "ambiguous_object",
+             "detail": "black chair, red chair"}
+        ]
+
+    def _uncoloured_geometry(self):
+        """Two chairs the scan could not read a colour for — the common case,
+        and the one where the confidence gate is working rather than failing.
+        scene_facts falls back to ordinals here, and 0184 is explicit that an
+        ordinal is not a referent: the person cannot tell which chair is the
+        second one either.
+        """
+        manifest = {
+            "scene_id": "s", "manifest_version": 2, "frame_count": 9,
+            "objects": [
+                {"object_id": "obj_000", "label": "chair", "placed": True,
+                 "quality": {"frames_observed": 4, "cluster_spread_m": 0.05},
+                 "world_transform": {"position": [0, 0.3, 0],
+                                     "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}},
+                {"object_id": "obj_001", "label": "chair", "placed": True,
+                 "quality": {"frames_observed": 4, "cluster_spread_m": 0.05},
+                 "world_transform": {"position": [2, 0.3, 0],
+                                     "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0}},
+            ],
+            "frames": [],
+        }
+        facts = derive_scene_facts(manifest)
+        assert [i.name for i in facts.inventory] == ["first chair", "second chair"]
+        assert all(i.named_by_bookkeeping for i in facts.inventory)
+        return _geometry_as_the_server_builds_it(manifest, facts)
+
+    def test_the_refusal_is_clean_where_no_colour_exists(self):
+        """Acceptance criterion 2's other half. Nothing measured separates
+        these two, so the refusal must still be a refusal — not a silent pick,
+        not an invented distinguishing feature, and not a pair of ordinals
+        offered as if they were names (0184)."""
+        geometry = self._uncoloured_geometry()
+        found = _find(geometry, "chair")
+        assert isinstance(found, Refusal)
+        assert found.reason == "ambiguous_object"
+        assert found.detail == "2 chairs that nothing separates"
+        assert "first" not in found.detail and "second" not in found.detail
+
+    def test_a_room_with_both_offers_only_what_can_be_offered(self):
+        """The shape the production walk actually produced: some chairs the
+        colour gate could read, some it could not. The nameable ones are
+        handed over; the rest are counted, never listed."""
+        manifest = {
+            "scene_id": "s", "manifest_version": 2, "frame_count": 9,
+            "objects": [
+                {"object_id": "obj_000", "label": "chair", "placed": True,
+                 "color": {"hex": "#880607", "concentration": 0.74,
+                           "visible_fraction": 0.9, "visible_points": 9000},
+                 "quality": {"frames_observed": 4, "cluster_spread_m": 0.05},
+                 "world_transform": {"position": [0, 0.3, 0],
+                                     "rotation_xyzw": [0, 0, 0, 1],
+                                     "scale": 1.0}},
+                {"object_id": "obj_001", "label": "chair", "placed": True,
+                 "quality": {"frames_observed": 4, "cluster_spread_m": 0.05},
+                 "world_transform": {"position": [2, 0.3, 0],
+                                     "rotation_xyzw": [0, 0, 0, 1],
+                                     "scale": 1.0}},
+                {"object_id": "obj_002", "label": "chair", "placed": True,
+                 "quality": {"frames_observed": 4, "cluster_spread_m": 0.05},
+                 "world_transform": {"position": [4, 0.3, 0],
+                                     "rotation_xyzw": [0, 0, 0, 1],
+                                     "scale": 1.0}},
+            ],
+            "frames": [],
+        }
+        facts = derive_scene_facts(manifest)
+        assert [i.name for i in facts.inventory] == [
+            "red chair", "first chair", "second chair"
+        ]
+        geometry = _geometry_as_the_server_builds_it(manifest, facts)
+        found = _find(geometry, "chair")
+        assert isinstance(found, Refusal)
+        assert found.detail == (
+            "red chair, and 2 more chairs that nothing separates"
+        )
+        # ...and the one that CAN be named still resolves on its own.
+        assert _find(geometry, "red chair").object_id == "obj_000"
+
+    def test_an_ordinal_still_resolves_for_the_tool_even_though_it_is_not_a_name(self):
+        """The ordinal is bookkeeping the guest may USE and must not OFFER
+        (0184). Refusing it here would make a piece unmovable rather than
+        unnameable, so the tool resolves it; what stops it being spoken as a
+        choice is the facts block's own limit, which is present in exactly
+        the rooms where a refusal can carry an ordinal.
+        """
+        geometry = self._uncoloured_geometry()
+        assert _find(geometry, "first chair").object_id == "obj_000"
+        assert _find(geometry, "the second chair").object_id == "obj_001"
