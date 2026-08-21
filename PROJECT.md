@@ -188,7 +188,7 @@ Suite **544**: 538 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
-### api-public — `api-public-00040-loj`, image `20260814-114714`
+### api-public — `api-public-00042-ruq`, image `20260821-005416`
 
 Client-facing, `--allow-unauthenticated`, with in-app Firebase JWT verification
 as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
@@ -227,7 +227,7 @@ declared-blob presence (0105). A rejection is a `failed_invalid` or
 Terminal-failure scenes are stamped with `expire_at`; revival clears it; `ready`
 is never stamped.
 
-### perception-obj — `perception-obj-00044-m5p`, image `20260813-222442`
+### perception-obj — `perception-obj-00062-hum`, image `20260821-010928`
 
 Runs as `perception-obj-runtime@` under least privilege (0090) and is
 platform-gated — only `tasks-invoker@` holds `run.invoker` (0106). Scales to
@@ -472,7 +472,11 @@ gains.
 - **`b667f891` is budget-starved.** Its census plan carries a 53-item long tail
   against the 900 s request budget, so it budget-stops every round and the
   fusion post-passes never run there. Not a placement defect — the room's
-  clutter exceeds one request.
+  clutter exceeds one request. **Measured cost, 2026-08-20:** a warm re-drive
+  on the colour image still came back `budget_stopped: true,
+  refinement_skipped: true`, and the room gained colour on 0 of 45 objects
+  while 40 of them had readable splats. The post-passes it loses are not
+  abstract.
 - **A window ships with ~30° in-plane skew.** Near-square planar objects are
   ~90°-ambiguous to the model and no instrument scores in-plane orientation.
 - **The "cabinet behind a wall" is not the declip bound** (0104). The declip pass
@@ -488,9 +492,16 @@ gains.
 
 **The guest**
 
-- **Object colour is built but reaches no production room** (0184). Perception
-  must deploy and the four walk rooms re-driven before any manifest carries a
-  `color` block. The guest is honest meanwhile by construction.
+- **Object colour ships in three of the four walk rooms, not the fourth**
+  (0184/0185; deployed 2026-08-20). rp7 8/16, rp6g1 9/20, spike 14/25 objects
+  carry a measured `color` block, and `scene_facts` turns them into spoken
+  names — spike's `red chair` is a real production referent. **rp6g2
+  (`b667f891`) has 0 of 45 and another re-drive will not change that**:
+  `apply_object_colors` runs inside the refinement pass, and that room's
+  manifest reports `budget_stopped: true, refinement_skipped: true`, so
+  colour is one of the post-passes its long tail costs it. Objects with no
+  block inside a coloured room are the confidence gate working, not a
+  failure.
 - **`guest_tools._find` falls back to the bare label**, so "chair" in a
   two-chair room silently resolves to whichever comes first rather than
   refusing. Pre-existing; the charter is what protects the person there.
@@ -547,7 +558,7 @@ gains.
   restriction, 27 APIs). The key the web app ships is properly restricted.
   Closing the gap breaks the live-authed-check path every recent api-public
   deploy uses — ship a replacement first.
-- **The registry holds 4 `perception-obj` images, not 3, and that is the policy working (0190).** The keep rule is *the 3 newest PLUS anything tagged `serving` or `buildcache`* — never "exactly 3", because a lane iterating on builds pushes the live image out of the top three, and exactly-3-by-recency would then delete the image Cloud Run is running on a scale-to-zero GPU service. On 2026-08-20 three undeployed builds landed and the live `20260813-222442` sat **4th, held only by its `serving` tag**; the policy evicted `20260816-050851` automatically when the third arrived, so the count is pinned at 4 (worst case 5) and self-maintaining. **The fix for a high count is to deploy or delete the surplus builds, never to tighten the policy.** Billing confirms the mechanism: ₹420/day at 1,446.7 GiB is ₹0.2903/GiB-day (= AR's $0.10/GB-month), Aug 19's ₹140 implies a 482 GiB daily average as GC drained, and the state after the geom retirement is 154.3 GiB ≈ **₹45/day, 89% below**. Two of those four images are undeployed and untagged, worth ~₹22/day — **untagging frees nothing; deleting the version is what reclaims it.**
+- **The registry holds 4 `perception-obj` images, not 3, and that is the policy working (0190).** The keep rule is *the 3 newest PLUS anything tagged `serving` or `buildcache`* — never "exactly 3", because a lane iterating on builds pushes the live image out of the top three, and exactly-3-by-recency would then delete the image Cloud Run is running on a scale-to-zero GPU service. On 2026-08-20 three undeployed builds landed and the live `20260813-222442` sat **4th, held only by its `serving` tag**; the policy evicted `20260816-050851` automatically when the third arrived, so the count is pinned at 4 (worst case 5) and self-maintaining. **The fix for a high count is to deploy or delete the surplus builds, never to tighten the policy.** Billing confirms the mechanism: ₹420/day at 1,446.7 GiB is ₹0.2903/GiB-day (= AR's $0.10/GB-month), Aug 19's ₹140 implies a 482 GiB daily average as GC drained, and the state after the geom retirement is 154.3 GiB ≈ **₹45/day, 89% below**. Two of those four images are undeployed and untagged, worth ~₹22/day — **untagging frees nothing; deleting the version is what reclaims it.** **Updated 2026-08-20 by the colour deploy:** the live image is now `20260821-010928` / `sha256:faa005c8…`, and the count sits temporarily above 4 for two reasons worth recognising rather than "fixing" — the first buildx build published an attestation sibling alongside the image (0200; `--provenance=false` stops that recurring), and the rollback target `d15ca00d…` is deliberately held by a `serving-rollback-00044-m5p` tag, which the Keep rule matches on PREFIX. **That hold is temporary and owed back** — drop the tag once `00062-hum` is trusted, or the image is pinned forever.
 - **Terms §9–§11 need an Indian lawyer.** Consumer Protection Act 2019 §2(46)
   can void the §11 liability cap against a consumer.
 - **App Store collateral is unstarted** except the icon: screenshots, support
@@ -763,7 +774,7 @@ app then silently mints a new anonymous uid, and every room captured under the
 old one is orphaned. Auto-cleanup would fire that for every user on a schedule.
 It is a single checkbox in the console.
 
-**Cloud Run revision numbers are NOT chronological on `perception-obj`.** The service has produced two revisions numbered 00036 (`-xer`, RP-8; `-l9l`, the 0089/0090 security+privacy deploy), one numbered 00038 (`-ses`, the 0081/0082 wave), and `perception-obj-00037-sd9` (image `20260808-200124`, the 0104 walk-classes deploy), which served 100% for two days despite a LOWER number than 00038. Do NOT read a lower revision number as a rollback — check the image tag and the traffic split (`gcloud run services describe perception-obj --region asia-southeast1`), which are the authorities. Serving now: **`perception-obj-00044-m5p`**, image `20260813-222442` (the same digest `sha256:d15ca00d…` that `00043-yiz` shipped — 00044 redeployed it on 2026-08-16 and the image never changed).
+**Cloud Run revision numbers are NOT chronological on `perception-obj`.** The service has produced two revisions numbered 00036 (`-xer`, RP-8; `-l9l`, the 0089/0090 security+privacy deploy), one numbered 00038 (`-ses`, the 0081/0082 wave), and `perception-obj-00037-sd9` (image `20260808-200124`, the 0104 walk-classes deploy), which served 100% for two days despite a LOWER number than 00038. Do NOT read a lower revision number as a rollback — check the image tag and the traffic split (`gcloud run services describe perception-obj --region asia-southeast1`), which are the authorities. Serving now: **`perception-obj-00062-hum`**, image `20260821-010928`, digest `sha256:faa005c8…` (the colour deploy, 2026-08-20). Its predecessor `00044-m5p` ran `20260813-222442` / `sha256:d15ca00d…` — the same digest `00043-yiz` shipped — and is the rollback target.
 
 **Old registry images are deleted by policy, and the live one is kept BY NAME
 (decision 0190).** `infra/artifact-cleanup-policy.json` is the source of truth
@@ -786,7 +797,11 @@ Forgetting the tag over-keeps one stale image, which is the safe direction;
 the unsafe direction is the registry reclaiming the image a scale-to-zero GPU
 service needs to start.
 
-**A perception build that suddenly takes forever: check `PIP_EXTRA_INDEX_URL` first (decision 0182).** `pypi.ngc.nvidia.com` — first in Meta's index line, carried verbatim into our Dockerfile — went NXDOMAIN, and an extra index is consulted for EVERY package, so pip paid five DNS retries with backoff per dependency: **764 retry warnings** in one build, with `pip install -e '.[dev]'` at 25 m 38 s and still resolving when it was cancelled. Dropped 2026-08-16 (dropped, not repointed at `pypi.nvidia.com` — every recent build already resolved from PyPI proper, so removing a dead index changes nothing while adding a live one could change which wheels are selected). **The layer cache is what hid it** — every deploy since 0120 rode the cache, and the first miss fell straight into it. Two adjacent facts from the same session: the cache missed BROADLY (apt, the clone and `mamba env create` all ran) for an undetermined reason — inline cache does not re-export entries a build itself imported, which is the first place to look — and **the base image is NOT a suspect** — `condaforge/mambaforge:24.7.1-0` has not moved, verified by `rootfs.diff_ids[0]`, and an apparent difference in *compressed* layer digests is an artefact of Artifact Registry re-compressing on push. Compare diff_ids, never compressed digests, across registries. One more reading trap, which cost a wrong conclusion before the timestamps caught it: in BuildKit's plain progress output the number after a step id is **seconds since the BUILD started**, not seconds into that step.
+**A perception build that suddenly takes forever: check `PIP_EXTRA_INDEX_URL` first (decision 0182).** `pypi.ngc.nvidia.com` — first in Meta's index line, carried verbatim into our Dockerfile — went NXDOMAIN, and an extra index is consulted for EVERY package, so pip paid five DNS retries with backoff per dependency: **764 retry warnings** in one build, with `pip install -e '.[dev]'` at 25 m 38 s and still resolving when it was cancelled. Dropped 2026-08-16 (dropped, not repointed at `pypi.nvidia.com` — every recent build already resolved from PyPI proper, so removing a dead index changes nothing while adding a live one could change which wheels are selected). **The layer cache is what hid it** — every deploy since 0120 rode the cache, and the first miss fell straight into it. Two adjacent facts from the same session: the cache missed BROADLY (apt, the clone and `mamba env create` all ran) for a reason that WAS undetermined and is now measured — see the cache entry below, which closes it — and **the base image is NOT a suspect** — `condaforge/mambaforge:24.7.1-0` has not moved, verified by `rootfs.diff_ids[0]`, and an apparent difference in *compressed* layer digests is an artefact of Artifact Registry re-compressing on push. Compare diff_ids, never compressed digests, across registries. One more reading trap, which cost a wrong conclusion before the timestamps caught it: in BuildKit's plain progress output the number after a step id is **seconds since the BUILD started**, not seconds into that step.
+
+**The perception layer cache alternated, and no longer does (decision 0199).** Until 2026-08-20 the build used `docker build --cache-from :buildcache` with `BUILDKIT_INLINE_CACHE=1`, and **the inline exporter writes cache records only for layers a build actually EXECUTED**. So a build that rode the cache published one missing every layer it had reused, and the next build rebuilt from `apt-get` down. Seven production builds alternate without a single exception — 58m, 59m, **10m**, 63m, **8m**, 60m, **8m** — and a three-layer probe reproduces it causally in under a minute (cold 27 s, hit 2 s, then **28 s off the hit's own cache**). This is what 0182 above left as "undetermined", and it is why 0163's 10-minute figure and 0182's 58-63 minute figure are both true and neither was predictive. Fixed by building with `docker buildx` on the `docker-container` driver, importing and exporting `type=registry,...,mode=max` at the same `:buildcache` ref — the registry exporter re-publishes records it imported, which is the half inline structurally cannot do. Measured on the real Dockerfile: the switching build missed at **53m58s** (predicted beforehand, and correctly), and the next build off its cache came back **49 of 49 steps CACHED in 40 s**. **Read that 40 s correctly** — it is a no-change build, so even the source `COPY` layers hit; a real source change still rebuilds and pushes from Dockerfile line 187 down, the historical **8-10 minutes**. What the fix buys is that the hit is REPEATABLE rather than every-other-time. **So: expect 8-10 minutes, and treat a 60-minute build as evidence an early layer genuinely changed rather than as the coin-flip it used to be.**
+
+**One build must publish exactly ONE registry version (decision 0200).** buildx attaches a provenance attestation by default, which makes the pushed artifact an **OCI index** over `{real image, attestation}` — the timestamped tag names the index, while Cloud Run resolves it and pins the **child** manifest, which carries no tag. Observed live: the `20260821-010928` build pushed three versions at one instant and the revision pinned the untagged `faa005c8…`. That silently breaks decision 0190, whose whole protection is a `serving` TAG and whose `move_serving_tag` tags the image URI — it would have tagged the index and left the digest a scale-to-zero GPU service boots from untagged and deletable. `--provenance=false --sbom=false` is in the build config for exactly this and is load-bearing, not tidiness. **The tell that it has regressed is one build publishing more than one version at the same timestamp.** Related sharp edge from the same note: the Keep rule matches on tag PREFIX, so any tag beginning with `serving` (e.g. a deliberate `serving-rollback-…` hold) pins an image in the registry until someone removes it.
 
 **perception-obj deploys candidate → smoke → flip like every other service.** `./infra/deploy_perception.sh obj --candidate` holds the new revision at 0% with a tagged URL and prints the smoke and flip commands; without the flag it still goes straight to 100%. The smoke needs an identity token (the service is platform-gated, 0106). Prefer the flag: a revision that fails at run time burns a full 900 s GPU request before anyone finds out, and route registration — the `/shell` and `/compress` stages — cannot be checked locally at all (0142).
 
