@@ -83,19 +83,51 @@ describe("the card draws at one uniform scale", () => {
   });
 
   it("never scales an axis on its own", () => {
-    // A similarity: x and z must carry the same factor. Compare the
-    // contour's world bounding box to the drawn one.
+    // The definition of a similarity: EVERY pairwise distance carries the
+    // same factor. Stronger than comparing bounding boxes, and it holds
+    // under the plan's rotation, which a bounding-box test would not —
+    // it catches per-axis scale, shear and skew alike.
     const { measure, layout } = heroCard();
+    const s = layout.claims.scalePxPerM;
     const fill = layout.ops.find((o) => o.kind === "fill")!;
-    const spanW = (get: (p: { x: number; z: number }) => number) =>
-      Math.max(...measure.contour.map(get)) - Math.min(...measure.contour.map(get));
-    const spanC = (i: 0 | 1) =>
-      Math.max(...fill.points.map((p) => p[i])) -
-      Math.min(...fill.points.map((p) => p[i]));
-    expect(spanC(0) / spanW((p) => p.x)).toBeCloseTo(
-      spanC(1) / spanW((p) => p.z),
-      9,
-    );
+    for (let i = 0; i < measure.contour.length; i++) {
+      for (let j = i + 1; j < measure.contour.length; j++) {
+        const world = Math.hypot(
+          measure.contour[j].x - measure.contour[i].x,
+          measure.contour[j].z - measure.contour[i].z,
+        );
+        const card = Math.hypot(
+          fill.points[j][0] - fill.points[i][0],
+          fill.points[j][1] - fill.points[i][1],
+        );
+        expect(card / world).toBeCloseTo(s, 9);
+      }
+    }
+  });
+
+  it("lays the dimensioned wall flat, with its label the right way up", () => {
+    // The plan is rotated so the datum wall is horizontal (a capture's
+    // world yaw is the phone's heading at scan start, not a measurement).
+    // Its consequence on the card is that the printed length never reads
+    // bottom-to-top.
+    for (const variant of ["landscape", "square"] as CardVariant[]) {
+      const { layout } = heroCard(variant);
+      const label = layout.ops.find(
+        (o) => o.kind === "text" && o.text === layout.claims.datum!.text,
+      );
+      expect(label!.kind).toBe("text");
+      expect((label as { rotateDeg: number }).rotateDeg).toBeCloseTo(0, 9);
+    }
+  });
+
+  it("puts the dimension line below the room, never through it", () => {
+    const { layout } = heroCard();
+    const fill = layout.ops.find((o) => o.kind === "fill")!;
+    const floorBottom = Math.max(...fill.points.map((p) => p[1]));
+    const label = layout.ops.find(
+      (o) => o.kind === "text" && o.text === layout.claims.datum!.text,
+    ) as { at: XY };
+    expect(label.at[1]).toBeGreaterThan(floorBottom);
   });
 });
 

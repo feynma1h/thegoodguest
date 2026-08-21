@@ -124,13 +124,66 @@ describe("measureRoom reproduces the hand-authored precedent", () => {
 });
 
 describe("measureRoom — a v2 arkit_planes room", () => {
-  it("prefers the measured floor polygon over the rendered one", async () => {
+  it("draws the rendered boundary, not the observed floor coverage", async () => {
     const assets = await mockAssets(MOCK_READY_SCENE_ID);
     const m = measureRoom(assets.shell, assets.manifest)!;
-    // The fixture's rendered polygon starts [-2.2, 0, 1.4]; the measured
-    // one starts [-2.1, 0, 1.3]. Closure never mutates measurement (0069),
-    // and the card draws the measurement.
-    expect(m.contour[0]).toEqual({ x: -2.1, z: 1.3 });
+    // The fixture's rendered polygon starts [-2.2, 0, 1.4]; its
+    // `measured_polygon` — the floor COVERAGE the scan observed — starts
+    // [-2.1, 0, 1.3], 10 cm inside the walls that were themselves measured
+    // at -2.2/1.4. The room's boundary is the rendered one; drawing the
+    // coverage would put a ghost outline inside every closed wall.
+    expect(m.contour[0]).toEqual({ x: -2.2, z: 1.4 });
+    const wall = m.walls.find((w) => w.wallId === "wall_01")!;
+    expect(wall.a).toEqual({ x: -2.2, z: 1.4 });
+  });
+
+  it("still calls that wall's length a measurement", async () => {
+    const assets = await mockAssets(MOCK_READY_SCENE_ID);
+    const m = measureRoom(assets.shell, assets.manifest)!;
+    // wall_00 was extended DOWNWARD to the floor (0 vs a detected 0.3) and
+    // not sideways, so its length is measured even though its height is
+    // partly closure. The two claims are separated on purpose.
+    const w0 = m.walls.find((w) => w.wallId === "wall_00")!;
+    expect(w0.lengthIsMeasured).toBe(true);
+    expect(w0.heightM).toBeCloseTo(1.9, 9);
+  });
+
+  it("refuses to dimension a wall closure widened", async () => {
+    const assets = await mockAssets(MOCK_READY_SCENE_ID);
+    const shell = structuredClone(assets.shell) as ShellDoc & {
+      walls: Array<{ measured_quad: Array<[number, number, number]> }>;
+    };
+    // Pull wall_00's DETECTED extent in by 40 cm at one end: the shell now
+    // says it rendered more wall than it saw, so its length is no longer a
+    // number the scan can stand behind.
+    shell.walls[0].measured_quad = [
+      [-1.8, 0.3, -2.6],
+      [1.8, 0.3, -2.6],
+      [1.8, 2.2, -2.6],
+      [-1.8, 2.2, -2.6],
+    ];
+    const m = measureRoom(shell, assets.manifest)!;
+    const w0 = m.walls.find((w) => w.wallId === "wall_00")!;
+    expect(w0.lengthIsMeasured).toBe(false);
+    // wall_00 is the longest at 4.0 m; the datum falls back to wall_01.
+    expect(w0.lengthM).toBeCloseTo(4.0, 9);
+    expect(m.datum!.wallId).toBe("wall_01");
+  });
+
+  it("prints no dimension at all when no wall qualifies", async () => {
+    const assets = await mockAssets(MOCK_READY_SCENE_ID);
+    const shell = structuredClone(assets.shell) as ShellDoc & {
+      walls: Array<{
+        quad: Array<[number, number, number]>;
+        measured_quad: Array<[number, number, number]>;
+      }>;
+    };
+    for (const wall of shell.walls) {
+      wall.measured_quad = wall.quad.map(
+        ([x, y, z]) => [x * 0.5, y, z * 0.5] as [number, number, number],
+      );
+    }
+    expect(measureRoom(shell, assets.manifest)!.datum).toBeNull();
   });
 
   it("excludes a closure extension from the ceiling claim", async () => {

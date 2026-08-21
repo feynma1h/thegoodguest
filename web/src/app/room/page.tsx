@@ -281,7 +281,12 @@ function RoomDetail() {
   if (scene.status === "ready") {
     return (
       <div className="relative min-h-dvh bg-[#1c1610]">
-        <RoomStage key={scene.scene_id} sceneId={scene.scene_id} />
+        <RoomStage
+          key={scene.scene_id}
+          sceneId={scene.scene_id}
+          status={scene.status}
+          createdAt={scene.created_at}
+        />
         <RoomChrome
           tone="cream"
           title={roomTitle(scene.created_at)}

@@ -4,24 +4,30 @@
  * XZ throughout — nothing here knows the card exists, and nothing here is
  * in pixels.
  *
- * WHAT MAKES THIS "MEASURED". A shell carries two geometries side by side,
- * and the distinction is load-bearing (0069): `polygon`/`quad` is what the
- * viewer RENDERS, after closure has extended a wall to meet its neighbour
- * or dropped it to the floor; `measured_polygon`/`measured_quad` is what
- * was DETECTED. On the roomplan method the two are the same object —
- * CapturedRoom geometry verbatim — which is why the product's own path
- * loses nothing here. Where they differ, this module draws and dimensions
- * the MEASURED extent, because a card is a picture of a measurement and a
- * closure-extended wall is not one.
+ * WHAT MAKES THIS "MEASURED", AND WHERE THE LINE ACTUALLY FALLS. A shell
+ * carries two geometries side by side, and the distinction is load-bearing
+ * (0069): `polygon`/`quad` is what the viewer RENDERS, after closure has
+ * extended a wall to meet its neighbour or dropped it to the floor;
+ * `measured_polygon`/`measured_quad` is what was DETECTED. On the roomplan
+ * method — the product's own LiDAR path — the two are the same object,
+ * CapturedRoom geometry verbatim, and none of this arises.
  *
- * That choice creates one problem and solves it exactly. An opening's
- * `rect_uv` is normalized against the RENDERED polygon's in-plane bounding
- * rect (lib/shell3d.ts mirrors the server frame), so a fraction taken from
- * the rendered wall cannot be replayed against a shorter measured wall. So
- * openings are resolved to their world position in the rendered frame and
- * then expressed against the measured segment, on the shared u-axis both
- * frames project onto. An opening that falls outside the measured extent
- * is clipped away rather than moved: we did not measure that piece of wall.
+ * The card DRAWS the rendered geometry. Closure works in-plane and it
+ * reconciles measurements rather than inventing any: an edge that reads
+ * `extended_to_wall:wall_00` was closed to a wall that was itself measured,
+ * and the floor's `measured_polygon` is the floor COVERAGE the scan
+ * observed, not the room's boundary. Drawing the coverage instead puts a
+ * ghost outline 10 cm inside every closed wall, which reads as a defect
+ * rather than as honesty — and the rendered polygon is also the frame each
+ * opening's `rect_uv` is normalized against (lib/shell3d.ts mirrors the
+ * server frame), so it is the only self-consistent choice.
+ *
+ * The card PRINTS only what was measured. A wall is dimensioned only if its
+ * detected extent equals its rendered extent IN PLAN — closure may have
+ * dropped it to the floor without touching its length, and that is fine —
+ * and the ceiling comes from detected heights alone. So the drawing is the
+ * room's reconciled boundary and every number on it is a measurement; a
+ * length taken off an extension would be a claim the scan never made.
  *
  * Consumers: lib/card/layout.ts (the only one). Tests pin the tolerance
  * this module reproduces against the hand-authored precedent in
@@ -58,6 +64,10 @@ export interface WallPlan {
   a: Pt2;
   b: Pt2;
   lengthM: number;
+  /** Whether `lengthM` is a measurement: the detected extent matches the
+   * rendered one along the wall. False means closure widened this wall to
+   * close a corner, so its length may be printed by nobody. */
+  lengthIsMeasured: boolean;
   /** Measured height (max y - min y of the detected extent), or null. */
   heightM: number | null;
   /** Unit XZ normal pointing OUT of the room — dimension lines go here. */
@@ -82,7 +92,9 @@ export interface RoomMeasure {
   /** Objects perception placed. Deliberately a COUNT and never a list:
    * an inventory of a person's furniture is rung 2 (0208), not this. */
   pieceCount: number;
-  /** The wall the card dimensions: the longest measured one. */
+  /** The wall the card dimensions: the longest one whose length is a
+   * measurement. Null when no wall qualifies — the card then draws the
+   * room and prints no dimension. */
   datum: WallPlan | null;
 }
 
@@ -158,49 +170,42 @@ function wallToPlan(wall: ShellWallEntry | ShellWallEntryV3): WallPlan | null {
   if (!frame) return null;
   const [ax, , az] = frame.axisU;
 
-  const measured = measuredCorners(wall) ?? rendered;
+  const measured = measuredCorners(wall);
   const r = extents(rendered, ax, az);
-  const m = extents(measured, ax, az);
-  const lengthM = m.maxU - m.minU;
+  const m = measured ? extents(measured, ax, az) : r;
+  const lengthM = r.maxU - r.minU;
   if (!(lengthM > EPS)) return null;
 
-  // Reconstruct world points on the MEASURED line from a scalar u. All
+  // Reconstruct world points on the wall's line from a scalar u. All
   // corners of a planar vertical wall share one perpendicular offset, so
   // one reference corner fixes it.
-  const ref = measured[0];
+  const ref = rendered[0];
   const refU = ref[0] * ax + ref[2] * az;
   const at = (u: number): Pt2 => ({
     x: ref[0] + (u - refU) * ax,
     z: ref[2] + (u - refU) * az,
   });
 
-  const renderedSpan = r.maxU - r.minU;
   const openings: PlanOpening[] = [];
   for (const op of wall.openings ?? []) {
     const rect = op?.rect_uv;
     if (!rect || rect.length !== 2) continue;
     const [[u0], [u1]] = rect;
     if (!Number.isFinite(u0) || !Number.isFinite(u1)) continue;
-    // Resolve to world position in the rendered frame, then express
-    // against the measured segment; clip to what was actually measured.
-    const lo = Math.min(u0, u1);
-    const hi = Math.max(u0, u1);
-    const worldLo = Math.max(r.minU + lo * renderedSpan, m.minU);
-    const worldHi = Math.min(r.minU + hi * renderedSpan, m.maxU);
-    if (worldHi - worldLo < 0.01) continue; // under a centimetre: not a hole
-    openings.push({
-      kind: openingKind(op.classification),
-      t0: (worldLo - m.minU) / lengthM,
-      t1: (worldHi - m.minU) / lengthM,
-    });
+    const t0 = Math.max(0, Math.min(1, Math.min(u0, u1)));
+    const t1 = Math.max(0, Math.min(1, Math.max(u0, u1)));
+    if ((t1 - t0) * lengthM < 0.01) continue; // under a centimetre: not a hole
+    openings.push({ kind: openingKind(op.classification), t0, t1 });
   }
 
   const height = m.maxY - m.minY;
   return {
     wallId: wall.wall_id,
-    a: at(m.minU),
-    b: at(m.maxU),
+    a: at(r.minU),
+    b: at(r.maxU),
     lengthM,
+    lengthIsMeasured:
+      Math.abs(m.minU - r.minU) < 1e-6 && Math.abs(m.maxU - r.maxU) < 1e-6,
     heightM: height > EPS ? height : null,
     // frame.normal points INTO the room (the winding contract), so the
     // dimension side is its negation.
@@ -221,10 +226,10 @@ export function measureRoom(
 ): RoomMeasure | null {
   if (!shell || shell.status !== "ready" || !shell.floor) return null;
   const floor = shell.floor;
-  const source =
-    (floor.measured_polygon && floor.measured_polygon.length >= 3
-      ? floor.measured_polygon
-      : floor.polygon) ?? [];
+  // The RENDERED polygon: the room's boundary, closure included. The
+  // floor's `measured_polygon` is observed coverage — see the file's
+  // docstring for why that is a different thing and not the contour.
+  const source = floor.polygon ?? [];
   if (source.length < 3) return null;
   const contour = (source as Vec3[]).map(xz);
   const floorAreaM2 = Math.abs(shoelace2(contour)) / 2;
@@ -243,8 +248,12 @@ export function measureRoom(
     }
   }
 
+  // The longest wall the shell says it actually measured end to end.
+  // A room whose every wall was widened by closure gets no dimension
+  // rather than a number the scan cannot stand behind.
   let datum: WallPlan | null = null;
   for (const w of walls) {
+    if (!w.lengthIsMeasured) continue;
     if (datum === null || w.lengthM > datum.lengthM) datum = w;
   }
 

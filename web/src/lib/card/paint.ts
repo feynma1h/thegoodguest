@@ -167,8 +167,8 @@ function drawGlow(
   tracePolygon(ctx, clip, true);
   ctx.clip();
   const g = ctx.createRadialGradient(at[0], at[1], 0, at[0], at[1], radius);
-  g.addColorStop(0, alpha(color, 0.28));
-  g.addColorStop(0.55, alpha(color, 0.11));
+  g.addColorStop(0, alpha(color, 0.24));
+  g.addColorStop(0.55, alpha(color, 0.09));
   g.addColorStop(1, alpha(color, 0));
   ctx.fillStyle = g;
   ctx.fillRect(at[0] - radius, at[1] - radius, radius * 2, radius * 2);

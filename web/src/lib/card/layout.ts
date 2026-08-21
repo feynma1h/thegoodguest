@@ -12,12 +12,17 @@
  * browser.
  *
  * THE PROJECTION IS A UNIFORM SIMILARITY. World XZ maps to card pixels as
- * `(x, z) -> (ox + s*x, oy + s*z)` with one scalar `s` — a plan seen from
- * above, +X right and +Z down, which is the view direction -Y. No rotation
- * and no per-axis scale, so EVERY length on the card is exactly `s` times
- * its measured length by construction rather than by care; the tolerance is
- * float64 and nothing else. The precedent this reproduces is
- * `docs/product/og-card.html`, whose plan was placed by hand at 82 px/m.
+ * one rotation, one scalar scale `s` and one translation — a plan seen from
+ * above, the view direction -Y. No per-axis scale and no shear, so EVERY
+ * length on the card is exactly `s` times its measured length by
+ * construction rather than by care; the tolerance is float64 and nothing
+ * else, and `layout.test.ts` checks it over every pair of contour vertices
+ * rather than over a bounding box.
+ *
+ * The rotation lays the dimensioned wall flat — see `orientation` for why
+ * that discards nothing. The precedent, `docs/product/og-card.html`, drew
+ * its room unrotated at 82 px/m; `measure.test.ts` holds the world-space
+ * geometry to it, which is the layer where the two are comparable.
  *
  * WHAT THE CARD MAY CARRY (social-layer.md §6.2): the measured contour, the
  * derived date title, and a dimension, a count and a measured colour. WHAT
@@ -125,18 +130,55 @@ function formatM2(value: number): string {
 interface Projector {
   s: number;
   p: (pt: Pt2) => XY;
+  /** Unit world direction -> unit screen direction, for normals and for
+   * the angle a dimension label sits at. */
+  d: (pt: Pt2) => XY;
 }
 
-function bounds(points: Pt2[]) {
+/**
+ * The plan's orientation, from the wall it dimensions.
+ *
+ * A capture's world yaw is whichever way the phone was pointing when the
+ * scan started — ARKit gravity-aligns Y and takes the initial heading from
+ * the device — so it is not a measurement and there is nothing to preserve
+ * in it. Normalising it is the same kind of act as centring the drawing.
+ *
+ * The datum wall is laid horizontal with the room above it and its
+ * dimension line below, which is the plan convention, and which also means
+ * the printed length is always the right way up rather than reading
+ * bottom-to-top on a room that happened to be scanned facing north.
+ *
+ * A rotation is part of the similarity, so every length still reproduces
+ * at exactly one scale.
+ */
+function orientation(datum: WallPlan | null): { c: number; s: number } {
+  if (!datum) return { c: 1, s: 0 };
+  const dx = datum.b.x - datum.a.x;
+  const dz = datum.b.z - datum.a.z;
+  const n = Math.hypot(dx, dz);
+  if (!(n > 1e-9)) return { c: 1, s: 0 };
+  let c = dx / n;
+  let sn = dz / n;
+  // R = [[c, sn], [-sn, c]] sends the wall to +X and (-sn, c) to +Y. Flip
+  // a half turn when that puts the outward normal at the top instead.
+  const outY = -sn * datum.outward.x + c * datum.outward.z;
+  if (outY < 0) {
+    c = -c;
+    sn = -sn;
+  }
+  return { c, s: sn };
+}
+
+function bounds(points: XY[]) {
   let minX = Infinity;
   let maxX = -Infinity;
   let minZ = Infinity;
   let maxZ = -Infinity;
-  for (const q of points) {
-    if (q.x < minX) minX = q.x;
-    if (q.x > maxX) maxX = q.x;
-    if (q.z < minZ) minZ = q.z;
-    if (q.z > maxZ) maxZ = q.z;
+  for (const [x, z] of points) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
   }
   return { minX, maxX, minZ, maxZ };
 }
@@ -150,8 +192,13 @@ function project(
   points: Pt2[],
   box: { x: number; y: number; w: number; h: number },
   inset: number,
+  rot: { c: number; s: number },
 ): Projector {
-  const b = bounds(points);
+  const d = (q: Pt2): XY => [
+    rot.c * q.x + rot.s * q.z,
+    -rot.s * q.x + rot.c * q.z,
+  ];
+  const b = bounds(points.map(d));
   const spanX = Math.max(b.maxX - b.minX, 1e-6);
   const spanZ = Math.max(b.maxZ - b.minZ, 1e-6);
   const usableW = Math.max(box.w - 2 * inset, 1);
@@ -159,7 +206,14 @@ function project(
   const s = Math.min(usableW / spanX, usableH / spanZ);
   const ox = box.x + box.w / 2 - s * (b.minX + spanX / 2);
   const oy = box.y + box.h / 2 - s * (b.minZ + spanZ / 2);
-  return { s, p: (q: Pt2) => [ox + s * q.x, oy + s * q.z] };
+  return {
+    s,
+    p: (q: Pt2) => {
+      const [x, y] = d(q);
+      return [ox + s * x, oy + s * y];
+    },
+    d,
+  };
 }
 
 const add = (a: XY, b: XY, k = 1): XY => [a[0] + b[0] * k, a[1] + b[1] * k];
@@ -194,7 +248,10 @@ function drawWalls(walls: WallPlan[], proj: Projector, contourPx: XY[]) {
     const b = proj.p(wall.b);
     // The wall's own outward normal. The plan is a uniform similarity
     // with no rotation, so a world unit vector is already a screen one.
-    const out: XY = [wall.outward.x, wall.outward.z];
+    // The plan is a uniform similarity, so a world unit vector maps to a
+    // screen unit vector under the same rotation. Jambs and glazing ride
+    // this, so it has to be the ROTATED normal, not the world one.
+    const out: XY = proj.d(wall.outward);
 
     const spans = [...wall.openings].sort((p, q) => p.t0 - q.t0);
     let cursor = 0;
@@ -221,20 +278,20 @@ function drawWalls(walls: WallPlan[], proj: Projector, contourPx: XY[]) {
       if (op.kind === "window") {
         // Glazing: the double line. A door or a bare opening gets jambs
         // and nothing across it, because nothing is across it.
-        for (const off of [-1.7, 1.7]) {
+        for (const off of [-2.6, 2.6]) {
           marks.push({
             kind: "stroke",
             points: [add(p0, out, off), add(p1, out, off)],
             closed: false,
-            stroke: alpha(INK, 0.7),
-            width: 1.1,
+            stroke: alpha(INK, 0.8),
+            width: 1.3,
           });
         }
         const mid = lerp(p0, p1, 0.5);
         glows.push({
           kind: "glow",
           at: mid,
-          radius: Math.max(0.95 * proj.s, 44),
+          radius: Math.max(0.85 * proj.s, 40),
           color: PALETTE.sun,
           clip: contourPx,
         });
@@ -261,7 +318,7 @@ function drawWalls(walls: WallPlan[], proj: Projector, contourPx: XY[]) {
 function drawDimension(ops: CardOp[], wall: WallPlan, proj: Projector, text: string) {
   const a = proj.p(wall.a);
   const b = proj.p(wall.b);
-  const out: XY = [wall.outward.x, wall.outward.z];
+  const out: XY = proj.d(wall.outward);
   const dir = unit(a, b);
   const hair = alpha(INK, 0.5);
 
@@ -304,10 +361,13 @@ function drawDimension(ops: CardOp[], wall: WallPlan, proj: Projector, text: str
   }
 
   const anchor = add(lerp(a, b, 0.5), out, LABEL);
-  let deg = (Math.atan2(dir[1], dir[0]) * 180) / Math.PI;
   // Never upside down: a half turn about the anchor keeps the text on the
-  // same side of the wall and the right way up.
-  if (deg > 90 || deg < -90) deg += 180;
+  // same side of the wall and the right way up. Normalised to (-90, 90],
+  // so a wall running right-to-left reads 0 rather than 360.
+  const raw = (Math.atan2(dir[1], dir[0]) * 180) / Math.PI;
+  let deg = ((raw % 360) + 540) % 360 - 180;
+  if (deg > 90) deg -= 180;
+  if (deg <= -90) deg += 180;
   ops.push({
     kind: "text",
     text,
@@ -359,9 +419,11 @@ export function layoutCard(input: CardInput): CardLayout {
 
   // --- the plan ----------------------------------------------------
   const planBox = wide
-    ? { x: 540, y: 74, w: frame.w - 540 - M + 24, h: frame.h - 74 - 74 }
-    : { x: M, y: 236, w: frame.w - 2 * M, h: 520 };
-  const proj = project(measure.contour, planBox, 58);
+    ? { x: 500, y: 48, w: frame.w - 500 - 40, h: frame.h - 96 }
+    : { x: M, y: 300, w: frame.w - 2 * M, h: frame.h - 300 - 108 };
+  // The inset is where the dimension callout lives: it is measured in
+  // pixels, not meters, so it cannot be part of the world-space fit.
+  const proj = project(measure.contour, planBox, 50, orientation(measure.datum));
   const contourPx = measure.contour.map(proj.p);
 
   ops.push({
@@ -384,7 +446,9 @@ export function layoutCard(input: CardInput): CardLayout {
     kind: "stroke",
     points: contourPx,
     closed: true,
-    stroke: alpha(INK, 0.3),
+    // Measured floor with no measured wall standing on it — the alcove
+    // openings in the hero room are exactly this. Lighter, never absent.
+    stroke: alpha(INK, 0.35),
     width: 1,
   });
   ops.push(...solids, ...marks);
@@ -395,7 +459,7 @@ export function layoutCard(input: CardInput): CardLayout {
   }
 
   // --- the words ---------------------------------------------------
-  const colW = wide ? 470 : frame.w - 2 * M;
+  const colW = wide ? 406 : frame.w - 2 * M;
 
   const markSize = 25;
   ops.push({ kind: "mark", at: [M, M], size: markSize });
@@ -414,13 +478,13 @@ export function layoutCard(input: CardInput): CardLayout {
     maxWidth: null,
   });
 
-  const titleY = wide ? 214 : 152;
+  const titleY = wide ? 206 : 150;
   ops.push({
     kind: "text",
     text: title,
     at: [M, titleY],
     role: "serif",
-    size: wide ? 44 : 48,
+    size: wide ? 42 : 48,
     weight: 400,
     italic: false,
     tracking: -0.015,
@@ -446,12 +510,14 @@ export function layoutCard(input: CardInput): CardLayout {
 
   // The measurement plate: label over value, mono throughout, because a
   // dimension is machine data (0057).
-  const plateY = wide ? 386 : titleY + 118;
+  // Content at the top, the plate and the domain at the foot: the air in
+  // between is the left column's answer to the drawing on the right.
+  const plateY = wide ? 446 : titleY + 128;
   ops.push({
     kind: "stroke",
     points: [
-      [M, plateY - 46],
-      [M + colW, plateY - 46],
+      [M, plateY - 38],
+      [M + colW, plateY - 38],
     ],
     closed: false,
     stroke: alpha(INK, 0.15),
@@ -471,13 +537,22 @@ export function layoutCard(input: CardInput): CardLayout {
     cells.push({ label: measure.pieceCount === 1 ? "PIECE" : "PIECES", value: pieceText });
   }
 
-  const step = colW / 3;
+  // A fixed column rather than a third of the width: with two cells, a
+  // third-width step spreads the plate across the whole card and it stops
+  // reading as one plate.
+  const step = Math.min(colW / 3, 156);
   cells.forEach((cell, i) => {
     const x = M + i * step;
+    const labelX = cell.swatch ? x + 16 : x;
+    if (cell.swatch) {
+      // The measured tone at full strength, as a bullet: the plan's wash
+      // is 9% and the colour is otherwise unreadable.
+      ops.push({ kind: "rect", at: [x, plateY - 9], w: 9, h: 9, fill: cell.swatch });
+    }
     ops.push({
       kind: "text",
       text: cell.label,
-      at: [x, plateY],
+      at: [labelX, plateY],
       role: "mono",
       size: 11,
       weight: 500,
@@ -486,12 +561,12 @@ export function layoutCard(input: CardInput): CardLayout {
       fill: alpha(INK, 0.45),
       align: "left",
       rotateDeg: 0,
-      maxWidth: step - 12,
+      maxWidth: step - 20,
     });
     ops.push({
       kind: "text",
       text: cell.value,
-      at: [x, plateY + 34],
+      at: [x, plateY + 36],
       role: "mono",
       size: 26,
       weight: 400,
@@ -502,17 +577,6 @@ export function layoutCard(input: CardInput): CardLayout {
       rotateDeg: 0,
       maxWidth: step - 12,
     });
-    if (cell.swatch) {
-      // The measured tone at full strength — the plan wash is 9% and the
-      // colour is otherwise unreadable.
-      ops.push({
-        kind: "rect",
-        at: [x, plateY + 44],
-        w: 26,
-        h: 5,
-        fill: cell.swatch,
-      });
-    }
   });
 
   ops.push({
