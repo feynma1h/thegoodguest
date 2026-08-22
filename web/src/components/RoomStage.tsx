@@ -19,6 +19,9 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import CallingCardSheet, {
+  CallingCardButton,
+} from "@/components/CallingCardSheet";
 import Conversation from "@/components/conversation/Conversation";
 import SplatViewer from "@/components/SplatViewer";
 import { PillButton, SPRING } from "@/components/ui/spring";
@@ -31,6 +34,7 @@ import {
   type FusedObject,
   type PositionedSplat,
   type SceneManifest,
+  type ShellDoc,
   type ShellPlane,
 } from "@/lib/api/types";
 import {
@@ -58,6 +62,11 @@ type AssetsResult =
       shell: ShellPlane[] | null;
       unrenderable: FusedObject[];
       manifest: SceneManifest;
+      /** The shell VERBATIM, beside the renderer's planes. The card draws
+       * measured geometry, and `assembleScene` deliberately keeps only what
+       * renders — `measured_polygon` and the openings' frame do not survive
+       * it (lib/card/measure.ts explains why both matter). */
+      shellDoc: ShellDoc | null;
     };
 
 // Shell grace window (0066): the shell task lands a beat after `ready`,
@@ -70,7 +79,15 @@ const SHELL_GRACE_DELAY_MS = 4000;
 
 type RevealPhase = "hold" | "assembling" | "settled";
 
-export default function RoomStage({ sceneId }: { sceneId: string }) {
+export default function RoomStage({
+  sceneId,
+  status,
+  createdAt,
+}: {
+  sceneId: string;
+  status: string;
+  createdAt: string;
+}) {
   const [result, setResult] = useState<AssetsResult | null>(null);
   // Reading localStorage in the initializer is safe here: this component
   // only ever mounts client-side, after the scene fetch resolves.
@@ -78,6 +95,7 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
     hasSeenReveal(sceneId) ? "settled" : "hold",
   );
   const [freshReveal, setFreshReveal] = useState(false);
+  const [cardOpen, setCardOpen] = useState(false);
   const [arrival, setArrival] = useState<string | null>(null);
   // Conversation is an enhancement layer: if its GET fails, the settled
   // layout degrades to the non-conversational shape (decision 0058).
@@ -114,6 +132,7 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
         setResult({
           forScene: sceneId, phase: "ready", splats, shell, unrenderable,
           manifest: sceneAssets.manifest,
+          shellDoc: sceneAssets.shell ?? null,
         });
       } catch (exc: unknown) {
         if (cancelled) return;
@@ -264,6 +283,11 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
           non-conversational layout when the conversation layer is down. */}
       {phase === "settled" && (
         <>
+          {/* The card a person can take away (social-layer.md §6). Quiet
+              and under the chrome: the room is still the hero. */}
+          <div className="absolute right-6 top-16 z-20">
+            <CallingCardButton onClick={() => setCardOpen(true)} />
+          </div>
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-6 pb-7">
             <div className="pointer-events-auto w-full max-w-2xl">
               {/* What this room is showing that the scan did not (0131).
@@ -372,6 +396,15 @@ export default function RoomStage({ sceneId }: { sceneId: string }) {
           )}
         </>
       )}
+
+      <CallingCardSheet
+        open={cardOpen}
+        onClose={() => setCardOpen(false)}
+        status={status}
+        createdAt={createdAt}
+        shell={assets.phase === "ready" ? assets.shellDoc : null}
+        manifest={assets.phase === "ready" ? assets.manifest : null}
+      />
 
       {/* The threshold (§4): nothing auto-plays; the room waits. */}
       <AnimatePresence>

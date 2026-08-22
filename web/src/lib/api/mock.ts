@@ -40,6 +40,33 @@ export const MOCK_READY_SCENE_ID = "11111111-1111-4111-8111-111111111111";
 export const MOCK_V3_BUNDLE_TRIGGER = "!v3";
 export const MOCK_V3_SCENE_ID = "33333333-3333-4333-8333-333333333333";
 
+/**
+ * Off-list pre-suppression scene: /room?bundle=!old is the v3 room with a
+ * `created_at` before the first suppression-armed perception revision, so
+ * the calling card's eligibility gate refuses it (decision 0089 via 0208).
+ * The date is the ONLY difference from the v3 fixture, which is exactly
+ * what the gate keys on — so the refusal is walkable offline rather than
+ * imagined, and it cannot be walked any other way: every mock scene is
+ * minutes old, and a real pre-0089 room needs an account that has one.
+ */
+export const MOCK_PRE_SUPPRESSION_TRIGGER = "!old";
+export const MOCK_PRE_SUPPRESSION_SCENE_ID = "44444444-4444-4444-8444-444444444444";
+
+/**
+ * Off-list REAL room: /room?bundle=!hero serves `public/hero/room.json` —
+ * scene ce68e24f's shell.json v3 verbatim, the landing hero's fixture
+ * (0122), and the only genuinely captured room this repo ships. Fetched
+ * rather than inlined: it is already a served static file, and duplicating
+ * 3.5 KB of real measurement into a fixture module would fork it.
+ *
+ * It exists so surfaces that draw a room — the calling card first — can be
+ * looked at against a real contour offline, with no `dev-fixtures` (3.9 GB
+ * of real homes inside `public/`) anywhere near the tree. Its object array
+ * is empty by design, so it is also the zero-piece case.
+ */
+export const MOCK_HERO_TRIGGER = "!hero";
+export const MOCK_HERO_SCENE_ID = "55555555-5555-4555-8555-555555555555";
+
 const STATUS_FIXTURES: Array<{ status: SceneStatus; minutesAgo: number }> = [
   { status: "ready", minutesAgo: 30 },
   { status: "processing", minutesAgo: 4 },
@@ -677,6 +704,34 @@ export class MockApiClient implements ApiClient {
   }
 
   async getSceneByBundle(bundleId: string): Promise<SceneSummary> {
+    if (bundleId === MOCK_HERO_TRIGGER) {
+      // Its shell was baked 2026-08-08, after the suppression-armed
+      // revision — which is 0122's own by-hand eligibility finding.
+      const t = "2026-08-08T08:36:54.000Z";
+      return delay({
+        scene_id: MOCK_HERO_SCENE_ID,
+        bundle_id: MOCK_HERO_TRIGGER,
+        status: "ready",
+        result_uri: `gs://mock-outputs/scenes/${MOCK_HERO_SCENE_ID}/manifest.json`,
+        missing_paths: null,
+        created_at: t,
+        updated_at: t,
+      });
+    }
+    if (bundleId === MOCK_PRE_SUPPRESSION_TRIGGER) {
+      // 2026-08-05: the day the RoomPlan spike room was segmented, which is
+      // the room 0122 disqualified by hand for exactly this reason.
+      const t = "2026-08-05T11:04:00.000Z";
+      return delay({
+        scene_id: MOCK_PRE_SUPPRESSION_SCENE_ID,
+        bundle_id: MOCK_PRE_SUPPRESSION_TRIGGER,
+        status: "ready",
+        result_uri: `gs://mock-outputs/scenes/${MOCK_PRE_SUPPRESSION_SCENE_ID}/manifest.json`,
+        missing_paths: null,
+        created_at: t,
+        updated_at: t,
+      });
+    }
     if (bundleId === MOCK_V3_BUNDLE_TRIGGER) {
       const t = new Date(Date.now() - 45 * 60_000).toISOString();
       return delay({
@@ -698,6 +753,13 @@ export class MockApiClient implements ApiClient {
 
   async getSceneAssets(sceneId: string): Promise<SceneAssets> {
     if (sceneId === MOCK_V3_SCENE_ID) return delay(V3_ASSETS);
+    if (sceneId === MOCK_PRE_SUPPRESSION_SCENE_ID) {
+      return delay({ ...structuredClone(V3_ASSETS), scene_id: sceneId });
+    }
+    if (sceneId === MOCK_HERO_SCENE_ID) {
+      const doc = (await (await fetch("/hero/room.json")).json()) as SceneAssets;
+      return { ...doc, scene_id: sceneId };
+    }
     const scene = this.scenes.find((s) => s.scene_id === sceneId);
     if (!scene) {
       throw new ApiError(404, "not_found", `No scene ${sceneId}`);
