@@ -80,8 +80,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import reproject
-from roomstudio_schemas.placement_math import project_points
-from roomstudio_schemas.pose_math import rotmat_to_quat
+from roomstudio_schemas.placement_math import project_points, trimmed_nn_rms
+from roomstudio_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +308,11 @@ _ARM_FILL_MARGIN = float(
 # sampler was told to spend its residue on boxes (0202) can hand a single
 # box many, and the budget this pass spends is not its own.
 _ARM_SELECT_MAX = int(os.environ.get("PERCEPTION_ARM_SELECT_MAX", "4"))
+
+# Points a box's measured cloud needs before its splat->cloud distance means
+# anything. Below this the axis reports None and the rule falls back to the
+# two it shipped with, rather than deciding on a handful of points.
+_ARM_S2C_MIN_CLOUD = int(os.environ.get("PERCEPTION_ARM_S2C_MIN_CLOUD", "200"))
 
 # --- Conditional second arm (decision 0229) --------------------------------
 # Whether a box whose FIRST arm already renders well keeps its planned second
@@ -1031,6 +1036,13 @@ class ArmFit:
     index: int  # position in the association sort; 0 is what ships today
     fill: float  # rendered vertical span / the box's MEASURED height
     residual_m: float  # sum |scale*extent - dim| over the three box axes
+    # Trimmed splat->cloud Chamfer against the box's measured points, or
+    # None when no cloud was available (decision 0233). The FIRST axis here
+    # that sees the reconstruction's interior: `fill` and `residual_m` are
+    # both functions of the same six numbers — three percentile spans of the
+    # splat and three box dimensions — so a hollow shell and a solid body
+    # with identical extents score identically on both.
+    s2c_m: float | None = None
 
     @property
     def fill_dist(self) -> float:
@@ -1039,7 +1051,9 @@ class ArmFit:
         return abs(self.fill - 1.0)
 
 
-def arm_fit(box, box_index: int, object_id: str, assoc, ctx) -> ArmFit | None:
+def arm_fit(
+    box, box_index: int, object_id: str, assoc, ctx, cloud=None
+) -> ArmFit | None:
     """0197's two output-side checks for one arm, or None when it cannot be
     placed at all.
 
@@ -1065,11 +1079,47 @@ def arm_fit(box, box_index: int, object_id: str, assoc, ctx) -> ArmFit | None:
     span = _rendered_span(pts, wt["rotation_xyzw"], float(wt["scale"]), box)
     if span is None:
         return None
+    s2c = None
+    if cloud is not None and len(cloud) >= _ARM_S2C_MIN_CLOUD:
+        placed = (
+            float(wt["scale"])
+            * (pts @ quat_to_rotmat(tuple(wt["rotation_xyzw"])).T)
+            + np.asarray(wt["position"], dtype=float)
+        )
+        s2c = trimmed_nn_rms(placed, cloud)
     return ArmFit(
         index=-1,
         fill=float((span[1] - span[0]) / height),
         residual_m=float(sum(entry.get("box_fit_residual") or [0.0])),
+        s2c_m=s2c,
     )
+
+
+def _box_cloud_for(box, associations: list, ctx):
+    """The measured points inside this box, from the frames its own arms
+    come from. None whenever the context cannot supply depth — a swept
+    capture, an ARKIT_ONLY tier, a test stub — which degrades the third axis
+    to abstention rather than to a wrong number."""
+    get_depth = getattr(ctx, "get_depth", None)
+    get_camera = getattr(ctx, "get_camera", None)
+    get_roomplan = getattr(ctx, "get_roomplan", None)
+    if get_depth is None or get_camera is None:
+        return None
+    room = get_roomplan() if get_roomplan is not None else None
+    frames = sorted({a.frame_index for a in associations})
+    if not frames:
+        return None
+    try:
+        import mask_refine  # deferred: peer module, imported for its geometry
+
+        cloud = mask_refine.box_measured_cloud(
+            box=box, room=room, frame_indices=frames,
+            get_depth=get_depth, get_camera=get_camera,
+        )
+    except Exception:
+        logger.warning("arm select: measured cloud unavailable", exc_info=True)
+        return None
+    return cloud if len(cloud) >= _ARM_S2C_MIN_CLOUD else None
 
 
 def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
@@ -1109,13 +1159,20 @@ def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
     `frames_observed` still counts every association and the facing check
     still scores every view it would have.
     """
+    # One cloud per BOX, not per arm — that is what makes the third axis
+    # comparative. Both arms score against the same measured points, so the
+    # clutter no radius can remove (probe 19) is a constant offset rather
+    # than a term that differs between them.
+    cloud = _box_cloud_for(box, associations[:_ARM_SELECT_MAX], ctx)
     fits: list[ArmFit] = []
     for i, a in enumerate(associations):
         if len(fits) >= _ARM_SELECT_MAX:
             break
-        f = arm_fit(box, box_index, object_id, a, ctx)
+        f = arm_fit(box, box_index, object_id, a, ctx, cloud=cloud)
         if f is not None:
-            fits.append(ArmFit(index=i, fill=f.fill, residual_m=f.residual_m))
+            fits.append(ArmFit(
+                index=i, fill=f.fill, residual_m=f.residual_m, s2c_m=f.s2c_m,
+            ))
     if len(fits) < 2:
         return associations, None
 
@@ -1161,23 +1218,56 @@ def choose_arm(fits: list[ArmFit]) -> tuple[ArmFit, dict]:
     """
     shipped = fits[0]
     best = shipped
+    splits: list[dict] = []
     for f in fits[1:]:
+        # Every axis that can express an opinion, each smaller-is-better and
+        # each voting only PREFER-CHALLENGER or not. k-of-n with k = n: one
+        # dissent refuses. `fill` alone carries the noise margin the sweep
+        # measured; the other two must merely improve.
+        votes = {
+            "fill": (shipped.fill_dist - f.fill_dist) >= _ARM_FILL_MARGIN,
+            "residual": f.residual_m < shipped.residual_m,
+        }
+        # The third axis abstains rather than dissents when either side has
+        # no cloud. Abstention must not veto: an object in a depth-less or
+        # starved room would otherwise lose arm selection silently, which is
+        # a behaviour change wearing the costume of a stricter rule.
+        if f.s2c_m is not None and shipped.s2c_m is not None:
+            votes["s2c"] = f.s2c_m < shipped.s2c_m
+        if not all(votes.values()):
+            if any(votes.values()):
+                # A split, not a tie. Recorded either way — 0205's posture is
+                # that a disagreement is the instrument saying it cannot
+                # tell, and the count is the only evidence that will ever
+                # accumulate about how often that happens.
+                splits.append({
+                    "rank": f.index,
+                    "agreed": sorted(k for k, v in votes.items() if v),
+                    "dissented": sorted(k for k, v in votes.items() if not v),
+                })
+            continue
         gain = shipped.fill_dist - f.fill_dist
-        if gain < _ARM_FILL_MARGIN:
-            continue  # inside the noise the sweep measured
-        if f.residual_m >= shipped.residual_m:
-            continue  # the second check disagrees: refuse, do not weigh
         if gain > shipped.fill_dist - best.fill_dist:
             best = f  # strict, so ties keep the lower index
-    return best, {
+
+    def _r(v):
+        return None if v is None else round(v, 4)
+
+    record = {
         "arms": len(fits),
+        "axes": ["fill", "residual", "s2c"],
         "shipped_fill": round(shipped.fill, 4),
         "shipped_residual_m": round(shipped.residual_m, 4),
+        "shipped_s2c_m": _r(shipped.s2c_m),
         "chosen_rank": best.index,
         "chosen_fill": round(best.fill, 4),
         "chosen_residual_m": round(best.residual_m, 4),
+        "chosen_s2c_m": _r(best.s2c_m),
         "fill_gain": round(shipped.fill_dist - best.fill_dist, 4),
     }
+    if splits:
+        record["refused"] = splits
+    return best, record
 
 
 def build_box_object(

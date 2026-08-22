@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
+from roomstudio_schemas import placement_math as pm
 from roomstudio_schemas.placement_math import (
     MIN_CLOUD_POINTS,
     DegenerateGeometryError,
@@ -1000,3 +1001,52 @@ def test_solve_wall_contact_ray_misses_wall_raises():
     d = np.array([0.0, 0.0, -1.0])  # points away from the wall
     with pytest.raises(DegenerateGeometryError):
         solve_wall_contact(splat, np.eye(3), o, d, 0.4, p_wall, n_wall)
+
+
+class TestTrimmedNnRms:
+    """One-directional trimmed Chamfer (decision 0233). The direction is the
+    caller's choice and the two must never be averaged, so the primitive
+    takes src and dst and says nothing about which is which."""
+
+    def test_a_cloud_against_itself_is_zero(self):
+        pts = np.random.default_rng(0).normal(size=(200, 3))
+        assert pm.trimmed_nn_rms(pts, pts) == pytest.approx(0.0, abs=1e-12)
+
+    def test_it_measures_a_known_offset(self):
+        """A grid spaced far wider than the shift, so each shifted point's
+        nearest neighbour is unambiguously its own original. A dense random
+        cloud would not test what it looks like it tests: a shifted point
+        there is often nearer to some OTHER original point."""
+        g = np.arange(6) * 1.0
+        pts = np.stack(np.meshgrid(g, g, g), axis=-1).reshape(-1, 3)
+        shifted = pts + np.array([0.05, 0.0, 0.0])
+        assert pm.trimmed_nn_rms(shifted, pts) == pytest.approx(0.05, abs=1e-9)
+
+    def test_it_is_asymmetric(self):
+        """src->dst penalises src mass dst cannot explain. A small cloud
+        inside a big one scores near zero; the big one against the small one
+        does not."""
+        big = np.random.default_rng(2).uniform(-1, 1, size=(800, 3))
+        small = big[:40] * 0.01
+        assert pm.trimmed_nn_rms(small, big) < pm.trimmed_nn_rms(big, small)
+
+    def test_trimming_drops_the_worst_matches(self):
+        pts = np.zeros((100, 3))
+        outliers = np.full((20, 3), 10.0)
+        src = np.vstack([pts, outliers])
+        untrimmed = pm.trimmed_nn_rms(src, pts, trim_fraction=1.0)
+        trimmed = pm.trimmed_nn_rms(src, pts, trim_fraction=0.8)
+        assert trimmed == pytest.approx(0.0, abs=1e-12)
+        assert untrimmed > 4.0
+
+    def test_too_few_points_is_none_not_a_number(self):
+        """The degrade every caller wants: no reading rather than a
+        confident one computed from nothing."""
+        assert pm.trimmed_nn_rms(np.zeros((2, 3)), np.zeros((50, 3))) is None
+        assert pm.trimmed_nn_rms(np.zeros((50, 3)), np.zeros((2, 3))) is None
+
+    def test_it_is_deterministic_above_the_subsample_cap(self):
+        a = np.random.default_rng(3).normal(size=(5000, 3))
+        b = np.random.default_rng(4).normal(size=(5000, 3))
+        first = pm.trimmed_nn_rms(a, b, max_points=500)
+        assert first == pm.trimmed_nn_rms(a, b, max_points=500)

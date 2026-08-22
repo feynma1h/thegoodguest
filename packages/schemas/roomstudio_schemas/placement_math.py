@@ -417,6 +417,54 @@ def fit_single_view(
     return s, t
 
 
+def trimmed_nn_rms(
+    src_points: np.ndarray,
+    dst_points: np.ndarray,
+    *,
+    trim_fraction: float = 0.8,
+    max_points: int = 4000,
+    seed: int = 0,
+) -> Optional[float]:
+    """Trimmed RMS distance from each src point to its nearest dst point.
+
+    One direction, deliberately, and the caller picks which: src->dst
+    penalises src mass that dst cannot explain. Pointed splat->cloud it
+    penalises FABRICATED and overflowing reconstruction; pointed
+    cloud->splat it penalises MISSING reconstruction. The two answer
+    different questions and must never be averaged.
+
+    Subsampling is RANDOM rather than evenly spaced (unlike
+    `refine_similarity_nn`'s) because both inputs here arrive in raster or
+    lexicographic order, where a strided sample is a spatial scan of one
+    part of the object rather than a sample of the whole. Seeded, so a
+    scene's manifest stays byte-identical across runs.
+
+    Returns None when either cloud is too small to say anything, which is
+    the degrade every caller wants: no number rather than a confident one
+    computed from nothing.
+    """
+    src = np.asarray(src_points, dtype=np.float64)
+    dst = np.asarray(dst_points, dtype=np.float64)
+    if src.ndim != 2 or dst.ndim != 2 or src.shape[0] < 3 or dst.shape[0] < 3:
+        return None
+
+    def _sub(a: np.ndarray) -> np.ndarray:
+        if a.shape[0] <= max_points:
+            return a
+        idx = np.random.default_rng(seed).choice(a.shape[0], max_points, replace=False)
+        idx.sort()
+        return a[idx]
+
+    src, dst = _sub(src), _sub(dst)
+    out = np.empty(src.shape[0], dtype=np.float64)
+    for i in range(0, src.shape[0], 256):
+        block = src[i:i + 256]
+        d2 = ((block[:, None, :] - dst[None, :, :]) ** 2).sum(axis=2)
+        out[i:i + 256] = np.sqrt(d2.min(axis=1))
+    keep = max(3, int(out.shape[0] * trim_fraction))
+    return float(np.sqrt((np.sort(out)[:keep] ** 2).mean()))
+
+
 def refine_similarity_nn(
     src_points: np.ndarray,
     dst_points: np.ndarray,

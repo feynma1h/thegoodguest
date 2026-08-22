@@ -245,6 +245,55 @@ def _on_room_plane(
     return on
 
 
+def box_measured_cloud(
+    *, box, room, frame_indices, get_depth, get_camera, min_confidence: int = 1
+) -> np.ndarray:
+    """The measured points inside one box, unioned over the given frames.
+
+    Exactly `unclaimed_in_box`'s geometry with the mask half removed: each
+    frame's depth back-projected with its OWN depth intrinsics (decision
+    0032), carried to world with its pose, clipped to the box's padded
+    volume, and rejected where it lies on a measured floor or wall at the
+    shipped tolerance (decision 0232 measured a tighter one re-admitting
+    floor).
+
+    Deliberately NOT a fused cloud over the whole capture. Production has
+    none and nothing here proposes one; this unions the handful of frames
+    the box already has associations in, which is what a
+    `RefinementContext` can reach. Decision 0233 records what that costs in
+    agreement with the fused instrument.
+
+    Returns an empty (0, 3) array rather than None when nothing is
+    measurable, so callers degrade on length alone.
+    """
+    half = np.asarray(box.dimensions, dtype=float) / 2.0 + BOX_PAD_M
+    acc: list[np.ndarray] = []
+    for frame_index in frame_indices:
+        payload = get_depth(frame_index) if get_depth is not None else None
+        cam = get_camera(frame_index) if get_camera is not None else None
+        if payload is None or cam is None:
+            continue
+        depth_raster, depth_confidence, depth_intrinsics = payload
+        if depth_raster is None:
+            continue
+        pointmap = pm.depth_pointmap(
+            np.asarray(depth_raster), depth_intrinsics, depth_confidence,
+            min_confidence=min_confidence,
+        )
+        flat = pointmap.reshape(-1, 3)
+        measured = np.isfinite(flat[:, 0])
+        if not measured.any():
+            continue
+        world = pm.camera_to_world(flat[measured], cam[0])
+        inside = np.all(np.abs(_box_local(world, box)) <= half, axis=1)
+        if inside.any():
+            acc.append(world[inside])
+    if not acc:
+        return np.zeros((0, 3))
+    stacked = np.concatenate(acc)
+    return stacked[~_on_room_plane(stacked, room)]
+
+
 def unclaimed_in_box(
     *,
     box,
