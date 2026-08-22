@@ -309,6 +309,36 @@ _ARM_FILL_MARGIN = float(
 # box many, and the budget this pass spends is not its own.
 _ARM_SELECT_MAX = int(os.environ.get("PERCEPTION_ARM_SELECT_MAX", "4"))
 
+# --- Conditional second arm (decision 0229) --------------------------------
+# Whether a box whose FIRST arm already renders well keeps its planned second
+# view. Default off. The plan emits box_best_view and box_second_view for
+# every eligible box and both reconstruct unconditionally — a bake-off at
+# 35-75 s a side on a card that OOMs.
+_CONDITIONAL_SECOND_ARM = os.environ.get(
+    "PERCEPTION_CONDITIONAL_SECOND_ARM", "0"
+) not in ("0", "false", "False", "")
+
+# What "already renders well" means. BOTH checks must agree, which is the
+# posture 0205 forced: fill reads one axis and the residual reads three, so
+# a hollow shell of the right height passes the first and fails the second.
+# spike's bed is that case exactly — fill_dist 0.029, the best in the corpus,
+# against residual 0.894, the worst — and a fill-only gate would drop the
+# second arm of the one box 0205 says nobody can adjudicate.
+#
+# Both thresholds sit at the GEOMETRIC CENTRE of a gap in the same 8-box
+# sweep `_ARM_FILL_MARGIN` was fitted from, so neither is fitted to an end:
+#   fill_dist  0.1692 -> 0.5850   centre 0.3146, 1.86x clear either side
+#   residual   0.1904 -> 0.4827   centre 0.3032, 1.59x clear either side
+# The two boxes above the fill gap are 0197's pair — the floating slab and
+# the legless desk — which are precisely the boxes whose second arm is worth
+# reconstructing.
+_SECOND_ARM_FILL_PASS = float(
+    os.environ.get("PERCEPTION_SECOND_ARM_FILL_PASS", "0.31")
+)
+_SECOND_ARM_RESIDUAL_PASS_M = float(
+    os.environ.get("PERCEPTION_SECOND_ARM_RESIDUAL_PASS_M", "0.30")
+)
+
 
 def family_compatible(category: str | None, label: str | None) -> bool:
     if not category or not label:
@@ -1097,6 +1127,27 @@ def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
         + [a for i, a in enumerate(associations) if i != best.index]
     )
     return reordered, record
+
+
+def arm_passes(fit: ArmFit | None) -> bool:
+    """Does this arm render well enough that a second view buys nothing?
+
+    Deliberately conservative in one direction only: `None` — the arm could
+    not be placed or parsed at all — is NOT a pass, so an object whose first
+    view failed keeps its second. That asymmetry is the whole safety
+    property of decision 0229, because the second arm is currently carrying
+    an OOM-fallback role in six of nine affected boxes (0228), and an arm
+    that OOMed produces no `ArmFit` to ask about.
+
+    Both checks must hold. See `_SECOND_ARM_FILL_PASS` for why one is not
+    enough.
+    """
+    if fit is None:
+        return False
+    return (
+        fit.fill_dist <= _SECOND_ARM_FILL_PASS
+        and fit.residual_m <= _SECOND_ARM_RESIDUAL_PASS_M
+    )
 
 
 def choose_arm(fits: list[ArmFit]) -> tuple[ArmFit, dict]:

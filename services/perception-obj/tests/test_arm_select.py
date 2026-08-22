@@ -484,3 +484,136 @@ class TestTheInstrumentReadsWhatShips:
         ctx.get_depth = _explode
         fits = [box_placement.arm_fit(box, 0, "obj_000", a, ctx) for a in assoc]
         assert [round(f.fill, 3) for f in fits] == [0.414, 1.021]
+
+
+# ---------------------------------------------------------------------------
+# The conditional second arm (decision 0229)
+# ---------------------------------------------------------------------------
+
+def _passes(box: dict) -> bool:
+    """Would this box's tier-1 arm make its tier-2 view unnecessary?"""
+    a0 = box["arms"][0]
+    return box_placement.arm_passes(_fit(0, a0["fill"], a0["residual_m"]))
+
+
+class TestArmPasses:
+    """The gate that decides whether a planned second view is worth a
+    reconstruction. Smaller-is-better on both axes, and BOTH must hold."""
+
+    def test_an_unbuildable_arm_never_passes(self):
+        """The safety property. `arm_fit` returns None when the arm cannot
+        be placed or parsed — which is the shape an OOMed tier-1 leaves —
+        and 0228 measured the second arm rescuing six of nine boxes whose
+        first view failed. None must therefore keep the second view."""
+        assert box_placement.arm_passes(None) is False
+
+    def test_a_good_arm_passes(self):
+        assert box_placement.arm_passes(_fit(0, 1.02, 0.09)) is True
+
+    def test_overshoot_is_penalised_like_truncation(self):
+        """`fill_dist` is |fill - 1|, so mass outside the measurement is not
+        a better arm than mass missing from it."""
+        assert box_placement.arm_passes(_fit(0, 1.40, 0.05)) is False
+        assert box_placement.arm_passes(_fit(0, 0.60, 0.05)) is False
+
+    def test_fill_alone_is_not_enough(self):
+        """0205's spike bed: fill_dist 0.029, the BEST in the corpus, and
+        residual 0.894, the worst — a hollow shell of the right height that
+        overflows its measurement by nearly a metre across the other two
+        axes. A fill-only gate drops the second arm of the one box 0205
+        says nobody can adjudicate."""
+        assert box_placement.arm_passes(_fit(0, 1.0291, 0.8941)) is False
+
+    def test_residual_alone_is_not_enough(self):
+        assert box_placement.arm_passes(_fit(0, 0.40, 0.05)) is False
+
+
+class TestConditionalSecondArmOnPreservedCaptures:
+    """The gate against the same eight real boxes `choose_arm` is pinned on.
+
+    Recorded because these numbers are the decision: the boxes it skips are
+    exactly the boxes whose second arm is provably unused, and the boxes it
+    keeps include every box anyone has walked."""
+
+    def test_it_passes_exactly_four_of_the_eight(self):
+        passed = sorted(
+            (b["room"], b["box_index"]) for b in SWEEP if _passes(b)
+        )
+        assert passed == [
+            ("rp6g1", 2), ("rp6g1", 3), ("spike", 5), ("spike", 6),
+        ]
+
+    def test_every_skipped_box_has_a_second_arm_choose_arm_never_uses(self):
+        """The whole claim, stated as a test: a skipped second view is one
+        `choose_arm` would have looked at and declined. If this ever fails,
+        the gate is dropping an arm that changes what ships."""
+        for b in SWEEP:
+            if _passes(b):
+                assert _acts(b) is False, (b["room"], b["box_index"])
+
+    def test_the_one_box_that_switches_keeps_its_second_view(self):
+        """rp6g1 b00 — 0197's floating slab, which gains a full set of legs
+        from its second arm and is the only walked `switch` in the corpus."""
+        box = next(
+            b for b in SWEEP if b["room"] == "rp6g1" and b["box_index"] == 0
+        )
+        assert _acts(box) is True
+        assert _passes(box) is False
+
+    def test_both_0197_boxes_keep_their_second_view(self):
+        """The legless pair. Their rank-0 fills are 0.406 and 0.415 — the
+        two values above the gap the threshold sits in — so the gate keeps
+        precisely the views worth reconstructing."""
+        for room, bi in (("rp6g1", 0), ("rp7", 2)):
+            box = next(
+                b for b in SWEEP if b["room"] == room and b["box_index"] == bi
+            )
+            assert _passes(box) is False
+
+    def test_it_does_not_touch_the_oom_fallback_population(self):
+        """0228: the second arm is currently rescuing six of nine boxes
+        whose FIRST view OOMed. Those boxes have one successful arm, so
+        they are not in this multi-arm table at all — and the rule cannot
+        reach them anyway, because an OOMed tier-1 yields no ArmFit. Pinned
+        because the disjointness is what makes the rule safe, and a future
+        change that scores a box from a cached sibling would break it
+        silently."""
+        oom_rescued = {
+            ("rp7", 0), ("rp7", 1), ("rp7", 4), ("rp7", 5),
+            ("rp6g1", 1), ("rp6g2", 0), ("rp6g2", 10),
+        }
+        multi_arm = {(b["room"], b["box_index"]) for b in SWEEP}
+        assert multi_arm & oom_rescued == set()
+
+
+class TestThresholdsAreNotFitted:
+    """Both gates sit at the geometric centre of a gap in the same sweep,
+    the way `_ARM_FILL_MARGIN` does. The pin is that the answer is stable
+    across the whole gap, not just at the default — a rule that only works
+    at its own constant is fitted to its answer."""
+
+    @pytest.mark.parametrize("fill_pass", [0.20, 0.25, 0.31, 0.40, 0.50])
+    def test_the_fill_gate_gives_the_same_answer_across_its_gap(
+        self, fill_pass, monkeypatch
+    ):
+        monkeypatch.setattr(box_placement, "_SECOND_ARM_FILL_PASS", fill_pass)
+        passed = sorted(
+            (b["room"], b["box_index"]) for b in SWEEP if _passes(b)
+        )
+        assert passed == [
+            ("rp6g1", 2), ("rp6g1", 3), ("spike", 5), ("spike", 6),
+        ]
+
+    @pytest.mark.parametrize("res_pass", [0.20, 0.25, 0.30, 0.40, 0.48])
+    def test_the_residual_gate_gives_the_same_answer_across_its_gap(
+        self, res_pass, monkeypatch
+    ):
+        monkeypatch.setattr(
+            box_placement, "_SECOND_ARM_RESIDUAL_PASS_M", res_pass
+        )
+        passed = sorted(
+            (b["room"], b["box_index"]) for b in SWEEP if _passes(b)
+        )
+        assert passed == [
+            ("rp6g1", 2), ("rp6g1", 3), ("spike", 5), ("spike", 6),
+        ]

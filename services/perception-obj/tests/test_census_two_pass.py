@@ -541,3 +541,163 @@ class TestPrivacySuppression:
             assert npz["masks"].shape[0] == 2  # bed + lamp, person absent
             union = npz["suppressed"]
         assert np.array_equal(union, _PersonMask.mask())
+
+
+# ---------------------------------------------------------------------------
+# The conditional second arm (decision 0229)
+# ---------------------------------------------------------------------------
+
+class _Sam3DFailingFirstObject:
+    """OOM on the first object only — attempt AND its one retry, which is
+    what `_reconstruct_with_retry` gives every object. The shape a real
+    CUDA OOM leaves behind: a soft-failed entry with no splat."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def reconstruct(self, pil, mask, seed=42):
+        self.calls += 1
+        if self.calls <= 2:
+            raise RuntimeError(
+                "CUDA out of memory. Tried to allocate 512.00 MiB. GPU 0 has "
+                "a total capacity of 22.03 GiB of which 355.12 MiB is free."
+            )
+        return _fake_result()
+
+
+def _objects_for(gcs: FakeGcs, frame: int):
+    blob = gcs.blobs.get(f"{_OUT}/scenes/{_SCENE}/frames/{frame:04d}/objects.json")
+    return json.loads(blob)["objects"] if blob else []
+
+
+def _all_entries(gcs: FakeGcs):
+    return [e for i in range(4) for e in _objects_for(gcs, i)]
+
+
+class TestConditionalSecondArm:
+    """`PERCEPTION_CONDITIONAL_SECOND_ARM`: a box whose first arm already
+    renders well does not spend a second reconstruction proving it.
+
+    The measurement is pinned in test_arm_select against the eight real
+    boxes; what is pinned HERE is the wiring, so `arm_fit` is stubbed to the
+    verdict under test. The load-bearing case is
+    `test_a_soft_failed_first_arm_keeps_its_second_view`: 0228 measured the
+    second arm rescuing six of nine boxes whose FIRST view OOMed, so
+    "tier-1 was attempted" must never license the skip.
+    """
+
+    def test_off_by_default_the_plan_is_unchanged(self):
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        _uri, _sam3, sam3d = _run(gcs)
+        assert sam3d.calls == 6
+        assert not any(
+            e.get("skipped_reason") == "first_arm_already_fits"
+            for e in _all_entries(gcs)
+        )
+
+    def test_a_passing_first_arm_skips_the_second_view(self, monkeypatch):
+        monkeypatch.setattr(box_placement, "_CONDITIONAL_SECOND_ARM", True)
+        monkeypatch.setattr(
+            box_placement, "arm_fit",
+            lambda *a, **k: box_placement.ArmFit(index=-1, fill=1.01, residual_m=0.05),
+        )
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        _uri, _sam3, sam3d = _run(gcs)
+        assert sam3d.calls == 5  # one fewer than the unconditional 6
+        reasons = [
+            e.get("skipped_reason") for e in _all_entries(gcs)
+            if not e.get("ok")
+        ]
+        assert reasons.count("first_arm_already_fits") == 1
+
+    def test_a_failing_first_arm_keeps_its_second_view(self, monkeypatch):
+        """0197's legless pair, in miniature: the first arm renders 0.41 of
+        its measured height, which is the case a second view exists for."""
+        monkeypatch.setattr(box_placement, "_CONDITIONAL_SECOND_ARM", True)
+        monkeypatch.setattr(
+            box_placement, "arm_fit",
+            lambda *a, **k: box_placement.ArmFit(index=-1, fill=0.41, residual_m=0.79),
+        )
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        _uri, _sam3, sam3d = _run(gcs)
+        assert sam3d.calls == 6
+
+    def test_an_unmeasurable_first_arm_keeps_its_second_view(self, monkeypatch):
+        """`arm_fit` returns None when the arm cannot be placed or parsed."""
+        monkeypatch.setattr(box_placement, "_CONDITIONAL_SECOND_ARM", True)
+        monkeypatch.setattr(box_placement, "arm_fit", lambda *a, **k: None)
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        _uri, _sam3, sam3d = _run(gcs)
+        assert sam3d.calls == 6
+
+    def test_a_soft_failed_first_arm_keeps_its_second_view(self, monkeypatch):
+        """THE safety property, exercised through a real OOM rather than a
+        stub: the first object's reconstruction and its retry both raise, so
+        tier-1 leaves an ok=False entry with no splat. `arm_fit` is stubbed
+        to a PASSING verdict here on purpose — if the gate ever consulted it
+        without first checking that tier-1 produced an arm, this test would
+        see 5 reconstructions and the box would lose the view that rescues
+        it in six of nine measured cases."""
+        monkeypatch.setattr(box_placement, "_CONDITIONAL_SECOND_ARM", True)
+        monkeypatch.setattr(
+            box_placement, "arm_fit",
+            lambda *a, **k: box_placement.ArmFit(index=-1, fill=1.0, residual_m=0.01),
+        )
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        sam3d = _Sam3DFailingFirstObject()
+        _run(gcs, sam3d=sam3d)
+        # 2 failed attempts on object 1, then all 6 plan items reconstruct
+        # except the failed one -> the second view MUST still be among them.
+        assert sam3d.calls == 7
+        entries = _all_entries(gcs)
+        assert any(
+            not e.get("ok") and "out of memory" in (e.get("error") or "")
+            for e in entries
+        )
+        assert not any(
+            e.get("skipped_reason") == "first_arm_already_fits" for e in entries
+        )
+
+    def test_a_raising_measurement_keeps_the_second_view(self, monkeypatch):
+        monkeypatch.setattr(box_placement, "_CONDITIONAL_SECOND_ARM", True)
+
+        def _boom(*a, **k):
+            raise ValueError("splat parse exploded")
+
+        monkeypatch.setattr(box_placement, "arm_fit", _boom)
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        _uri, _sam3, sam3d = _run(gcs)
+        assert sam3d.calls == 6
+
+    def test_a_conditionally_skipped_frame_still_caches(self, monkeypatch):
+        """The skip is deterministic, like a policy skip, so the frame it
+        lands in is complete and must be cached — otherwise every re-drive
+        re-segments a frame nothing is pending in."""
+        monkeypatch.setattr(box_placement, "_CONDITIONAL_SECOND_ARM", True)
+        monkeypatch.setattr(
+            box_placement, "arm_fit",
+            lambda *a, **k: box_placement.ArmFit(index=-1, fill=1.01, residual_m=0.05),
+        )
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        _run(gcs)
+        assert all(
+            f"{_OUT}/scenes/{_SCENE}/frames/{i:04d}/objects.json" in gcs.blobs
+            for i in range(4)
+        )
+
+    def test_the_reason_is_distinct_from_a_policy_skip(self, monkeypatch):
+        """`box_covered_by_other_view` means another view of this box is
+        planned; `first_arm_already_fits` means this box's own first view
+        rendered well enough. Folding them loses the difference between a
+        budget decision and a quality one."""
+        monkeypatch.setattr(box_placement, "_CONDITIONAL_SECOND_ARM", True)
+        monkeypatch.setattr(
+            box_placement, "arm_fit",
+            lambda *a, **k: box_placement.ArmFit(index=-1, fill=1.01, residual_m=0.05),
+        )
+        gcs = FakeGcs(_make_bundle(), _room_json())
+        _run(gcs)
+        reasons = {
+            e.get("skipped_reason") for e in _all_entries(gcs) if not e.get("ok")
+        }
+        assert reasons == {"box_covered_by_other_view", "first_arm_already_fits"}
