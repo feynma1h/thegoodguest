@@ -128,6 +128,42 @@ recovering both. That is the shape worth costing first, and it is a
 restructure of `_run_census_two_pass`, which is the same loop the frozen-plan
 retry work would need. **These two are one project, not two.**
 
+## What it inherits from 0230 — a capacity fix alone is half a fix
+
+`box_covered_by_other_view` is decided before pass 2 runs, so it states that
+another view of the box is PLANNED, never that one succeeded. Three boxes
+across the four preserved captures end with no arm while a policy-skipped,
+family-compatible view of them sits recorded and unused.
+
+The durable half is worse than the immediate half. Measured through the
+census harness, two consecutive runs against the same bucket:
+
+| | segmentations | reconstructions | plan |
+|---|---|---|---|
+| cold | 4 | 6 | 1 best, 1 second, 4 tail, 2 policy-skipped |
+| warm re-drive | **0** | **0** | all zero |
+
+A policy-skipped view is **structurally unreachable**, not merely unretried:
+it is not an observation (`ok` is false), not `done_ok`, and its whole-frame
+cache hit keeps its frame out of `states`, so all three of the plan's ways of
+noticing a view miss it. That is 0160's corollary reproduced from a new
+construction, and it means a warm re-drive — the documented coverage recipe —
+is measurably a no-op for exactly the boxes that need it.
+
+**So this charter must not stop at recovering the OOMs.** A capacity fix that
+raises the reconstruction success rate and leaves policy-skipped views
+permanently unreachable fixes the objects the GPU dropped and abandons the
+objects the PLAN dropped, and the second set does not shrink on its own. The
+retry loop this charter is about — re-entering reconstruction after the loop,
+with outcomes known — subsumes both cases in one mechanism, which is the
+argument for building it once rather than patching either half.
+
+0230 also names the small non-loop variant and why it was not taken: refusing
+to cache a frame whose skipped views belong to an uncovered box would make
+the next drive re-segment it, at the cost of converting a free warm re-drive
+into one that re-segments N frames forever. If the loop is built, that
+question disappears.
+
 ## Where to start
 
 The log query is done and the baseline is measured, so the first unknown is

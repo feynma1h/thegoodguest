@@ -107,12 +107,22 @@ refinement after it.
 
 **A flag was built and then removed**, which is the part worth stating
 plainly. Shipping it default-off would have been the defensible-looking
-choice and it is the wrong one. 0225 named the shape one stage earlier: a
-gate whose margins sit inside the noise "is a gate that never fires, which is
-worse than no gate because it looks live". This is the same hazard with the
-sign flipped — a switch that DOES fire, into a defect, wearing the costume of
-a conservative default. Nobody turning it on would see floor; they would see
-the flag rate rise and read it as the detector working better.
+choice and it is the wrong one. That generalises, and it is the inverse of a
+hazard already on the record:
+
+> 0225: **a gate whose margins sit inside the noise never fires**, "which is
+> worse than no gate because it looks live."
+>
+> 0232: **a switch that fires INTO a defect is worse still**, because
+> default-off makes it look conservative while the metric it moves reads as
+> improvement. Nobody enabling this one would see floor. They would see the
+> flag rate rise from 9 to 10 of 26 and conclude the detector had got better.
+
+The pair is the same underlying rule seen from both ends: **a control must be
+judged by what it does when exercised, not by where its default sits.** An
+unfireable gate and a harmful switch are both shipped code that no
+measurement in the repo contradicts, and both cost more than the absence of
+the feature would have.
 
 **What the finding costs elsewhere.** The 8 cm rejection genuinely does
 delete the bottom tenth of every floor-standing box, and that consequence is
@@ -123,12 +133,23 @@ shape of the fix and it is not a tolerance.
 
 ## What would change this decision
 
-A local floor estimate. If the floor level under a box can be estimated from
-that box's own depth returns — a robust percentile of the returns in its
-footprint, say — then the tolerance can tighten against a plane that is
-actually where the surface is, and `floor_tol_m` is the seam it would use.
-The numbers to beat are in the table above: the restored points must NOT
-collapse between 0.02 and 0.06.
+**A LOCAL floor estimate — the named candidate, and the piece that would
+make the lower band mean what this item claimed.** RoomPlan gives one plane
+for the whole room; the defect is that the surface is not at that plane, by
+up to 4.3 cm on open floor and more under furniture. If the floor level under
+a box is estimated from that box's OWN depth returns — a robust percentile of
+the returns in its footprint, say — the tolerance can tighten against a plane
+that is where the surface actually is, and `floor_tol_m` is the seam it would
+use.
+
+**Not in scope here, and it should not be built without its own registered
+prediction.** It belongs to whatever charter picks up the truth layer next,
+as a named candidate rather than an assumption. The numbers to beat are the
+table above: **the restored points must NOT collapse between 0.02 and 0.06**,
+because that collapse is the signature of a plane rather than a leg. If a
+local estimate is correct, the same sweep run against it should thin out
+roughly linearly with tolerance, and the footprint occupancy should fall from
+45-59% into the few-percent range the four sparse cases already show.
 
 The measurement is single-frame and production-path. The fused cloud grows
 22-37% in the lowest band under the same relaxation (probe19 A5), which is
