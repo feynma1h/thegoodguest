@@ -108,6 +108,19 @@ MIN_ADDED_ON_SIGNAL = float(
 ROOM_PLANE_TOL_M = float(
     os.environ.get("PERCEPTION_MASK_REFINE_PLANE_TOL_M", "0.08")
 )
+# 0.08 LOOKS like a room-scale number misapplied to an object: it reaches 8 cm
+# up into every box standing on the floor, which is where feet are, and the
+# bottom tenth of nine of eleven legged boxes is empty because of it. A
+# box-aware relaxation to 0.02 was built and MEASURED, and it is refused —
+# what it restores is the floor, not the feet (decision 0232). The floor's own
+# measured spread about the plane is p90 +2.2 to +4.3 cm across the four
+# preserved captures, so 0.02 sits INSIDE the noise, and the restored points
+# collapse by 96-100% between 0.02 and 0.06 — a thin sheet, where a leg would
+# thin out linearly. `_on_room_plane` keeps `floor_tol_m` as a parameter so
+# the measurement is one line to reproduce and so a LOCAL floor estimate could
+# use it, but no env flag ships: a switch whose measured effect is to feed the
+# detector floor is worse than no switch, because it looks live.
+
 BOX_PAD_M = float(os.environ.get("PERCEPTION_MASK_REFINE_BOX_PAD_M", "0.05"))
 
 
@@ -176,8 +189,19 @@ BAND_UPPER_MIN = 0.70
 
 def height_bands(height_frac: np.ndarray) -> dict[str, np.ndarray]:
     """Boolean masks over a height-fraction array (0 at the box's floor face,
-    1 at its top)."""
+    1 at its top). Three bands, and the bottom one exists to be empty.
+
+    `foot` is [0, 0.10): the slice `_on_room_plane` deletes at the shipped
+    tolerance, because 0.08 m of floor rejection reaches 8 cm up into every
+    object standing on the floor. Measured on production's own geometry over
+    the 26 planned box views of the four preserved captures: **0.2% of all
+    considered points, and exactly zero on 24 of the 26**. Reporting it as a
+    band rather than letting it fall outside the decomposition is what makes
+    `PERCEPTION_BOX_AWARE_FLOOR_TOL` observable — the restored mass lands
+    here and nowhere else.
+    """
     return {
+        "foot": height_frac < BAND_LOWER_MIN,
         "lower": (height_frac >= BAND_LOWER_MIN) & (height_frac < BAND_UPPER_MIN),
         "upper": height_frac >= BAND_UPPER_MIN,
     }
@@ -189,19 +213,28 @@ def _box_local(world: np.ndarray, box) -> np.ndarray:
     return (world - np.asarray(box.center_world, dtype=float)) @ R
 
 
-def _on_room_plane(world: np.ndarray, room) -> np.ndarray:
+def _on_room_plane(
+    world: np.ndarray, room, floor_tol_m: float | None = None
+) -> np.ndarray:
     """Points lying within ROOM_PLANE_TOL_M of a measured floor or wall.
 
     Floors are read as a world-Y level and walls as a plane through the
     surface origin with the surface's local +Z as normal — the same
     reading `contact_priors` takes of the same entities.
+
+    `floor_tol_m` overrides the FLOOR tolerance only; walls always keep
+    ROOM_PLANE_TOL_M. Callers that have already clipped `world` to one
+    object's volume pass the tight value (decision 0232) — inside a box the
+    room-scale tolerance is not deciding what is floor, it is deleting the
+    object's feet.
     """
     on = np.zeros(len(world), dtype=bool)
     if room is None:
         return on
+    floor_tol = ROOM_PLANE_TOL_M if floor_tol_m is None else float(floor_tol_m)
     for floor in getattr(room, "floors", ()):
         y = float(np.asarray(floor.transform, dtype=float)[1, 3])
-        on |= np.abs(world[:, 1] - y) < ROOM_PLANE_TOL_M
+        on |= np.abs(world[:, 1] - y) < floor_tol
     for wall in getattr(room, "walls", ()):
         T = np.asarray(wall.transform, dtype=float)
         n = T[:3, 2]
