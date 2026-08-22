@@ -78,14 +78,30 @@ exceeding the card — and its cost was never counted.
 
 **2. Downscale-and-retry is refused.** Arithmetically a halved request fits
 in 12 of 12 box views, so the prediction that it would recover fewer than
-four is a **MISS**. It is refused on other grounds: 0197 measured that
-changing what SAM 3D is shown has LARGE and BIDIRECTIONAL effects on the
-reconstruction — the same swap gained one table a full set of legs and cost
-another the ones it had. A reduced-resolution retry therefore does not
-produce a degraded version of the same object; it produces **a different
-object shipped under the same identity**, with no instrument able to say
-which one arrived. Buying twelve reconstructions of unknown provenance is
-not worth twelve missing ones.
+four is a **MISS**, and the arithmetic alone would have green-lit it. It is
+refused on other grounds, and the reasoning generalises past this item:
+
+> **Any change to what SAM 3D is shown produces a different object, not a
+> better or worse one.** 0197 measured the effect as large and
+> BIDIRECTIONAL — the same swap gained one table a full set of legs and cost
+> another the ones it had, with every input-side measure pointing the same
+> way on both. So a fallback that alters the input on failure does not
+> degrade gracefully; it substitutes **a different object under the same
+> identity**, and nothing downstream can detect the substitution. A missing
+> object is visible, countable, and honest. A silently swapped one is none
+> of those. **Where a fallback must choose between altering the input and
+> not running, it must not run** — unless an instrument exists that can
+> accept or reject the result on its own merits.
+
+That test is what makes a deferred retry admissible and a downscaled one
+not: the deferred retry makes the SAME request with the SAME input, so
+there is no substitution to detect. It is also why this reasoning does not
+generalise into a ban on retries — only onto retries that change the input.
+
+The instrument that would lift the refusal is 0204's chooser, and it
+declines to rank: it refuses on axis disagreement rather than ordering
+candidates. So there is no scorer that could adjudicate a downscaled
+reconstruction against its full-resolution sibling today.
 
 **3. A pre-allocation gate can predict and has nothing to do.** Free memory
 at call time is the causal variable and a gate on it separates perfectly.
