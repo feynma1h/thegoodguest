@@ -516,6 +516,21 @@ gains.
   refinement_skipped: true`, and the room gained colour on 0 of 45 objects
   while 40 of them had readable splats. The post-passes it loses are not
   abstract.
+- **13% of detections are lost to CUDA OOM, and it is headroom rather than
+  size** (0228). 22 of 163 detections across the four preserved captures
+  fail to reconstruct — **12 of them box views**, and rp7 b03 and rp6g1 b04
+  lose their ONLY family-compatible mask that way (0227). 0061's mechanism
+  analysis stands and memory does return to its 16.4 GiB baseline after
+  every frame; what is wrong is its characterisation of what remains.
+  **It is not "single large objects" needing 2.6-2.9 GiB**: 21 of the 22
+  requests are **0.500-0.861 GiB**, the median box-view shortfall is
+  **133 MiB**, and three cases miss by **16 MiB**. Mask area does not
+  predict it — Spearman r = −0.009 over an 84x area range, and the best
+  possible area threshold scores 0.846 against a 0.852 base rate, i.e.
+  worse than no threshold. The request is a fixed-shape model activation;
+  what varies is that the card is 91-99% occupied at the moment of the ask.
+  Uncounted for as long as it was because the failures are recorded
+  per-frame in `objects.json` and nothing aggregates them.
 - **A window ships with ~30° in-plane skew.** Near-square planar objects are
   ~90°-ambiguous to the model and no instrument scores in-plane orientation.
 - **The "cabinet behind a wall" is not the declip bound** (0104). The declip pass
@@ -717,8 +732,6 @@ ever done or ruled, delete it — do not annotate it.
   outside `public/` would remove the hazard rather than guard it.
 - **Cold-start coverage is thin by design.** The first `/process` request spends
   its budget on boot and model load; warm re-drives are the coverage recipe.
-  Large single objects can transiently exceed the L4's memory even at baseline —
-  per-object soft-fail contains it. That is a capacity fact, not a lifecycle bug.
 
 ## Python test policy
 
