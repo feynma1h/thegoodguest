@@ -245,16 +245,18 @@ Three stages, all Cloud Tasks driven:
   weakest-first seconds, then the long tail) under budget admission. Frame
   selection is box-visibility set-cover plus pose-diverse FPS residue. Scene
   claims are atomic with lease-TTL crash recovery; OOM is contained per object.
-  Three passes are BUILT and OFF, each behind one env var, each with a
-  byte-identical degrade proven against all four preserved captures:
+  Three passes ship behind one env var each, all still OFF by default, each
+  with a byte-identical degrade proven against all four preserved captures:
   `PERCEPTION_MASK_REFINE` repairs a mask the frame's own LiDAR shows cut its
   object short (0198/0201), `PERCEPTION_OBJECT_AWARE_RESIDUE` spends the
   residue slots on second views of boxes rather than on pose spread (0202),
   and `PERCEPTION_ARM_SELECT` picks which of an object's arms supplies its
   appearance by placing each one against the object's measured box, rather
-  than by mask-hull overlap (0204/0205). None has run on a GPU. They are one
-  chain — supply, selection, repair — and 0203's objection to turning the
-  residue on, that nothing chose among the arms it buys, is now answered.
+  than by mask-hull overlap (0204/0205). **All three have now run live on
+  0%-traffic candidates** (0211/0212), and what that measured is that they are
+  not three independent switches: refine and select flip TOGETHER, refine
+  first, because refinement changes what the chooser is choosing between. The
+  residue waits on one more room.
 - **`/shell`** — the room envelope. shell.json **v3** on the LiDAR paths:
   method `roomplan` renders CapturedRoom geometry verbatim, method
   `anchor_envelope` is the degrade for LIDAR_ARKIT and roomplan-absent
@@ -450,36 +452,32 @@ gains.
 
 **Perception / room quality**
 
-- **The mask repair is BUILT and has never run on a GPU** (0198/0201). SAM 3D's
-  input is RGBA with **alpha = the SAM mask** (`models/sam3d.py`), so an
-  incomplete mask deletes from the model's input what the photograph actually
-  contains — rp7 f114's mask excluded both desk legs and ~3,000 mask pixels took
-  the splat from `0.983 × 0.212 × 0.718`, a 21 cm slab that cannot be a desk
-  under ANY rotation, to `0.983 × 0.655 × 0.444`. `mask_refine.py` now detects
-  it from the frame's own LiDAR, prompts SAM 3 through
-  `add_geometric_prompt` — in the image we ship, never called until now — and
-  validates the result after the fact, reproducing every verdict of the eight
-  masks the benches produced. What it has NOT had is a single live
-  reconstruction: every number behind it is offline geometry over cached masks.
-  It flags **9 of 25** planned box views across the four preserved captures, so
-  ~2 refinements per room, adding no reconstruction. `PERCEPTION_MASK_REFINE=1`
-  and a COLD room are what it needs — the per-object splat cache is checked
-  first, so a warm re-drive never refines anything (0160's lesson, new place).
-- **Arm selection is BUILT and OFF, and one operator answer gates it**
-  (0204/0205). Under `PERCEPTION_ARM_SELECT`, `build_box_object` places every
-  arm an object has and keeps the one that best fits its measured RoomPlan box,
-  instead of taking the first association with a splat. Off is byte-identical
-  across all 31 boxes of the four preserved captures; on, 8 entries change, 7
-  of them by the added record alone, and exactly one object moves — rp6g1's
-  table, 0.406 → 1.004 of its measured height, a floating slab becoming a table
-  with four legs — while rp7's desk keeps its arm unprompted, the
-  opposite-signed half of 0197's walked pair. What it owes is the sitting 0197
-  named and 0203 called superseded rather than answered: three questions at
-  gitignored `outputs/selection/walk/WALK.md`, of which only the first changes
-  a room. **Its one measured hole is spike's bed** (0205) — fill reads one axis
-  and the fit error reads three, so they disagree when the error is not
-  vertical, and the rule refuses there rather than tuning. All three candidate
-  rules get both walked objects right, so nothing but that bed separates them.
+- **The repair and the chooser are proven live, still OFF, and they flip
+  together** (0198/0201, 0204/0205, 0211/0212). SAM 3D's input is RGBA with
+  **alpha = the SAM mask** (`models/sam3d.py`), so an incomplete mask deletes
+  from the model's input what the photograph actually contains. On a 0%-traffic
+  candidate the repair reproduced 0198's bench **to the pixel** — 58,386 →
+  61,439 mask px at IoU 0.9493 — and rp7's desk went from filling **0.321** of
+  its box's narrowest axis to **1.122**. `PERCEPTION_ARM_SELECT` then moved
+  exactly one object: rp7's desk, which 0204 had measured as a KEEPER. **The
+  chooser did not change — refinement changed what it was choosing between**,
+  which is why these are one decision rather than two and why refine goes first
+  (0212). The measured COLD flag rate is **10 of 37** planned box views (rp7
+  1/12, rp6g1 3/10, rp6g2 2/5, spike 4/10), against the warm **9 of 25** that
+  0201 priced from — a warm room understates it. What both owe is one operator
+  look at gitignored `outputs/ship/WALK.md`: two splats sit in
+  `outputs/ship/evidence/` and the question is whether the repaired desk reads
+  as a desk with legs, because 0198's amendment is the standing reminder that
+  the number can be right while the object is on its side. Arm selection's one
+  measured hole is unchanged (0205): on spike's bed, fill reads one axis and
+  the fit error reads three, so they disagree when the error is not vertical,
+  and the rule refuses there rather than tuning.
+- **The object-aware residue ran live and is NOT ready** (0202, 0212). It hit
+  its pre-registered frame set exactly and bought spike's bed a better arm —
+  and **cost rp7's desk its repair**, because frame 114 is not in the residue
+  set. So supply and repair can compete for the same budget, which nothing
+  predicted. It waits on one more room (spike, ~3 cold drives, ~2,700 GPU-s)
+  before it can be judged.
 - **Class-6 splat truncation is untouched and has no live route.** Reconstructions
   are missing legs, bases, and backs. Every placement fix to date positions or
   orients an incomplete reconstruction better rather than completing it, and all
@@ -1021,7 +1019,7 @@ evidence crops (decision 0070; see the privacy bullet).
 
 **7 — RoomPlan tier: the 0085 walk's fixable classes are BUILT; a SECOND operator walk is the open gate.** The consolidated walk RAN (2026-08-08, verdicts in gitignored `outputs/consolidated-walk/verdicts.md`, decision 0085) and its ranked classes were attacked in decision 0104 — see the What-works bullet for what shipped and, just as important, for the four measured refutations that close the rotation thread for now. **THE SECOND WALK RAN 2026-08-12** (verdicts in gitignored `outputs/item7-walk-2026-08-12/verdicts.md`) — every 0104 mechanism confirmed landed, and the reveal's two questions closed positive. **What it leaves, ranked by the operator's own eyes:** (a) **the contact-TILT class, NEW and the top item** — four objects across two rooms (spike speaker, rp7 lamp, rp6g1 lamp, rp6g1 monitor) now sit at the right height but touch at a single point, tilted, because the 0104 support snap is height-only and the splat's residual rotation tilts the body; this is the same rotation ceiling wearing a contact costume, so it is NOT a fifth attack on the rotation DOF but a question about whether contact should level an object it cannot orient; (b) **class-6 truncation in two fresh costumes** — rp7's monitor renders far smaller than the real object, and rp6g1's monitor has NO generated base, so it cannot visually rest on any surface at any height (a floating monitor whose position is correct); (c) rp7's monitor still hovers; (d) the window's in-plane skew, class 5 (re-scoped, see the residue bullet), and `b667f891`'s starvation, all unchanged. **Still NOT to be re-reported as new:** rp7's bed facing and the fronts-to-wall 180° signs — three instrument families are measured dead on that DOF (0104). **Operator product suggestions from this walk — promoted 2026-08-13 to the room-quality session's two starting defects, and both ANSWERED NEGATIVE by it (decisions 0146/0150; mechanisms as stated in `docs/briefs/next-work-directions.md` §1a, whose reading of the code was correct and whose implied fix was not):** per-object *cleanest-frame* selection for SAM 3D ("if we use some frame that doesn't really capture the object, we can't expect the render to look how it actually looks" — adjacent to RP-5's census box-best-view scoring but aimed at reconstruction quality rather than coverage, and pointed straight at class-6), and capture-time per-object sufficiency feedback (touches §3, where RP-7's floor plan deliberately replaced any camera preview — re-opening that is a design argument to make explicitly, and the floor plan may host the same signal). Both were first recorded as "design inputs" in **0075 (2026-07-28)** as live capture-coverage feedback and object-aware frame selection, restated after this walk, and acted on only now — the clearest instance of the drift the outcome-scoping reframe exists to stop. Standing: the `facts_version`-gated scene_facts consumption of box extents. **Re-sign clock now 2026-08-19 07:15 UTC.**
 
-**8 — DONE 2026-08-09/10: the four-surface deploy executed** (revisions in the What-works deploy bullet; the build-gate failure and fix in 0109). The slot keeps its number — it is cross-referenced throughout this file. **Follow-ons, each small and named:** (a) the operator's two-minute production browser leg + the HAR + the white-screen wording (the only legs nobody else can run — see the P0 bullet); (b) CLOSED 2026-08-10 — 0124's filter shipped on `api-public-00036-duv` (22 → 10, A/B-confirmed); (c) CLOSED 2026-08-10 — perception-obj platform-gated (unauth probes can no longer boot the L4) and the tombstone swept; (d) CLOSED 2026-08-10 — layer cache landed and seeded (0120; speedup measured on the next real build); (e) CLOSED 2026-08-10 — 0108 wording + 0107 eval reshape shipped and live-verified (see the stage-2 bullet). **Perception's live gate = the operator's next real scan**, chosen on cost: it proves `extent_axes_m` and the `/process`→`/compress` enqueue end-to-end free, where re-uploading the 494 MB spike bundle would cost ~1,800 GPU-s and a re-grant of the revoked tokenCreator.
+**8 — DONE 2026-08-09/10: the four-surface deploy executed** (revisions in the What-works deploy bullet; the build-gate failure and fix in 0109). The slot keeps its number — it is cross-referenced throughout this file. **Follow-ons, each small and named:** (a) the operator's two-minute production browser leg + the HAR + the white-screen wording (the only legs nobody else can run — see the P0 bullet); (b) CLOSED 2026-08-10 — 0124's filter shipped on `api-public-00036-duv` (22 → 10, A/B-confirmed); (c) CLOSED 2026-08-10 — perception-obj platform-gated (unauth probes can no longer boot the L4) and the tombstone swept; (d) CLOSED 2026-08-10 — layer cache landed and seeded (0120; speedup measured on the next real build); (e) CLOSED 2026-08-10 — 0108 wording + 0107 eval reshape shipped and live-verified (see the stage-2 bullet). **Perception's live gate = the operator's next real scan**, chosen on cost: it proves `extent_axes_m` and the `/process`→`/compress` enqueue end-to-end free. **Re-driving a preserved capture instead costs the GPU but no longer costs a tokenCreator re-grant** — 0164 replaced the mint path with a plain rsync, and 0210 writes down the rest of the cold-room procedure, which the ship lane then executed.
 
 **9 — Conversational redesign (stage 2): MERGED and DEPLOYED — serving since `api-public-00034-zad`, with the language residue closed on `00036-duv`; see the four-surface deploy and stage-2 bullets.** Decisions 0129–0133 executed; 0135/0136/0137 record what building it measured. See the What-works bullet for the whole shape. **What remains, in order:** (a) CLOSED — the v3 evals ran at the four-surface deploy (0107's outcome) and the v4 ones at the facing ship (0172); both green live, both after revising the suite. (b) CLOSED — real turns with the real model have run at every deploy since, `propose` and `turn` included. (c) CLOSED — deployed; the `arrangement` SSE event and both spec routes are live and were exercised end to end on 2026-08-14. (d) **The operator's eyes**, which are the standard (0080/0085): whether a proposed move reads as a proposal rather than as the room being wrong, and whether the contour footprint reads as measurement — 0129 answered the first question with my eyes on nine objects in two already-walked rooms and explicitly flagged that as thin. (e) `0135`'s clip-yaw A/B, which is small, possibly a real quality win on every room, and deliberately left as an operator call. (f) CLOSED 2026-08-14 — rule 10's conditional grammar works with an arrangement in place, and the pin now covers the arrangement block too (0174/0175; see the What-works bullet). The residue it leaves is one composed-case sample in seven, in What-does-NOT-work; the `scene_facts` provenance line is CLOSED (0214). **Deliberately NOT built, each with its trigger:** free rotation in proposals — the trigger 0133 wrote (splat axis resolution) will not fire, and the one that did is that five instrument families are dead, so rotation returned on `lane-a-facings` as a facing CORRECTION rather than a proposal: one half turn, no angle, no direction (0157/0158/0159). Also out: per-object selection and R3F (0133: not prerequisites), the catalog, DAG versioning, and the ledger with its vocabulary ban.
 
