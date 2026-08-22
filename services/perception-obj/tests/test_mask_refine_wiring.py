@@ -179,9 +179,9 @@ def _lamp_mask() -> np.ndarray:
 
 def _detections() -> list[dict]:
     return [
-        {"label": "table", "instance_idx": 0, "bbox": [4, 4, 28, 28],
+        {"label": "desk", "instance_idx": 0, "bbox": [4, 4, 28, 28],
          "score": 0.9, "mask": _short_mask()},
-        {"label": "lamp", "instance_idx": 0, "bbox": [28, 0, 31, 3],
+        {"label": "table lamp", "instance_idx": 0, "bbox": [28, 0, 31, 3],
          "score": 0.7, "mask": _lamp_mask()},
     ]
 
@@ -279,7 +279,7 @@ def _run(*, enabled: bool, sam3=None, monkeypatch=None):
          patch.object(process_receiver, "_gcs_upload_for_scene", gcs.upload):
         run_perception(
             scene_id=_SCENE, bundle_uri=_BUNDLE_URI, outputs_bucket=_OUT,
-            sam3_model=sam3, sam3d_model=sam3d, object_prompt="table,lamp",
+            sam3_model=sam3, sam3d_model=sam3d, object_prompt="desk,table lamp",
         )
     return gcs, sam3, sam3d
 
@@ -346,7 +346,7 @@ class TestTheSubstitutionHappens:
         """The lamp is long tail — an unassociated mask has no measured
         volume, so there is nothing to detect an incomplete mask against."""
         _gcs, sam3, _sam3d = _run(enabled=True)
-        assert {c["label"] for c in sam3.refine_calls} == {"table"}
+        assert {c["label"] for c in sam3.refine_calls} == {"desk"}
 
     def test_the_prompt_is_normalized_and_names_the_original(self):
         _gcs, sam3, _sam3d = _run(enabled=True)

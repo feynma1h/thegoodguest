@@ -236,13 +236,30 @@ def _parse_family_map(raw: str) -> dict[str, frozenset[str]]:
 # rest on it inherited the disagreement. Association is greedy on overlap
 # and each observation joins at most one box, so listing a label in two
 # families costs nothing but lets the right box win.
+# Every member here is a label SAM can actually emit, which is a
+# stronger constraint than it looks: SAM 3 returns the PROMPT TERM, so a
+# family member absent from `DEFAULT_OBJECT_PROMPT` can never match
+# anything. Eight of 0077's seventeen were in that position — `table`
+# included, because the prompt carries `dining table`, `coffee table` and
+# `side table` and no bare `table` — which made `table` operationally
+# {desk, nightstand} and `chair` operationally {chair}. They are gone, and
+# the specific names SAM does emit are here in their place.
+# `vocabulary_gaps` below keeps both directions of that alignment
+# observable, so prompt growth cannot silently re-orphan a family.
+#
+# `armchair` is listed under BOTH chair and sofa for the same reason
+# `nightstand` is listed under both table and storage: RoomPlan may file an
+# upholstered single seat either way, association is greedy, and each
+# observation joins at most one box, so dual listing costs nothing and lets
+# the right box win on overlap.
 _DEFAULT_FAMILIES = (
     "bed:bed"
-    "|table:table,desk,nightstand"
-    "|chair:chair,stool,bench"
-    "|storage:cabinet,dresser,wardrobe,bookshelf,shelf,nightstand"
-    "|sofa:sofa,couch"
-    "|television:tv,television,monitor"
+    "|table:desk,nightstand,dining table,coffee table,side table"
+    "|chair:chair,dining chair,armchair"
+    "|storage:cabinet,bookshelf,nightstand"
+    "|sofa:sofa,armchair"
+    "|television:tv,monitor"
+    "|refrigerator:cabinet"
 )
 BOX_LABEL_FAMILIES: dict[str, frozenset[str]] = _parse_family_map(
     os.environ.get("PLACEMENT_BOX_LABEL_FAMILIES", _DEFAULT_FAMILIES)
@@ -298,6 +315,40 @@ def family_compatible(category: str | None, label: str | None) -> bool:
         return False
     family = BOX_LABEL_FAMILIES.get(category.strip().lower())
     return family is not None and label.strip().lower() in family
+
+
+def vocabulary_gaps(
+    categories, prompt: str
+) -> tuple[list[str], list[str]]:
+    """(box categories with no family, family labels the prompt cannot emit).
+
+    Both are STRUCTURAL misses — a box in the first list can never associate
+    however well its mask overlaps, and a label in the second can never be
+    returned by SAM however well it fits a family. Both were silent until
+    this existed, and both cost real objects: `refrigerator` was absent from
+    the map entirely, and eight of 0077's family members were absent from
+    the prompt.
+
+    A report, not a gate. Apple's full CapturedRoom category enum is not
+    enumerable from this repo, so the first list is the only way a category
+    nobody anticipated becomes visible — it is measured from the room in
+    hand rather than guessed at in advance.
+    """
+    emittable = {t.strip().lower() for t in prompt.split(",") if t.strip()}
+    unmapped = sorted({
+        c for c in (
+            (getattr(b, "category", None) or "").strip().lower()
+            for b in categories
+        )
+        if c and c not in BOX_LABEL_FAMILIES
+    })
+    inert = sorted({
+        label
+        for family in BOX_LABEL_FAMILIES.values()
+        for label in family
+        if label not in emittable
+    })
+    return unmapped, inert
 
 
 # ---------------------------------------------------------------------------

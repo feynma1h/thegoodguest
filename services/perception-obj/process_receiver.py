@@ -71,6 +71,21 @@ from roomstudio_schemas import CaptureBundle
 
 logger = logging.getLogger(__name__)
 
+# The segmentation vocabulary. It lives here rather than in server.py
+# because SAM 3 returns the PROMPT TERM verbatim as a detection's label, so
+# this string and `box_placement.BOX_LABEL_FAMILIES` are two halves of one
+# contract: a family member absent from here can never match a box, and a
+# term here that is in no family can never associate with one. Eight family
+# members were in the first position and nobody could see it. server.py
+# imports this; `box_placement.vocabulary_gaps` reports both directions of
+# the gap once per room, and a test pins the map fully emittable by it.
+DEFAULT_OBJECT_PROMPT = (
+    "sofa,armchair,chair,dining chair,dining table,coffee table,side table,desk,"
+    "cabinet,bookshelf,bed,nightstand,rug,curtain,floor lamp,table lamp,pendant light,"
+    "ceiling fan,plant,artwork,painting,mirror,window,door,doorway,fireplace,"
+    "tv,monitor,speaker,clock"
+)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -1615,6 +1630,21 @@ def run_perception(
             "roomplan scene_id=%s source=%s walls=%d objects=%d",
             scene_id, roomplan_source, len(room_plan.walls), len(room_plan.objects),
         )
+        # Structural association misses, both directions, once per room. A
+        # box whose category has no family never associates however well its
+        # mask overlaps; a family label the prompt cannot emit never matches
+        # however well it fits. Neither is visible in any other log.
+        import box_placement  # deferred with the other heavy imports
+
+        unmapped, inert = box_placement.vocabulary_gaps(
+            room_plan.objects, object_prompt
+        )
+        if unmapped or inert:
+            logger.warning(
+                "box_vocabulary_gap scene_id=%s unmapped_categories=%s "
+                "unemittable_family_labels=%s",
+                scene_id, unmapped or "-", inert or "-",
+            )
 
     frames_total = len(bundle.frames)
     effective_max = max_frames if max_frames is not None else sampling_mod.DEFAULT_MAX_FRAMES
