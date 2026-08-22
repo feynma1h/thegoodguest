@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -22,6 +23,7 @@ if str(_schemas_path) not in sys.path:
     sys.path.insert(0, str(_schemas_path))
 
 import mask_refine  # noqa: E402
+from roomstudio_schemas import capture_bundle_pb2  # noqa: E402
 
 
 def _stack(*masks: np.ndarray) -> np.ndarray:
@@ -188,3 +190,97 @@ class TestTheDetectorDegrades:
             depth_confidence=None, depth_intrinsics=None,
             mask_stack=_stack(_rect(8, 8, 0, 4, 0, 4)), mask_index=7,
         ) is None
+
+
+class TestTheBandsAreAlignedToTheRaster:
+    """Decision 0231's one real hazard: `bands` indexes the height fractions
+    of the KEPT points, while `free` indexes the same points in raster
+    order. If those two orders ever diverge the numbers stay plausible and
+    become meaningless, so the alignment is pinned by construction.
+
+    The scene is a 2 m box 2 m in front of an identity camera (ARKit: the
+    camera looks down -Z), filled with a flat depth plane, so the box spans
+    the image exactly. Image row 0 is world UP, hence the box's upper band.
+    """
+
+    H = W = 32
+    Z = 2.0
+    DIM = 2.0
+
+    def _scene(self):
+        box = SimpleNamespace(
+            dimensions=np.array([self.DIM, self.DIM, self.DIM]),
+            transform=np.eye(4),
+            center_world=np.array([0.0, 0.0, -self.Z]),
+        )
+        box.transform[:3, 3] = box.center_world
+        room = SimpleNamespace(floors=[], walls=[])
+        pose = capture_bundle_pb2.Pose()
+        pose.quat_w = 1.0
+        intr = capture_bundle_pb2.Intrinsics()
+        intr.fx = intr.fy = 32.0
+        intr.cx = intr.cy = self.W / 2.0
+        intr.width, intr.height = self.W, self.H
+        depth = np.full((self.H, self.W), self.Z, dtype=np.float32)
+        return box, room, pose, intr, depth
+
+    @property
+    def _boundary_row(self) -> int:
+        """The image row where the box's upper band begins, derived from the
+        band constant rather than hard-coded, so retuning the cut moves this
+        test with it."""
+        y = (self.DIM / 2.0) * (2.0 * mask_refine.BAND_UPPER_MIN - 1.0)
+        return int(np.ceil(self.W / 2.0 - 32.0 * y / self.Z))
+
+    def _signal(self, mask, depth=None):
+        box, room, pose, intr, default_depth = self._scene()
+        return mask_refine.unclaimed_in_box(
+            box=box, room=room, camera_pose=pose,
+            depth_raster=default_depth if depth is None else depth,
+            depth_confidence=None, depth_intrinsics=intr,
+            mask_stack=_stack(mask), mask_index=0,
+        )
+
+    def test_a_mask_on_the_upper_band_leaves_the_lower_band_unclaimed(self):
+        sig = self._signal(
+            _rect(self.H, self.W, 0, self._boundary_row, 0, self.W)
+        )
+        (lo_n, lo), (up_n, up) = sig.bands["lower"], sig.bands["upper"]
+        assert lo_n > 0 and up_n > 0
+        assert up == pytest.approx(0.0, abs=1e-9)   # claimed
+        assert lo == pytest.approx(1.0, abs=1e-9)   # unclaimed
+
+    def test_the_mirror_case_inverts_both_readings(self):
+        """The half that catches a transposed or reversed index: covering
+        the OTHER band must swap the readings, not repeat them."""
+        sig = self._signal(
+            _rect(self.H, self.W, self._boundary_row, self.H, 0, self.W)
+        )
+        (lo_n, lo), (up_n, up) = sig.bands["lower"], sig.bands["upper"]
+        assert lo_n > 0 and up_n > 0
+        assert up == pytest.approx(1.0, abs=1e-9)
+        assert lo == pytest.approx(0.0, abs=1e-9)
+
+    def test_a_band_with_nothing_measured_is_none_not_zero(self):
+        """Depth only where the upper band projects. The lower band is not
+        unclaimed — it was never seen — and the two must not collapse."""
+        _b, _r, _p, _i, depth = self._scene()
+        depth[self._boundary_row:, :] = np.nan
+        sig = self._signal(
+            np.zeros((self.H, self.W), dtype=bool), depth=depth
+        )
+        assert sig.bands["lower"] == (0, None)
+        assert sig.bands["upper"][0] > 0
+        assert sig.bands["upper"][1] == pytest.approx(1.0, abs=1e-9)
+
+    def test_the_record_distinguishes_null_from_zero(self):
+        _b, _r, _p, _i, depth = self._scene()
+        depth[self._boundary_row:, :] = np.nan
+        blind = self._signal(
+            np.zeros((self.H, self.W), dtype=bool), depth=depth
+        ).as_record()
+        seen = self._signal(
+            _rect(self.H, self.W, 0, self.H, 0, self.W)
+        ).as_record()
+        assert blind["lower_unclaimed_fraction"] is None
+        assert seen["lower_unclaimed_fraction"] == 0.0

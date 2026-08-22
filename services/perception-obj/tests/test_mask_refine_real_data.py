@@ -210,6 +210,56 @@ class TestTheDetectorOnTheFrameItWasFoundOn:
         assert flagged.flagged is True
         assert control.flagged is False
 
+    def test_the_bands_separate_a_mask_defect_from_a_view_defect(self):
+        """Decision 0231, on the pair the pooled number cannot tell apart.
+
+        Both frames raise `fraction`, and for opposite reasons. On f114 the
+        camera SAW the desk's lower band and the mask claimed almost none of
+        it — a mask defect, and the one 0198's repair fixed. On f7 the
+        camera saw NOTHING there: the legs run off the frame. Repair is the
+        only response the pooled number can suggest, and on f7 it is the
+        wrong one."""
+        by_frame = {e["frame"]: self._signal(e) for e in DETECTOR_INDEX}
+        flagged, control = by_frame[114], by_frame[7]
+
+        lo_n, lo_frac = flagged.bands["lower"]
+        assert lo_n > 0
+        assert lo_frac is not None and lo_frac > 0.5
+
+        ctrl_n, ctrl_frac = control.bands["lower"]
+        assert ctrl_n == 0
+        # None, never 0.0 — "the mask claimed none of what was seen" and
+        # "the camera saw none of it" must not collapse.
+        assert ctrl_frac is None
+
+    def test_an_invisible_band_records_an_explicit_null(self):
+        control = next(
+            self._signal(e) for e in DETECTOR_INDEX if e["frame"] == 7
+        )
+        record = control.as_record()
+        assert record["lower_considered_px"] == 0
+        assert "lower_unclaimed_fraction" in record
+        assert record["lower_unclaimed_fraction"] is None
+
+    def test_the_bands_partition_what_was_considered(self):
+        """No point is counted twice, and the shortfall is the sub-0.10
+        band the room-plane rejection empties — measured at 0.2% of all
+        considered points across the four preserved captures, with 24 of 26
+        planned box views at exactly zero."""
+        for entry in DETECTOR_INDEX:
+            sig = self._signal(entry)
+            counted = sum(n for n, _ in sig.bands.values())
+            assert counted <= sig.considered_px
+
+    def test_the_bands_do_not_change_the_flag(self):
+        """0231 adds no threshold and gates nothing. The pooled number and
+        its verdict are exactly what they were."""
+        by_frame = {e["frame"]: self._signal(e) for e in DETECTOR_INDEX}
+        assert by_frame[114].fraction == pytest.approx(0.403, abs=0.002)
+        assert by_frame[7].fraction == pytest.approx(0.163, abs=0.002)
+        assert by_frame[114].flagged is True
+        assert by_frame[7].flagged is False
+
     def test_the_signal_records_what_it_looked_at(self):
         for entry in DETECTOR_INDEX:
             sig = self._signal(entry)
