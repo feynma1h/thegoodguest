@@ -54,6 +54,13 @@ class _Frame:
         self.intrinsics = self._Intr()
 
 
+def _lit(n: int = 32) -> np.ndarray:
+    """A frame with light and texture — passes veto 1 on every check."""
+    g = np.full((n, n), 128.0)
+    g[::2, ::2] = 168.0
+    return g
+
+
 def _box(center, dims=(2.0, 0.5, 1.0), identifier="B"):
     T = np.eye(4)
     T[:3, 3] = center
@@ -156,3 +163,130 @@ class TestSpikeFixtureGate:
         c, ic = census_sampling.select_frames_census(b.frames, room.objects, 12)
         assert [f.frame_index for f in a] == [f.frame_index for f in c]
         assert ia == ic
+
+
+# ---------------------------------------------------------------------------
+# The two vetoes (decision 0234)
+# ---------------------------------------------------------------------------
+
+class TestVetoOne:
+    """Whole-frame usability. REJECT ONLY — it never ranks, and it never
+    rejects a frame it cannot assess."""
+
+    def _grey(self, v=128.0, n=32):
+        g = np.full((n, n), v, dtype=float)
+        g[::2, ::2] = v + 40  # texture, so the blur check passes
+        return g
+
+    def test_a_normal_frame_is_usable(self):
+        assert census_sampling.frame_is_usable(self._grey()) is True
+
+    def test_a_black_frame_is_not(self):
+        assert census_sampling.frame_is_usable(np.zeros((32, 32))) is False
+
+    def test_a_blown_out_frame_is_not(self):
+        assert census_sampling.frame_is_usable(np.full((32, 32), 255.0)) is False
+
+    def test_a_featureless_frame_is_not(self):
+        """Uniform mid-grey: bright enough, not blown, and carrying no
+        gradient at all."""
+        assert census_sampling.frame_is_usable(np.full((32, 32), 128.0)) is False
+
+    def test_no_pixels_is_not_a_rejection(self):
+        assert census_sampling.frame_is_usable(None) is True
+        assert census_sampling.frame_is_usable(np.zeros((0, 0))) is True
+
+    def test_it_accepts_colour_or_luma(self):
+        rgb = np.dstack([self._grey()] * 3)
+        assert census_sampling.frame_is_usable(rgb) is True
+
+
+class TestVetoTwo:
+    """Per (object, frame) lower-band visibility. Zero only — never a
+    ranking, because part-wise visibility separated an object with no leg
+    failure mode by 5.7x and its top-ranked frames have never been
+    reconstructed."""
+
+    def test_no_depth_is_not_a_rejection(self):
+        assert census_sampling.box_band_is_visible(
+            object(), None, _Frame(0, (0.0, 0.0, 0.0)), None
+        ) is True
+
+    def test_no_box_is_not_a_rejection(self):
+        assert census_sampling.box_band_is_visible(
+            None, None, _Frame(0, (0.0, 0.0, 0.0)), lambda fi: None
+        ) is True
+
+    def test_an_error_is_not_a_rejection(self):
+        def _boom(_fi):
+            raise RuntimeError("depth exploded")
+
+        assert census_sampling.box_band_is_visible(
+            _box((0.0, 0.0, -3.0)), None,
+            _Frame(0, (0.0, 0.0, 0.0)), _boom
+        ) is True
+
+
+class TestTheVetoesAreOffByDefault:
+    def test_the_flag_defaults_off(self):
+        assert census_sampling.VISIBILITY_VETO is False
+
+    def test_no_accessors_means_no_veto_block(self):
+        frames = [_Frame(i, (0.5 * i, 0.0, 0.0)) for i in range(8)]
+        _sel, info = census_sampling.select_frames_census(
+            frames, [_box((0.0, 0.0, -3.0))], 4)
+        assert "veto" not in info
+
+
+class TestTheVetoesShapeSelection:
+    """Wired end to end over synthetic frames. The four preserved captures'
+    real answers are recorded in decision 0234 — they need depth and RGB
+    rasters this fixture does not carry."""
+
+    def _run(self, monkeypatch, *, bad_frames=(), max_frames=4, n=10):
+        monkeypatch.setattr(census_sampling, "VISIBILITY_VETO", True)
+        frames = [_Frame(i, (0.5 * i, 0.0, 0.0)) for i in range(n)]
+        seen = {"rgb": [], "depth": []}
+
+        def get_rgb(fi):
+            seen["rgb"].append(fi)
+            return np.zeros((16, 16)) if fi in bad_frames else _lit()
+
+        def get_depth(fi):
+            seen["depth"].append(fi)
+            return None
+
+        sel, info = census_sampling.select_frames_census(
+            frames, [_box((0.0, 0.0, -3.0))], max_frames,
+            room=None, get_depth=get_depth, get_rgb=get_rgb,
+        )
+        return [f.frame_index for f in sel], info, seen
+
+    def test_an_unusable_frame_never_reaches_the_selection(self, monkeypatch):
+        idx, info, _ = self._run(monkeypatch, bad_frames={0, 1, 2})
+        assert not ({0, 1, 2} & set(idx))
+        assert set(info["veto"]["unusable_frames"]) <= {0, 1, 2}
+
+    def test_the_residue_draws_from_survivors_too(self, monkeypatch):
+        """The gap this test exists for: the cover pass and the residue pass
+        pick separately, and a frame carrying no information is no more
+        useful as pose spread than as coverage."""
+        idx, _info, _ = self._run(monkeypatch, bad_frames={0, 1, 2}, max_frames=8)
+        assert not ({0, 1, 2} & set(idx))
+
+    def test_the_block_is_recorded(self, monkeypatch):
+        _idx, info, _ = self._run(monkeypatch, bad_frames={0})
+        assert info["veto"]["policy"] == "visibility_veto_v1"
+        assert "unusable_frames" in info["veto"]
+        assert "band_vetoed_pairs" in info["veto"]
+        assert "relaxed_boxes" in info["veto"]
+
+    def test_the_vetoes_are_asked_only_about_winners(self, monkeypatch):
+        """The cost property, pinned. Scoring every candidate would fetch a
+        frame's pixels AND its depth raster per keyframe — 1,444 blobs on
+        the spike capture — to answer a question about the handful that get
+        picked. Asked lazily, the count stays near the number selected."""
+        n, max_frames = 40, 4
+        idx, _info, seen = self._run(monkeypatch, max_frames=max_frames, n=n)
+        assert len(set(seen["rgb"])) <= max_frames * 3
+        assert len(set(seen["rgb"])) < n
