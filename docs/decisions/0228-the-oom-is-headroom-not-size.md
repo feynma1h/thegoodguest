@@ -150,14 +150,79 @@ the view that is currently saving them. This is the difference between a
 GPU saving and six missing objects, and it is invisible without the OOM
 data.
 
+## Amendment, same day — the deferred retry is inert, and finding 4 is wrong
+
+Finding 4 above proposed re-attempting the same request at frame-boundary
+baseline occupancy, and predicted all 22 recovered. It was green-lit. It was
+checked before implementation and it does not survive the check.
+
+**The structural half, which needs no numbers.**
+`_reconstruct_with_retry` already calls `gc.collect()` + `empty_cache()`
+between attempt 1 and attempt 2, and pass 2 calls `_free_gpu_memory()` after
+every object, so **no other object is ever in flight when a reconstruction
+runs**. `_reconstruct_one_object` additionally drops the 15-key GPU result
+dict eagerly, before upload. A deferred retry at any boundary therefore runs
+under conditions IDENTICAL to attempt 2. There is no state a deferral clears
+that the existing retry does not already clear, and no memory a frame
+boundary returns that an object boundary does not.
+
+**The arithmetic half, which says why the shortfall persists.** Taking
+0061's measured baseline (16.4 GiB of model, plus 0.375 GiB of measured
+non-PyTorch context), the transient budget on a 22.03 GiB card is
+**5.26 GiB**. What the failing objects need — their accrued transient at the
+moment of the ask, plus the ask — is **5.23 to 6.43 GiB**.
+
+| | |
+|---|---|
+| would fit at a perfectly clean baseline | **3 of 22 overall, 1 of 12 box views** |
+| and those three fit by | 0.01-0.03 GiB, inside the arithmetic's own error |
+
+So effectively **none** of them fit. The objects do not fail because they
+were asked for at a crowded moment. They fail because their forward pass
+needs more transient memory than the card has left once both models are
+resident.
+
+**What that costs the note's own framing.** "Headroom, not size" is right
+that the shortfall is small — 16 to 230 MiB — and right that mask area
+cannot predict it. It is **wrong about where the headroom can come from**.
+It cannot come from timing, because timing is already optimal. It can only
+come from the **baseline**, and the baseline is the two models.
+
+**So the lever is the 16.4 GiB baseline, and there is one obvious candidate.**
+Pass 1 completes all segmentation before pass 2 begins, and pass 2 touches
+SAM 3 only through `_mask_refiner_for`. With `PERCEPTION_MASK_REFINE` off —
+which is the shipped default — **SAM 3 is provably idle for the whole of
+pass 2 while holding multiple GiB of VRAM**. 0191 measures the two HF
+snapshots at 17.207 GiB on disk with SAM 3D's share at 11.199, putting SAM
+3's at roughly 6 GiB; VRAM residency is not disk size, but the order is
+right, and freeing even 1.2 GiB covers 21 of the 22 failures while freeing
+3 GiB covers all of them including the 6.43 GiB outlier.
+
+That is not built here. It changes model lifetime from process-scoped to
+pass-scoped, it costs a reload (~100 s against a 900 s budget) on the next
+request that segments, and it is **mutually exclusive with mask refinement**,
+which 0212 is about to turn on and which calls SAM 3 inside pass 2. Those are
+real trades and they belong to whoever owns throughput.
+
+**The cheapest next step is a log query, not a GPU run.** The arithmetic
+above rests on 0061's 16.4 GiB baseline, measured on revision
+`00026-449` in July, while these captures span later revisions. `_log_vram`
+already writes `allocated_mib` at every frame boundary and at
+`after_census_pass2`. Reading those lines from Cloud Logging on a recent
+scene settles whether the baseline has drifted and costs nothing — and it is
+0061's own re-open trigger, unexercised since it was written.
+
 ## What would change this decision
 
-The deferred-retry estimate rests on 0061's measured frame-boundary
-baseline rather than on a run of its own, so it is a prediction: **all 22
-recovered, including all 12 box views**. Register it before building, and
-if a candidate revision recovers materially fewer, the assumption that a
-frame boundary is quiet is wrong and the finding is a scheduling problem
-one level up.
+The deferred retry was predicted to recover all 22 and was refuted before
+implementation by the amendment above — **MISS**, and the miss is the
+useful part: the prediction assumed a frame boundary is quieter than an
+object boundary, and in this pipeline it is not.
+
+What would reopen containment is a smaller baseline. If SAM 3 is ever
+evicted for the duration of pass 2, or the two models are ever split across
+requests, re-measure this table first: every number in it is a function of
+the 5.26 GiB the models leave behind.
 
 Two things would reopen the refusal of downscale-retry: an instrument that
 can score a reconstruction against its measured box well enough to accept
