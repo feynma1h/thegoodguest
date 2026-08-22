@@ -297,8 +297,24 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
   `tone` picks only which ink plate it sits on. The tab icon ships twice —
   `icon.svg` answers `prefers-color-scheme`, `favicon.ico` is the legacy
   fallback and is framed, the variant that survives a light tab strip.
+- **The calling card** — rung 0 of the sharing ladder
+  (`docs/product/social-layer.md` §6), BUILT and undeployed. `lib/card/` is
+  measurement → display list → canvas, split the way `lib/reveal.ts` splits the
+  reveal: the layout is a pure function so the whole artifact can be pinned
+  without a browser, the painter makes no decisions, and the preview IS the
+  downloaded file (one canvas, `toBlob`'d). The projection is a uniform
+  similarity, so every length is exact by construction rather than by care — it
+  reproduces `docs/product/og-card.html`'s hand-placed plan to **0.0055 px on a
+  382 px span**, where that file claims 0.7%. It draws the RENDERED boundary and
+  prints only DETECTED extents (0222), and rotates the plan flat because an
+  ARKit yaw is the phone's start heading rather than a measurement (0223).
+  Canvas and not SVG: an SVG rasterized through an `<img>` cannot see the
+  document's fonts and would silently set the card in system faces.
+  Eligibility is a conservative `created_at` gate against the first
+  suppression-armed revision (0221) — a card ships the shell and a person
+  contaminates a measured albedo, so this is the rung where 0089 binds hardest.
 
-Suite **216** vitest; lint, tsc, and the static-export build are green.
+Suite **276** vitest; lint, tsc, and the static-export build are green.
 
 ### Infra and operations
 
@@ -565,6 +581,16 @@ gains.
   §7): revocation of a share and deletion of a room are one mechanism seen from
   two angles, so shipping the link first would ship a share that outlives every
   means of stopping it. Unshare is not a feature of sharing; it is a precondition.
+  Rung 0 — the calling card — is built and needs none of this, because nothing
+  leaves our systems; every rung above it is still behind this gap.
+- **The card's date gate refuses rooms that are genuinely eligible** — an older
+  scene re-driven cold on a suppression-armed revision qualifies and the gate
+  still says no, because `created_at` cannot see a re-drive. One-directional by
+  construction and the safe direction; the manifest provenance field is the
+  durable fix and 0221 carries its trigger. Related and untested: the card has
+  never been drawn against a real `anchor_envelope` shell — the v2 mock
+  exercises the measured-vs-rendered divergence, a real LIDAR_ARKIT capture
+  would be the better test.
 
 **Infra / release**
 
@@ -847,7 +873,7 @@ Default tool for code work: **Claude Code**. Default for strategy / architecture
 
 **A whole thread — a quality push, an investigation, a migration — is briefed as a CHARTER, not a task list**, per `.claude/WORKFLOW.md`. Its five parts exist because a task-scoped brief produces a session that stops at the first adjacent defect: an outcome with a self-checkable acceptance test, autonomy grants stated POSITIVELY (the part most briefs omit, and the reason sessions stall), named stopping conditions, the batched-judgment protocol when the acceptance test is the operator's eyes, and a scope boundary that is not a file list. A charter loosens scope, never rigour.
 
-**A lane that walks the room page will 404 on `dev-fixtures`** — it is deliberately absent from worktrees (3.9 GB). The cheap fix is `tools/make_synthetic_splat.py` (~14 MB of synthetic rooms, no real capture), and the rule is DELETE THEM AFTERWARDS so nothing real or bulky can reach a build.
+**A lane that walks the room page will 404 on `dev-fixtures`** — it is deliberately absent from worktrees (3.9 GB). The cheap fix is `tools/make_synthetic_splat.py` (~14 MB of synthetic rooms, no real capture), and the rule is DELETE THEM AFTERWARDS so nothing real or bulky can reach a build. **Cheaper still, and free, for any lane that draws GEOMETRY rather than splats: `/room?bundle=!hero` serves `web/public/hero/room.json` — the one genuinely captured room this repo ships (0122's fixture, 3.5 KB, already a tracked static file) — and `!v3`, `!old` and the six list rooms need no fixtures at all.** Nothing to generate and nothing to delete; the splat viewer 404s and everything shell-shaped renders. The calling-card lane built its whole surface this way and never staged a fixture.
 
 **The coordinator rotates itself before it degrades, and does not wait to be
 told.** A coordinator accumulates every lane's context and is the one session
@@ -1016,7 +1042,7 @@ evidence crops (decision 0070; see the privacy bullet).
 
 **(a) Fired triggers, nothing scheduled.** **The `i_up` item is CLOSED end to end** — perception declared the up axis as `extent_axes_m` (0143), and the guest now speaks a measured height and footprint from it (0178/0184, branch `guest-voice`). What that chain leaves for whoever wants it: 0133's furniture catalog, whose named re-open trigger this was. Then: frame coverage (0062 — the trigger says real rooms under-covering at 12 frames means raise the default or make it adaptive; `b667f891`'s 53-item tail and 17-of-22 `insufficient_observations` ARE that evidence, and the board currently only calls the knobs "one-capture-calibrated", which reads as posture rather than a fired trigger); the re-mint fatal (0049 item 1 — `force_remint` is serving, so convert `remint_returned_stale_uris` from fatal into ONE forced re-mint; this is SMALLER and SEPARATE from the `.recoverable` coordinator that is already tracked, and easy to assume is covered by it); and 0088's own instruction to record finding 4's outcome in the note — **CLOSED 2026-08-09**: both of that note's fired triggers are now written back into it (finding 4 revoked; remediation 1 shipped as 0090), each verified live rather than restated — the SA has zero bindings and perception-obj runs as `perception-obj-runtime@`.
 
-**(b) RULED 2026-08-12 a COMMITMENT; DESIGNED 2026-08-21 at `docs/product/social-layer.md` (0207/0208/0209).** The layer is defined and nothing is built. What it settles: a feed is where rooms arrive UNASKED, so the draft's feed cut and the commitment ruling never collided — the test is whether a stranger's room can reach someone who did not ask for it, and it is held architecturally because no such route exists (0207). Sharing is a four-rung ladder — card / shell / shell+inventory / splats — cut on the seam the pipeline already has, generalising the cut 0122 made for the landing hero at 3,557 bytes against ~460 MB (0208). Comparison between two people is REFUSED as a surface and designed as an aggregate input to reasoning: every axis the product can measure proxies income more than taste, and a comparison view contradicts the landing copy (0209). Evolution over time is a user-asserted lineage of captures diffed on measurement, which needs no DAG. **The first increment is a generated card, not a hosted link** — it needs no new trust boundary, no licence amendment, and no moderation surface; its one non-obvious dependency is that the 0089 eligibility rule is NOT checkable from a room's own data (no suppression provenance on the manifest — 0122 settled the hero by hand), so it carries either a conservative `created_at` gate or a new manifest field. Six rulings are the operator's and are listed in §10 of the doc; none of them blocks a build charter for the card. The spatial relationship graph is NOT part of this layer — it is item 9's substrate, which is where 0056 put it.
+**(b) RULED 2026-08-12 a COMMITMENT; DESIGNED 2026-08-21 at `docs/product/social-layer.md` (0207/0208/0209).** The layer is defined, and rung 0 of it is built — see the end of this paragraph. What it settles: a feed is where rooms arrive UNASKED, so the draft's feed cut and the commitment ruling never collided — the test is whether a stranger's room can reach someone who did not ask for it, and it is held architecturally because no such route exists (0207). Sharing is a four-rung ladder — card / shell / shell+inventory / splats — cut on the seam the pipeline already has, generalising the cut 0122 made for the landing hero at 3,557 bytes against ~460 MB (0208). Comparison between two people is REFUSED as a surface and designed as an aggregate input to reasoning: every axis the product can measure proxies income more than taste, and a comparison view contradicts the landing copy (0209). Evolution over time is a user-asserted lineage of captures diffed on measurement, which needs no DAG. **The first increment — a generated card, not a hosted link — is BUILT on branch `calling-card` and undeployed** (see the What-works bullet; decisions 0221/0222/0223). It needed no new trust boundary, no new route, no new storage, no licence amendment and no moderation surface, exactly as designed. The 0089 eligibility rule is NOT checkable from a room's own data (no suppression provenance on the manifest — 0122 settled the hero by hand), and the fork was resolved to the **conservative `created_at` gate** on a fact that inverts the obvious: on day one the exact fix refuses strictly MORE rooms than the conservative one, because absence of a field is not proof and no existing room carries it (0221). **What remains on this increment is the operator's eyes and the name** — an eight-item batched-judgment list is at gitignored `outputs/reports/calling-card.md` with renders beside it at `outputs/calling-card/`, and every user-visible string sits in one `COPY` block in `CallingCardSheet.tsx`. Six rulings are the operator's and are listed in §10 of the doc; none of them blocks a build charter for the card. The spatial relationship graph is NOT part of this layer — it is item 9's substrate, which is where 0056 put it.
 
 **(c) Seams built and left empty.** `RSSound.swift` is wired at three call sites with a documented three-cue design and says plainly "the cue files are not yet in the bundle" — the app is silent, and 0055 lists sound as first-class durable. The web has no sound at all, and the founding reveal opens on ambient room tone. Branded fonts (already in the iOS residue) and the product name are the same class: a one-file swap waiting on an asset or a decision.
 
