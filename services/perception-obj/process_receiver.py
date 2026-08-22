@@ -1043,6 +1043,11 @@ class _PlanCtx:
     masks lazy-load from their masks.npz so a warm retry's plan can see
     which box views prior attempts already reconstructed."""
 
+    # `get_appearance` is None rather than absent: `build_box_object` guards
+    # on exactly that, and a plan-time context has no business fetching
+    # colour. `arm_fit` calls that path with scoring off, so it never asks.
+    get_appearance = None
+
     def __init__(
         self, frames_by_idx: dict, states: dict, cached_masks: dict
     ) -> None:
@@ -1050,6 +1055,32 @@ class _PlanCtx:
         self._states = states
         self._cached_loaders = cached_masks  # frame_index -> () -> stack|None
         self._cached_stacks: dict[int, Any] = {}
+        self._splats: dict[str, Any] = {}
+
+    def get_splat(self, splat_gcs_uri: str):
+        """Parsed vertices for a splat this run already uploaded, memoized.
+
+        Fetched from GCS rather than kept from the reconstruction: the PLY
+        bytes are dropped eagerly inside `_reconstruct_one_object` — before
+        upload, deliberately, because they sit beside 15 keys of GPU tensors
+        — and holding them to save a download would undo that. One download
+        and parse per box evaluated, against the 35-75 s reconstruction the
+        evaluation may avoid.
+        """
+        if not splat_gcs_uri:
+            return None
+        if splat_gcs_uri not in self._splats:
+            import placement as placement_mod  # deferred with the heavy imports
+
+            try:
+                raw = _download_gcs_uri(splat_gcs_uri)
+                self._splats[splat_gcs_uri] = placement_mod.parse_ply_vertices(raw)
+            except Exception:
+                logger.warning(
+                    "conditional second arm: splat unreadable %s", splat_gcs_uri
+                )
+                self._splats[splat_gcs_uri] = None
+        return self._splats[splat_gcs_uri]
 
     def get_camera(self, frame_index):
         frame = self._frames.get(frame_index)
@@ -1221,7 +1252,82 @@ def _build_reconstruction_plan(
         "policy_skipped": len(skipped),
         "associated_boxes": sorted(f"box_{bi:02d}" for bi in assoc_by_box),
     }
-    return plan, {"info": plan_info, "skipped": skipped, "box_by_key": box_by_key}
+    # `assoc_by_box` is returned, not recomputed: decision 0229's in-loop
+    # check needs the box's first association to score the arm it produced,
+    # and the plan has already built exactly that. Returning it does not
+    # unfreeze the plan — the triple list above is unchanged and still
+    # decided before pass 2 begins.
+    return plan, {
+        "info": plan_info,
+        "skipped": skipped,
+        "box_by_key": box_by_key,
+        "assoc_by_box": assoc_by_box,
+    }
+
+
+def _first_arm_passes(
+    *, box_index: int, boxes: list, states: dict, plan_meta: dict,
+    tier1_by_box: dict, ctx,
+) -> bool:
+    """Did this box's tier-1 view render well enough to make a second one
+    pointless? Decision 0229.
+
+    Every path that is not a clear pass returns False, and that direction is
+    load-bearing rather than defensive. 0228 measured the second arm
+    currently carrying an OOM fallback in six of nine affected boxes — in
+    those, tier-1 is the view that failed and a lower-ranked one rescued the
+    box. So "tier-1 was attempted" must never license a skip; only "tier-1
+    produced an arm, and the arm fits" may. A missing entry, a soft-failed
+    one, an unreadable splat and an unplaceable arm all fall on the safe
+    side of that line by construction.
+    """
+    import box_placement  # deferred with the other heavy imports
+
+    key = tier1_by_box.get(box_index)
+    if key is None:
+        return False  # tier-1 never ran, or was not planned for this box
+    entry = states.get(key[0], {}).get("entries", {}).get(key[1])
+    if not entry or not entry.get("ok") or not entry.get("splat_gcs_uri"):
+        return False  # tier-1 soft-failed — this is the OOM case
+    assoc = next(
+        (
+            a for a in plan_meta.get("assoc_by_box", {}).get(box_index, [])
+            if (a.frame_index, a.mask_index) == key
+        ),
+        None,
+    )
+    if assoc is None:
+        return False
+    # The plan's associations carry an empty splat uri for pass-1
+    # detections — the splat did not exist when the plan was built. Point
+    # this one at what tier-1 actually produced.
+    scored = box_placement.BoxAssociation(
+        box_index=assoc.box_index,
+        frame_index=assoc.frame_index,
+        mask_index=assoc.mask_index,
+        overlap=assoc.overlap,
+        in_frame_fraction=assoc.in_frame_fraction,
+        obs={**assoc.obs, "splat_gcs_uri": entry["splat_gcs_uri"]},
+    )
+    try:
+        fit = box_placement.arm_fit(
+            boxes[box_index], box_index, f"box_{box_index:02d}", scored, ctx
+        )
+    except Exception:
+        logger.warning(
+            "conditional second arm: arm_fit raised for box %d; keeping the "
+            "second view", box_index, exc_info=True,
+        )
+        return False
+    passes = box_placement.arm_passes(fit)
+    logger.info(
+        "conditional_second_arm box=%d fill=%s residual_m=%s passes=%s",
+        box_index,
+        "-" if fit is None else round(fit.fill, 4),
+        "-" if fit is None else round(fit.residual_m, 4),
+        passes,
+    )
+    return passes
 
 
 def _mask_refiner_for(
@@ -1472,10 +1578,38 @@ def _run_census_two_pass(
         outputs_bucket, scene_id,
     )
     executed: set[tuple[int, int]] = set()
+    # Decision 0229: which box each executed tier-1 view was planned for, so
+    # a tier-2 entry can ask what its own tier-1 actually rendered. The plan
+    # emits every box_best_view before any box_second_view, so this is always
+    # populated by the time it is read — and a box whose tier-1 was already
+    # cached never reaches tier 2 at all, because `_views_left` drops below 2.
+    tier1_by_box: dict[int, tuple[int, int]] = {}
+    conditional_skipped: list[tuple[int, int]] = []
     if not budget_stopped:
+        import box_placement  # deferred with the other heavy imports
+
+        # One context for the whole loop so its splat memo survives; masks
+        # are not needed here, hence the empty cached-loader map.
+        arm_ctx = _PlanCtx(frames_by_idx, states, {})
         for frame_idx, mask_index, _tier in plan:
             st = states[frame_idx]
             det = st["detections"][mask_index]
+            box_index = plan_meta["box_by_key"].get((frame_idx, mask_index))
+            if (
+                box_placement._CONDITIONAL_SECOND_ARM
+                and _tier == "box_second_view"
+                and box_index is not None
+                and _first_arm_passes(
+                    box_index=box_index,
+                    boxes=boxes,
+                    states=states,
+                    plan_meta=plan_meta,
+                    tier1_by_box=tier1_by_box,
+                    ctx=arm_ctx,
+                )
+            ):
+                conditional_skipped.append((frame_idx, mask_index))
+                continue
             if st["depth"] is None:
                 st["depth"] = _fetch_frame_depth(st["frame"], prefix)
             depth_raster, depth_confidence, depth_intrinsics = st["depth"]
@@ -1508,7 +1642,26 @@ def _run_census_two_pass(
                 break
             st["entries"][mask_index] = entry
             executed.add((frame_idx, mask_index))
+            if _tier == "box_best_view" and box_index is not None:
+                tier1_by_box[box_index] = (frame_idx, mask_index)
             _free_gpu_memory()
+
+    # Conditional second-arm skips (decision 0229). Recorded with their own
+    # reason, never folded into `box_covered_by_other_view`: that reason
+    # means "another view of this box is planned", and this one means "this
+    # box's own first view already rendered well enough".
+    for frame_idx, mask_index in conditional_skipped:
+        st = states[frame_idx]
+        det = st["detections"][mask_index]
+        st["entries"][mask_index] = {
+            "label": det["label"],
+            "instance_idx": det["instance_idx"],
+            "bbox": det["bbox"],
+            "score": det["score"],
+            "mask_index": mask_index,
+            "ok": False,
+            "skipped_reason": "first_arm_already_fits",
+        }
 
     # Policy skips: recorded entries (deterministic — safe to cache).
     for frame_idx, mask_index in plan_meta["skipped"]:
