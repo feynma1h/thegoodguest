@@ -6,15 +6,28 @@
 /// The returning-home variant (a thin recent-rooms strip above the same button)
 /// rides with the history surface (§9) since it needs a rooms fetch — this view
 /// takes `hasRooms`/`roomsStrip` so that variant can slot in without a rewrite.
+///
+/// `notice` is the third state: the hero, plus something the app needs to say
+/// about the rooms it could not fetch. It sits INSIDE the scroll area with the
+/// hero rather than above the whole screen, because the scan action is pinned —
+/// anything stacked outside the ScrollView squeezes it, and at accessibility
+/// sizes that squeeze truncated "Scan a room" to "Scan a ro…". Found by
+/// screenshot; the pinned action is the one thing on this screen that must
+/// never be compressed.
 
 import SwiftUI
 
-struct HomeView<RoomsStrip: View>: View {
+struct HomeView<RoomsStrip: View, Notice: View>: View {
     var onScan: () -> Void = {}
     var onProfile: () -> Void = {}
     /// When true, the hero collapses and `roomsStrip` is shown above the button.
     var hasRooms: Bool = false
     @ViewBuilder var roomsStrip: () -> RoomsStrip
+    /// Shown above the hero, in the scroll area. EmptyView when there is
+    /// nothing to say. No default: a defaulted generic slot cannot be inferred
+    /// at a call site that omits it, so the convenience inits below carry the
+    /// EmptyView cases explicitly.
+    @ViewBuilder var notice: () -> Notice
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,8 +42,11 @@ struct HomeView<RoomsStrip: View>: View {
                     roomsStrip()
                         .padding(.top, 20)
                 } else {
-                    hero
-                        .padding(.top, 28)
+                    VStack(spacing: 22) {
+                        notice()
+                        hero
+                    }
+                    .padding(.top, 20)
                 }
             }
 
@@ -95,10 +111,36 @@ struct HomeView<RoomsStrip: View>: View {
     }
 }
 
-// Convenience initializer for the first-time state (no rooms strip).
-extension HomeView where RoomsStrip == EmptyView {
+// Convenience initializer for the first-time state (no rooms strip, nothing to say).
+extension HomeView where RoomsStrip == EmptyView, Notice == EmptyView {
     init(onScan: @escaping () -> Void = {}, onProfile: @escaping () -> Void = {}) {
-        self.init(onScan: onScan, onProfile: onProfile, hasRooms: false, roomsStrip: { EmptyView() })
+        self.init(onScan: onScan, onProfile: onProfile, hasRooms: false,
+                  roomsStrip: { EmptyView() }, notice: { EmptyView() })
+    }
+}
+
+// Convenience initializer for the hero-plus-notice state.
+extension HomeView where RoomsStrip == EmptyView {
+    init(
+        onScan: @escaping () -> Void = {},
+        onProfile: @escaping () -> Void = {},
+        @ViewBuilder notice: @escaping () -> Notice
+    ) {
+        self.init(onScan: onScan, onProfile: onProfile, hasRooms: false,
+                  roomsStrip: { EmptyView() }, notice: notice)
+    }
+}
+
+// Convenience initializer for the returning-home strip with nothing to say.
+extension HomeView where Notice == EmptyView {
+    init(
+        onScan: @escaping () -> Void = {},
+        onProfile: @escaping () -> Void = {},
+        hasRooms: Bool,
+        @ViewBuilder roomsStrip: @escaping () -> RoomsStrip
+    ) {
+        self.init(onScan: onScan, onProfile: onProfile, hasRooms: hasRooms,
+                  roomsStrip: roomsStrip, notice: { EmptyView() })
     }
 }
 

@@ -182,13 +182,21 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   a mint-429 screen that names the reset time rather than sleeping. Declaring a
   new flight stands the previous room's status down, so no surface can narrate a
   finished room over a scan still going up (0217).
+- **History.** `ScenesListClient` fetches `GET /scenes` — the caller's own
+  rooms, scoped to the token — and `RoomsStore` holds one answer for all three
+  surfaces that state a count: the returning-home strip, `RoomsListView`, and
+  `WhySignInSheet`'s invitation. The load state is four-way and its accessors
+  are Optional, so "no rooms" and "could not ask" cannot be collapsed (0206);
+  a failed fetch never renders as zero. Rows offer a tap only where one can
+  land — gated on `NetworkConfig.webBaseURL`, which is nil, exactly as the
+  doorway's CTA is.
 - **The mark.** `DesignSystem/Wordmark.swift` draws the same room corner as the
   app icon, from the generated `MarkGeometry.swift` (0193). `RSBrand.name` stays
   the one-file swap for the name; there is no separate mark glyph.
 - **Reclaim.** `CaptureReaper` frees a capture's record and files once the user
   has *seen* the outcome — never on mere upload success.
 
-Suite **553**: 547 asserting offline tests + 2 boilerplate stubs + 4 live
+Suite **600**: 594 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
@@ -567,7 +575,9 @@ gains.
   cannot be seen on any deployed origin by design: a real object splat is a
   possession, so its files are gitignored and hosting-ignored.
 - **The bridge QR encodes nothing.** No deep-link infrastructure exists; the
-  caption says so.
+  caption says so. It is NOT blocked on the rooms fetch, which is what its
+  staged-list entry used to imply — the desk names the room in the link it
+  hands over, so a list of the phone's own rooms tells it nothing (0218).
 - **`RSSound` is wired at three call sites with no cue files** — the app is
   silent. The web has no sound at all. Branded fonts fall back to system faces.
   The product **name** is still a placeholder.
@@ -766,13 +776,15 @@ re-enqueue (18) and ruff (non-gating) passed.
 
 ## iOS test policy
 
-The iOS suite is **553 tests total** (was 544; the ios-surfaces pass added 9 — the flight stand-down and the launch-adoption table, both in `ScenePollExpectationTests`. Before that, 535 → 544 from the uid-churn investigation — `IdentityContinuityTests`, the launch continuity table. Before that, 523 → 535 from the Google-linking pass and 482 → 523 from the ios-residue pass. Before that, 463 → 482; the walk-findings pass added 19 — Live Activity narration, failure copy, and the recoverable count. Before that, 391 → 463 from the Live Activity / 429 / guidance pass, which added 76 and relocated 4. Before that, 352 → 391 from the release-residue pass; the release-residue pass added 39 — `CaptureReclaimTests` 15, `CaptureReaperTests` 12, `StagingHooksTests` 7, `ScenePollExpectationTests` 5. Before that, 302 → 352 from RP-6/RP-7; RP-6 added 11 — 9 co-run/wire pins + 2 envelope-edge pins — and RP-7 added 39 — `FloorPlanMathTests` 18, `FloorPlanVoiceTests` 13, `FloorPlanFixtureTests` 8. Before that, 288 → 302 from the 0074 phantom-room pass), run manually via `xcodebuild … -scheme RoomStudioCapture-Integration` — the only scheme in this project (no separate default scheme, no CI gate). That scheme bakes `RUN_INTEGRATION_TESTS=1`, so the 4 `UploadSessionClientTests` **execute live on every run**; they are NOT skipped in practice. They last ran live 2026-08-21 (the ios-surfaces pass, 553/553) against `api-public-00042-ruq`, the whole suite in 21.5 s of test execution.
+The iOS suite is **600 tests total** (was 553; the scenes-client pass added 47 — `ScenesListClientTests` 17, `RoomHistoryTests` 12, `RoomsStoreTests` 11, `RoomsSurfaceTests` 7, for the `GET /scenes` client and the three surfaces it feeds. Before that, 544 → 553; the ios-surfaces pass added 9 — the flight stand-down and the launch-adoption table, both in `ScenePollExpectationTests`. Before that, 535 → 544 from the uid-churn investigation — `IdentityContinuityTests`, the launch continuity table. Before that, 523 → 535 from the Google-linking pass and 482 → 523 from the ios-residue pass. Before that, 463 → 482; the walk-findings pass added 19 — Live Activity narration, failure copy, and the recoverable count. Before that, 391 → 463 from the Live Activity / 429 / guidance pass, which added 76 and relocated 4. Before that, 352 → 391 from the release-residue pass; the release-residue pass added 39 — `CaptureReclaimTests` 15, `CaptureReaperTests` 12, `StagingHooksTests` 7, `ScenePollExpectationTests` 5. Before that, 302 → 352 from RP-6/RP-7; RP-6 added 11 — 9 co-run/wire pins + 2 envelope-edge pins — and RP-7 added 39 — `FloorPlanMathTests` 18, `FloorPlanVoiceTests` 13, `FloorPlanFixtureTests` 8. Before that, 288 → 302 from the 0074 phantom-room pass), run manually via `xcodebuild … -scheme RoomStudioCapture-Integration` — the only scheme in this project (no separate default scheme, no CI gate). That scheme bakes `RUN_INTEGRATION_TESTS=1`, so the 4 `UploadSessionClientTests` **execute live on every run**; they are NOT skipped in practice. They last ran live 2026-08-22 (the scenes-client pass, 600/600) against `api-public-00042-ruq`, the whole suite in ~14 s of test execution.
 
-**What the suite does and does not cover.** It pins flow LOGIC — routing tables, restore selection, deferral scoping, poller visibility — deliberately extracted into pure functions so they are reviewable as tables instead of by reading SwiftUI. It does NOT cover rendering: a green suite is compatible with a screen whose only exit is clipped off-frame at accessibility sizes. **AX5 layout claims must be re-verified by screenshot, never by reading** (`xcrun simctl ui <udid> content_size accessibility-extra-extra-extra-large`, then a temporary app-entry swap to the screen under test); three separate review passes claimed AX coverage they did not have, and the two screens that actually failed — `AccountConflictView` (deleted since, 0216) and `QRBridgeView` — were both found by screenshot after being read as fine.
+**What the suite does and does not cover.** It pins flow LOGIC — routing tables, restore selection, deferral scoping, poller visibility — deliberately extracted into pure functions so they are reviewable as tables instead of by reading SwiftUI. It does NOT cover rendering: a green suite is compatible with a screen whose only exit is clipped off-frame at accessibility sizes. **AX5 layout claims must be re-verified by screenshot, never by reading** (`xcrun simctl ui <udid> content_size accessibility-extra-extra-extra-large`, then a temporary app-entry swap to the screen under test); three separate review passes claimed AX coverage they did not have, and the two screens that actually failed — `AccountConflictView` (deleted since, 0216) and `QRBridgeView` (fixed; re-verified by screenshot 2026-08-22) — were both found by screenshot after being read as fine. **The sharpest thing to check is a PINNED action** (0224): home's scan button truncated to "Scan a ro…" because a notice stacked outside `HomeView`'s `ScrollView` took ~370pt at AX5 and the compression landed on the pinned sibling rather than on the scroll area. Content belongs in the scroll area; only the action is pinned. Two shipped surfaces — `UploadFailedBanner` and home's re-entry row — are still stacked in that position and have NOT been screenshotted at AX5 with the action in frame. Second recurring form, same shot: `.center` is `HStack`'s default, so any glyph or button beside prose that wraps to four lines comes to rest in the middle of it — top-align it.
 
 **Posture: fail-closed-live, not fail-open.** Each integration test calls `XCTSkipIf(!RUN_INTEGRATION_TESTS)` — the fail-open default — but because the sole scheme always sets the flag, that skip path is never taken here. With the flag set they hit the live `/upload_session` contract and go **red if the backend is unreachable**. Running the suite therefore requires a reachable backend; an offline run will fail those 4 (expected, not a regression).
 
-**Honest count:** report as "538 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 544 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't.
+**Honest count:** report as "594 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 600 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't.
+
+**One known flake, measured 2026-08-22.** `BlobUploadManagerTests.test_gate_lastDecrement_afterDrain_firesHandler` fails roughly **1 run in 15** under full-suite load and **0 in 12** in isolation — so it is a scheduler race, not a regression, and re-running is the correct response to seeing it red once. Measured across 29 full-suite runs (1 failure in 15 on `scenes-client`, 0 in 14 on `0f671fc`), which is why it is recorded as a rate rather than attributed to a change. The cause is visible in the test's own source: a single `await Task.yield()` is the only synchronisation before it asserts that a background-completion handler has run. Fixing it means giving the test a real await, not a longer sleep — but it belongs to whoever owns upload, not to a passing lane.
 
 **Parallel-worktree note:** `GoogleService-Info.plist` is gitignored, so a fresh git worktree lacks it and the 4 live tests fail with a Firebase configure error that mimics a backend failure. Copy it from the main tree (`ios/RoomStudioCapture/RoomStudioCapture/`) before running the suite in a worktree; a rebuild picks it into the app bundle.
 
