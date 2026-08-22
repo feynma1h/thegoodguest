@@ -121,15 +121,26 @@ class TestChooseArm:
 
     def test_the_record_names_both_arms_either_way(self):
         """A refusal is recorded as fully as an action — the manifest says
-        what was compared, not just what happened."""
+        what was compared, not just what happened.
+
+        Re-pinned for decision 0233's third axis. The record now also names
+        WHICH axes split, which the two-axis form could not: here `residual`
+        preferred the challenger and `fill` did not, and `s2c` abstained
+        because these synthetic fits carry no cloud."""
         _, rec = box_placement.choose_arm([
             _fit(0, 0.9506, 0.0646), _fit(1, 0.9683, 0.0518),
         ])
         assert rec == {
             "arms": 2,
+            "axes": ["fill", "residual", "s2c"],
             "shipped_fill": 0.9506, "shipped_residual_m": 0.0646,
+            "shipped_s2c_m": None,
             "chosen_rank": 0, "chosen_fill": 0.9506,
-            "chosen_residual_m": 0.0646, "fill_gain": 0.0,
+            "chosen_residual_m": 0.0646, "chosen_s2c_m": None,
+            "fill_gain": 0.0,
+            "refused": [
+                {"rank": 1, "agreed": ["residual"], "dissented": ["fill"]}
+            ],
         }
 
     def test_it_is_deterministic(self):
@@ -617,3 +628,124 @@ class TestThresholdsAreNotFitted:
         assert passed == [
             ("rp6g1", 2), ("rp6g1", 3), ("spike", 5), ("spike", 6),
         ]
+
+
+# ---------------------------------------------------------------------------
+# The third axis (decision 0233)
+# ---------------------------------------------------------------------------
+
+def _fit3(index, fill, residual_m, s2c_m=None):
+    return box_placement.ArmFit(
+        index=index, fill=fill, residual_m=residual_m, s2c_m=s2c_m
+    )
+
+
+class TestTheThirdAxisIsAVeto:
+    """k-of-n with k = n: every axis that can express an opinion must prefer
+    the challenger. Adding an axis can therefore only make `choose_arm` act
+    LESS often, never more — which is what makes it safe against the
+    population 0228 measured, where the second arm is carrying an OOM
+    fallback in six of nine affected boxes. A third axis that could ENABLE
+    switches would be interacting with those boxes; a veto cannot."""
+
+    def test_it_vetoes_a_switch_the_two_axes_would_have_made(self):
+        two = [_fit3(0, 0.40, 0.50), _fit3(1, 1.00, 0.30)]
+        assert box_placement.choose_arm(two)[0].index == 1
+        three = [_fit3(0, 0.40, 0.50, 0.05), _fit3(1, 1.00, 0.30, 0.19)]
+        assert box_placement.choose_arm(three)[0].index == 0
+
+    def test_it_lets_an_agreed_switch_through(self):
+        three = [_fit3(0, 0.40, 0.50, 0.19), _fit3(1, 1.00, 0.30, 0.05)]
+        assert box_placement.choose_arm(three)[0].index == 1
+
+    def test_it_can_never_enable_a_switch_the_two_axes_refuse(self):
+        """Whatever the third axis says, a fill or residual dissent still
+        refuses. Swept rather than asserted once."""
+        for s_ship, s_chal in ((0.9, 0.01), (0.01, 0.9), (None, None)):
+            fits = [_fit3(0, 0.99, 0.10, s_ship), _fit3(1, 0.98, 0.90, s_chal)]
+            assert box_placement.choose_arm(fits)[0].index == 0
+
+    def test_abstention_does_not_veto(self):
+        """A depth-less or starved room yields no cloud, so `s2c_m` is None.
+        That must fall back to the two-axis rule that ships today, not
+        silently disable arm selection — otherwise turning the axis on is a
+        behaviour change wearing the costume of a stricter rule."""
+        for pair in ((None, None), (None, 0.05), (0.05, None)):
+            fits = [_fit3(0, 0.40, 0.50, pair[0]), _fit3(1, 1.00, 0.30, pair[1])]
+            assert box_placement.choose_arm(fits)[0].index == 1
+
+    def test_abstention_is_byte_identical_to_the_two_axis_rule(self):
+        """The degrade lock. With no cloud anywhere, every answer over the
+        real sweep is the one that shipped before the axis existed."""
+        for b in SWEEP:
+            two = _fits(b)
+            three = [_fit3(a["rank"], a["fill"], a["residual_m"], None)
+                     for a in b["arms"]]
+            assert (box_placement.choose_arm(two)[0].index
+                    == box_placement.choose_arm(three)[0].index)
+
+    def test_a_split_is_recorded_with_the_axes_that_disagreed(self):
+        _, rec = box_placement.choose_arm(
+            [_fit3(0, 0.40, 0.50, 0.05), _fit3(1, 1.00, 0.30, 0.19)]
+        )
+        assert rec["refused"] == [
+            {"rank": 1, "agreed": ["fill", "residual"], "dissented": ["s2c"]}
+        ]
+
+    def test_all_three_readings_are_recorded_whether_it_acts_or_not(self):
+        for fits in (
+            [_fit3(0, 0.40, 0.50, 0.19), _fit3(1, 1.00, 0.30, 0.05)],   # acts
+            [_fit3(0, 0.99, 0.10, 0.05), _fit3(1, 0.98, 0.90, 0.19)],   # refuses
+        ):
+            _, rec = box_placement.choose_arm(fits)
+            assert rec["axes"] == ["fill", "residual", "s2c"]
+            for k in ("shipped_fill", "shipped_residual_m", "shipped_s2c_m",
+                      "chosen_fill", "chosen_residual_m", "chosen_s2c_m"):
+                assert k in rec
+
+
+class TestTheThirdAxisOnPreservedCaptures:
+    """The eight real boxes, with the s2c readings production's own
+    `select_arm` path computes — measured against a cloud built from each
+    box's own association frames, which is what a RefinementContext can
+    reach. Production has no fused cloud and 0233 does not propose one."""
+
+    def _fits3(self, b):
+        return [_fit3(a["rank"], a["fill"], a["residual_m"], a.get("s2c_m"))
+                for a in b["arms"]]
+
+    def test_every_arm_carries_a_reading(self):
+        for b in SWEEP:
+            for a in b["arms"]:
+                assert a.get("s2c_m") is not None, (b["room"], b["box_index"])
+                assert 0.0 < a["s2c_m"] < 1.0
+
+    def test_the_third_axis_changes_nothing_on_this_corpus(self):
+        """Insurance, not improvement — and recorded as such. The rule acts
+        on the same single box with two axes and with three."""
+        two = [b for b in SWEEP if _acts(b)]
+        three = [b for b in SWEEP
+                 if box_placement.choose_arm(self._fits3(b))[0].index != 0]
+        assert [(b["room"], b["box_index"]) for b in two] == [("rp6g1", 0)]
+        assert [(b["room"], b["box_index"]) for b in three] == [("rp6g1", 0)]
+
+    def test_it_agrees_with_the_only_walked_switch(self):
+        """rp6g1 b00 — 0197's floating slab. The one case in this corpus
+        anyone has adjudicated, and the veto does not fire on it."""
+        b = next(x for x in SWEEP
+                 if x["room"] == "rp6g1" and x["box_index"] == 0)
+        assert b["walked"] == "switch"
+        assert b["arms"][1]["s2c_m"] < b["arms"][0]["s2c_m"]
+
+    def test_spike_bed_is_now_a_two_to_one_refusal(self):
+        """0205's bed, where fill and the residual disagree and nobody can
+        adjudicate. The third axis sides with fill, so the refusal is
+        recorded 2-vs-1 rather than 1-vs-1 — still a refusal, with more
+        evidence in it than before."""
+        b = next(x for x in SWEEP
+                 if x["room"] == "spike" and x["box_index"] == 3)
+        _, rec = box_placement.choose_arm(self._fits3(b))
+        assert rec["chosen_rank"] == 0
+        split = rec["refused"][0]
+        assert split["agreed"] == ["residual"]
+        assert split["dissented"] == ["fill", "s2c"]
