@@ -69,6 +69,40 @@ PERCEPTION_BOX_COVER_MIN_AREA_FRAC = float(
 # downstream, on the output, against its measured box.
 OBJECT_AWARE_RESIDUE = os.environ.get("PERCEPTION_OBJECT_AWARE_RESIDUE", "0") == "1"
 
+# --- The two vetoes (decision 0234) ----------------------------------------
+# Selection today asks only where a box PROJECTS. Two frames can project a
+# box identically while one of them is unusable and the other shows the
+# object's lower half. Off by default; with it off this module is byte for
+# byte what every preserved capture shipped.
+#
+# REJECT ONLY, NEVER RANK. That restriction is the whole design and it is not
+# caution — it is measured. Eleven view measures have been refuted (0146,
+# 0152, 0162) and 0197 measured the twelfth as large and BIDIRECTIONAL, the
+# same swap gaining one table a full set of legs and costing another the ones
+# it had. Part-wise visibility in particular separated an object with no leg
+# failure mode by 5.7x, which was the pre-registered tripwire for a generic
+# quality proxy, and its top-ranked frames have never been reconstructed. So
+# these vetoes answer only "can this frame serve this object AT ALL", at
+# zero, and every surviving frame is ordered by exactly what ordered it
+# before.
+VISIBILITY_VETO = os.environ.get("PERCEPTION_VISIBILITY_VETO", "0") == "1"
+
+# Veto 1, whole-frame usability. Deliberately extreme: these reject a frame
+# that carries no information, not a frame that is merely worse than another.
+VETO_MIN_MEAN_LUMA = float(os.environ.get("PERCEPTION_VETO_MIN_LUMA", "12"))
+VETO_MAX_BLOWN_FRACTION = float(os.environ.get("PERCEPTION_VETO_MAX_BLOWN", "0.85"))
+VETO_MIN_LAPLACIAN_VAR = float(os.environ.get("PERCEPTION_VETO_MIN_LAPVAR", "3.0"))
+
+# Veto 2's band, carried from the detector rather than restated so one cut
+# moves both.
+VETO_BAND = "lower"
+
+# How far the cover bar may relax for a box the vetoes would otherwise
+# orphan. Veto 2 REMOVES candidate frames, so it can starve a box that had
+# few — rp6g2 has one with exactly one qualifying frame across 124 — and this
+# is that veto's counterweight rather than an independent feature.
+VETO_RELAX_STEPS = (1.0, 0.8, 0.6, 0.4)
+
 # How many qualifying views of one box the object-aware residue will buy.
 # Deliberately the SAME env var the reconstruction plan caps itself with
 # (process_receiver._PLAN_VIEWS_PER_BOX), because a view beyond the plan's
@@ -111,8 +145,132 @@ def box_visibility(frames: Sequence, boxes: list) -> tuple[np.ndarray, np.ndarra
     return V, Q
 
 
+def frame_is_usable(rgb) -> bool:
+    """Veto 1. False only for a frame carrying no information: black, blown
+    out, or catastrophically blurred. Never a comparison between frames."""
+    if rgb is None:
+        return True  # cannot tell -> do not reject
+    a = np.asarray(rgb)
+    if a.size == 0:
+        return True
+    g = a.mean(axis=2) if a.ndim == 3 else a.astype(float)
+    if float(g.mean()) < VETO_MIN_MEAN_LUMA:
+        return False
+    if float((g >= 250).mean()) > VETO_MAX_BLOWN_FRACTION:
+        return False
+    # Variance of the Laplacian, the standard blur proxy, by direct
+    # convolution — scipy is not in this image.
+    lap = (
+        -4.0 * g[1:-1, 1:-1]
+        + g[:-2, 1:-1] + g[2:, 1:-1] + g[1:-1, :-2] + g[1:-1, 2:]
+    )
+    if lap.size and float(lap.var()) < VETO_MIN_LAPLACIAN_VAR:
+        return False
+    return True
+
+
+def box_band_is_visible(box, room, frame, get_depth) -> bool:
+    """Veto 2. Does this frame see ANY of the box's lower band?
+
+    True whenever the question cannot be asked — no depth, no payload — so a
+    missing raster never removes a candidate. The measurement is the
+    detector's own geometry with the mask half absent, which is what makes it
+    available before any GPU work.
+    """
+    if get_depth is None or box is None:
+        return True
+    try:
+        import mask_refine  # deferred: peer module, imported for its geometry
+
+        cloud = mask_refine.box_measured_cloud(
+            box=box, room=room, frame_indices=[frame.frame_index],
+            get_depth=get_depth,
+            get_camera=lambda _fi: (frame.camera_pose, frame.intrinsics),
+        )
+        if len(cloud) == 0:
+            return True  # nothing measured at all -> not a band verdict
+        local = mask_refine._box_local(cloud, box)
+        height = float(box.dimensions[1])
+        if height <= 0.0:
+            return True
+        hf = (local[:, 1] + height / 2.0) / height
+        return bool(mask_refine.height_bands(hf)[VETO_BAND].any())
+    except Exception:
+        return True  # never reject on an error
+
+
+class _Vetoes:
+    """Lazily evaluated and memoized, so a depth raster is fetched only for a
+    (frame, box) pair the cover pass actually wants. Precomputing the matrix
+    would cost one depth fetch per keyframe — 722 on the spike capture —
+    before any GPU work, to answer a question about the handful of frames
+    that get picked."""
+
+    def __init__(self, frames, boxes, room, get_depth, get_rgb):
+        self._frames, self._boxes, self._room = frames, boxes, room
+        self._get_depth, self._get_rgb = get_depth, get_rgb
+        self._usable: dict[int, bool] = {}
+        self._band: dict[tuple[int, int], bool] = {}
+        self.rejected_frames: list[int] = []
+        self.rejected_pairs: list[tuple[int, int]] = []
+
+    def frame_ok(self, fi: int) -> bool:
+        if fi not in self._usable:
+            rgb = None
+            if self._get_rgb is not None:
+                try:
+                    rgb = self._get_rgb(self._frames[fi].frame_index)
+                except Exception:
+                    rgb = None
+            ok = frame_is_usable(rgb)
+            self._usable[fi] = ok
+            if not ok:
+                self.rejected_frames.append(self._frames[fi].frame_index)
+        return self._usable[fi]
+
+    def pair_ok(self, fi: int, bi: int) -> bool:
+        key = (fi, bi)
+        if key not in self._band:
+            ok = box_band_is_visible(
+                self._boxes[bi], self._room, self._frames[fi], self._get_depth
+            )
+            self._band[key] = ok
+            if not ok:
+                self.rejected_pairs.append((self._frames[fi].frame_index, bi))
+        return self._band[key]
+
+
+def _reselect_info(frames, boxes, max_frames) -> dict:
+    """The info block an unvetoed selection would have produced. Used only
+    by the overrule path, so the manifest still describes what shipped."""
+    before = globals()["VISIBILITY_VETO"]
+    globals()["VISIBILITY_VETO"] = False
+    try:
+        return select_frames_census(frames, boxes, max_frames)[1]
+    finally:
+        globals()["VISIBILITY_VETO"] = before
+
+
+def _q_relaxed(frame, box, scale: float) -> bool:
+    """The cover bar with both thresholds scaled down together. Used only by
+    the per-object relaxation, and only for a box the vetoes would otherwise
+    orphan."""
+    w, h = _frame_dims(frame.intrinsics)
+    hull, frac = box_placement.project_box_footprint(
+        box, frame.intrinsics, frame.camera_pose
+    )
+    if hull is None:
+        return False
+    area = box_placement._polygon_area(box_placement._clip_to_rect(hull, w, h))
+    return (
+        frac >= PERCEPTION_BOX_COVER_MIN_INFRAME * scale
+        and area >= PERCEPTION_BOX_COVER_MIN_AREA_FRAC * scale * w * h
+    )
+
+
 def select_frames_census(
-    frames: Sequence, boxes: list, max_frames: int
+    frames: Sequence, boxes: list, max_frames: int,
+    *, room=None, get_depth=None, get_rgb=None,
 ) -> tuple[list, dict]:
     """Select up to max_frames frames: set-cover over the census first,
     pose-diverse residue after. Returns (frames in input order, info) —
@@ -137,21 +295,100 @@ def select_frames_census(
 
     V, Q = box_visibility(frames, boxes)
 
+    vetoes = (
+        _Vetoes(frames, boxes, room, get_depth, get_rgb)
+        if VISIBILITY_VETO else None
+    )
+
+    # Both vetoes are asked ONLY about the frame the pass is about to take,
+    # never about every candidate. That is a cost decision with a number
+    # behind it: veto 1 needs the frame's pixels and veto 2 needs its depth
+    # raster, so scoring all candidates would fetch two blobs per keyframe —
+    # 1,444 on the spike capture — before any GPU work, to answer a question
+    # about the handful of frames that actually get picked. Scoring stays on
+    # the projection alone; the veto only ever removes a winner.
+    blocked_frames: set[int] = set()
+    blocked_pairs: set[tuple[int, int]] = set()
+
+    def _covers(fi: int, bi: int, scale: float = 1.0) -> bool:
+        if (fi, bi) in blocked_pairs or fi in blocked_frames:
+            return False
+        if scale >= 1.0:
+            return bool(Q[fi, bi])
+        return _q_relaxed(frames[fi], boxes[bi], scale)
+
+    def _admit(fi: int, targets: set[int]) -> set[int] | None:
+        """The boxes `fi` may cover once the vetoes have had their say, or
+        None if the frame itself is rejected."""
+        if vetoes is None:
+            return targets
+        if not vetoes.frame_ok(fi):
+            blocked_frames.add(fi)
+            return None
+        kept = set()
+        for bi in sorted(targets):
+            if vetoes.pair_ok(fi, bi):
+                kept.add(bi)
+            else:
+                blocked_pairs.add((fi, bi))
+        return kept
+
     uncovered = set(range(len(boxes)))
     cover_positions: list[int] = []
     while uncovered and len(cover_positions) < max_frames:
         best_pos, best_gain = None, 0.0
         for fi in range(len(frames)):
-            if fi in cover_positions:
+            if fi in cover_positions or fi in blocked_frames:
                 continue
-            gain = float(sum(V[fi, bi] for bi in uncovered if Q[fi, bi]))
+            gain = float(sum(V[fi, bi] for bi in uncovered if _covers(fi, bi)))
             # Strictly-greater keeps ties at the lower frame index.
             if gain > best_gain:
                 best_pos, best_gain = fi, gain
         if best_pos is None:
             break  # nothing sees any remaining box well
+        would_cover = {bi for bi in uncovered if _covers(best_pos, bi)}
+        admitted = _admit(best_pos, would_cover)
+        if not admitted:
+            # Rejected outright, or every box it would have covered vetoed.
+            # Both are now recorded in blocked_*, so the next pass re-ranks
+            # without it and this terminates.
+            continue
         cover_positions.append(best_pos)
-        uncovered -= {bi for bi in uncovered if Q[best_pos, bi]}
+        uncovered -= admitted
+
+    # Per-object relaxation, the vetoes' counterweight. Veto 2 REMOVES
+    # candidate frames, so a box that had few can be starved by it — rp6g2
+    # carries one with exactly one qualifying frame across 124. Rather than
+    # let the veto orphan such a box, its own bar relaxes until something
+    # qualifies. Per box, never global: relaxing the bar for everyone would
+    # change which frames cover the boxes that were already fine.
+    relaxed_boxes: dict[str, float] = {}
+    if vetoes is not None and uncovered:
+        for bi in sorted(uncovered):
+            placed = False
+            for scale in VETO_RELAX_STEPS[1:]:
+                if placed or len(cover_positions) >= max_frames:
+                    break
+                cands = sorted(
+                    (fi for fi in range(len(frames))
+                     if fi not in cover_positions and _covers(fi, bi, scale)),
+                    key=lambda fi: (-V[fi, bi], fi),
+                )
+                for fi in cands:
+                    if _admit(fi, {bi}):
+                        cover_positions.append(fi)
+                        relaxed_boxes[f"box_{bi:02d}"] = scale
+                        uncovered.discard(bi)
+                        placed = True
+                        break
+        cover_positions.sort()
+
+    # Per-object relaxation, the vetoes' counterweight. Veto 2 REMOVES
+    # candidate frames, so a box that had few can be starved by it — rp6g2
+    # carries one with exactly one qualifying frame across 124. Rather than
+    # let the veto orphan such a box, its own bar relaxes until something
+    # qualifies. Per box, never global: relaxing the bar for everyone would
+    # change which frames cover the boxes that were already fine.
 
     # Residue: farthest-point over the pose-diversity metric, seeded with
     # the cover picks (the 0062 metric, continued from a non-empty seed).
@@ -170,18 +407,52 @@ def select_frames_census(
             min_dist = dist[seeded].min(axis=0) if seeded else None
         else:
             min_dist = None
-        for _ in range(n_residue):
+        # The residue draws from the SURVIVORS too. Veto 1 is a statement
+        # about the frame, not about the frame's relationship to a box, so a
+        # frame that carries no information is no more useful as pose spread
+        # than as coverage — and rp6g2's last 28 keyframes are black, two of
+        # which the shipped sampler takes.
+        taken = 0
+        guard = 0
+        while taken < n_residue and guard < len(frames) * 2:
+            guard += 1
             if min_dist is None:
-                seed = int(np.argmax(dist.sum(axis=1)))
-                residue_positions.append(seed)
-                min_dist = dist[seed].copy()
+                nxt = int(np.argmax(dist.sum(axis=1)))
+                min_dist = dist[nxt].copy()
+            else:
+                min_dist[cover_positions + residue_positions] = -1.0
+                if blocked_frames:
+                    min_dist[sorted(blocked_frames)] = -1.0
+                nxt = int(np.argmax(min_dist))
+                if min_dist[nxt] < 0:
+                    break  # nothing left that is not taken or blocked
+                min_dist = np.minimum(min_dist, dist[nxt])
+            if vetoes is not None and not vetoes.frame_ok(nxt):
+                blocked_frames.add(nxt)
                 continue
-            min_dist[cover_positions + residue_positions] = -1.0
-            nxt = int(np.argmax(min_dist))
             residue_positions.append(nxt)
-            min_dist = np.minimum(min_dist, dist[nxt])
+            taken += 1
 
     selected_positions = sorted(cover_positions + residue_positions)
+
+    # A veto that empties the selection is overruled. Every frame failing
+    # veto 1 is a capture problem — a dark room, a covered lens — and the
+    # right response to it is a bad scene, not NO scene: shipping zero
+    # frames means the room produces nothing at all, where shipping the
+    # frames the sampler would have taken at least reaches the ingest gate
+    # with something a person can be told about. Recorded, never silent.
+    if vetoes is not None and not selected_positions:
+        return select_frames_census(frames, boxes, max_frames)[0], {
+            **_reselect_info(frames, boxes, max_frames),
+            "veto": {
+                "policy": "visibility_veto_v1",
+                "overruled": True,
+                "unusable_frames": [],
+                "band_vetoed_pairs": [],
+                "relaxed_boxes": {},
+            },
+        }
+
     selected = [frames[i] for i in selected_positions]
     info = {
         "cover_frame_indices": sorted(
@@ -198,6 +469,19 @@ def select_frames_census(
         # written under the default is byte-identical to what shipped.
         info["residue_policy"] = "object_aware_v1"
         info["views_per_box_target"] = VIEWS_PER_BOX_TARGET
+    if vetoes is not None:
+        # Same rule: only present when the vetoes ran, so a default manifest
+        # is unchanged. What was REMOVED is recorded, because a selector that
+        # silently drops candidates is indistinguishable from one that never
+        # saw them.
+        info["veto"] = {
+            "policy": "visibility_veto_v1",
+            "unusable_frames": sorted(vetoes.rejected_frames),
+            "band_vetoed_pairs": sorted(
+                f"f{f}:box_{b:02d}" for f, b in vetoes.rejected_pairs
+            ),
+            "relaxed_boxes": relaxed_boxes,
+        }
     return selected, info
 
 

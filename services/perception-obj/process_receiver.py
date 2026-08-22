@@ -1809,8 +1809,41 @@ def run_perception(
         # (the degrade lock).
         import census_sampling as census_sampling_mod
 
+        # The vetoes (decision 0234) need pixels and depth, which only this
+        # layer can fetch. Both accessors are lazy and are asked only about a
+        # frame the cover pass is about to take, so a default run fetches
+        # nothing extra and a veto run fetches a handful of blobs.
+        _prefix = _bundle_prefix(bundle_uri)
+        _by_idx = {f.frame_index: f for f in bundle.frames}
+
+        def _veto_depth(frame_index: int):
+            frame = _by_idx.get(frame_index)
+            if frame is None:
+                return None
+            try:
+                return _fetch_frame_depth(frame, _prefix)
+            except Exception:
+                return None
+
+        def _veto_rgb(frame_index: int):
+            frame = _by_idx.get(frame_index)
+            if frame is None or not frame.rgb_gcs_path:
+                return None
+            try:
+                import numpy as np  # deferred with the other heavy imports
+                from PIL import Image
+
+                raw = _download_gcs_uri(_prefix + frame.rgb_gcs_path)
+                return np.asarray(Image.open(io.BytesIO(raw)).convert("L"))
+            except Exception:
+                return None
+
+        _veto_on = census_sampling_mod.VISIBILITY_VETO
         selected, census_info = census_sampling_mod.select_frames_census(
-            bundle.frames, census_boxes, effective_max
+            bundle.frames, census_boxes, effective_max,
+            room=room_plan if _veto_on else None,
+            get_depth=_veto_depth if _veto_on else None,
+            get_rgb=_veto_rgb if _veto_on else None,
         )
     else:
         selected = sampling_mod.select_frames(bundle.frames, effective_max)
