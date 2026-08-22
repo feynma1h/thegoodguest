@@ -45,7 +45,7 @@ tests/test_mask_refine_real_data.py.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from roomstudio_schemas import placement_math as pm
@@ -115,12 +115,29 @@ BOX_PAD_M = float(os.environ.get("PERCEPTION_MASK_REFINE_BOX_PAD_M", "0.05"))
 class UnclaimedSignal:
     """What the frame's own measurements say is inside this box and not in
     anybody's mask. `unclaimed_vu` is on the MASK grid, so it composes with
-    the mask stack directly."""
+    the mask stack directly.
+
+    `bands` decomposes the same points by height (decision 0231). `fraction`
+    pools the whole box volume, and pooling hides which of two different
+    defects produced it:
+
+      * the camera SAW surface in a band and the mask claimed none of it —
+        a mask defect, and the one 0198's repair is for;
+      * the camera saw NOTHING there — a view defect, which no prompt and no
+        repair can reach.
+
+    Both raise `fraction` the same way, and the pooled number cannot tell
+    them apart because a band the camera never saw contributes no considered
+    pixels at all. A band with zero considered pixels therefore reports
+    `None`, never 0.0 — the distinction is the whole point.
+    """
 
     fraction: float
     own_fraction: float
     considered_px: int
     unclaimed_vu: np.ndarray  # (N, 2) int, (row, col) on the mask grid
+    # band name -> (considered_px, unclaimed fraction or None)
+    bands: dict = field(default_factory=dict)
 
     @property
     def flagged(self) -> bool:
@@ -131,11 +148,39 @@ class UnclaimedSignal:
         )
 
     def as_record(self) -> dict:
-        return {
+        rec = {
             "unclaimed_fraction": round(self.fraction, 4),
             "own_fraction": round(self.own_fraction, 4),
             "considered_px": self.considered_px,
         }
+        for name, (n, frac) in sorted(self.bands.items()):
+            rec[f"{name}_considered_px"] = int(n)
+            # Explicitly null, not absent and not zero: a reader must be able
+            # to tell "the mask claimed none of what was seen" from "nothing
+            # was seen".
+            rec[f"{name}_unclaimed_fraction"] = (
+                None if frac is None else round(float(frac), 4)
+            )
+        return rec
+
+
+# The crude structural split: a slab and what holds it up. Deliberately not
+# tuned — 0.70 puts a tabletop in `upper` on every box in the four preserved
+# captures, and the point of the split is that pooling hides the defect, not
+# that this particular cut is optimal. `lower` starts at 0.10 because the
+# room-plane rejection above has already emptied the bottom tenth of every
+# floor-standing box.
+BAND_LOWER_MIN = 0.10
+BAND_UPPER_MIN = 0.70
+
+
+def height_bands(height_frac: np.ndarray) -> dict[str, np.ndarray]:
+    """Boolean masks over a height-fraction array (0 at the box's floor face,
+    1 at its top)."""
+    return {
+        "lower": (height_frac >= BAND_LOWER_MIN) & (height_frac < BAND_UPPER_MIN),
+        "upper": height_frac >= BAND_UPPER_MIN,
+    }
 
 
 def _box_local(world: np.ndarray, box) -> np.ndarray:
@@ -232,11 +277,25 @@ def unclaimed_in_box(
     own = mask_stack[mask_index][mv, mu]
 
     free = ~claimed
+    # Height fraction of the same considered points, in the same order as
+    # `us`/`vs`: `keep` selected them out of the flattened pointmap, so the
+    # nonzero order of `keep.reshape(dh, dw)` and the row order of
+    # `local[keep]` are the same raster order.
+    box_height = float(box.dimensions[1])
+    kept_local = local[keep]
+    bands: dict[str, tuple[int, float | None]] = {}
+    if box_height > 0.0:
+        hf = (kept_local[:, 1] + box_height / 2.0) / box_height
+        for name, sel in height_bands(hf).items():
+            n = int(sel.sum())
+            bands[name] = (n, float(free[sel].mean()) if n else None)
+
     return UnclaimedSignal(
         fraction=float(free.mean()),
         own_fraction=float(own.mean()),
         considered_px=int(len(us)),
         unclaimed_vu=np.column_stack([mv[free], mu[free]]),
+        bands=bands,
     )
 
 
