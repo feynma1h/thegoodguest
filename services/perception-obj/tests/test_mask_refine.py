@@ -284,3 +284,44 @@ class TestTheBandsAreAlignedToTheRaster:
         ).as_record()
         assert blind["lower_unclaimed_fraction"] is None
         assert seen["lower_unclaimed_fraction"] == 0.0
+
+
+class TestTheFloorToleranceIsAParameterNotASwitch:
+    """Decision 0232. `floor_tol_m` exists so the refutation is one line to
+    reproduce and so a LOCAL floor estimate could use it later. It must not
+    become an env switch: tightening it globally feeds the detector floor."""
+
+    def test_the_default_is_the_room_tolerance(self):
+        world = np.array([[0.0, 0.05, 0.0], [0.0, 0.09, 0.0]])
+        room = SimpleNamespace(floors=[SimpleNamespace(transform=np.eye(4))],
+                               walls=[])
+        on = mask_refine._on_room_plane(world, room)
+        assert on.tolist() == [True, False]      # 0.05 < 0.08 <= 0.09
+
+    def test_a_tighter_floor_tolerance_admits_the_points_between(self):
+        world = np.array([[0.0, 0.05, 0.0], [0.0, 0.01, 0.0]])
+        room = SimpleNamespace(floors=[SimpleNamespace(transform=np.eye(4))],
+                               walls=[])
+        on = mask_refine._on_room_plane(world, room, floor_tol_m=0.02)
+        assert on.tolist() == [False, True]
+
+    def test_walls_keep_the_room_tolerance_regardless(self):
+        """A wall does not cut through an object the way the floor it stands
+        on does, so the override is floor-only by construction."""
+        T = np.eye(4)
+        T[:3, 2] = [0.0, 0.0, 1.0]
+        room = SimpleNamespace(
+            floors=[], walls=[SimpleNamespace(transform=T)]
+        )
+        world = np.array([[0.0, 0.0, 0.05]])
+        assert mask_refine._on_room_plane(world, room).tolist() == [True]
+        assert mask_refine._on_room_plane(
+            world, room, floor_tol_m=0.02
+        ).tolist() == [True]
+
+    def test_no_env_switch_ships_for_it(self):
+        """Pinned because the switch was built, measured harmful, and removed.
+        A gate whose measured effect is to admit floor is worse than no gate,
+        because it looks live (0225's lesson, one stage earlier)."""
+        assert not hasattr(mask_refine, "_BOX_AWARE_FLOOR_TOL")
+        assert not hasattr(mask_refine, "BOX_AWARE_FLOOR_TOL_M")
