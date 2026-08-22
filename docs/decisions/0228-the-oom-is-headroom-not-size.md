@@ -110,7 +110,9 @@ only actions it could take are already taken (`empty_cache`) or out of
 scope (reordering, which the frozen plan forbids).
 
 **4. The intervention the data supports is a deferred retry at the frame
-boundary.** Not a smaller request and not a gate: the *same* request, made
+boundary.** **REFUTED THE SAME DAY — see the amendment below before
+acting on any part of this paragraph. It is preserved because a future
+session that reads only the recommendation would rebuild it.** Not a smaller request and not a gate: the *same* request, made
 when occupancy is at baseline. 0061's own live verification is the evidence
 — allocated VRAM returns to 16.4 GiB after every frame (16431 / 16439 /
 16439 MiB measured). At that baseline roughly **5.6 GiB is free**, which
@@ -166,21 +168,46 @@ under conditions IDENTICAL to attempt 2. There is no state a deferral clears
 that the existing retry does not already clear, and no memory a frame
 boundary returns that an object boundary does not.
 
-**The arithmetic half, which says why the shortfall persists.** Taking
-0061's measured baseline (16.4 GiB of model, plus 0.375 GiB of measured
-non-PyTorch context), the transient budget on a 22.03 GiB card is
-**5.26 GiB**. What the failing objects need — their accrued transient at the
-moment of the ask, plus the ask — is **5.23 to 6.43 GiB**.
+**The arithmetic half, which says why the shortfall persists, and which the
+log query below turns from an estimate into an identity.**
+
+An OOM means `request > free`, which is `inuse + request > capacity`. If the
+object began its forward pass at baseline, then its `inuse` at the moment of
+failure is baseline plus its OWN accrual — so re-running it from baseline
+reproduces the same accrual and the same inequality. **Restarting a failed
+object changes nothing that appears in the inequality.** That is not an
+estimate; it is what the failure condition says once the starting point is
+known.
+
+**The starting point is now measured, not assumed.** `_log_vram` lines from
+Cloud Logging, 125 of them across **16 revisions** from `00032-km5` to
+`00072-pox`, at frame boundaries and at `after_census_pass2`:
 
 | | |
 |---|---|
-| would fit at a perfectly clean baseline | **3 of 22 overall, 1 of 12 box views** |
-| and those three fit by | 0.01-0.03 GiB, inside the arithmetic's own error |
+| `allocated_mib` values observed | **16431 and 16439 — nothing else** |
+| spread, across 16 revisions and a month | **8 MiB** |
+| peak_mib observed | up to 22177 = **21.66 GiB** |
+| headroom at that peak on a 22.03 GiB card | **0.37 GiB** |
 
-So effectively **none** of them fit. The objects do not fail because they
-were asked for at a crowded moment. They fail because their forward pass
-needs more transient memory than the card has left once both models are
-resident.
+So memory returns to an invariant baseline before every object, the baseline
+has not drifted at all, and the pipeline's successful peaks run **exactly at
+the ceiling**. With the measured 0.375 GiB of non-PyTorch context the
+transient budget is 22.03 − 16.05 − 0.375 = **5.61 GiB**, and the observed
+successful peak transient is 21.66 − 16.05 = **5.61 GiB**. The pipeline
+routinely runs the card to its last hundred megabytes; the OOMs are the
+objects that need a hair more than that.
+
+**Correction while citing it:** 0061 records this baseline as "16.4 GiB"
+from the same three readings (16431 / 16439 / 16439 MiB). Those are MiB, and
+16439 / 1024 = **16.05 GiB** — the note divided by 1000. The slip is small
+and changes no conclusion in 0061, but every budget computed from it is
+0.35 GiB optimistic, which is more than the median shortfall this note is
+about.
+
+The objects therefore do not fail because they were asked for at a crowded
+moment. They fail because their forward pass needs more transient memory
+than the card has left once both models are resident.
 
 **What that costs the note's own framing.** "Headroom, not size" is right
 that the shortfall is small — 16 to 230 MiB — and right that mask area
