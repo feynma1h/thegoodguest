@@ -99,6 +99,16 @@ the costume of a stricter rule.
 primitives, one-directional by construction so a caller must choose which
 question it is asking.
 
+**What it costs, since 0204 said the pass was free and this makes it not.**
+Per BOX: one measured cloud, which is a depth back-projection per frame the
+box has an association in, from rasters pass 1 already holds. Per ARM: one
+trimmed Chamfer, measured at **~400 ms** and flat in cloud size, because
+`trimmed_nn_rms` subsamples both sides to 4,000 points — 50k-vs-30k and
+200k-vs-444k both come back in 0.4 s. At the shipped `_ARM_SELECT_MAX` of 4
+that is under 2 s per multi-arm box, so a ten-box room pays seconds against a
+900 s request. Small, but not the "one splat parse and nothing else" 0204
+recorded, and the comment on `_ARM_SELECT_MAX` now says so.
+
 ## Why
 
 **Unanimity means the axis can only make the rule act LESS often. That is a

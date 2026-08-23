@@ -303,10 +303,14 @@ _ARM_FILL_MARGIN = float(
     os.environ.get("PERCEPTION_ARM_SELECT_FILL_MARGIN", "0.10")
 )
 
-# Arms scored per box, best-associated first. Each costs one splat parse
-# and nothing else — no cloud, no appearance, no GPU — but a room whose
-# sampler was told to spend its residue on boxes (0202) can hand a single
-# box many, and the budget this pass spends is not its own.
+# Arms scored per box, best-associated first. No appearance and no GPU, but
+# NOT free since 0233 added the third axis: one splat parse per arm, one
+# measured cloud per BOX (a depth back-projection per frame the box has an
+# association in, from rasters pass 1 already holds), and one trimmed
+# Chamfer per arm — the last measured at ~400 ms, capped by
+# `trimmed_nn_rms`'s 4,000-point subsample rather than by cloud size. A room
+# whose sampler was told to spend its residue on boxes (0202) can hand a
+# single box many, and the budget this pass spends is not its own.
 _ARM_SELECT_MAX = int(os.environ.get("PERCEPTION_ARM_SELECT_MAX", "4"))
 
 # Points a box's measured cloud needs before its splat->cloud distance means
@@ -1061,9 +1065,11 @@ def arm_fit(
     the call 0197 measured the instrument under — a single-arm list has no
     partner views to score and the extent-best mapping is what an unscored
     box ships anyway. So this is the measured instrument rather than a
-    relative of it, and it costs one splat parse: no cloud, no appearance,
-    no GPU. `allow_scoring=False` is also the recursion guard — the scored
-    path is the only one that selects.
+    relative of it. It costs one splat parse and no appearance and no GPU;
+    it BUILDS no cloud, but scores a trimmed Chamfer (~400 ms) against one
+    when the caller supplies it — `select_arm` does, per box, and 0229's
+    first-arm check deliberately does not. `allow_scoring=False` is also the
+    recursion guard — the scored path is the only one that selects.
     """
     pts = ctx.get_splat(assoc.obs["splat_gcs_uri"])
     if pts is None:
