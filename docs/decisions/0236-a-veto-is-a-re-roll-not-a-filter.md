@@ -32,6 +32,16 @@ restriction on ORDERING is real. What it does not constrain is the SELECTION:
 **16 of 48 frames across the corpus**, where 0234 reports "3 unusable frames"
 and "3 band-vetoed pairs" and nothing about blast radius.
 
+**The record does not list what the veto removed.** rp6g2's shipped selection
+contains two black frames, f103 and f119. The veto's `unusable_frames` names
+**f103 and not f119** — because `frame_ok` is asked only about a frame the
+pass is about to take, and by the time f119 would have been taken the
+selection had already diverged. f119 left by cascade. So did f95, which is a
+perfectly usable frame at luma 101.6 carrying 8 detections. **The manifest
+block records the frames the veto REJECTED, and that is a strict subset of
+the frames it removed** — which is the same confusion in miniature as the
+one this note is about.
+
 **The mechanism is one line of the cover loop.** A vetoed (frame, box) pair
 leaves that box uncovered, so the greedy pass spends an EXTRA cover pick on
 it. That changes both the SEED and the COUNT of the farthest-point residue,
