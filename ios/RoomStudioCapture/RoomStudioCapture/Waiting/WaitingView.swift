@@ -51,9 +51,9 @@ struct WaitingView: View {
     /// true even after the user leaves and returns.
     ///
     /// OPTIONAL BY DESIGN: nil until the first 200 delivers `created_at`. Before
-    /// that there is no honest thing to count from (matching SceneStatusView's
-    /// server-anchored rule), so the clock is not rendered at all rather than
-    /// silently counting from a client-side moment.
+    /// that there is no honest thing to count from — the anchor is server-side by
+    /// rule — so the clock is not rendered at all rather than silently counting
+    /// from a client-side moment.
     var anchor: Date?
     /// True when the poll loop has STOPPED (a fatal poll error). Swaps the
     /// "I'll keep trying quietly" reassurance for the truth.

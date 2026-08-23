@@ -111,8 +111,7 @@ nonisolated enum FailureCopy {
     /// that those files can be re-sent. In THIS state they cannot — the bytes
     /// are gone from the phone, or the server named nothing usable — so the
     /// count is stated as a FACT and the only offered path stays a full rescan.
-    /// "N files need re-uploading" (the wording the superseded SceneStatusView
-    /// used) is exactly the sentence that would promise one.
+    /// "N files need re-uploading" is exactly the sentence that would promise one.
     ///
     /// The constraint has NOT been relaxed by the re-send landing; it has been
     /// made conditional. `incompleteBody(missingCount:resend:)` may promise a

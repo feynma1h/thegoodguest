@@ -4,19 +4,16 @@
 ///   home → guidance → capturing → gotRoom → review → (Send it home)
 ///        → post-send: waiting (ScenePoller) → doorway / failure
 ///
-/// KEY BEHAVIORAL CHANGE vs the old ContentView: the upload no longer begins
-/// automatically when stopCapture() publishes bundlePath — it begins on review's
-/// "Send it home", which is where the design puts the decision. stopCapture()
-/// still assembles the bundle; RootFlowView holds it at review until the user
-/// sends.
+/// WHERE THE UPLOAD BEGINS: not when stopCapture() publishes bundlePath, but on
+/// review's "Send it home", which is where the design puts the decision.
+/// stopCapture() still assembles the bundle; RootFlowView holds it at review
+/// until the user sends.
 ///
 /// THIS IS THE APP ROOT (activated 2026-07-25). The former gate — "a non-LiDAR
 /// device would see UnsupportedDeviceView" — stopped being a blocker when the
 /// product became Pro/LiDAR-only (decision 0071): that screen is now the CORRECT
 /// behaviour on unsupported hardware, not a regression. The simulator is treated
 /// as supported so development continues without a device.
-///
-/// ContentView is retained, unreferenced, as the rollback path.
 ///
 /// Remaining activation follow-ups: add-more resume-with-progress
 /// (CaptureManager.startCapture currently mints a new bundle rather than
@@ -323,14 +320,13 @@ struct RootFlowView: View {
         // The kick from onFatalBlobError cannot outlive the process, so without this
         // independent store scan a failure from a previous launch (crash, dead
         // battery mid-upload) would never surface — exactly the case the banner
-        // exists for. Mirrors what UploadFailureView does for the old ContentView.
+        // exists for.
         .task { await UploadFailureMonitor.shared.refresh() }
-        // Relaunch recovery. ContentView's SceneStatusView did this for the old root
-        // (scanning for a bundle whose upload finished while the app was dead);
-        // activating RootFlowView without it would LOSE that. Restoring the id is
-        // enough — the home re-entry row renders from it, and entering the wait
-        // resumes polling from the persisted record. Latched to one run per launch
-        // inside; this .task re-fires on every return to home.
+        // Relaunch recovery: adopt a bundle whose upload finished while the app
+        // was dead. Restoring the id is enough — the home re-entry row renders
+        // from it, and entering the wait resumes polling from the persisted
+        // record. Latched to one run per launch inside; this .task re-fires on
+        // every return to home.
         //
         // The phase refresh, by contrast, SHOULD run on every return: it is what
         // keeps the re-entry row from advertising a bundle that failed while the
@@ -457,7 +453,7 @@ struct RootFlowView: View {
                     // notifyBundleComplete) is dropped when no status surface is
                     // visible, so a user who leaves the wait mid-upload would never
                     // get polling started again. Reading the persisted `.complete`
-                    // record is the same seam SceneStatusView uses.
+                    // record is the seam that does not depend on the kick.
                     Task { await resumePollIfUploadFinished() }
                 }
                 .onDisappear { ScenePoller.shared.setVisible(false) }
@@ -666,21 +662,17 @@ struct RootFlowView: View {
             // the screen would say "Getting in line / I'll start the moment there's
             // room" for the whole upload (~1 min on the real 126-frame capture),
             // while nothing had reached the desk. Polling begins on the completion
-            // kick (BlobUploadManager.onBundleComplete → notifyBundleComplete),
-            // which is the architecture SceneStatusView already uses.
+            // kick (BlobUploadManager.onBundleComplete → notifyBundleComplete).
             if case .ready = coordinator.sessionState {
                 sentBundleId = bundleId
             }
         }
     }
 
-    /// Re-adopt a bundle left behind by a previous launch, newest first.
-    ///
-    /// ContentView's SceneStatusView did this for the old root (finding a bundle
-    /// whose upload finished while the app was dead); activating RootFlowView
-    /// without it would LOSE that. Restoring the id is enough — the home re-entry
-    /// row renders from it, and entering the wait resumes polling from the
-    /// persisted record.
+    /// Re-adopt a bundle left behind by a previous launch, newest first — one
+    /// whose upload finished while the app was dead. Restoring the id is enough:
+    /// the home re-entry row renders from it, and entering the wait resumes
+    /// polling from the persisted record.
     ///
     /// ONCE PER LAUNCH, and never for a bundle the user has finished with. home's
     /// `.task` re-fires on every return to `.home`, and `.complete` records are never
