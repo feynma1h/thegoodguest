@@ -27,7 +27,7 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   // Working title — no product name chosen yet (see Wordmark.tsx).
-  title: "roomstudio",
+  title: "The Good Guest",
   description:
     "Scan a room with your phone. Meet it again on your desk — real, in 3D, exactly as you live in it — with a guest who understands it.",
   // Share card. The PNG bakes the placeholder name in, so it re-exports

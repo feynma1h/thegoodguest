@@ -403,8 +403,8 @@ export const CARD_SUBTITLE = "Every line here was measured, not drawn.";
 
 /** The placeholder wordmark. One-file swap, like components/Wordmark.tsx —
  * see that file's note for everywhere else the name is rendered. */
-const WORDMARK = "roomstudio";
-const DOMAIN = "roomstudio.web.app";
+export const WORDMARK = "The Good Guest";
+export const DOMAIN = "roomstudio.web.app";
 
 export function layoutCard(input: CardInput): CardLayout {
   const { measure, title } = input;

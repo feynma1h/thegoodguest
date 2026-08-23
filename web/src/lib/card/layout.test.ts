@@ -6,15 +6,7 @@ import { MockApiClient, MOCK_READY_SCENE_ID, MOCK_V3_SCENE_ID } from "@/lib/api/
 import type { SceneAssets } from "@/lib/api/types";
 import { roomTitle } from "@/lib/voice";
 import { measureRoom, type RoomMeasure } from "./measure";
-import {
-  CARD_FRAMES,
-  CARD_SUBTITLE,
-  formatM,
-  layoutCard,
-  type CardLayout,
-  type CardVariant,
-  type XY,
-} from "./layout";
+import { CARD_FRAMES, CARD_SUBTITLE, formatM, layoutCard, type CardLayout, type CardVariant, type XY, WORDMARK, DOMAIN } from "./layout";
 
 function heroAssets(): SceneAssets {
   return JSON.parse(
@@ -243,8 +235,11 @@ describe("the card carries nothing on the forbidden list", () => {
     const derived = new Set([
       TITLE,
       CARD_SUBTITLE,
-      "ROOMSTUDIO",
-      "roomstudio.web.app",
+      // Tracked from the constants, not retyped: a rename must not be
+      // able to stale this guard, which is the only thing standing
+      // between a new string and an artifact that leaves the browser.
+      WORDMARK.toUpperCase(),
+      DOMAIN,
       "CEILING",
       "FLOOR",
       "3.0 m",
