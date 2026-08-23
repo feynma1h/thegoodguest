@@ -666,6 +666,11 @@ gains.
   depth are valid, so this may be an **iOS capture defect** rather than a data
   quirk. Re-read every prior conclusion drawn from it — including the 53-item
   budget-starved tail and the 0-of-45 colour result — against this.
+  **Measured 2026-08-24 for the `capture-dark` lane:** the two black frames
+  the shipped sampler takes, f103 and f119, read mean luma **2.46** and
+  **1.88** and produce **0 detections each** — SAM 3 finds literally nothing
+  in them, so they consume two of that room's eight cover picks and return
+  nothing. That is independent of the veto and true of today's production.
 - **An unmatched RoomPlan box has FIVE causes and the two anyone looks for
   are the smallest** (0227). Of nine unmatched boxes across the four
   captures: 2 PLAN_SKIP, 2 DETECTION, 1 OOM, 1 COMPETITION, 1 SAMPLING, 1
