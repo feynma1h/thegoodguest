@@ -444,6 +444,17 @@ mistake available in this repo.
 - **Do not tune `FUSION_CLUSTER_DIST_M` or `SHELL_WALL_MERGE_*` to chase
   under-merge symptoms** (0075). Both measured correct on real rooms; the
   symptoms are label collapse and edge truncation.
+- **A tighter floor tolerance inside a box restores FLOOR, not feet** (0232).
+  0.08 m looks like a room-scale number misapplied at object scale; it is
+  sized for the floor plane's own error. Open floor sits up to **+4.3 cm**
+  above RoomPlan's plane, so 0.02 is inside the noise, and 96-100% of the
+  restored points vanish by tol=0.06 where a leg would thin out linearly. The
+  real fix is a floor level estimated LOCALLY from each box's own depth, and
+  it needs its own registered prediction — the numbers to beat are that the
+  restored points must NOT collapse between 0.02 and 0.06. **No env switch
+  ships**: a control that fires into a defect under a conservative default is
+  worse than one that never fires, because the metric it moves reads as
+  improvement (the inverse of 0225's unfireable gate).
 - **Generic compression buys almost nothing** (0125). Float32 splat data is
   high-entropy: gzip is 1.36×, where the SPZ tier is 5.8×.
 - **Spark is not the render bottleneck** (0123). Parse is under 1% of the wait;
@@ -522,9 +533,9 @@ gains.
   ruled ON having seen this**, on the merits: class-6 truncation is endemic,
   and an object standing on its measured floor at the right height beats a
   desktop floating 47 cm up. **Do not re-report the width as a fresh defect.**
-  The third Chamfer axis rides `ARM_SELECT` and needs no env of its own
+  The third Chamfer axis (0233) rides `ARM_SELECT` and needs no env of its own
   (`PERCEPTION_ARM_S2C_MIN_CLOUD` is a threshold, not a gate); the
-  band-decomposed claim rate is inert and has no flag.
+  band-decomposed claim rate (0231) is inert and has no flag.
 - **The object-aware residue is PARKED, and the spike run is refused rather
   than deferred** (0202, 0212; operator sitting 2026-08-23). It hit its
   pre-registered frame set exactly and bought spike's bed a better arm — and
@@ -611,6 +622,17 @@ gains.
   depth are valid, so this may be an **iOS capture defect** rather than a data
   quirk. Re-read every prior conclusion drawn from it — including the 53-item
   budget-starved tail and the 0-of-45 colour result — against this.
+- **An unmatched RoomPlan box has FIVE causes and the two anyone looks for
+  are the smallest** (0227). Of nine unmatched boxes across the four
+  captures: 2 PLAN_SKIP, 2 DETECTION, 1 OOM, 1 COMPETITION, 1 SAMPLING, 1
+  NEVER_FRAMED, 1 LABEL. Four carry family-compatible masks at up to overlap
+  **1.0000** and are invisible to association only because `ok=False` — no
+  splat, so not an observation. Every failure is recorded faithfully in its
+  frame's `objects.json`; nothing aggregates them, which is why four boxes
+  had their answer written down and unread. **Two of the declined label
+  matches (rp6g1 b04, rp6g2 b09) are NOT label problems** — both have good
+  uncontested `cabinet` masks that OOM'd or were policy-skipped. The declines
+  stand; do not re-open them as label cases. rp6g2 b07 is confirmed LABEL.
 - **A window ships with ~30° in-plane skew.** Near-square planar objects are
   ~90°-ambiguous to the model and no instrument scores in-plane orientation.
 - **The "cabinet behind a wall" is not the declip bound** (0104). The declip pass
@@ -828,8 +850,6 @@ ever done or ruled, delete it — do not annotate it.
   outside `public/` would remove the hazard rather than guard it.
 - **Cold-start coverage is thin by design.** The first `/process` request spends
   its budget on boot and model load; warm re-drives are the coverage recipe.
-  Large single objects can transiently exceed the L4's memory even at baseline —
-  per-object soft-fail contains it. That is a capacity fact, not a lifecycle bug.
 
 ## Python test policy
 
