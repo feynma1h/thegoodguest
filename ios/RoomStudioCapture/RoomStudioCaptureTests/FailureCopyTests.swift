@@ -64,9 +64,8 @@ final class FailureCopyTests: XCTestCase {
     /// blobs can be re-sent. Only `incompleteBody(missingCount:resend:)` in
     /// `.available` may make that promise, because only there has CaptureRecovery
     /// confirmed every named file is still on the phone. "N files need
-    /// re-uploading" — the superseded SceneStatusView's line, and the obvious
-    /// phrasing to reach for when restoring a count — is exactly the promise
-    /// this overload must not make.
+    /// re-uploading" — the obvious phrasing to reach for when restoring a count
+    /// — is exactly the promise this overload must not make.
     func testNeverPromisesAReUpload() {
         for count in [0, 1, 2, 40] {
             let body = FailureCopy.incompleteBody(missingCount: count).lowercased()

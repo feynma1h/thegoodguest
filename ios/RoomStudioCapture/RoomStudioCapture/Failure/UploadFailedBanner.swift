@@ -3,19 +3,17 @@
 /// mid-upload never loses the room silently. The capture file is retained
 /// on-device.
 ///
-/// This is the Good Guest restyle of the existing functional `UploadFailureView`
-/// (Upload/). The spine integration swaps the old banner for this and binds it to
-/// `UploadFailureMonitor`. Kept a pure presentation component so it previews
-/// standalone.
+/// Bound to `UploadFailureMonitor` by the spine. Kept a pure presentation
+/// component so it previews standalone.
 ///
 /// NO RETRY AFFORDANCE, deliberately: this banner surfaces only
 /// `uploadPhase == .failed` records (see `UploadFailureMonitor`), which are
 /// TERMINAL by construction: DEFERRED paths retry cross-launch without ever
 /// setting `.failed` (decision 0045). `BlobUploadManager.rehydrateBundle`
 /// refuses `.failed` records, so a "try again" here would be a silent no-op.
-/// It is a truthful notification with one honest action — dismiss — matching
-/// the original `UploadFailureView` semantics. A real re-drive belongs to the
-/// deferred terminal-state-handling design, not a dead button.
+/// It is a truthful notification with one honest action — dismiss. A real
+/// re-drive belongs to the deferred terminal-state-handling design, not a dead
+/// button.
 ///
 /// The room is not named: iOS holds no room name (rooms are named on the web
 /// from captured data), so the copy stays general rather than inventing one.

@@ -1,11 +1,10 @@
 /// Which bundle — if any — the home screen should re-adopt at launch, and the
 /// record of which bundles the user has already finished with.
 ///
-/// WHY THIS EXISTS: activating RootFlowView would otherwise have LOST the relaunch
-/// recovery ContentView's SceneStatusView provided (finding a bundle whose upload
-/// completed while the app was dead). The first version of that recovery re-scanned
-/// the store from home's `.task` and adopted the newest non-failed record — which
-/// re-adopted a bundle the user had just dismissed, because:
+/// WHY THIS EXISTS: home must re-adopt a bundle whose upload completed while the
+/// app was dead. The obvious form of that recovery — re-scan the store from home's
+/// `.task` and adopt the newest non-failed record — re-adopts a bundle the user
+/// has just dismissed, because:
 ///
 ///   • home's `.task` re-fires every time the flow returns to `.home`, not once per
 ///     launch (verified: one home → capture → review → home round trip runs it
