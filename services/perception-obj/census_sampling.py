@@ -245,17 +245,6 @@ class _Vetoes:
         return self._band[key]
 
 
-def _reselect_info(frames, boxes, max_frames) -> dict:
-    """The info block an unvetoed selection would have produced. Used only
-    by the overrule path, so the manifest still describes what shipped."""
-    before = globals()["VISIBILITY_VETO"]
-    globals()["VISIBILITY_VETO"] = False
-    try:
-        return select_frames_census(frames, boxes, max_frames)[1]
-    finally:
-        globals()["VISIBILITY_VETO"] = before
-
-
 def _q_relaxed(frame, box, scale: float) -> bool:
     """The cover bar with both thresholds scaled down together. Used only by
     the per-object relaxation, and only for a box the vetoes would otherwise
@@ -388,13 +377,6 @@ def select_frames_census(
                         break
         cover_positions.sort()
 
-    # Per-object relaxation, the vetoes' counterweight. Veto 2 REMOVES
-    # candidate frames, so a box that had few can be starved by it — rp6g2
-    # carries one with exactly one qualifying frame across 124. Rather than
-    # let the veto orphan such a box, its own bar relaxes until something
-    # qualifies. Per box, never global: relaxing the bar for everyone would
-    # change which frames cover the boxes that were already fine.
-
     # Residue: farthest-point over the pose-diversity metric, seeded with
     # the cover picks (the 0062 metric, continued from a non-empty seed).
     residue_positions: list[int] = []
@@ -447,16 +429,21 @@ def select_frames_census(
     # frames the sampler would have taken at least reaches the ingest gate
     # with something a person can be told about. Recorded, never silent.
     if vetoes is not None and not selected_positions:
-        return select_frames_census(frames, boxes, max_frames)[0], {
-            **_reselect_info(frames, boxes, max_frames),
-            "veto": {
-                "policy": "visibility_veto_v1",
-                "overruled": True,
-                "unusable_frames": [],
-                "band_vetoed_pairs": [],
-                "relaxed_boxes": {},
-            },
+        # The re-run deliberately passes NO accessors, and that is what makes
+        # it terminate rather than recurse: both vetoes refuse to reject what
+        # they cannot assess, so an armed-but-blind pass reproduces the
+        # unvetoed selection in one step and the manifest still describes
+        # what shipped. Do NOT forward room/get_depth/get_rgb here — that
+        # reproduces the empty selection and recurses forever.
+        overruled, info = select_frames_census(frames, boxes, max_frames)
+        info["veto"] = {
+            "policy": "visibility_veto_v1",
+            "overruled": True,
+            "unusable_frames": [],
+            "band_vetoed_pairs": [],
+            "relaxed_boxes": {},
         }
+        return overruled, info
 
     selected = [frames[i] for i in selected_positions]
     info = {
