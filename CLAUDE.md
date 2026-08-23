@@ -142,9 +142,11 @@ state machine, the scene read/write repositories, `UploadSessionRepository` +
 `gcs_mint_resumable_uri`, semantic manifest validation, and the capture-bundle
 test fixtures.
 
-Suites: schemas **120**, root **862 passed + 27 skipped** with
-`web/public/dev-fixtures` staged and **787 + 102** without — both measured
-2026-08-21, after 0213/0214 added 23 tests. Always say which. re-enqueue **18**.
+Suites: schemas **120**, root **803 passed + 102 skipped** WITHOUT
+`web/public/dev-fixtures` (measured 2026-08-24, after 0186/0215/0219/0220 added
+16 fixture-free tests) and **862 + 27** with them staged (measured 2026-08-21,
+so that one is 16 tests stale — it has not been re-measured since). Always say
+which. re-enqueue **18**.
 
 ### iOS capture app — `ios/RoomStudioCapture/`
 
@@ -216,8 +218,11 @@ as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
   verbatim, V4-signed splat URLs for placed objects, and an additive
   `asset_urls_compressed` for the SPZ tier that never narrows the PLY fallback.
 - `GET/POST /scenes/{id}/conversation` — the guest, at `FACTS_VERSION 4` and
-  `PROMPT_VERSION 6`. SSE with a disconnect shield: the turn completes and
-  persists even if the client stops listening.
+  `PROMPT_VERSION 7` on `main` (`api-public` still SERVES 6). SSE with a
+  disconnect shield: the turn completes and persists even if the client stops
+  listening. `PROMPT_SURFACE_SHA256` covers the charter, the arrangement block
+  AND `guest_tools.TOOLS`, schema included (0219) — every word the model reads
+  is under one digest, enforced by construction rather than by a list.
 - `GET/DELETE /scenes/{id}/design_spec` — the arrangement document. Every entry
   carries `measured_transform` beside `proposed_transform`; an entry that cannot
   is unrepresentable.
@@ -576,32 +581,39 @@ gains.
   colour is one of the post-passes its long tail costs it. Objects with no
   block inside a coloured room are the confidence gate working, not a
   failure.
-- **The guest's tool descriptions are instruction it reads and are NOT under
-  `PROMPT_SURFACE_SHA256`.** The pin covers the charter and the arrangement
-  block, and the comment above it says why: prose outside the pin can be
-  "reworded with no version bump and no eval trigger, which is exactly how
-  decision 0174's defect shipped and survived two bumps unnoticed".
-  `guest_tools.TOOLS` carries several hundred words of exactly that prose,
-  outside the pin. Found 2026-08-21 by the guest lane and deliberately not
-  fixed: widening a pin turns other lanes' evals red, which is a scheduling
-  call rather than a lane's.
-- **Two voice evals carry known flakiness** — one setup asks about an ambiguous
-  wall roughly 1 time in 8.
-- **`FACTS_VERSION 4` and the ambiguity refusal are MERGED BUT UNPROVEN against
-  a live model** (0213/0214, merged 2026-08-21). The voice evals are
-  fail-closed-live and need an `ANTHROPIC_API_KEY`; the lane had none and
-  neither did the coordinator, so they are **not green and not red — they never
-  ran**. The unit suite covers the resolver (370 + 102 in `api-public`), which
-  is a different question from whether the guest speaks the refusal well. The
-  lane fixed two real harness bugs while in there — both were grading a guest
-  production does not ship — and added one eval for the new refusal, so the
-  coverage is written and waiting on one run. **This is a deploy gate, not a
-  merge gate:** the code is on `main` and must not reach `api-public` until the
-  evals run once with a key.
-  The `ANTHROPIC_API_KEY` was never absent — `anthropic-api-key` has been in
-  Secret Manager since 2026-07-21 and the operator's own account can read it.
-  Nothing connected it to the eval harness. Run:
-  `RUN_VOICE_EVALS=1 ANTHROPIC_API_KEY="$(gcloud secrets versions access latest --secret=anthropic-api-key --project=roomstudio)" .venv/bin/pytest services/api-public/tests/test_guest_voice_evals.py -v`
+- **One voice eval is flaky at roughly 1 run in 4** —
+  `TestFacingCorrection::test_a_piece_with_no_second_way_round_is_refused_plainly`
+  asks the guest to turn a rug with no measured box and greps its reply for a
+  refusal word; the miss is phrasing, not behaviour. Re-run before believing a
+  single red. **The other long-recorded flake — "one setup asks about an
+  ambiguous wall roughly 1 time in 8" — is probably not a flake and its rate
+  was understated.** 0186 measured that setup refused 9 times in 26, and one
+  refusal was verbatim "only works if you tell me which wall". Re-measure
+  rather than assuming it is gone: 0186's fix took the same setup to 14/14.
+- **Rule 10's literal "would" is at 4/24, against 12/16 when 0174 measured it**
+  (0215). The property the rule states — the person can hear which room is being
+  described — holds at 21/24, so the evals now grade that instead. **The cause
+  is unattributed and the obvious suspect is NOT ruled out:** 0214's rearranged
+  provenance line opens "as it stands on screen" and the guest's replies echo
+  that verb. 0215 records the cheap method to settle it; the first attempt was
+  run through a test that could fail for a second reason and is uninterpretable.
+- **The voice evals RAN 2026-08-24 and 0213/0214's deploy gate is CLEARED**
+  (26 passed, 1 failed at `PROMPT_VERSION 6`; the single failure was not in
+  either of them). They found two defects underneath that work — 0186's charter
+  contradiction and 0215's instrument — both now fixed on `main`. **The
+  `ANTHROPIC_API_KEY` was never absent**: `anthropic-api-key` has been in
+  Secret Manager since 2026-07-21 and the operator's own account can read it;
+  nothing had connected it to the harness, and the belief that it was missing
+  cost that lane two days.
+- **A SMALLER deploy gate is open in its place, and it is blocked on
+  BILLING.** 0186's fix is a charter edit, and the last full-suite run predates
+  it — the Anthropic credit balance ran out mid-lane (`400 — Your credit
+  balance is too low`). Its own effect is well measured (17/26 → 14/14 wall
+  placements, plus 24 clean samples of the rule-10 scenario, which exercises
+  rules 5, 6, 10 and 2a together), but a charter edit can disturb behaviours
+  those samples do not cover. **Do not deploy `api-public` until this runs
+  green.** Top up credits, then:
+  `RUN_VOICE_EVALS=1 ANTHROPIC_API_KEY="$(gcloud secrets versions access latest --secret=anthropic-api-key --project=roomstudio)" .venv/bin/pytest services/api-public/tests/test_guest_voice_evals.py -q`
 
 **iOS**
 
@@ -1055,7 +1067,7 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 **ALL THREE PARALLEL LANES MERGED 2026-08-09** (`stage2` → 0135–0137, `perception-emit`, `ios-residue`; worktrees removed, branches deleted). Merged-tree verification: root **724 passed + 10 skipped**, perception **704**, web **204**, iOS **523**, tsc clean, zero conflict markers. **What the lanes left owed, now written:** lane B's two notes are 0142 (`/compress` as a third `/process` stage rather than a sidecar) and 0143 (`extent_axes_m` declared per box, horizontals deliberately unnamed). The `dims` correction is lane C's **0137**, reached independently — there is no third note on it.
 
-**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-21, with the colour-deploy, what-the-model-sees and guest lanes merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0186, 0189, 0194, 0195, 0196, 0236+** — **0083, 0092 and 0093 were never created and are cited nowhere**, and were absent from this list until 2026-08-21, which is the fourth lag and the first in that direction. **Reserved: 0215 plus 0219–0220 to the guest-closure lane, 0236 to selection-review, 0237–0238 to ios-surfaces-2, 0239 to upload-flake, 0240–0241 to capture-dark, 0242 to privacy-labels, and 0243–0244 to perception-deploy — seven blocks live at once. **0245 is SPENT by the name swap** — 0245 (the name is the register it was built in). guest-closure had NOT started** — those three are written nowhere, and were deliberately KEPT reserved rather than freed on 2026-08-23: the lane is provisioned, was unblocked that day, and one of its three items is a live deploy gate. Never free a block on the belief a lane finished — `git branch --merged` lists a branch with no commits of its own, which is exactly what `guest-closure` is. One block live at once, each also stated inside its own charter body, which is the half that actually reaches the session. **0199–0200 are SPENT by colour-deploy** — 0199 (the inline cache destroys itself by being used), 0200 (the tag must name what Cloud Run pins); **0201–0203 are SPENT by what-the-model-sees** — 0201 (the repair is judged by what it added), 0202 (the residue was never asked where anything is), 0203 (a second arm is not a better object); **0204–0205 are SPENT by selection** — 0204 (the arm that ships is chosen by looking at it), 0205 (fill sees one axis); **0210–0212 are SPENT by ship** — 0210 (a cold room is two deletions and an audience), 0211 (the flag was never in the image), 0212 (the three flags are one decision); **0206, 0218 and 0224 are SPENT by scenes-client** — 0206 (no rooms and could not ask), 0218 (the bridge was never waiting on the fetch), 0224 (a pinned action does not share a column); **0216–0217 are SPENT by ios-surfaces** — 0216 (a count that cannot exist), 0217 (the declaration is the stand-down); **0207–0209 are SPENT by social-layer** — 0207 (a layer is not a feed), 0208 (sharing cuts where the pipeline already cut), 0209 (comparison between people is evidence, not a surface); **0221–0223 are SPENT by calling-card** — 0221 (a room's eligibility is a date, not a field), 0222 (the card draws the boundary and prints the measurement), 0223 (the yaw is not a measurement); **0213–0214 are SPENT by the guest lane** — 0213 (two candidates refuse rather than pick), 0214 (the provenance line describes the room on screen). Spent by clipped-views: **0197** (the uncropped photograph is not a better photograph) and **0198** (the mask is the photograph SAM 3D sees). Spent by geom-retire: **0192** (perception-geom is retired). Spent by the brand-mark pass: **0193** (the mark is generated, not copied). **0225–0235 are SPENT by selection-supply**, unmerged at the time of writing — which is why the union method above exists. Everything else through 0224 is used.
+**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-21, with the colour-deploy, what-the-model-sees and guest lanes merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere**, and were absent from this list until 2026-08-21, which is the fourth lag and the first in that direction. **Reserved: 0236 to selection-review, 0237–0238 to ios-surfaces-2, 0239 to upload-flake, 0240–0241 to capture-dark, 0242 to privacy-labels, and 0243–0244 to perception-deploy — six blocks live at once. **0245 is SPENT by the name swap** — 0245 (the name is the register it was built in). **0215, 0219, 0220 and 0186 are SPENT by guest-closure** — 0215 (the conditional survived the word), 0219 (the pin covers what the model reads), 0220 (the refusal names a handle), and 0186 taken from the free list because the owed eval run turned up a defect underneath the work rather than in it (rule 5 forbade what rule 6 grants). That lane is the standing example of why a block is not freed on the belief a lane finished: on 2026-08-23 `git branch --merged` listed `guest-closure` because it had no commits of its own, and it had not started. One block live at once, each also stated inside its own charter body, which is the half that actually reaches the session. **0199–0200 are SPENT by colour-deploy** — 0199 (the inline cache destroys itself by being used), 0200 (the tag must name what Cloud Run pins); **0201–0203 are SPENT by what-the-model-sees** — 0201 (the repair is judged by what it added), 0202 (the residue was never asked where anything is), 0203 (a second arm is not a better object); **0204–0205 are SPENT by selection** — 0204 (the arm that ships is chosen by looking at it), 0205 (fill sees one axis); **0210–0212 are SPENT by ship** — 0210 (a cold room is two deletions and an audience), 0211 (the flag was never in the image), 0212 (the three flags are one decision); **0206, 0218 and 0224 are SPENT by scenes-client** — 0206 (no rooms and could not ask), 0218 (the bridge was never waiting on the fetch), 0224 (a pinned action does not share a column); **0216–0217 are SPENT by ios-surfaces** — 0216 (a count that cannot exist), 0217 (the declaration is the stand-down); **0207–0209 are SPENT by social-layer** — 0207 (a layer is not a feed), 0208 (sharing cuts where the pipeline already cut), 0209 (comparison between people is evidence, not a surface); **0221–0223 are SPENT by calling-card** — 0221 (a room's eligibility is a date, not a field), 0222 (the card draws the boundary and prints the measurement), 0223 (the yaw is not a measurement); **0213–0214 are SPENT by the guest lane** — 0213 (two candidates refuse rather than pick), 0214 (the provenance line describes the room on screen). Spent by clipped-views: **0197** (the uncropped photograph is not a better photograph) and **0198** (the mask is the photograph SAM 3D sees). Spent by geom-retire: **0192** (perception-geom is retired). Spent by the brand-mark pass: **0193** (the mark is generated, not copied). **0225–0235 are SPENT by selection-supply**, unmerged at the time of writing — which is why the union method above exists. Everything else through 0224 is used.
 
 Two durable lessons, both learned by collision. **Put a session's number block INSIDE the prompt body**: a block written in a chat heading once reached nobody and two lanes claimed the same numbers, and the room-quality session was handed one stale block in its prompt and a different one in its handoff. When a prompt and this file disagree, **this file and the handoff win** — a prompt is written once, these are maintained. And **two sessions sharing one tree is how a note gets dropped**: decision 0179 was lost by the sam3d-pointmap merge and restored by `546281e`, which is why the Tooling conventions now insist every session gets its own worktree.
 
