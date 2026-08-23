@@ -196,9 +196,12 @@ def height_bands(height_frac: np.ndarray) -> dict[str, np.ndarray]:
     object standing on the floor. Measured on production's own geometry over
     the 26 planned box views of the four preserved captures: **0.2% of all
     considered points, and exactly zero on 24 of the 26**. Reporting it as a
-    band rather than letting it fall outside the decomposition is what makes
-    `PERCEPTION_BOX_AWARE_FLOOR_TOL` observable — the restored mass lands
-    here and nowhere else.
+    band rather than letting it fall outside the decomposition is what made
+    a tighter floor tolerance measurable at all — every point such a
+    relaxation restores lands here and nowhere else, which is how 0232
+    measured that what comes back is floor rather than feet, and refused it.
+    No env switch ships; `_on_room_plane`'s `floor_tol_m` parameter is the
+    whole of what remains.
     """
     return {
         "foot": height_frac < BAND_LOWER_MIN,
