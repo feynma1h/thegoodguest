@@ -554,9 +554,11 @@ gains.
   offline through production's own selector: **16 of 48 frames change across
   the four captures** — rp7 5/12, rp6g1 8/12, rp6g2 3/12, spike 0/12 — where
   0234 reports a three-frame change. On rp6g1 **one** band-vetoed pair moves
-  **8 frames**. The GPU drive then answered 0234's blocker: detections
-  **+46% on rp7, −12% on rp6g1**, and rp6g1's **long tail 33 → 27, −18%**
-  against 0234's own ≤10% bar. On the output-side instrument it is 0197's
+  **8 frames**. The GPU drive then answered 0234's blocker, and
+  **answered it mostly favourably** — corpus detections **228 → 250, +10%**
+  (rp7 +46%, rp6g2 +10%, spike 0, rp6g1 **−12%** with its long tail 33 → 27,
+  the only room past 0234's ≤10% bar). **The check the flag was held on is
+  not the check that decides it.** On the output-side instrument it is 0197's
   bidirectionality again — rp7's chair **0.655 → 0.083** and rp6g1 gains a
   box that had no arm at all, against rp7's bed **0.419 → 0.799** and rp6g1's
   nightstand **fill 1.169 → 0.223**. **The sharpest cost is invisible to a
