@@ -460,6 +460,29 @@ mistake available in this repo.
 - **Do not tune `FUSION_CLUSTER_DIST_M` or `SHELL_WALL_MERGE_*` to chase
   under-merge symptoms** (0075). Both measured correct on real rooms; the
   symptoms are label collapse and edge truncation.
+- **The FUSED cloud makes orientation WORSE, and the same-mass rule is dead**
+  (0225). Coverage for visibility questions, PURITY for orientation ones. A
+  box-clipped cloud accumulated over every keyframe medians a **0.0287**
+  axis-assignment margin against 0081's masked single-view **0.15-0.47**,
+  clears the shipped 0.10 gate on **1 of 20** boxes, and **7 of 20 winners
+  move** under cloud perturbation. That last number refutes the claim
+  everything here rested on — that clutter cancels across rotations of one
+  splat because the point set is identical. The mass IS common; its COST is
+  not, because rotating a table moves its legs relative to a bag that stays
+  put. **The 180-degree sign speculation dies with it** and the sign stays
+  where 0171 put it. Re-opens only on a per-object cloud accumulated through
+  each frame's own SAM mask — a purity mechanism, not more views.
+- **The OOM is HEADROOM, not size, and no retry reaches it** (0228). See the
+  open-defect entry; the refused half is that **downscale-and-retry is out**
+  even though the arithmetic green-lights it (a halved request fits 12 of 12
+  box views), because 0197's bidirectionality means an altered input yields
+  **a different object under the same identity** with nothing able to detect
+  the swap. Generalised: *where a fallback must choose between altering the
+  input and not running, it must not run.* **A deferred retry at a frame or
+  object boundary is also out** — refuted before implementation, needing no
+  measurement: the existing retry already runs after `gc.collect()` +
+  `empty_cache()` with no other object in flight, so the queue it would defer
+  into is already empty.
 - **A tighter floor tolerance inside a box restores FLOOR, not feet** (0232).
   0.08 m looks like a room-scale number misapplied at object scale; it is
   sized for the floor plane's own error. Open floor sits up to **+4.3 cm**
@@ -615,7 +638,12 @@ gains.
 - **CUDA OOM is the largest measured loss in the corpus** (0228) — **22 of 163
   detections**, twelve of them box views, and **two boxes lost their only
   compatible mask**. It is **capacity, not scheduling**: the models hold
-  ~16.4 GiB, the forward pass needs 5.23–6.43 GiB, the card has **5.26 left**.
+  ~16.4 GiB, the forward pass PEAKS at 5.23–6.43 GiB, and the card has
+  **5.26 left**. Read the peak, not the request: **21 of the 22 failing
+  allocations are 0.500–0.861 GiB**, the median box-view shortfall is 133 MiB
+  and three cases miss by 16 MiB, so this is headroom rather than object size
+  — mask area does not predict it at all (Spearman r = −0.009 over an 84×
+  area range).
   Freeing 1.2 GiB covers 21 of the 22. **The second arm is currently the OOM
   fallback in six of nine affected boxes** (0229) — which is why
   `PERCEPTION_CONDITIONAL_SECOND_ARM` stays OFF until the throughput charter
