@@ -174,6 +174,28 @@ the next drive re-segment it, at the cost of converting a free warm re-drive
 into one that re-segments N frames forever. If the loop is built, that
 question disappears.
 
+## What 0236 hands it — supply and the chooser cannot be evaluated apart
+
+Measured at the review that landed this branch, and it is the sharpest form
+of the "one allocator" argument above. `PERCEPTION_VISIBILITY_VETO` looks
+local — three unusable frames, three vetoed pairs — and moves **16 of 48
+frames** across the four preserved captures, because a vetoed (frame, box)
+pair costs the greedy cover pass an extra pick and that re-seeds the whole
+farthest-point residue.
+
+What it costs is invisible to the way it was measured. Both of its rp6g1
+losses are losses of an ALTERNATIVE rather than of a shipped arm, so a run
+with `PERCEPTION_ARM_SELECT` off — every run in 0234 — cannot see either. The
+nightstand is the case in one row: today the box has two arms and the chooser
+correctly refuses the bad one, fill 1.169 kept over 0.223; under the veto it
+has one, and 0.223 ships.
+
+**So a supply stage cannot be judged on detection counts, and cannot be
+judged with the chooser off.** Any allocator this charter builds has to be
+measured against `choose_arm`'s output over the boxes RoomPlan measured, on
+both arms of the change, or it will report an improvement while deleting the
+thing downstream was going to pick.
+
 ## Where to start
 
 The log query is done and the baseline is measured, so the first unknown is
