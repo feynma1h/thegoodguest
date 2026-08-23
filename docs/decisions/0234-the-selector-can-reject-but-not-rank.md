@@ -137,6 +137,17 @@ No regression, on a proxy, and the real check is a GPU drive.
 ## Two follow-ups, neither built here
 
 **1. The long-tail check is a BLOCKER on this flag, not a completed item.**
+
+> **Amended 2026-08-24 — the drive ran; see 0236.** The detection check came
+> back mostly favourable (corpus 228 → 250, +10%; only rp6g1 falls, at −12%
+> with its long tail −18%), so the condition this paragraph sets is satisfied
+> and **the flag is still refused, for a different reason.** What the drive
+> found is upstream of it: the veto moves **16 of 48 frames** across the
+> corpus, not the three this note describes, and its cost lands on
+> ALTERNATIVES that only `choose_arm` can see — so every number below,
+> including the pose-coverage proxy, was taken where the cost is invisible.
+> Read 0236 before enabling anything here.
+
 The charter asked for detection counts under the new sampler against today's;
 the new sampler picks frames that were never segmented, so the counts need a
 GPU drive. The pose-coverage proxy above shows no regression, and a proxy is
