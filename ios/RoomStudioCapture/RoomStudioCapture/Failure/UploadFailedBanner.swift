@@ -1,7 +1,12 @@
-/// The upload-failed banner (design spec §7). Pinned to the top of the idle home
+/// The upload-failed banner (design spec §7). Sits at the top of the idle home
 /// on the next launch after an upload stalls — so a crash or a dead battery
 /// mid-upload never loses the room silently. The capture file is retained
 /// on-device.
+///
+/// It renders in `HomeView`'s `notice` slot, inside the scroll area, NOT in the
+/// wrapper above it: a notice in that fixed column takes the height the pinned
+/// scan action needs, and at accessibility sizes the action is what gives
+/// (decision 0224).
 ///
 /// Bound to `UploadFailureMonitor` by the spine. Kept a pure presentation
 /// component so it previews standalone.
@@ -29,13 +34,19 @@ struct UploadFailedBanner: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 9) {
+            // .top, not centred: at accessibility sizes the headline wraps and a
+            // vertically centred glyph comes to rest in the middle of it, reading
+            // as punctuation rather than as an icon. Decision 0224.
+            HStack(alignment: .top, spacing: 9) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Color.rsGoldLight)
+                    .frame(height: 20, alignment: .center)
                 Text("One room didn't make it up")
                     .font(RSFont.ui(.subheadline, weight: .semibold))
                     .foregroundStyle(Color.rsOnDark)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
             }
             GuestLine("A scan stalled on its way to the desk. It's still here on your phone, safe.",
                       size: 13, onDark: true)

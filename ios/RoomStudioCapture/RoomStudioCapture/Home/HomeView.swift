@@ -7,13 +7,18 @@
 /// rides with the history surface (§9) since it needs a rooms fetch — this view
 /// takes `hasRooms`/`roomsStrip` so that variant can slot in without a rewrite.
 ///
-/// `notice` is the third state: the hero, plus something the app needs to say
-/// about the rooms it could not fetch. It sits INSIDE the scroll area with the
-/// hero rather than above the whole screen, because the scan action is pinned —
-/// anything stacked outside the ScrollView squeezes it, and at accessibility
-/// sizes that squeeze truncated "Scan a room" to "Scan a ro…". Found by
-/// screenshot; the pinned action is the one thing on this screen that must
-/// never be compressed.
+/// `notice` carries everything the app needs to SAY on this screen — the
+/// upload-failed banner, the re-entry row, the rooms-trouble line. It sits
+/// INSIDE the scroll area, above the hero or the strip, because the scan action
+/// is pinned: anything stacked outside the ScrollView squeezes it, and at
+/// accessibility sizes that squeeze truncated "Scan a room" to "Scan a ro…"
+/// (decision 0224). Found by screenshot, and only findable that way.
+///
+/// The rule is structural, not cosmetic: content goes in the scroll area, only
+/// the action is pinned. A caller with something to say reaches for this slot
+/// rather than for the VStack above this view — which is why the slot renders in
+/// BOTH variants, first-time and returning. A notice that only the no-rooms
+/// branch could show would push every returning-home caller back outside.
 
 import SwiftUI
 
@@ -23,10 +28,10 @@ struct HomeView<RoomsStrip: View, Notice: View>: View {
     /// When true, the hero collapses and `roomsStrip` is shown above the button.
     var hasRooms: Bool = false
     @ViewBuilder var roomsStrip: () -> RoomsStrip
-    /// Shown above the hero, in the scroll area. EmptyView when there is
-    /// nothing to say. No default: a defaulted generic slot cannot be inferred
-    /// at a call site that omits it, so the convenience inits below carry the
-    /// EmptyView cases explicitly.
+    /// Shown above the hero or the strip, in the scroll area. EmptyView when
+    /// there is nothing to say. No default: a defaulted generic slot cannot be
+    /// inferred at a call site that omits it, so the convenience inits below
+    /// carry the EmptyView cases explicitly.
     @ViewBuilder var notice: () -> Notice
 
     var body: some View {
@@ -38,16 +43,15 @@ struct HomeView<RoomsStrip: View, Notice: View>: View {
             // exceed the space between the header and the CTA, and with fixed
             // Spacers the clipped text was unrecoverable.
             ScrollView {
-                if hasRooms {
-                    roomsStrip()
-                        .padding(.top, 20)
-                } else {
-                    VStack(spacing: 22) {
-                        notice()
+                VStack(spacing: 22) {
+                    notice()
+                    if hasRooms {
+                        roomsStrip()
+                    } else {
                         hero
                     }
-                    .padding(.top, 20)
                 }
+                .padding(.top, 20)
             }
 
             scanAction
