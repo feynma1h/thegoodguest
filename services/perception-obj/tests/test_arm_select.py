@@ -739,9 +739,12 @@ class TestTheThirdAxisOnPreservedCaptures:
 
     def test_spike_bed_is_now_a_two_to_one_refusal(self):
         """0205's bed, where fill and the residual disagree and nobody can
-        adjudicate. The third axis sides with fill, so the refusal is
-        recorded 2-vs-1 rather than 1-vs-1 — still a refusal, with more
-        evidence in it than before."""
+        adjudicate. On the LOCAL cloud — the one production builds, and the
+        one this sweep holds — the third axis sides with fill, so the record
+        reads 2-vs-1. Read it as a mechanism pin and not as added evidence:
+        spike b03 is one of the two boxes whose s2c ranking flips between the
+        local and fused clouds, at a margin of 0.014, so the third vote here
+        states which cloud was used rather than which arm is better (0233)."""
         b = next(x for x in SWEEP
                  if x["room"] == "spike" and x["box_index"] == 3)
         _, rec = box_placement.choose_arm(self._fits3(b))
