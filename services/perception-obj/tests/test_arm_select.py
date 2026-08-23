@@ -582,8 +582,10 @@ class TestConditionalSecondArmOnPreservedCaptures:
             assert _passes(box) is False
 
     def test_it_does_not_touch_the_oom_fallback_population(self):
-        """0228: the second arm is currently rescuing six of nine boxes
-        whose FIRST view OOMed. Those boxes have one successful arm, so
+        """0228: of the nine boxes that hit an OOM on a box view, another
+        view rescued SEVEN — and in six of the nine the view that OOMed was
+        rank 1. The set below is the seven rescued. Those boxes have one
+        successful arm, so
         they are not in this multi-arm table at all — and the rule cannot
         reach them anyway, because an OOMed tier-1 yields no ArmFit. Pinned
         because the disjointness is what makes the rule safe, and a future
