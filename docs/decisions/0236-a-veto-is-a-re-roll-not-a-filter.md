@@ -99,6 +99,21 @@ operator ruled ON, against the frames the veto leaves:
 | nightstand `box_03` | **two arms**, f97 fill 1.169 kept over f216 fill 0.223 | **one arm**, f216, fill **0.223** |
 | storage `box_04` | **no arm at all** | f88, fill 0.931 |
 
+**rp7's bed is the same argument from the other side, and it is worse.**
+Both f294 and f363 are in the veto's selection, so the chooser HAS the good
+arm — and refuses it:
+
+| rp7 `box_04` | rank 0 | rank 1 | `choose_arm` |
+|---|---|---|---|
+| shipped selection | f294, fill 1.404, err **0.419** | — | f294 |
+| veto selection | f363, fill 0.946, err **0.799** | f294, fill 1.404, err **0.419** | **f363** |
+
+f294 wins the residual by 0.38 m and LOSES `fill`, because it overshoots
+vertically at 1.404 where f363 sits at 0.946. Unanimity refuses, correctly by
+its own rule, and the room ships the worse bed. **That is 0205's measured
+hole — fill reads one axis and the residual reads three, so they disagree
+when the error is not vertical — with a cost attached for the first time.**
+
 `box_03` is the whole argument in one row. Today that box has two arms and
 arm selection **correctly refuses** the bad one. Under the veto it has ONE,
 because f97 is gone from the selection, so the chooser has nothing to choose
@@ -183,6 +198,8 @@ pick, the residue's seed and count would be unchanged and the change would be
 as local as the design intended. That is the version worth measuring next,
 and the number to beat is 16 of 48 frames moved.
 
-**Arm selection ON.** The bed regression is invisible to it, and the veto's
-losses should be re-measured once the chooser is live rather than against
-greedy-on-overlap.
+**Arm selection ON.** Re-measure the veto's losses against the chooser rather
+than against greedy-on-overlap — but note what the rp7 table above already
+says: the chooser does not rescue that one, and the reason is 0205, not the
+veto. **0205's refusal now has a measured price**, which is the trigger that
+note was waiting for.

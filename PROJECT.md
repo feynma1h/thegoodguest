@@ -623,7 +623,13 @@ gains.
   to choose and **fill 0.223 ships**. **The veto shrinks the candidate set
   arm selection exists to search** — 0212's enable order already puts the
   veto last, and this is the stronger reason for it. A supply change and a
-  chooser cannot be evaluated apart. Two follow-ups in 0236: **split the
+  chooser cannot be evaluated apart. **rp7's bed is the same argument from
+  the other side and it indicts 0205 rather than the veto**: both f294 and
+  f363 are in the veto's selection, so the chooser HAS the better arm — f294
+  wins the three-axis error by 0.38 m — and refuses it, because f294
+  overshoots vertically (fill 1.404) where f363 sits at 0.946 and unanimity
+  requires both axes. **0205's measured hole now has a price**, which is the
+  trigger that note was waiting for. Two follow-ups in 0236: **split the
   flag** (veto 1 removes two frames that produced literally 0 detections and
   is free; veto 2 causes the whole cascade), and **contain the cascade** by
   relaxing a vetoed box's own bar in place rather than buying an extra cover
