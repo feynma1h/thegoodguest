@@ -266,8 +266,24 @@ Three stages, all Cloud Tasks driven:
   than by mask-hull overlap (0204/0205). **All three have now run live on
   0%-traffic candidates** (0211/0212), and what that measured is that they are
   not three independent switches: refine and select flip TOGETHER, refine
-  first, because refinement changes what the chooser is choosing between. The
-  residue waits on one more room.
+  first, because refinement changes what the chooser is choosing between.
+  **Refine and arm-select are RULED ON** and sit on
+  `perception-obj-00074-var` at 0% traffic; **the serving revision
+  `00062-hum` still carries neither**, so production today runs every flag
+  off. The residue is parked (0202/0212).
+  **Two more ship OFF and byte-identical off, from `selection-supply`** —
+  `PERCEPTION_CONDITIONAL_SECOND_ARM` skips a box's planned second view when
+  its FIRST arm already renders well (0229; 4 of 8 multi-arm boxes, and never
+  when tier-1 merely *ran*), and `PERCEPTION_VISIBILITY_VETO` lets frame
+  selection REJECT a frame or an (object, frame) pair, never rank one (0234).
+  **The enable ORDER is: refine, then arm-select, then
+  conditional-second-arm** — 0212's refine-before-select still holds, and
+  conditional-second-arm decides using `arm_fit`, whose input refinement
+  changes. **The veto is not in that order any more: it is measured and
+  refused** (0236, see the open defect below). `PERCEPTION_ARM_SELECT` also
+  carries a third axis — trimmed splat→cloud Chamfer, unanimous-or-refuse
+  (0233) — which is **structurally incapable of enabling a switch**, only of
+  vetoing one, and costs ~400 ms per arm plus one measured cloud per box.
 - **`/shell`** — the room envelope. shell.json **v3** on the LiDAR paths:
   method `roomplan` renders CapturedRoom geometry verbatim, method
   `anchor_envelope` is the degrade for LIDAR_ARKIT and roomplan-absent
