@@ -23,6 +23,8 @@ Run from repo root:
 """
 from __future__ import annotations
 
+import pathlib
+
 import guest_prompt
 import guest_tools
 from guest_prompt import (
@@ -38,6 +40,29 @@ from guest_prompt import (
     telemetry_flags,
 )
 from scene_facts import derive_scene_facts, render_facts_block
+
+
+def _voice_evals():
+    """The voice-eval module, loaded BY PATH and cached.
+
+    Not `import test_guest_voice_evals`: pytest gives these files dotted
+    package identities rather than putting their directory on sys.path, so
+    the plain import does not resolve. Executing the module is safe offline —
+    it constructs no client, and every Anthropic import in it is inside a
+    function.
+    """
+    global _VOICE_EVALS
+    if _VOICE_EVALS is None:
+        import importlib.util
+        path = pathlib.Path(__file__).with_name("test_guest_voice_evals.py")
+        spec = importlib.util.spec_from_file_location("_voice_evals_pin", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _VOICE_EVALS = module
+    return _VOICE_EVALS
+
+
+_VOICE_EVALS = None
 
 
 def _string_paths(node, trail=()):
@@ -83,7 +108,7 @@ def _surface_hash_with_tools(tools):
 
 _PINNED = (
     7,
-    "23480854349098d91ce3660001c20f6b50d404b4179f96b5e7be48eec9f8fb74",
+    "b5fb04f39736a79dd20cd6295baacd147935029ebd4d652e232fd0da570515d3",
 )
 
 
@@ -114,6 +139,33 @@ class TestPinnedCharter:
                 hashlib.sha256(mutated.encode("utf-8")).hexdigest()
                 != PROMPT_SURFACE_SHA256
             ), "a change to this block would not move the pin"
+
+    def test_rule_five_does_not_forbid_what_rule_six_grants(self):
+        """Decision 0186. Rule 5 read "never describe them, place anything
+        against one, or say a room has none" — written at PROMPT_VERSION 2,
+        when the guest had no hands at all. 0132 gave it hands and an
+        `against_wall` relation, and nobody re-read the verb.
+
+        The guest then quoted the clause back to refuse: "I can't place
+        anything against one." Measured 17 of 26 wall placements applied
+        before the fix, 14 of 14 after (Fisher one-sided p = 0.011).
+
+        Pinned as a capability truth rather than a phrasing: what must hold is
+        that the charter does not tell the guest it may not do the thing the
+        tool schema offers it.
+        """
+        lowered = STATIC_CHARTER.lower()
+        assert "place anything against one" not in lowered, (
+            "rule 5 forbids the against_wall relation the tools offer"
+        )
+        # ...and says so positively, so the reconciliation is not merely an
+        # absence a later edit could undo without noticing.
+        assert "putting a piece against a wall" in lowered
+        assert "it does the placing" in lowered
+        # The limits rule 5 exists for are untouched.
+        for needle in ("never describe one", "never say where one is",
+                       "never say a room has none"):
+            assert needle in lowered, needle
 
     def test_the_pin_covers_the_tool_definitions_too(self):
         """0219: the tools are instruction, and the model reads them.
@@ -449,3 +501,55 @@ class TestTelemetryFlags:
             "no measurements here",
             [],
         ) == ["1.3 m"]
+
+
+class TestTheEvalInstruments:
+    """The voice evals' regexes, pinned OFFLINE (decision 0215).
+
+    An instrument that can only be exercised with an API key is only checked
+    at the moment it is being trusted, which is the wrong moment. These cost
+    nothing and run on every suite.
+
+    They exist because `_MARKED_AS_ARRANGED` was WIDENED: the guest stopped
+    using rule 10's literal "would" and started scoping the number in words
+    instead, 0 of 27 samples against 27 of 27. Widening an instrument to
+    accept what the model happens to do now is how an eval quietly becomes a
+    tautology, so what it must still REJECT is pinned here beside what it
+    accepts.
+    """
+
+    def test_the_arrangement_marker_rejects_plain_measured_grammar(self):
+        evals = _voice_evals()
+        _MARKED_AS_ARRANGED = evals._MARKED_AS_ARRANGED
+        for text in evals._MEASURED_GRAMMAR_SAMPLES:
+            hit = _MARKED_AS_ARRANGED.search(text)
+            assert hit is None, (
+                f"accepted the measured room's own grammar ({hit.group(0)!r}) "
+                f"— the instrument has stopped measuring anything: {text!r}"
+            )
+
+    def test_the_arrangement_marker_accepts_what_the_guest_actually_says(self):
+        """"would" plus the three shapes nine live runs produced."""
+        evals = _voice_evals()
+        for text in evals._ARRANGED_GRAMMAR_SAMPLES:
+            assert evals._MARKED_AS_ARRANGED.search(text), text
+
+    def test_a_bare_now_is_not_a_marker(self):
+        """The question the eval asks is "how far is it NOW", so the guest
+        echoing "now" is not evidence of anything. Pinned separately because
+        it is the cheapest way to widen this regex into uselessness."""
+        assert _voice_evals()._MARKED_AS_ARRANGED.search(
+            "It's 2.2 m now."
+        ) is None
+
+    def test_the_hedge_detector_stays_narrow(self):
+        """`_HEDGE` keeps grading the conditional MOOD, because its other two
+        uses assert the guest does NOT reach for one on a fact no change
+        touched. Widening it there would read a scoping clause as an
+        over-hedge and fail the guest for being precise."""
+        evals = _voice_evals()
+        hedge = evals.TestRuleTenGrammar._HEDGE
+        assert hedge.search("It would be about 2.2 m.")
+        # The scoping constructions are NOT hedges.
+        for text in evals._ARRANGED_GRAMMAR_SAMPLES[1:]:
+            assert hedge.search(text) is None, text

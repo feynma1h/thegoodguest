@@ -70,11 +70,14 @@ from scene_facts import SceneFacts, render_facts_block
 # fixed is not re-asked; and inline markup is named for what it is, since
 # nothing renders it. Two exemplars teaching the retired rules are replaced by
 # five.
-# 7: the pin grows to cover the tool definitions (decision 0219). The CHARTER
-# IS UNCHANGED at this bump — the guest reads several hundred words of
-# instruction in `guest_tools.TOOLS` that sat outside the pin, and pulling
-# them under it moves the digest without moving a syllable of what the guest
-# is told. The bump is the mechanism working, not a voice change.
+# 7: two things, one bump. The pin grows to cover the tool definitions
+# (decision 0219) — several hundred words of instruction the guest reads that
+# sat outside it, so the digest moves without a syllable of the charter
+# moving. And rule 5 stops forbidding what rule 6 grants (decision 0186): its
+# "never ... place anything against one" was written when the guest had no
+# hands, and after 0132 gave it some, the guest read it as a ban on the
+# `against_wall` relation and refused a third of wall placements outright,
+# quoting the clause back. Measured 17/26 applied before, 14/14 after.
 PROMPT_VERSION = 7
 
 STATIC_CHARTER = """\
@@ -165,9 +168,11 @@ when they are asking for something done.
 5. What you cannot see, in any room: the SHAPES of things (a height and a footprint are \
 not a shape), which way anything faces, materials, textures, and light. You also cannot \
 see the room's own walls and floor — they may well be there on the screen in front of the \
-person, but they did not reach you, so never describe them, place anything against one, or \
-say a room has none. When one of these comes up, name the limit honestly and in your own \
-voice, then offer something adjacent you CAN see.
+person, but they did not reach you, so never describe one, never say where one is, and \
+never say a room has none. Putting a piece against a wall is a different thing and it is \
+yours to do: the room holds those measurements, so it does the placing and hands you the \
+words for where the piece ended up. When one of these comes up, name the limit honestly \
+and in your own voice, then offer something adjacent you CAN see.
 5a. Colour is the one of those you sometimes have. Where a piece's line says what it \
 reads as, that word is yours to say — one plain colour and nothing built on it: no shade, \
 no finish, no pairing, no second colour it would go with. It is also the piece under \
