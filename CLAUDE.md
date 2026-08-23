@@ -265,6 +265,21 @@ Three stages, all Cloud Tasks driven:
   not three independent switches: refine and select flip TOGETHER, refine
   first, because refinement changes what the chooser is choosing between. The
   residue waits on one more room.
+  **Two more ship on `selection-supply`, also OFF and also byte-identical
+  off** — `PERCEPTION_CONDITIONAL_SECOND_ARM` skips a box's planned second
+  view when its FIRST arm already renders well (0229; 4 reconstructions saved
+  of 8 multi-arm boxes, and never when tier-1 merely *ran* — see the OOM
+  entry below), and `PERCEPTION_VISIBILITY_VETO` lets frame selection REJECT
+  a frame or an (object, frame) pair, never rank one (0234). **The enable
+  ORDER is: refine, then arm-select, then conditional-second-arm, then the
+  veto.** 0212's refine-before-select still holds and the two new ones sit
+  downstream of it: conditional-second-arm decides using `arm_fit`, which
+  refinement changes the input to, and the veto changes which frames exist
+  before any of it. `PERCEPTION_ARM_SELECT` now carries a third axis —
+  trimmed splat->cloud Chamfer, unanimous-or-refuse (0233) — which is
+  **structurally incapable of enabling a switch**, only of vetoing one.
+  **`PERCEPTION_VISIBILITY_VETO` has an outstanding blocker**: the long-tail
+  detection-count check needs a GPU drive and has not run.
 - **`/shell`** — the room envelope. shell.json **v3** on the LiDAR paths:
   method `roomplan` renders CapturedRoom geometry verbatim, method
   `anchor_envelope` is the degrade for LIDAR_ARKIT and roomplan-absent
@@ -422,6 +437,40 @@ mistake available in this repo.
 - **Do not tune `FUSION_CLUSTER_DIST_M` or `SHELL_WALL_MERGE_*` to chase
   under-merge symptoms** (0075). Both measured correct on real rooms; the
   symptoms are label collapse and edge truncation.
+- **The FUSED cloud makes orientation WORSE, and the same-mass rule is dead**
+  (0225). Coverage for visibility questions, PURITY for orientation ones. A
+  box-clipped cloud accumulated over every keyframe medians a **0.0287**
+  axis-assignment margin against 0081's masked single-view **0.15-0.47**,
+  clears the shipped 0.10 gate on **1 of 20** boxes, and **7 of 20 winners
+  move** under cloud perturbation. That last number refutes the claim
+  everything here rested on — that clutter cancels across rotations of one
+  splat because the point set is identical. The mass IS common; its COST is
+  not, because rotating a table moves its legs relative to a bag that stays
+  put. **The 180-degree sign speculation dies with it** and the sign stays
+  where 0171 put it. Re-opens only on a per-object cloud accumulated through
+  each frame's own SAM mask — a purity mechanism, not more views.
+- **The OOM is HEADROOM, not size, and no retry reaches it** (0228). See the
+  open-defect entry; the refused half is that **downscale-and-retry is out**
+  even though the arithmetic green-lights it (a halved request fits 12 of 12
+  box views), because 0197's bidirectionality means an altered input yields
+  **a different object under the same identity** with nothing able to detect
+  the swap. Generalised: *where a fallback must choose between altering the
+  input and not running, it must not run.* **A deferred retry at a frame or
+  object boundary is also out** — refuted before implementation, needing no
+  measurement: the existing retry already runs after `gc.collect()` +
+  `empty_cache()` with no other object in flight, so the queue it would defer
+  into is already empty.
+- **A tighter floor tolerance inside a box restores FLOOR, not feet** (0232).
+  0.08 m looks like a room-scale number misapplied at object scale; it is
+  sized for the floor plane's own error. Open floor sits up to **+4.3 cm**
+  above RoomPlan's plane, so 0.02 is inside the noise, and 96-100% of the
+  restored points vanish by tol=0.06 where a leg would thin out linearly. The
+  real fix is a floor level estimated LOCALLY from each box's own depth, and
+  it needs its own registered prediction — the numbers to beat are that the
+  restored points must NOT collapse between 0.02 and 0.06. **No env switch
+  ships**: a control that fires into a defect under a conservative default is
+  worse than one that never fires, because the metric it moves reads as
+  improvement (the inverse of 0225's unfireable gate).
 - **Generic compression buys almost nothing** (0125). Float32 splat data is
   high-entropy: gzip is 1.36×, where the SPZ tier is 5.8×.
 - **Spark is not the render bottleneck** (0123). Parse is under 1% of the wait;
@@ -508,6 +557,20 @@ gains.
   three attacks on the cause are measured dead above. What remains is decision
   0052's standing trigger: a different model — one that consumes several views
   itself, or exposes calibrated metric scale or pose.
+- **A quarter of `b667f891` (rp6g2) is DARK, and it confounds every thin
+  result drawn from it** (0235). Its last 28 keyframes read mean luminance
+  **0.13-4.49** against a whole-capture median of **129.5** — 29 of 124
+  frames unusable, 23.4% — and the shipped sampler takes two of them (f103,
+  f119). Round 2's "5 of 11 boxes lose every fully-in-frame view", round 3's
+  2,585-voxel box, and the 53-item long tail below are all measured over a
+  denominator that includes those frames. **None of those findings is
+  retracted** — each correctly describes what the capture contains — but they
+  describe a DEFECTIVE CAPTURE rather than a difficult room, and no claim
+  resting mainly on rp6g2 should be generalised without this caveat. The
+  cause is unknown and worth one look: 28 consecutive black frames with valid
+  poses and depth means ARKit kept tracking while the camera produced
+  nothing, and if that is an RGB pipeline stall it is an iOS defect real
+  users would hit.
 - **`b667f891` is budget-starved.** Its census plan carries a 53-item long tail
   against the 900 s request budget, so it budget-stops every round and the
   fusion post-passes never run there. Not a placement defect — the room's
@@ -531,6 +594,17 @@ gains.
   what varies is that the card is 91-99% occupied at the moment of the ask.
   Uncounted for as long as it was because the failures are recorded
   per-frame in `objects.json` and nothing aggregates them.
+- **An unmatched RoomPlan box has FIVE causes and the two anyone looks for
+  are the smallest** (0227). Of nine unmatched boxes across the four
+  captures: 2 PLAN_SKIP, 2 DETECTION, 1 OOM, 1 COMPETITION, 1 SAMPLING, 1
+  NEVER_FRAMED, 1 LABEL. Four carry family-compatible masks at up to overlap
+  **1.0000** and are invisible to association only because `ok=False` — no
+  splat, so not an observation. Every failure is recorded faithfully in its
+  frame's `objects.json`; nothing aggregates them, which is why four boxes
+  had their answer written down and unread. **Two of the declined label
+  matches (rp6g1 b04, rp6g2 b09) are NOT label problems** — both have good
+  uncontested `cabinet` masks that OOM'd or were policy-skipped. The declines
+  stand; do not re-open them as label cases. rp6g2 b07 is confirmed LABEL.
 - **A window ships with ~30° in-plane skew.** Near-square planar objects are
   ~90°-ambiguous to the model and no instrument scores in-plane orientation.
 - **The "cabinet behind a wall" is not the declip bound** (0104). The declip pass

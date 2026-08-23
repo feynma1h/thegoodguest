@@ -134,6 +134,29 @@ rather than usable ones it looks worse on rp6g2, and that reading is an
 artefact: the metric penalises a selection for not covering 28 black frames.
 No regression, on a proxy, and the real check is a GPU drive.
 
+## Two follow-ups, neither built here
+
+**1. The long-tail check is a BLOCKER on this flag, not a completed item.**
+The charter asked for detection counts under the new sampler against today's;
+the new sampler picks frames that were never segmented, so the counts need a
+GPU drive. The pose-coverage proxy above shows no regression, and a proxy is
+not the measurement. **`PERCEPTION_VISIBILITY_VETO` must not be enabled
+anywhere until that drive has run** — the residue exists to serve objects
+RoomPlan does not box, and a box-shaped veto reshuffling the residue is
+exactly the kind of change that could serve them worse while every number
+this note reports improves.
+
+**2. Log the luminance statistic on every capture, whether the veto fires or
+not.** Veto 1's thresholds sit roughly thirty times below anything in this
+corpus — rp6g2's blank tail reads 0.13-4.49 against a 129.5 median — and they
+have never been tested against a genuinely dim room, a night capture, or a
+motion-blurred pan that still carries structure. Today the manifest records
+only what was REJECTED, so a first false positive would appear as a frame
+count quietly dropping on a capture nobody thinks is dark. Recording the
+distribution unconditionally turns that first dim room into data instead.
+Not built here: it is a change to what every capture writes, and it belongs
+with whoever next touches the manifest's sampling block.
+
 ## What would change this decision
 
 **The thresholds are the weak point and they are not fitted.** Veto 1's three
