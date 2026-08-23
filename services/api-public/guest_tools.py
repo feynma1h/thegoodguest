@@ -49,6 +49,7 @@ tests/test_design_spec_routes.py.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -275,12 +276,103 @@ def _find(geometry: RoomGeometry, object_id: str) -> RoomObject | Refusal:
         if len(hits) == 1:
             return hits[0]
         if len(hits) > 1:
-            return Refusal("ambiguous_object", _candidates(hits))
+            return Refusal("ambiguous_object", _candidates(geometry, hits))
     return Refusal("unknown_object")
 
 
-def _candidates(hits: list[RoomObject]) -> str:
-    """What the guest may offer the person, and an honest count of what it
+# How much nearer to an anchor one candidate must be than every other before
+# "the chair nearest the desk" is a pointer rather than a coin flip
+# (decision 0220). Chosen from the four preserved walk rooms, not from taste:
+# across their 24 duplicate-label sets the margin a valid handle actually has
+# is either tiny or generous, so 0.25 m and 0.50 m name exactly the same
+# handles and 0.75 m starts costing real ones. 0.50 m is the top of that free
+# range. It is also comfortably above `scene_facts._SAME_HEIGHT_BAND_M`, the
+# 0.15 m within which this product already declines to order two centres at
+# all — a handle may not claim a separation the facts would call level.
+_HANDLE_MIN_SEPARATION_M = 0.5
+
+
+def _spatial_handles(
+    geometry: RoomGeometry, hits: list[RoomObject]
+) -> dict[str, tuple[bool, float, str]]:
+    """A measured pointer for each candidate one uniquely identifies, keyed
+    by spec key (decision 0220). The value carries the phrase and the
+    (is_far, distance) rank the caller orders on.
+
+    Position is how people actually refer to their own furniture, and it is
+    the handle this product should have reached for first: colour shipped
+    ahead of it because it was cheap (0184), not because it was primary. The
+    numbers here are the ones `scene_facts` already derives its
+    nearest-neighbour comparatives from — the same centre-to-centre
+    distances over the same `world_transform.position` — so a handle can
+    never contradict a fact the guest is reading in the same breath.
+
+    THREE THINGS MUST HOLD, and each is a way the pointer could be true and
+    still send the person to the wrong chair:
+
+    - **Unique within the candidate set.** The phrase ranges over every
+      candidate, so it is computed over all of them — including the ones
+      colour already named. If the red chair is the one nearest the desk,
+      no other chair may claim that handle.
+    - **Separated by a margin.** 0.90 m and 0.95 m from the desk makes
+      "nearest the desk" true and useless. See `_HANDLE_MIN_SEPARATION_M`.
+    - **Anchored on something the person can find.** An anchor whose own
+      name is bookkeeping moves the ambiguity rather than resolving it —
+      "nearest the third door" is not a place. `named_by_bookkeeping` is
+      already exactly this test, so it is reused rather than restated: a
+      two-desk room offers no desk, while a room with a red desk and a black
+      one offers both.
+
+    ONLY PLACED CANDIDATES ARE RANKED, and the caller must report the rest
+    separately for this to stay honest. A piece the scan never placed has no
+    position (rule 4), so it cannot be ranked — and if it were silently
+    dropped, "the chair nearest the desk" would be claiming a minimum over a
+    set with unmeasured members, which is the same overclaim as a guessed
+    transform. `_candidates` names the unplaced ones for what they are.
+
+    BOTH ENDS OF THE RANKING COUNT. Nearest and furthest are the same
+    measurement, the same uniqueness test and the same margin; taking only
+    the near end would refuse a handle separated by 2.4 m while accepting one
+    separated by 0.5 m. It is also what rescues the hardest real room: rp6g2
+    holds five chairs and exactly one anchor the person could find, four
+    chairs sit within 0.54 m of each other in distance to it, and the fifth
+    is 2.39 m clear at the far end.
+    """
+    candidates = [o for o in hits if o.placed and o.position is not None]
+    if len(candidates) < 2:
+        return {}
+    label = hits[0].label
+    candidate_keys = {o.key for o in hits}
+    anchors = [
+        o for o in geometry.objects
+        if o.key not in candidate_keys
+        and o.placed
+        and o.position is not None
+        and not o.named_by_bookkeeping
+    ]
+    # (is_far, distance) picks per candidate: a near handle reads better than
+    # a far one, and a closer anchor better than a distant one.
+    best: dict[str, tuple[bool, float, str]] = {}
+    for anchor in sorted(anchors, key=lambda o: (o.name, o.key)):
+        ranked = sorted(
+            (math.dist(o.position, anchor.position), o.key) for o in candidates
+        )
+        for (distance, key), margin, is_far, phrase in (
+            (ranked[0], ranked[1][0] - ranked[0][0], False,
+             f"the {label} nearest the {anchor.name}"),
+            (ranked[-1], ranked[-1][0] - ranked[-2][0], True,
+             f"the {label} furthest from the {anchor.name}"),
+        ):
+            if margin < _HANDLE_MIN_SEPARATION_M:
+                continue
+            pick = (is_far, distance, phrase)
+            if key not in best or pick[:2] < best[key][:2]:
+                best[key] = pick
+    return best
+
+
+def _candidates(geometry: RoomGeometry, hits: list[RoomObject]) -> str:
+    """What the guest may offer the person, and an honest account of what it
     may not.
 
     A bookkeeping name is an ordinal scene_facts assigned because nothing
@@ -291,23 +383,69 @@ def _candidates(hits: list[RoomObject]) -> str:
     new road: a tool result is server-authored, and rule 2a asks the guest to
     quote those verbatim.
 
-    So the detail names only the pieces a person could have meant, and says
-    plainly how many it cannot name. Where that is all of them, the refusal
-    is the whole answer — which is the honest end of "nothing separates
-    them", not a gap in this function.
+    THREE TIERS, most human first (decision 0220). Colour where the gate read
+    one and it is unique; then a measured spatial relation; then a count. The
+    count is last because it is the only tier that tells the person something
+    false about their own room: standing in it, plenty separates those
+    chairs — one is by the window and one is at the desk. It shipped first
+    (0213) as the whole answer, and the colour gate declines on most pieces
+    (0 of 45 in one real room), so the false form was the majority case.
+
+    NEVER-PLACED PIECES ARE COUNTED APART from the ones nothing separates.
+    They are two different failures and 0213 collapsed them: what separates
+    an unplaced chair from its siblings is precisely that the scan never
+    placed it, which the room does know. Splitting them is also what lets the
+    spatial tier range over a set with no unmeasured members.
+
+    A set where every piece is placed and nothing separates any of them
+    yields byte-identically what 0213 yielded, which is the sense in which
+    this subsumes that rather than replacing it.
     """
-    named = [o for o in hits if not o.named_by_bookkeeping]
-    nameable = sorted({o.name for o in named})
-    rest = len(hits) - len(named)
     label = hits[0].label
-    if not nameable:
-        return f"{len(hits)} {label}s that nothing separates"
-    if not rest:
-        return ", ".join(nameable)
-    return (
-        f"{', '.join(nameable)}, and {rest} more {label}"
-        f"{'s' if rest > 1 else ''} that nothing separates"
-    )
+
+    def _plural(count: int) -> str:
+        return f"{label}{'s' if count > 1 else ''}"
+
+    placed = [o for o in hits if o.placed and o.position is not None]
+    unplaced = len(hits) - len(placed)
+
+    handles = _spatial_handles(geometry, hits)
+    by_colour = sorted({o.name for o in placed if not o.named_by_bookkeeping})
+    # Nearest before furthest, then closest anchor first: the order the person
+    # would sweep the room in. Alphabetical would put "furthest" first, which
+    # reads as the afterthought arriving before the point.
+    by_position = [
+        phrase for _far, _distance, phrase in sorted(
+            {handles[o.key] for o in placed
+             if o.named_by_bookkeeping and o.key in handles}
+        )
+    ]
+    nameable = by_colour + by_position
+    rest = len(placed) - len(nameable)
+
+    if not nameable and len(placed) == 1:
+        # "1 monitor that nothing separates" is nonsense: there is nothing to
+        # separate it FROM among the placed pieces. What distinguishes it is
+        # the thing the room actually knows — that it is the one the scan put
+        # somewhere — and that is a handle a person can act on.
+        clause = f"the {label} the scan placed"
+    elif not nameable:
+        clause = f"{len(placed)} {_plural(len(placed))} that nothing separates"
+    elif not rest:
+        clause = ", ".join(nameable)
+    else:
+        clause = (
+            f"{', '.join(nameable)}, and {rest} more {_plural(rest)} "
+            f"that nothing separates"
+        )
+    if not placed:
+        return f"{unplaced} {_plural(unplaced)} the scan never placed"
+    if unplaced:
+        return (
+            f"{clause}; {unplaced} more {_plural(unplaced)} "
+            f"the scan never placed"
+        )
+    return clause
 
 
 def _measured(obj: RoomObject) -> Transform | None:
