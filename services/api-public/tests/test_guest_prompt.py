@@ -24,6 +24,7 @@ Run from repo root:
 from __future__ import annotations
 
 import guest_prompt
+import guest_tools
 from guest_prompt import (
     ARRANGEMENT_FOOTER,
     ARRANGEMENT_PREAMBLE,
@@ -38,6 +39,42 @@ from guest_prompt import (
 )
 from scene_facts import derive_scene_facts, render_facts_block
 
+
+def _string_paths(node, trail=()):
+    """Every string in a nested structure, as an index/key path to it."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _string_paths(value, trail + (key,))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _string_paths(value, trail + (index,))
+    elif isinstance(node, str):
+        yield trail
+
+
+def _with_string_appended(tools, trail):
+    import copy
+    clone = copy.deepcopy(tools)
+    node = clone
+    for step in trail[:-1]:
+        node = node[step]
+    node[trail[-1]] += " x"
+    return clone
+
+
+def _surface_hash_with_tools(tools):
+    """PROMPT_SURFACE_SHA256 as guest_prompt itself would compute it, over a
+    substituted tool set. Reloads the real module so the recipe under test is
+    the shipped one."""
+    import importlib
+    original = guest_tools.TOOLS
+    guest_tools.TOOLS = tools
+    try:
+        return importlib.reload(guest_prompt).PROMPT_SURFACE_SHA256
+    finally:
+        guest_tools.TOOLS = original
+        importlib.reload(guest_prompt)
+
 # ---------------------------------------------------------------------------
 # THE PIN. If this test fails you changed something the guest reads: bump
 # PROMPT_VERSION, update the hash below, and re-run the voice eval suite
@@ -45,18 +82,18 @@ from scene_facts import derive_scene_facts, render_facts_block
 # ---------------------------------------------------------------------------
 
 _PINNED = (
-    6,
-    "e4c075164212308e572f7bd74364c228f7ce1e21126ae35e07f0e9a5ff1be435",
+    7,
+    "23480854349098d91ce3660001c20f6b50d404b4179f96b5e7be48eec9f8fb74",
 )
 
 
 class TestPinnedCharter:
     def test_version_and_surface_hash_move_together(self):
         assert (PROMPT_VERSION, PROMPT_SURFACE_SHA256) == _PINNED, (
-            "The guest's instructions changed — the charter, or the "
-            "arrangement block's prose. Bump PROMPT_VERSION, re-pin "
-            "(PROMPT_VERSION, sha256) here, and re-run "
-            "tests/test_guest_voice_evals.py against the live model."
+            "The guest's instructions changed — the charter, the arrangement "
+            "block's prose, or the tool definitions in guest_tools.TOOLS. "
+            "Bump PROMPT_VERSION, re-pin (PROMPT_VERSION, sha256) here, and "
+            "re-run tests/test_guest_voice_evals.py against the live model."
         )
 
     def test_the_pin_covers_the_arrangement_block_too(self):
@@ -77,6 +114,50 @@ class TestPinnedCharter:
                 hashlib.sha256(mutated.encode("utf-8")).hexdigest()
                 != PROMPT_SURFACE_SHA256
             ), "a change to this block would not move the pin"
+
+    def test_the_pin_covers_the_tool_definitions_too(self):
+        """0219: the tools are instruction, and the model reads them.
+
+        Driven through the REAL digest recipe by reloading the module over a
+        mutated `guest_tools.TOOLS`, rather than by rebuilding the hash here
+        — a test that recomputed the recipe would keep passing after someone
+        narrowed the real one, which is the whole failure mode this guards.
+
+        Every string the structure carries is checked at any depth, so a
+        description added to a new property years from now is covered without
+        anyone remembering to widen this test.
+        """
+        strings = list(_string_paths(guest_tools.TOOLS))
+        assert len(strings) > 20, (
+            f"the tools should carry substantial prose; found {len(strings)}"
+        )
+        for trail in strings:
+            mutated = _with_string_appended(guest_tools.TOOLS, trail)
+            assert _surface_hash_with_tools(mutated) != PROMPT_SURFACE_SHA256, (
+                f"a change to TOOLS{list(trail)} would not move the pin"
+            )
+
+    def test_a_tool_cannot_be_added_or_dropped_under_the_pin(self):
+        """The structural half: mutation only covers strings that already
+        exist. A whole new tool is the largest instruction change available
+        here and must move the digest too."""
+        import copy
+
+        added = copy.deepcopy(guest_tools.TOOLS)
+        added.append({"name": "measure", "description": "invent a number",
+                      "input_schema": {"type": "object", "properties": {}}})
+        assert _surface_hash_with_tools(added) != PROMPT_SURFACE_SHA256
+
+        assert _surface_hash_with_tools(
+            copy.deepcopy(guest_tools.TOOLS)[:-1]
+        ) != PROMPT_SURFACE_SHA256
+
+    def test_the_pinned_recipe_still_reproduces_the_live_digest(self):
+        """The reload harness above is only evidence if it agrees with the
+        module when nothing is mutated."""
+        assert _surface_hash_with_tools(
+            guest_tools.TOOLS
+        ) == PROMPT_SURFACE_SHA256
 
     def test_the_arrangement_block_carries_the_re_derivation(self):
         """Decision 0174's fix, as a capability truth rather than a phrasing.
