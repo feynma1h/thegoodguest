@@ -245,8 +245,25 @@ gcloud run deploy "${SERVICE}" \
     --no-cpu-throttling \
     --cpu-boost \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
-    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app,CLOUD_TASKS_PROJECT=roomstudio,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15,SHELL_MATERIAL_MODEL=claude-sonnet-5 \
+    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app,CLOUD_TASKS_PROJECT=roomstudio,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15,SHELL_MATERIAL_MODEL=claude-sonnet-5,PERCEPTION_MASK_REFINE=1,PERCEPTION_ARM_SELECT=1 \
     --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
+    # PERCEPTION_MASK_REFINE and PERCEPTION_ARM_SELECT are ON by operator
+    # ruling (2026-08-23). They flip TOGETHER and refine goes first —
+    # refinement changes what the chooser is choosing between (0212), so
+    # they are one decision, not two switches. --set-env-vars REPLACES the
+    # whole list, so a flag absent from this line is a flag that silently
+    # does not ship: a deploy that looks like it applied the ruling and
+    # did not is worse than one that fails outright.
+    #
+    # The three flags deliberately NOT here, each with its reason:
+    #   PERCEPTION_OBJECT_AWARE_RESIDUE — parked; its job moved into the
+    #     cover pass and it belongs to the throughput charter (0202/0212).
+    #   PERCEPTION_CONDITIONAL_SECOND_ARM — OFF until the throughput
+    #     charter closes; the second arm is currently the OOM fallback in
+    #     six of nine affected boxes (0229).
+    #   PERCEPTION_VISIBILITY_VETO — BLOCKED, not deferred: its long-tail
+    #     regression check needs a GPU and has not run (0234).
+    # Their absence is a ruling. Do not 'fix' it by adding them.
     # SHELL_MATERIAL_MODEL is the material-family classifier (decision
     # 0069; shell_material.py). Swapping it changes what families ship —
     # adjudicate on the reference room before widening. The secret mount
