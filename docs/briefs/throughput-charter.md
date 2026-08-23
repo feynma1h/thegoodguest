@@ -116,11 +116,21 @@ residency is not disk size, but the order is right. Freeing **1.2 GiB covers
    exists; the cost is wall-clock on a service that budget-stops rooms
    today (`b667f891` stops every round).
 3. **It is mutually exclusive with mask refinement.** 0212 is about to turn
-   refinement on, refinement calls SAM 3 inside pass 2, and refinement is the
-   largest measured win in this corpus — rp7's desk from 0.321 to 1.122 of
-   its box's narrowest axis. **Trading refinement for OOM headroom is a
-   product decision, not an implementation one**, and it should not be made
-   by whoever happens to be holding the file.
+   refinement on and refinement calls SAM 3 inside pass 2, so the trade is
+   real. **Its value wants stating carefully, because the headline number is
+   one axis.** rp7's desk goes 0.321 -> 1.122 on `arm_fit`'s `fill`, which
+   divides the rendered VERTICAL span by `box.dimensions[1]` — the box's
+   HEIGHT, not its narrowest axis, which is what this charter and CLAUDE.md
+   both used to call it. Read in the box's own three axes (1.291 x 0.795 x
+   0.660 m) the refined arm is 0.734 x 0.877 x 0.665: width falls to **0.569
+   of the box** and the three-axis error goes **0.626 -> 0.644 m, marginally
+   worse**. It is not rotated; it is a **partial object**, about 57% of the
+   desk's width. The operator ruled refinement ON having seen exactly this,
+   on other merits, so the ruling stands — but it is not "the largest
+   measured win in this corpus", and whoever costs this trade must not
+   inherit that valuation. **Trading refinement for OOM headroom is a product
+   decision, not an implementation one**, and it should not be made by
+   whoever happens to be holding the file.
 
 The exclusivity is not absolute: a restructure that batches pass 2's
 refinement calls into their own sub-pass would let SAM 3 be evicted after it,

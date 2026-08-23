@@ -303,6 +303,22 @@ the viewer may render, so measurement is never falsified to hide a splat
 artifact. `person` is a suppression-only concept — segmented, never shipped
 (0089).
 
+**Association's label map and the segmentation prompt are ONE contract**
+(0226), and this is the one change on `selection-supply` that is NOT behind a
+flag. SAM 3 returns the prompt term verbatim, so `BOX_LABEL_FAMILIES` and
+`DEFAULT_OBJECT_PROMPT` are two halves of one list: eight of seventeen family
+members could never be emitted (`table` among them, because the prompt carries
+`dining table`/`coffee table`/`side table` and no bare `table`), and five
+emittable furniture names sat in no family. Removing the eight is provably
+behaviour-identical; adding the five plus `refrigerator:cabinet` takes the
+four preserved captures **20/31 → 22/31 boxes matched, 28 → 30 associations**,
+and an independent A/B over all four confirms **no pre-existing association
+moved** — both new matches are boxes that previously had none.
+`box_placement.vocabulary_gaps` logs `box_vocabulary_gap` once per room so
+neither direction can silently re-open, and `DEFAULT_OBJECT_PROMPT` now lives
+in `process_receiver.py` because `server.py` imports torch and no GPU-free
+test could read it there.
+
 Suite **952 passed + 2 skipped** with `web/public/dev-fixtures` staged and
 **945 + 9** without (`services/perception-obj/tests`;
 903 + 9 before 0204-0205 added 42).
@@ -531,7 +547,15 @@ gains.
   from the model's input what the photograph actually contains. On a 0%-traffic
   candidate the repair reproduced 0198's bench **to the pixel** — 58,386 →
   61,439 mask px at IoU 0.9493 — and rp7's desk went from filling **0.321** of
-  its box's narrowest axis to **1.122**. `PERCEPTION_ARM_SELECT` then moved
+  its box's HEIGHT to **1.122**. That axis label matters and was wrong here
+  until 2026-08-24: `arm_fit`'s `fill` divides the rendered vertical span by
+  `box.dimensions[1]`, so it is the box's height rather than its narrowest
+  axis, and it is ONE axis — in the desk box's own three (1.291 × 0.795 ×
+  0.660 m) the refined arm is 0.734 × 0.877 × 0.665, its width falls to
+  **0.569 of the box**, and the three-axis error goes **0.626 → 0.644 m,
+  marginally worse**. It is a partial object, not a rotated one. The ruling
+  stands on other merits; the valuation does not — see the throughput
+  charter, which carried the inflated version. `PERCEPTION_ARM_SELECT` then moved
   exactly one object: rp7's desk, which 0204 had measured as a KEEPER. **The
   chooser did not change — refinement changed what it was choosing between**,
   which is why these are one decision rather than two and why refine goes first
