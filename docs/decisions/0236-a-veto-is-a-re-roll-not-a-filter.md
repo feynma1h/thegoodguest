@@ -63,6 +63,24 @@ from bad here. rp7, all six box views complete before the budget stop:
 | bed | f294, **0.419** | f363, **0.799** | **+0.380** |
 | cabinet, desk, nightstand | | unchanged | |
 
+**The coupling with arm selection, which is the finding that decides it.**
+Replayed through `choose_arm` over rp6g1's two selections — the flag the
+operator ruled ON, against the frames the veto leaves:
+
+| box | shipped selection, arm-select ON | veto selection, arm-select ON |
+|---|---|---|
+| table `box_00` | f178, fill **1.004** | f171, fill **0.761** |
+| chair `box_01` | f57, fill 1.031 | f57, fill 1.031 |
+| bed `box_02` | f178, fill 0.884, err 0.134 | f136, fill **1.102**, err **0.094** |
+| nightstand `box_03` | **two arms**, f97 fill 1.169 kept over f216 fill 0.223 | **one arm**, f216, fill **0.223** |
+| storage `box_04` | **no arm at all** | f88, fill 0.931 |
+
+`box_03` is the whole argument in one row. Today that box has two arms and
+arm selection **correctly refuses** the bad one. Under the veto it has ONE,
+because f97 is gone from the selection, so the chooser has nothing to choose
+and the 0.223 fill ships. `box_00` is the same shape one step milder: the
+walked switch to f178 is simply not available.
+
 ## What we chose
 
 **The flag stays off, and this is why rather than a blank.** Not because the
@@ -102,6 +120,16 @@ puts arm-select before anything that touches supply.
 **rp7 gaining 46% more detections is not a defence.** 0197 measured point
 count picking the wrong view; detection count is the same kind of number.
 The room gained detections and lost its bed.
+
+**The veto and arm selection are adversarially coupled, and nothing said so.**
+0212's enable order already puts the veto last, for the right reason stated
+too weakly — "the veto changes which frames exist before any of it". What the
+table above measures is stronger: **the veto shrinks the candidate set that
+arm selection exists to search.** Its two rp6g1 losses are both losses of an
+ALTERNATIVE, not of a shipped arm, so they are invisible to any measurement
+taken with arm selection off — which is every measurement in 0234, and every
+measurement in this note's own detection table. A supply change and a chooser
+cannot be evaluated apart.
 
 ## What would change this decision
 

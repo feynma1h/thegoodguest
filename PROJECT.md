@@ -560,10 +560,17 @@ gains.
   bidirectionality again — rp7's chair **0.655 → 0.083** and rp6g1 gains a
   box that had no arm at all, against rp7's bed **0.419 → 0.799** and rp6g1's
   nightstand **fill 1.169 → 0.223**. **The sharpest cost is invisible to a
-  flags-off run:** the veto removes rp6g1 f178 and rp7 f114, which are not
-  those boxes' shipped arms but their better ALTERNATIVES — the one walked
-  arm-select switch and mask refinement's target — so it deletes what the two
-  flags just ruled ON exist to act upon. Two follow-ups in 0236: **split the
+  flags-off run, which is every measurement 0234 took:** the veto removes
+  rp6g1 f178 and rp7 f114, which are not those boxes' shipped arms but their
+  better ALTERNATIVES — the one walked arm-select switch and mask
+  refinement's target. Replayed through `choose_arm` over rp6g1's two
+  selections, the nightstand is the whole argument in one row: today it has
+  **two** arms and arm selection correctly refuses the bad one (fill 1.169
+  kept over 0.223); under the veto it has **one**, so the chooser has nothing
+  to choose and **fill 0.223 ships**. **The veto shrinks the candidate set
+  arm selection exists to search** — 0212's enable order already puts the
+  veto last, and this is the stronger reason for it. A supply change and a
+  chooser cannot be evaluated apart. Two follow-ups in 0236: **split the
   flag** (veto 1 removes two frames that produced literally 0 detections and
   is free; veto 2 causes the whole cascade), and **contain the cascade** by
   relaxing a vetoed box's own bar in place rather than buying an extra cover
