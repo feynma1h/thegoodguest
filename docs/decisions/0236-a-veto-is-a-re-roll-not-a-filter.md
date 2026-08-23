@@ -49,9 +49,14 @@ every selected frame even on a budget-stopped run):
 | capture | shipped | with vetoes | |
 |---|---|---|---|
 | rp7   | 39 | **57** | +46% |
-| rp6g1 | 49 | **43** | **−12%**, past 0234's own ≤10% bar |
-| rp6g2 | see below | | |
+| rp6g1 | 49 | **43** | **−12%**; its long tail 33 → 27, **−18%** |
+| rp6g2 | 102 | **112** | +10% — it drops two frames worth 0 detections |
 | spike | 38 | 38 | the veto changes nothing there |
+| **corpus** | **228** | **250** | **+10%** |
+
+**So the blocker comes back mostly favourable.** On aggregate detections rise;
+only rp6g1 falls, and only there does the long tail cross 0234's ≤10% bar.
+The check 0234 held the flag on is not the check that decides it.
 
 **And the output-side instrument** — three-axis error against the box
 RoomPlan measured, which is the one instrument that has ever separated good
@@ -62,6 +67,11 @@ from bad here. rp7, all six box views complete before the budget stop:
 | chair | f7, **0.655** | f115, **0.083** | −0.572 |
 | bed | f294, **0.419** | f363, **0.799** | **+0.380** |
 | cabinet, desk, nightstand | | unchanged | |
+
+rp6g2, the room the vetoes exist for, is the friendliest case and still not
+one-sided: **two boxes acquire an arm they never had** (b01 `sofa`, b08
+`table`), one regresses modestly (b03 `cabinet`, 0.151 → 0.243), eight are
+unchanged.
 
 **The coupling with arm selection, which is the finding that decides it.**
 Replayed through `choose_arm` over rp6g1's two selections — the flag the
