@@ -23,6 +23,25 @@ no-plane-rejection, a configuration nothing ships; trimmed is the shipping
 configuration and it is stable. That is the property c2s does not have — 7 of
 20 of its winners move under the same class of perturbation (0225).
 
+## The substrate was swapped, and that is the headline
+
+**HARD STOP 2's numbers are the FUSED instrument's. Production uses a
+different cloud, and its numbers are worse.** Anyone reading 8-of-8 stability
+or the 5-of-8 residual agreement as a statement about what ships is reading
+the wrong instrument.
+
+| | fused (every keyframe) | **local (what production builds)** |
+|---|---|---|
+| points per box | 36,931 - 444,126 | **1,761 - 29,896** |
+| stable across cloud variants | 8 of 8 | **6 of 8** |
+| agrees with the other one's ranking | — | **6 of 8** |
+
+The gate this note cleared was measured on a cloud production does not have.
+The substitution was deliberate and is stated here rather than left implicit,
+because it is exactly the kind of swap that goes unrecorded: the instrument
+that green-lit the decision and the instrument that ships are not the same
+instrument, and every future claim about s2c must say which one it came from.
+
 ## What we tried
 
 **The cloud is the hard part, and the answer is not the instrument's.**
@@ -82,9 +101,11 @@ question it is asking.
 
 ## Why
 
-**Unanimity means the axis can only make the rule act LESS often. That is
-the whole safety argument, and it is about a population the charter did not
-originally have in view.** 0228 measured the second arm currently carrying an
+**Unanimity means the axis can only make the rule act LESS often. That is a
+STRUCTURAL safety guarantee, not an empirical one** — it holds by the shape
+of the rule rather than because these eight boxes happened to come out that
+way, so no future capture can violate it. The population it protects is one
+the charter did not originally have in view.** 0228 measured the second arm currently carrying an
 **OOM fallback in six of nine affected boxes** — cases where tier-1 is the
 view that failed and a lower-ranked one rescued the object. That role
 persists until the throughput charter lands. A third axis that could ENABLE
