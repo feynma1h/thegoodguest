@@ -105,21 +105,29 @@ question it is asking.
 STRUCTURAL safety guarantee, not an empirical one** — it holds by the shape
 of the rule rather than because these eight boxes happened to come out that
 way, so no future capture can violate it. The population it protects is one
-the charter did not originally have in view.** 0228 measured the second arm currently carrying an
-**OOM fallback in six of nine affected boxes** — cases where tier-1 is the
-view that failed and a lower-ranked one rescued the object. That role
+the charter did not originally have in view: 0228 measured the second arm
+currently carrying an **OOM fallback in six of nine affected boxes** — cases
+where tier-1 is the view that failed and a lower-ranked one rescued the
+object. That role
 persists until the throughput charter lands. A third axis that could ENABLE
 switches would be interacting with those boxes and not merely with the walked
 ones; a veto cannot reach them at all. A test sweeps that property rather
 than asserting it once.
 
 **On this corpus the axis is insurance, not improvement, and it is recorded
-as such.** It changes no outcome. What it changes is the evidence: spike's
-bed, the one box 0205 says nobody can adjudicate, is now a **2-vs-1 refusal**
-rather than 1-vs-1 — fill and s2c prefer the shipped arm, the residual
-prefers the other. The rule still refuses, correctly, but the record now says
-how the instrument split, and that count is the only evidence that will ever
-accumulate about how often the three disagree.
+as such.** It changes no outcome, and on the one box 0205 says nobody can
+adjudicate it adds no evidence either. spike's bed reads **2-vs-1** on the
+LOCAL cloud — fill and s2c prefer the shipped arm, the residual prefers the
+other — but it is **1-vs-1 as an instrument**, because spike b03 is one of
+the two boxes named above whose s2c ranking FLIPS between the two clouds: the
+Chamfer axis prefers the challenger on the fused cloud and the shipped arm on
+the cloud production can build, at a margin of **0.014**. So the third vote
+here is a statement about which cloud was used, not about which arm is
+better. The rule still refuses, correctly, and for a reason the first two
+axes already supply. What the record buys is the split count itself, which is
+the only evidence that will ever accumulate about how often the three
+disagree — read it with the cloud provenance attached, as this note's own
+6-of-8 table requires.
 
 **The local cloud's 6-of-8 agreement with the fused one is the honest cost of
 not having a fused cloud in production**, and it is not hidden. The two
