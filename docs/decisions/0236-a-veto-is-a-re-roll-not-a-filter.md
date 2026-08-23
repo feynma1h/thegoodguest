@@ -59,14 +59,18 @@ every selected frame even on a budget-stopped run):
 | capture | shipped | with vetoes | |
 |---|---|---|---|
 | rp7   | 39 | **57** | +46% |
-| rp6g1 | 49 | **43** | **−12%**; its long tail 33 → 27, **−18%** |
+| rp6g1 | 49 | **43** | **−12%**; its unassociated reconstructions 33 → 27 |
 | rp6g2 | 102 | **112** | +10% — it drops two frames worth 0 detections |
 | spike | 38 | 38 | the veto changes nothing there |
 | **corpus** | **228** | **250** | **+10%** |
 
-**So the blocker comes back mostly favourable.** On aggregate detections rise;
-only rp6g1 falls, and only there does the long tail cross 0234's ≤10% bar.
-The check 0234 held the flag on is not the check that decides it.
+**So the blocker comes back mostly favourable.** On aggregate detections rise
+and only rp6g1 falls — and there the objects RoomPlan does not box, which is
+what the residue exists to serve, go 33 → 27. Stated precisely because the
+plan's own `long_tail` counter is a different denominator: these are
+reconstructed observations that associated with no box, counted offline
+through `associate_observations` over both selections. **The check 0234 held
+the flag on is not the check that decides it.**
 
 **And the output-side instrument** — three-axis error against the box
 RoomPlan measured, which is the one instrument that has ever separated good
