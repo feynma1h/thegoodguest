@@ -36,7 +36,7 @@ import type { Metadata } from "next";
 import LegalPage, { M, Section } from "@/components/LegalPage";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy — roomstudio",
+  title: "Privacy Policy — The Good Guest",
   description:
     "What a room scan contains, where it goes, who processes it, how long it is kept, and how to delete all of it.",
 };
@@ -58,8 +58,8 @@ export default function PrivacyPage() {
     >
       <Section n="1" title="Who this is about">
         <p>
-          This policy covers the roomstudio iPhone capture app and the
-          roomstudio web app (together, “the service”). The service
+          This policy covers The Good Guest iPhone capture app and the
+          web app (together, “the service”). The service
           is operated by Utkarsh Singh (“we”), an individual.
         </p>
         <p>

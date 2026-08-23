@@ -32,9 +32,9 @@ import type { Metadata } from "next";
 import LegalPage, { M, Section } from "@/components/LegalPage";
 
 export const metadata: Metadata = {
-  title: "Terms of Service — roomstudio",
+  title: "Terms of Service — The Good Guest",
   description:
-    "The agreement covering the roomstudio capture app and web app: what you may scan, what we promise, and what we do not.",
+    "The agreement covering The Good Guest capture app and web app: what you may scan, what we promise, and what we do not.",
 };
 
 export default function TermsPage() {
@@ -55,7 +55,7 @@ export default function TermsPage() {
         <p>
           These terms are between you and Utkarsh Singh (“we”), an
           individual, and they
-          govern your use of the roomstudio iPhone app and web app
+          govern your use of The Good Guest iPhone app and web app
           (“the service”). Using the service means you accept them.
           If you do not, do not use it.
         </p>
@@ -71,8 +71,7 @@ export default function TermsPage() {
       <Section n="2" title="What the service is, and what state it is in">
         <p>
           You scan a room with an iPhone; we reconstruct it as a 3D model you
-          can look at and talk about. The product name is not final —
-          “roomstudio” is a working title.
+          can look at and talk about.
         </p>
         <p>
           The service is early. Features appear, change, and are withdrawn.

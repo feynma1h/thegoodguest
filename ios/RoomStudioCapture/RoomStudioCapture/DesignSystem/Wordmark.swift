@@ -24,7 +24,7 @@ import SwiftUI
 
 enum RSBrand {
     /// Placeholder product name. One-file swap when the real name is chosen.
-    static let name = "roomstudio"
+    static let name = "The Good Guest"
 }
 
 /// One filled polygon of the mark, scaled from the generated 1024 design space.

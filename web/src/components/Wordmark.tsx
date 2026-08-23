@@ -1,6 +1,7 @@
 /**
  * The product wordmark — isolated here because NO NAME HAS BEEN CHOSEN.
- * "roomstudio" is a stand-in (see CLAUDE.md "Naming" and decision 0055).
+ * The product name is "The Good Guest" (decision 0245). This file and
+ * DesignSystem/Wordmark.swift are still the only places it is set.
  * The design file renders every wordmark slot as a literal placeholder
  * in quiet tracked mono; this component honors that — deliberately quiet,
  * because the room is the hero.
@@ -97,7 +98,7 @@ export default function Wordmark({
       } ${className ?? ""}`}
     >
       <Mark size="13px" onDark={tone === "cream"} />
-      roomstudio
+      The Good Guest
     </span>
   );
 }
