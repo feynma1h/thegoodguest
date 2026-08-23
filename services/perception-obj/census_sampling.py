@@ -85,6 +85,11 @@ OBJECT_AWARE_RESIDUE = os.environ.get("PERCEPTION_OBJECT_AWARE_RESIDUE", "0") ==
 # these vetoes answer only "can this frame serve this object AT ALL", at
 # zero, and every surviving frame is ordered by exactly what ordered it
 # before.
+#
+# NOT READY TO ENABLE. The long-tail regression check decision 0234 owes —
+# detection counts under this sampler against today's — needs a GPU drive and
+# has not run. The pose-coverage proxy shows no regression and a proxy is not
+# the measurement.
 VISIBILITY_VETO = os.environ.get("PERCEPTION_VISIBILITY_VETO", "0") == "1"
 
 # Veto 1, whole-frame usability. Deliberately extreme: these reject a frame
