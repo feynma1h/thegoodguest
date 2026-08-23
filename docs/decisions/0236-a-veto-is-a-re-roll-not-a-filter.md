@@ -83,11 +83,27 @@ walked switch to f178 is simply not available.
 
 ## What we chose
 
-**The flag stays off, and this is why rather than a blank.** Not because the
-vetoes are wrong — veto 1 is unarguable, see below — but because the switch
-as built cannot be enabled without accepting a whole-selection re-roll whose
-measured effect is one large win and one large loss on the first room that
-ran.
+**The flag stays off, and this is why rather than a blank.**
+
+It is **not** net-negative, and the note should not be read as saying so: rp7
+gains a chair at 0.655 → 0.083, rp6g1 gains a box that had no arm at all and a
+better bed, against rp7's bed and rp6g1's nightstand and table. Roughly even,
+per object, in both directions. Three reasons it should not ship in this
+shape:
+
+1. **It is a coin flip per object**, which is 0197's standing rule. An effect
+   this large and this bidirectional, with nothing that predicts the sign, is
+   not shippable however good the average looks.
+2. **It was built on a wrong picture of its own size.** 0234 describes a
+   three-frame change. Nobody chose to accept a whole-selection re-roll,
+   because nobody knew that was what it was.
+3. **Its measurable half improves while its unmeasurable half degrades.**
+   Detections, coverage and pose spread all read fine or better; the cost sits
+   in ALTERNATIVES, which only the chooser can see, and every number in 0234
+   was taken with the chooser off. That is exactly the shape 0232 refused a
+   switch for — a control that fires into a defect under a conservative
+   default is worse than one that never fires, because the metric it moves
+   reads as improvement.
 
 ## Why
 
