@@ -54,14 +54,27 @@ Against 0174's measurement of the same two things — 12/16 for the word, 16/16
 for the property — **the word has collapsed and the property has held**. Which
 is what makes this a defect in the instrument rather than in the guest.
 
-**Attribution to 0214 was attempted and is NOT settled.** It gave the
+**Attribution to 0214 is SETTLED, and it is exonerated.** It gave the
 rearranged room a provenance line opening *"as it stands on screen"*, and the
 guest's replies echo that verb closely enough to suspect the facts block had
-taught it a register that displaced rule 10's. Replacing that clause and
-re-running the test three times gave three more reds — but by the same flaw
-described above, those reds are uninterpretable. The hypothesis is open. It is
-cheap to settle for anyone who wants to: patch the clause and run the
-per-sample harness rather than the test, comparing the "would" column above.
+taught it a register that displaced rule 10's. The first attempt to test this
+re-ran the whole test three times and read three reds — uninterpretable, by
+the same flaw described above. Measured properly instead, paired and
+interleaved, alternating the two provenance openings sample by sample:
+
+| provenance opening | literal "would" | marked as arranged |
+|---|---|---|
+| shipped ("as it stands on screen") | 2/16 | 14/16 |
+| neutral (the clause removed) | 4/16 | 14/16 |
+
+The two arms do not separate (p = 0.33), and — the part that actually settles
+it — **the neutral arm is still far below 0174's 12/16** (p = 0.006). Removing
+the suspect clause does not bring the word back. Whatever moved rule 10's
+grammar, it is not this. The property holds at 14/16 either way, which is the
+same 88% the table above records.
+
+That leaves the model behind `GUEST_MODEL` as the remaining explanation, and
+the suite's own header already names a model change as trigger 2.
 
 ## What we chose
 
@@ -128,6 +141,9 @@ notes that model swaps move voice more than prompt edits do.
   one model, and this note is the evidence that they do not survive a swap.
   0172 already recorded that a green run does not say which sentence is
   holding the voice up; this adds that a red one does not say the voice broke.
-- **Someone settles the 0214 attribution.** If that provenance line IS what
-  displaced the word, the fix is a wording change in `scene_facts` rather than
-  anything here, and rule 10's "would" would come back on its own.
+- **A future model brings the word back on its own.** If a later
+  `GUEST_MODEL` reads rule 10 the way 0174's did, this instrument becomes
+  wider than it needs to be, and narrowing it back to `_HEDGE` costs nothing.
+  Measure before doing it: the harness is four lines over the suite's own
+  `_Room`, and running it paired and interleaved is what made both of this
+  note's attributions cheap.

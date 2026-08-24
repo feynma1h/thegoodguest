@@ -581,22 +581,29 @@ gains.
   colour is one of the post-passes its long tail costs it. Objects with no
   block inside a coloured room are the confidence gate working, not a
   failure.
-- **One voice eval is flaky at roughly 1 run in 4** —
+- **Two voice evals are flaky, both measured 2026-08-24 rather than guessed.**
   `TestFacingCorrection::test_a_piece_with_no_second_way_round_is_refused_plainly`
-  asks the guest to turn a rug with no measured box and greps its reply for a
-  refusal word; the miss is phrasing, not behaviour. Re-run before believing a
-  single red. **The other long-recorded flake — "one setup asks about an
+  misses about **1 run in 4** — it asks the guest to turn a rug with no measured
+  box and greps its reply for a refusal word, so the miss is phrasing, not
+  behaviour. `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`
+  misses about **1 run in 13**, on `main`'s charter and the current one alike.
+  Re-run before believing either, and **measure with the rate harness rather
+  than by re-running the test and counting pass/fail** — 0215 records why that
+  is not a rate. **The other long-recorded flake — "one setup asks about an
   ambiguous wall roughly 1 time in 8" — is probably not a flake and its rate
   was understated.** 0186 measured that setup refused 9 times in 26, and one
   refusal was verbatim "only works if you tell me which wall". Re-measure
   rather than assuming it is gone: 0186's fix took the same setup to 14/14.
-- **Rule 10's literal "would" is at 4/24, against 12/16 when 0174 measured it**
-  (0215). The property the rule states — the person can hear which room is being
-  described — holds at 21/24, so the evals now grade that instead. **The cause
-  is unattributed and the obvious suspect is NOT ruled out:** 0214's rearranged
-  provenance line opens "as it stands on screen" and the guest's replies echo
-  that verb. 0215 records the cheap method to settle it; the first attempt was
-  run through a test that could fail for a second reason and is uninterpretable.
+- **Rule 10's literal "would" has collapsed — 2/16 against 12/16 when 0174
+  measured it** (0215) — while the property the rule states holds at 14/16, so
+  the evals now grade the property. **0214 was the obvious suspect and is
+  RULED OUT**: on a paired, interleaved A/B of its provenance opening, the two
+  arms do not separate (2/16 vs 4/16, p = 0.33) and the arm with the suspect
+  clause REMOVED is still far below 0174's rate (p = 0.006). Removing it does
+  not bring the word back. The remaining explanation is the model behind
+  `GUEST_MODEL`, which is the suite's own trigger 2. **Do not re-open this by
+  re-running the test and counting pass/fail** — that method is what made the
+  first attempt uninterpretable.
 - **The voice evals RAN 2026-08-24 and 0213/0214's deploy gate is CLEARED**
   (26 passed, 1 failed at `PROMPT_VERSION 6`; the single failure was not in
   either of them). They found two defects underneath that work — 0186's charter
@@ -605,30 +612,24 @@ gains.
   Secret Manager since 2026-07-21 and the operator's own account can read it;
   nothing had connected it to the harness, and the belief that it was missing
   cost that lane two days.
-- **The full suite RAN at the final charter and came back 26 passed, 1 failed
-  — so `PROMPT_VERSION 7` is NOT cleared for deploy.** The failure is
-  `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`:
-  told "turn it round" straight after moving the red chair, the guest asked
-  which chair instead of taking the referent from the turn before. **It is ONE
-  observation and its cause is unmeasured** — it passed in both earlier full
-  runs the same day, and its own docstring calls it "the cheapest of the six to
-  get wrong".
-  **What IS ruled out, offline and provably:** the 0220 resolver change is not
-  the mechanism. In that room `"it"` resolves to `unknown_object` with an EMPTY
-  detail on `main` and on `main`+0220 alike, and `"chair"` differs only in a
-  tail that is strictly more decisive after 0220 (it rules three unplaced
-  chairs OUT rather than lumping them in as indistinguishable). The remaining
-  candidate is 0186's 35-word charter edit, which cannot be separated from
-  ordinary model variance at n=1.
-  **Measuring it is blocked until 2026-09-01.** Not credits this time — a
-  configured account usage cap: `400 — You have reached your specified API
-  usage limits. You will regain access on 2026-09-01 at 00:00 UTC.` Raising
-  the cap in the Anthropic Console lifts it sooner; adding credits does not.
-  The rate harness is four lines over the eval suite's own `_Room` and is the
-  right instrument — **do not re-run the whole test and count pass/fail**,
-  which is the error 0215 records, because this test can fail at its setup for
-  a second reason.
-  `RUN_VOICE_EVALS=1 ANTHROPIC_API_KEY="$(gcloud secrets versions access latest --secret=anthropic-api-key --project=roomstudio)" .venv/bin/pytest services/api-public/tests/test_guest_voice_evals.py -q`
+- **The full suite at `PROMPT_VERSION 7` reads 26 passed, 1 failed, and the
+  red is a PRE-EXISTING FLAKE rather than a regression.** The failure is
+  `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`
+  — told "turn it round" after moving the red chair, the guest occasionally
+  asks which chair instead of taking the referent from the turn before. It is
+  a PER-SAMPLE assertion, so the test goes red whenever one sample misses.
+  **Measured 2026-08-24 on a paired, interleaved A/B, 0186's charter against
+  `main`'s: 19/20 on BOTH arms.** Pooled over every sample taken that day,
+  33/36 shipped against 34/35 main (Fisher p ≈ 0.31). So the guest takes the
+  referent about 12 times in 13, on either charter, and 0186's edit is ruled
+  OUT as the cause. **Do not re-report this as a regression, and do not
+  attribute it to 0186 or 0220** — 0220's resolver is separately ruled out
+  offline, because in that room `"it"` resolves to `unknown_object` with an
+  EMPTY detail before and after, and `"chair"` differs only in a tail that is
+  strictly more decisive afterwards.
+  The remaining question is whether the eval should be a rate rather than a
+  per-sample rule, which is the same shape as the residue 0174 left and is a
+  judgment call nobody has made.
 
 **iOS**
 
