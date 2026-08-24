@@ -167,6 +167,16 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   `sceneDepth`, measured on hardware. Plane detection on every tier; the final
   anchor set is snapshotted at stop. Tier is `LIDAR_ROOMPLAN` iff a built room
   with at least one wall or floor ships.
+- **Frame luminance.** `FrameLuminance` measures mean luma on the luma plane of
+  every accepted keyframe, on the queue that already holds the buffer, and
+  `CaptureManager` reports the census at stop on **every** capture — a census
+  that only prints on trouble cannot be told apart from one that never ran. The
+  floor is 16, the video-range black level, and it sits in a chasm: across the
+  seven preserved captures the six healthy ones never read below 80.63, while
+  rp6g2's covered-lens tail reads 0.13–11.87 (0240/0241). **Reporting only —
+  nothing is dropped and nothing is gated on the reading**, deliberately, and
+  the durable fix is an additive proto field carrying the statistic on the
+  bundle, triggered by the next `capture_bundle.proto` change for any reason.
 - **Live floor plan** drawn from the RoomPlan delegate stream, replacing the old
   placeholder sketch. Confidence gates naming: a low-confidence object renders
   unlabelled and the guest hedges.
@@ -203,11 +213,8 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
 - **Reclaim.** `CaptureReaper` frees a capture's record and files once the user
   has *seen* the outcome — never on mere upload success.
 
-Suite **590**: 584 asserting offline tests + 2 boilerplate stubs + 4 live
-integration tests that require a reachable backend. **It was 600 until
-2026-08-24, and the drop is the 0072 rollback path being deleted (0237), not a
-regression** — `SceneStatusViewTests` was 6 tests and the `newestCompleted`
-table 4, and both had a deleted view as their only subject. See the iOS test policy
+Suite **610**: 604 asserting offline tests + 2 boilerplate stubs + 4 live
+integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
 ### api-public — `api-public-00042-ruq`, image `20260821-005416`
@@ -677,10 +684,17 @@ gains.
   abstract.
   **rp6g2 is NOT a representative room** (0235): its last **28 keyframes are
   black**, mean luma 0.13–4.49 against a capture median of 129.5 — **23.4% of
-  a room that has been the thin case in every round of analysis.** Poses and
-  depth are valid, so this may be an **iOS capture defect** rather than a data
-  quirk. Re-read every prior conclusion drawn from it — including the 53-item
-  budget-starved tail and the 0-of-45 colour result — against this.
+  a room that has been the thin case in every round of analysis.** Re-read
+  every prior conclusion drawn from it — including the 53-item budget-starved
+  tail and the 0-of-45 colour result — against this. **The cause is settled and
+  is NOT the app (0240): the operator's hand covered the lens** for the last
+  5.7 s of a 32.8 s capture. The RGB carries 150–250 kB of red-dominant sensor
+  noise rather than a blank buffer — a zero-filled YCbCr buffer renders mid
+  GREEN, not black — the frames show fingers arriving at f95, and the depth map
+  turns at f96 into a plane at 0.39–0.59 m, flat to ~1 cm, that holds its
+  distance while the phone walks a metre. **Do not re-open this as a pipeline
+  stall**; what would re-open the class is a dark run with *room-scale* depth
+  behind it, which is what 0241's logging now makes visible.
   **Measured 2026-08-24 for the `capture-dark` lane:** the two black frames
   the shipped sampler takes, f103 and f119, read mean luma **2.46** and
   **1.88** and produce **0 detections each** — SAM 3 finds literally nothing
@@ -751,6 +765,21 @@ gains.
 
 **iOS**
 
+- **A keyframe's manifest entry survives its JPEG failing to write** (0240).
+  `acceptFrame` appends to `capturedFrames` synchronously while the encode and
+  the write happen later on `jpegQueue`; both failure paths log, count, and
+  return without removing the entry. So the bundle can declare a frame whose
+  file was never written. **This is a MISSING file, not a dark one** — 0105's
+  declared-blob check turns it into `failed_incomplete` — and no capture has
+  been observed hitting it; the stop-time verification already counts accepted
+  vs written vs on-disk but does not reconcile them. Found while ruling the app
+  out of the rp6g2 dark tail, deliberately not fixed there.
+- **The luminance census has never run against a live camera buffer** (0241).
+  It is pinned against the preserved capture's readings and synthetic planes
+  only. A real scan on a re-signed device build is the confirmation, and it is
+  the operator's. The one thing it would settle that offline work cannot is
+  which luma range ARKit vends on this hardware — the code reads the format and
+  handles both, so a wrong assumption shows up as a scale error, not a crash.
 - **The OS-kill relaunch gate (2b) has never run on hardware.** The code is
   complete; force-quit provably produces zero background relaunches (0114), so
   `StagingHooks`' `exit(0)` route is the only way to reach it.
@@ -1010,7 +1039,7 @@ re-enqueue (18) and ruff (non-gating) passed.
 
 ## iOS test policy
 
-The iOS suite is **590 tests total** (was 600; the ios-surfaces-2 pass REMOVED 10 by deleting the 0072 rollback path — `SceneStatusViewTests` 6 and the four `newestCompleted` assertions in `ScenePollExpectationTests`, whose only subject was a static helper on a deleted view. **A number below 600 is that deletion, not a regression** — decision 0237. Before that, 553 → 600; the scenes-client pass added 47 — `ScenesListClientTests` 17, `RoomHistoryTests` 12, `RoomsStoreTests` 11, `RoomsSurfaceTests` 7, for the `GET /scenes` client and the three surfaces it feeds. Before that, 544 → 553; the ios-surfaces pass added 9 — the flight stand-down and the launch-adoption table, both in `ScenePollExpectationTests`. Before that, 535 → 544 from the uid-churn investigation — `IdentityContinuityTests`, the launch continuity table. Before that, 523 → 535 from the Google-linking pass and 482 → 523 from the ios-residue pass. Before that, 463 → 482; the walk-findings pass added 19 — Live Activity narration, failure copy, and the recoverable count. Before that, 391 → 463 from the Live Activity / 429 / guidance pass, which added 76 and relocated 4. Before that, 352 → 391 from the release-residue pass; the release-residue pass added 39 — `CaptureReclaimTests` 15, `CaptureReaperTests` 12, `StagingHooksTests` 7, `ScenePollExpectationTests` 5. Before that, 302 → 352 from RP-6/RP-7; RP-6 added 11 — 9 co-run/wire pins + 2 envelope-edge pins — and RP-7 added 39 — `FloorPlanMathTests` 18, `FloorPlanVoiceTests` 13, `FloorPlanFixtureTests` 8. Before that, 288 → 302 from the 0074 phantom-room pass), run manually via `xcodebuild … -scheme RoomStudioCapture-Integration` — the only scheme in this project (no separate default scheme, no CI gate). That scheme bakes `RUN_INTEGRATION_TESTS=1`, so the 4 `UploadSessionClientTests` **execute live on every run**; they are NOT skipped in practice. They last ran live 2026-08-24 (the ios-surfaces-2 pass, 590/590) against `api-public-00042-ruq`, the whole suite in ~17 s of test execution.
+The iOS suite is **610 tests total** (was 590; the capture-dark pass added 20 — and 590 was itself 600 before ios-surfaces-2 REMOVED 10 by deleting the 0072 rollback path, so neither lane's own figure is main's — `FrameLuminanceTests`, the mean-luma statistic and its session census, including the preserved rp6g2 capture's own 124 readings as a fixture. Before that, 553 → 600; the scenes-client pass added 47 — `ScenesListClientTests` 17, `RoomHistoryTests` 12, `RoomsStoreTests` 11, `RoomsSurfaceTests` 7, for the `GET /scenes` client and the three surfaces it feeds. Before that, 544 → 553; the ios-surfaces pass added 9 — the flight stand-down and the launch-adoption table, both in `ScenePollExpectationTests`. Before that, 535 → 544 from the uid-churn investigation — `IdentityContinuityTests`, the launch continuity table. Before that, 523 → 535 from the Google-linking pass and 482 → 523 from the ios-residue pass. Before that, 463 → 482; the walk-findings pass added 19 — Live Activity narration, failure copy, and the recoverable count. Before that, 391 → 463 from the Live Activity / 429 / guidance pass, which added 76 and relocated 4. Before that, 352 → 391 from the release-residue pass; the release-residue pass added 39 — `CaptureReclaimTests` 15, `CaptureReaperTests` 12, `StagingHooksTests` 7, `ScenePollExpectationTests` 5. Before that, 302 → 352 from RP-6/RP-7; RP-6 added 11 — 9 co-run/wire pins + 2 envelope-edge pins — and RP-7 added 39 — `FloorPlanMathTests` 18, `FloorPlanVoiceTests` 13, `FloorPlanFixtureTests` 8. Before that, 288 → 302 from the 0074 phantom-room pass), run manually via `xcodebuild … -scheme RoomStudioCapture-Integration` — the only scheme in this project (no separate default scheme, no CI gate). That scheme bakes `RUN_INTEGRATION_TESTS=1`, so the 4 `UploadSessionClientTests` **execute live on every run**; they are NOT skipped in practice. They last ran live 2026-08-24 (the capture-dark pass, 620/620) against `api-public-00042-ruq`, the whole suite in ~16 s of test execution.
 
 **A full-suite run SPENDS the operator's daily capture quota, and nothing warns you.** `UploadSessionClientTests` mints a fresh `bundleId = UUID()` per test, and the per-UID daily CAPTURE ceiling (12, `UPLOAD_SESSION_DAILY_CAPTURES`, live in `infra/api-public.env.yaml`) is charged on first claim — BEFORE manifest validation, so the path-violation test charges one too. That is **~3 captures per full-suite run**, against a ceiling of 12: **four runs a day exhausts it and locks the operator out of scanning their own rooms.** This is the same objection `.github/workflows/ios.yml` documents for CI, and it applies identically to a local lane iterating. **Use `-skip-testing:RoomStudioCaptureTests/UploadSessionClientTests` for repeat runs** — exactly what the workflow does — and take the live tests once at the end. **Any lane asked for repeated full-suite runs must skip them**; measured 2026-08-24 after a lane's early runs failed on `UploadSessionClientTests` in a way that reads exactly like a backend outage.
 
@@ -1018,7 +1047,7 @@ The iOS suite is **590 tests total** (was 600; the ios-surfaces-2 pass REMOVED 1
 
 **Posture: fail-closed-live, not fail-open.** Each integration test calls `XCTSkipIf(!RUN_INTEGRATION_TESTS)` — the fail-open default — but because the sole scheme always sets the flag, that skip path is never taken here. With the flag set they hit the live `/upload_session` contract and go **red if the backend is unreachable**. Running the suite therefore requires a reachable backend; an offline run will fail those 4 (expected, not a regression).
 
-**Honest count:** report as "584 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 590 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't.
+**Honest count:** report as "604 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 620 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't.
 
 **One known flake, measured 2026-08-22.** `BlobUploadManagerTests.test_gate_lastDecrement_afterDrain_firesHandler` fails roughly **1 run in 15** under full-suite load and **0 in 12** in isolation — so it is a scheduler race, not a regression, and re-running is the correct response to seeing it red once. Measured across 29 full-suite runs (1 failure in 15 on `scenes-client`, 0 in 14 on `0f671fc`), which is why it is recorded as a rate rather than attributed to a change. The cause is visible in the test's own source: a single `await Task.yield()` is the only synchronisation before it asserts that a background-completion handler has run. Fixing it means giving the test a real await, not a longer sleep — but it belongs to whoever owns upload, not to a passing lane.
 
@@ -1207,7 +1236,7 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 **ALL THREE PARALLEL LANES MERGED 2026-08-09** (`stage2` → 0135–0137, `perception-emit`, `ios-residue`; worktrees removed, branches deleted). Merged-tree verification: root **724 passed + 10 skipped**, perception **704**, web **204**, iOS **523**, tsc clean, zero conflict markers. **What the lanes left owed, now written:** lane B's two notes are 0142 (`/compress` as a third `/process` stage rather than a sidecar) and 0143 (`extent_axes_m` declared per box, horizontals deliberately unnamed). The `dims` correction is lane C's **0137**, reached independently — there is no third note on it.
 
-**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-24, with selection-supply and ios-surfaces-2 merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNSPENT: 0243–0244 to perception-deploy**, the only lane with no commits of its own. **Written but UNMERGED, so invisible to `main` and not free: 0186 plus 0215 and 0219–0220 (guest-closure), 0239 (upload-flake), 0240–0241 (capture-dark), 0242 (privacy-labels)** — guest-closure took 0186 from the free pool beyond its block, correctly derived. **0225–0236 are SPENT by selection-supply** — its own eleven plus 0236 for the review's veto verdict; **0237–0238 are SPENT by ios-surfaces-2** — 0237 (dead code rusts shut), 0238 (one slot is what keeps the rule); **0245 is SPENT by the name swap** (the name is the register it was built in). Everything else through 0245 is used.
+**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2 and capture-dark merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNSPENT: 0243–0244 to perception-deploy**, the only lane with no commits of its own. **Written but UNMERGED, so invisible to `main` and not free: 0186 plus 0215 and 0219–0220 (guest-closure), 0239 (upload-flake), 0242 (privacy-labels)** — guest-closure took 0186 from the free pool beyond its block, correctly derived. **0225–0236 are SPENT by selection-supply**; **0237–0238 by ios-surfaces-2** (dead code rusts shut; one slot is what keeps the rule); **0240–0241 by capture-dark** (the dark tail is a covered lens; the capture measures darkness and does not act on it); **0245 by the name swap**. Everything else through 0245 is used.
 
 Two durable lessons, both learned by collision. **Put a session's number block INSIDE the prompt body**: a block written in a chat heading once reached nobody and two lanes claimed the same numbers, and the room-quality session was handed one stale block in its prompt and a different one in its handoff. When a prompt and this file disagree, **this file and the handoff win** — a prompt is written once, these are maintained. And **two sessions sharing one tree is how a note gets dropped**: decision 0179 was lost by the sam3d-pointmap merge and restored by `546281e`, which is why the Tooling conventions now insist every session gets its own worktree.
 
