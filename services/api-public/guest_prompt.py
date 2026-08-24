@@ -9,11 +9,12 @@ instructions without bumping PROMPT_VERSION turns tests/test_guest_prompt.py's
 pinned-hash test red, and every persisted turn records the reproducibility
 triple (facts_version, prompt_version, model).
 
-The pin covers the whole instruction surface, charter and arrangement block
-alike (PROMPT_SURFACE_SHA256). It did not always: the arrangement block's
-prose sat outside it, could be reworded with no version bump and no eval
-trigger, and that is how decision 0174's defect shipped and survived two bumps
-without anyone noticing.
+The pin covers the whole instruction surface — charter, arrangement block and
+TOOL DEFINITIONS alike (PROMPT_SURFACE_SHA256). It did not always, twice over:
+the arrangement block's prose sat outside it until 0175, and the tools' several
+hundred words of instruction until 0219. Both could be reworded with no version
+bump and no eval trigger, and that is how decision 0174's defect shipped and
+survived two bumps without anyone noticing.
 
 Assembly order is fixed for caching and safety: static charter → per-scene
 facts → messages. User text NEVER enters the system prompt. cache_control
@@ -34,8 +35,10 @@ tests/test_guest_prompt.py (pinned hash), tests/test_guest_voice_evals.py
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 
+from guest_tools import TOOLS
 from scene_facts import SceneFacts, render_facts_block
 
 # Bump on ANY change to the guest's instruction surface — the charter or the
@@ -67,7 +70,15 @@ from scene_facts import SceneFacts, render_facts_block
 # fixed is not re-asked; and inline markup is named for what it is, since
 # nothing renders it. Two exemplars teaching the retired rules are replaced by
 # five.
-PROMPT_VERSION = 6
+# 7: two things, one bump. The pin grows to cover the tool definitions
+# (decision 0219) — several hundred words of instruction the guest reads that
+# sat outside it, so the digest moves without a syllable of the charter
+# moving. And rule 5 stops forbidding what rule 6 grants (decision 0186): its
+# "never ... place anything against one" was written when the guest had no
+# hands, and after 0132 gave it some, the guest read it as a ban on the
+# `against_wall` relation and refused a third of wall placements outright,
+# quoting the clause back. Measured 17/26 applied before, 14/14 after.
+PROMPT_VERSION = 7
 
 STATIC_CHARTER = """\
 You are the guest: a considerate visitor with a spatial designer's eye, invited into one \
@@ -157,9 +168,11 @@ when they are asking for something done.
 5. What you cannot see, in any room: the SHAPES of things (a height and a footprint are \
 not a shape), which way anything faces, materials, textures, and light. You also cannot \
 see the room's own walls and floor — they may well be there on the screen in front of the \
-person, but they did not reach you, so never describe them, place anything against one, or \
-say a room has none. When one of these comes up, name the limit honestly and in your own \
-voice, then offer something adjacent you CAN see.
+person, but they did not reach you, so never describe one, never say where one is, and \
+never say a room has none. Putting a piece against a wall is a different thing and it is \
+yours to do: the room holds those measurements, so it does the placing and hands you the \
+words for where the piece ended up. When one of these comes up, name the limit honestly \
+and in your own voice, then offer something adjacent you CAN see.
 5a. Colour is the one of those you sometimes have. Where a piece's line says what it \
 reads as, that word is yours to say — one plain colour and nothing built on it: no shade, \
 no finish, no pairing, no second colour it would go with. It is also the piece under \
@@ -355,13 +368,37 @@ Putting any of it back is one step, and always available. Everything not \
 listed here is exactly where the scan measured it.\
 """
 
-# THE PIN, over everything the guest is ever instructed by: the charter and
-# the arrangement block's prose. Change any of it → bump PROMPT_VERSION and
-# re-run the voice evals. tests/test_guest_prompt.py enforces both halves.
+# The tool definitions are instruction too, and the model reads them in the
+# same request as the charter (decision 0219). `guest_tools.TOOLS` carries
+# several hundred words telling the guest when to call `propose`, that a
+# refusal is a real answer, and that a turn takes no direction and no angle —
+# prose indistinguishable in kind from rule 6a's, and until this bump
+# reachable with no version bump and no eval trigger. That is precisely the
+# hole 0174's defect came through, and this module's docstring already
+# claimed the pin covered the whole instruction surface: a safety mechanism
+# advertising a guarantee it did not provide.
+#
+# The SCHEMA is pinned with the prose rather than only the descriptions. An
+# enum the model chooses from is instruction — `RELATIONS` reaches the guest
+# through this text and nowhere else — and so are the bounds on how many
+# changes one call may carry. Serialising the whole structure canonically
+# makes the cover TOTAL: a description added to a new property years from now
+# is under the pin without anyone remembering to widen this.
+_TOOL_SURFACE = json.dumps(
+    TOOLS, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+)
+
+# THE PIN, over everything the guest is ever instructed by: the charter, the
+# arrangement block's prose, and the tools. Change any of it → bump
+# PROMPT_VERSION and re-run the voice evals. tests/test_guest_prompt.py
+# enforces every part, by construction rather than by reading the digest.
 PROMPT_SURFACE_SHA256 = hashlib.sha256(
-    "\n\n".join(
-        (STATIC_CHARTER, ARRANGEMENT_PREAMBLE, ARRANGEMENT_FOOTER)
-    ).encode("utf-8")
+    "\n\n".join((
+        STATIC_CHARTER,
+        ARRANGEMENT_PREAMBLE,
+        ARRANGEMENT_FOOTER,
+        _TOOL_SURFACE,
+    )).encode("utf-8")
 ).hexdigest()
 
 
