@@ -219,19 +219,28 @@ COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 COPY services/perception-obj/compress_receiver.py /app/compress_receiver.py
 COPY services/perception-obj/compress_enqueue.py /app/compress_enqueue.py
 
-# Deferred-import smoke: placement/fusion/sampling/budget and the shell_*
-# modules are imported lazily inside /process and /shell, so a missing COPY
-# above passes /health and every pre-traffic probe, then breaks the first
-# real reconstruction (this happened: placement.py and fusion.py were
-# absent from an image that passed /health and every probe). Fail the
-# BUILD instead.
+# Deferred-import smoke: every module below is imported lazily inside
+# /process, /shell or /compress, so a missing COPY above passes /health and
+# every pre-traffic probe, then breaks the first real reconstruction. This
+# has happened twice — placement.py and fusion.py, then mask_refine.py,
+# which raised ModuleNotFoundError on every object of every scene (decision
+# 0211). Fail the BUILD instead.
+#
+# The rule is the WHOLE list, not a representative sample: every .py COPYd
+# above that is imported inside a function belongs on this line, and both
+# escapes were a COPY landing without its matching name here. `server` is
+# the single deliberate omission — uvicorn imports it at start, so a
+# missing server.py never reaches a probe to fool.
+#
 # (Light imports only — numpy + roomstudio_schemas; no torch, no model
-# weights.) `anthropic` is on the line because shell_material defers it:
-# a missing pip install would not crash — the 0069 fallback rule would
-# silently null every family forever, which the build must catch instead.
+# weights. process_receiver holds its heavy stack behind function-scoped
+# imports, so it stays inside that budget.) `anthropic` is on the line
+# because shell_material defers it: a missing pip install would not crash —
+# the 0069 fallback rule would silently null every family forever, which
+# the build must catch instead.
 RUN python -c "import placement, fusion, reproject, sampling, census_sampling, \
 budget, room_planes, roomplan_room, contact_priors, box_placement, privacy, \
-object_color, \
+mask_refine, object_color, oidc, receiver_repo, fcm, process_receiver, \
 shell_geometry, shell_envelope, shell_observation, shell_material, \
 shell_receiver, shell_enqueue, compress_receiver, compress_enqueue, anthropic"
 
