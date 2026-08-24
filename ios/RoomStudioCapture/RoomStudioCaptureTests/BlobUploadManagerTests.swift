@@ -1197,9 +1197,10 @@ final class BlobUploadManagerTests: XCTestCase {
         await manager.setBackgroundCompletionHandler(spy)
         // Simulate one in-flight completion: increment, then decrement via handleTaskCompletion.
         manager.incrementPendingCompletions()
+        // handleTaskCompletion's defer decrements and routes through the gate before the
+        // call returns, so awaiting it is the whole synchronisation — there is no window
+        // afterwards in which the handler could still be on its way.
         await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
-        // Yield so any spawned Task from decrementPendingCompletions can run.
-        await Task.yield()
         XCTAssertEqual(count(), 0, "Handler must not fire when drainObserved is false")
         let drainSeen = await manager._drainObserved
         XCTAssertFalse(drainSeen, "drainObserved must remain false")
@@ -1225,9 +1226,10 @@ final class BlobUploadManagerTests: XCTestCase {
         // Drain arrives while one completion is still in-flight.
         await manager.drainBackgroundSessionEvents()
         XCTAssertEqual(count(), 0, "Handler must not fire: count > 0 despite drain observed")
-        // Last handleTaskCompletion completes → counter → 0 → fires.
+        // Last handleTaskCompletion completes → counter → 0 → fires, inside that call's own
+        // defer. The await is the signal: the handler has run by the time it returns, so this
+        // asserts an ordering the seam guarantees rather than outrunning a scheduler.
         await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
-        await Task.yield()
         XCTAssertEqual(count(), 1, "Handler must fire after last decrement when drain already observed")
     }
 
@@ -1243,7 +1245,6 @@ final class BlobUploadManagerTests: XCTestCase {
             group.addTask { await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil) }
             group.addTask { await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil) }
         }
-        await Task.yield()
         XCTAssertEqual(count(), 1, "Handler must fire exactly once regardless of concurrency")
     }
 
@@ -1253,7 +1254,6 @@ final class BlobUploadManagerTests: XCTestCase {
         manager.incrementPendingCompletions()
         await manager.drainBackgroundSessionEvents()
         await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
-        await Task.yield()
         let fired = await manager._handlerFired
         XCTAssertFalse(fired, "handlerFired must remain false when no handler was stored")
     }
@@ -1267,7 +1267,6 @@ final class BlobUploadManagerTests: XCTestCase {
         await manager.drainBackgroundSessionEvents()
         // Decrement to 0 (no handler yet).
         await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
-        await Task.yield()
         XCTAssertEqual(count(), 0, "No handler stored yet — must not have fired")
         // Handler arrives late.
         await manager.setBackgroundCompletionHandler(spy)
@@ -1309,11 +1308,9 @@ final class BlobUploadManagerTests: XCTestCase {
         await manager.handleTaskCompletion(taskDescription: nil, statusCode: nil, error: nil)
         // 2. Drain fires (urlSessionDidFinishEvents delivered).
         await manager.drainBackgroundSessionEvents()
-        // 3. Yield to let any Tasks from decrementPendingCompletions run.
-        await Task.yield()
         // At this point: drainObserved=true, count=0, but NO handler stored yet.
         XCTAssertEqual(count2(), 0, "Round 2: handler must not have fired before setBackgroundCompletionHandler is called")
-        // 4. AppDelegate Task hop finally executes — handler arrives late.
+        // 3. AppDelegate Task hop finally executes — handler arrives late.
         await manager.setBackgroundCompletionHandler(spy2)
         // Must fire immediately because drain + count==0 pre-conditions are already met.
         XCTAssertEqual(count2(), 1, "Round 2: handler must fire immediately on setBackgroundCompletionHandler when drain + count already settled (handler-stored-late in second round)")
