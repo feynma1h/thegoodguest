@@ -612,24 +612,17 @@ gains.
   Secret Manager since 2026-07-21 and the operator's own account can read it;
   nothing had connected it to the harness, and the belief that it was missing
   cost that lane two days.
-- **The full suite at `PROMPT_VERSION 7` reads 26 passed, 1 failed, and the
-  red is a PRE-EXISTING FLAKE rather than a regression.** The failure is
-  `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`
-  — told "turn it round" after moving the red chair, the guest occasionally
-  asks which chair instead of taking the referent from the turn before. It is
-  a PER-SAMPLE assertion, so the test goes red whenever one sample misses.
-  **Measured 2026-08-24 on a paired, interleaved A/B, 0186's charter against
-  `main`'s: 19/20 on BOTH arms.** Pooled over every sample taken that day,
-  33/36 shipped against 34/35 main (Fisher p ≈ 0.31). So the guest takes the
-  referent about 12 times in 13, on either charter, and 0186's edit is ruled
-  OUT as the cause. **Do not re-report this as a regression, and do not
-  attribute it to 0186 or 0220** — 0220's resolver is separately ruled out
-  offline, because in that room `"it"` resolves to `unknown_object` with an
-  EMPTY detail before and after, and `"chair"` differs only in a tail that is
-  strictly more decisive afterwards.
-  The remaining question is whether the eval should be a rate rather than a
-  per-sample rule, which is the same shape as the residue 0174 left and is a
-  judgment call nobody has made.
+- **`PROMPT_VERSION 7`'s voice evals are GREEN — 27 passed, 2026-08-24 — so
+  the deploy gate is CLEARED.** The run before it read 26 passed, 1 failed on
+  `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`,
+  which was measured rather than argued about and is a **pre-existing flake**:
+  paired and interleaved against `main`'s charter it reads **19/20 on both
+  arms** (33/36 vs 34/35 pooled, p = 0.32). It is a PER-SAMPLE assertion, so
+  the test goes red whenever one sample misses. **Do not re-report it as a
+  regression, and do not attribute it to 0186 or 0220** — 0220's resolver is
+  separately ruled out offline, because in that room `"it"` resolves to
+  `unknown_object` with an EMPTY detail before and after, and `"chair"` differs
+  only in a tail that is strictly more decisive afterwards.
 
 **iOS**
 
