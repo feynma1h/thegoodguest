@@ -1,8 +1,7 @@
 /// App entry point for RoomStudio Capture.
 ///
 /// Single-window app; RootFlowView is the root and coordinates the capture
-/// flow (ContentView is retained, unreferenced, as the rollback path). At
-/// launch: FirebaseApp.configure(), then four .task jobs — anonymous sign-in,
+/// flow. At launch: FirebaseApp.configure(), then four .task jobs — anonymous sign-in,
 /// orphaned-capture-directory sweep, upload rehydration, and the
 /// acknowledged-flight reap (decision 0084).
 /// GoogleService-Info.plist must be present in the app bundle — obtain it

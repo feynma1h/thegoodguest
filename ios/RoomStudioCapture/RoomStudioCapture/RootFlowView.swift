@@ -4,19 +4,16 @@
 ///   home → guidance → capturing → gotRoom → review → (Send it home)
 ///        → post-send: waiting (ScenePoller) → doorway / failure
 ///
-/// KEY BEHAVIORAL CHANGE vs the old ContentView: the upload no longer begins
-/// automatically when stopCapture() publishes bundlePath — it begins on review's
-/// "Send it home", which is where the design puts the decision. stopCapture()
-/// still assembles the bundle; RootFlowView holds it at review until the user
-/// sends.
+/// WHERE THE UPLOAD BEGINS: not when stopCapture() publishes bundlePath, but on
+/// review's "Send it home", which is where the design puts the decision.
+/// stopCapture() still assembles the bundle; RootFlowView holds it at review
+/// until the user sends.
 ///
 /// THIS IS THE APP ROOT (activated 2026-07-25). The former gate — "a non-LiDAR
 /// device would see UnsupportedDeviceView" — stopped being a blocker when the
 /// product became Pro/LiDAR-only (decision 0071): that screen is now the CORRECT
 /// behaviour on unsupported hardware, not a regression. The simulator is treated
 /// as supported so development continues without a device.
-///
-/// ContentView is retained, unreferenced, as the rollback path.
 ///
 /// Remaining activation follow-ups: add-more resume-with-progress
 /// (CaptureManager.startCapture currently mints a new bundle rather than
@@ -250,87 +247,67 @@ struct RootFlowView: View {
     }
 
     private var homeScreen: some View {
-        VStack(spacing: 0) {
-            if failures.latestFailure != nil {
-                UploadFailedBanner(
-                    reason: failures.latestFailure?.reason,
-                    onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
-                )
-                .padding([.horizontal, .top], 20)
-            }
-            // Suppressed while THIS bundle's failure is showing: the banner and the
-            // row otherwise contradicted each other for the same capture. Also
-            // suppressed on the PERSISTED failure, which dismissing the banner cannot
-            // erase — otherwise the row came back claiming a terminally failed bundle
-            // was still "on its way".
-            if sentBundleId != nil, failures.latestFailure?.bundleId != sentBundleId,
-               !sentBundleFailedOnDisk {
-                // Re-entry. Without this, leaving the wait was one-way: the room
-                // keeps processing but no surface could ever show it again, so
-                // "leaving is free" was false.
-                Button { stage = .sent } label: {
-                    HStack(spacing: 9) {
-                        Circle().fill(Color.rsGold).frame(width: 7, height: 7)
-                        Text("One room is on its way — check on it")
-                            .font(RSFont.ui(.subheadline, weight: .medium))
-                            .foregroundStyle(Color.rsInk)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.rsInk.opacity(0.4))
-                    }
-                    .padding(.horizontal, 14).padding(.vertical, 11)
-                    .background(Color.rsSurface.opacity(0.9), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.rsHairline, lineWidth: 1))
+        // EVERY notice this screen carries goes through HomeView's `notice` slot,
+        // which is inside its ScrollView. None of them may be stacked around
+        // HomeView: that column is shared with the pinned scan action, and at
+        // accessibility sizes the action is what gives — "Scan a room" truncated
+        // to "Scan a ro…" (decision 0224). Content scrolls; only the action is
+        // pinned.
+        //
+        // A failed rooms fetch must not simply fall back to the first-time hero:
+        // in this flow that IS the no-rooms variant, so silently showing it tells
+        // a returning user their rooms are gone. The hero still holds the space
+        // (it is true for everyone), with an honest line saying the phone could
+        // not look.
+        HomeView(
+            onScan: { showGuidance = true },
+            onProfile: { showProfile = true },
+            hasRooms: homeRooms == .strip,
+            roomsStrip: {
+                if case .loaded(let list, let stale) = rooms.state {
+                    RecentRoomsStrip(
+                        rooms: list,
+                        stale: stale,
+                        canOpenWeb: canOpenAnyRoomOnWeb,
+                        onOpen: openRoomOnWeb,
+                        onSeeAll: { showRooms = true },
+                        onRetry: refreshRooms
+                    )
                 }
-                .padding([.horizontal, .top], 20)
-            }
-            // A failed rooms fetch must not simply fall back to the first-time
-            // hero: in this flow that IS the no-rooms variant, so silently
-            // showing it tells a returning user their rooms are gone. The hero
-            // still holds the space (it is true for everyone), with an honest
-            // line saying the phone could not look — carried in HomeView's
-            // `notice` slot so it shares the scroll area rather than squeezing
-            // the pinned scan action.
-            HomeView(
-                onScan: { showGuidance = true },
-                onProfile: { showProfile = true },
-                hasRooms: homeRooms == .strip,
-                roomsStrip: {
-                    if case .loaded(let list, let stale) = rooms.state {
-                        RecentRoomsStrip(
-                            rooms: list,
-                            stale: stale,
-                            canOpenWeb: canOpenAnyRoomOnWeb,
-                            onOpen: openRoomOnWeb,
-                            onSeeAll: { showRooms = true },
-                            onRetry: refreshRooms
+            },
+            notice: {
+                VStack(spacing: 14) {
+                    if failures.latestFailure != nil {
+                        UploadFailedBanner(
+                            reason: failures.latestFailure?.reason,
+                            onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
                         )
                     }
-                },
-                notice: {
+                    // Suppressed while THIS bundle's failure is showing: the banner
+                    // and the row otherwise contradicted each other for the same
+                    // capture. Also suppressed on the PERSISTED failure, which
+                    // dismissing the banner cannot erase — otherwise the row came
+                    // back claiming a terminally failed bundle was still "on its way".
+                    if sentBundleId != nil, failures.latestFailure?.bundleId != sentBundleId,
+                       !sentBundleFailedOnDisk {
+                        ReEntryRow { stage = .sent }
+                    }
                     if homeRooms == .heroWithTrouble {
                         RoomsTroubleLine(onRetry: refreshRooms)
                     }
                 }
-            )
-        }
-        // The banner and re-entry rows live in this wrapper, OUTSIDE HomeView's own
-        // backdrop — without this they sat on bare white with a hard seam where the
-        // parchment began.
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .rsParchmentScreen()
+            }
+        )
         // The kick from onFatalBlobError cannot outlive the process, so without this
         // independent store scan a failure from a previous launch (crash, dead
         // battery mid-upload) would never surface — exactly the case the banner
-        // exists for. Mirrors what UploadFailureView does for the old ContentView.
+        // exists for.
         .task { await UploadFailureMonitor.shared.refresh() }
-        // Relaunch recovery. ContentView's SceneStatusView did this for the old root
-        // (scanning for a bundle whose upload finished while the app was dead);
-        // activating RootFlowView without it would LOSE that. Restoring the id is
-        // enough — the home re-entry row renders from it, and entering the wait
-        // resumes polling from the persisted record. Latched to one run per launch
-        // inside; this .task re-fires on every return to home.
+        // Relaunch recovery: adopt a bundle whose upload finished while the app
+        // was dead. Restoring the id is enough — the home re-entry row renders
+        // from it, and entering the wait resumes polling from the persisted
+        // record. Latched to one run per launch inside; this .task re-fires on
+        // every return to home.
         //
         // The phase refresh, by contrast, SHOULD run on every return: it is what
         // keeps the re-entry row from advertising a bundle that failed while the
@@ -457,7 +434,7 @@ struct RootFlowView: View {
                     // notifyBundleComplete) is dropped when no status surface is
                     // visible, so a user who leaves the wait mid-upload would never
                     // get polling started again. Reading the persisted `.complete`
-                    // record is the same seam SceneStatusView uses.
+                    // record is the seam that does not depend on the kick.
                     Task { await resumePollIfUploadFinished() }
                 }
                 .onDisappear { ScenePoller.shared.setVisible(false) }
@@ -666,21 +643,17 @@ struct RootFlowView: View {
             // the screen would say "Getting in line / I'll start the moment there's
             // room" for the whole upload (~1 min on the real 126-frame capture),
             // while nothing had reached the desk. Polling begins on the completion
-            // kick (BlobUploadManager.onBundleComplete → notifyBundleComplete),
-            // which is the architecture SceneStatusView already uses.
+            // kick (BlobUploadManager.onBundleComplete → notifyBundleComplete).
             if case .ready = coordinator.sessionState {
                 sentBundleId = bundleId
             }
         }
     }
 
-    /// Re-adopt a bundle left behind by a previous launch, newest first.
-    ///
-    /// ContentView's SceneStatusView did this for the old root (finding a bundle
-    /// whose upload finished while the app was dead); activating RootFlowView
-    /// without it would LOSE that. Restoring the id is enough — the home re-entry
-    /// row renders from it, and entering the wait resumes polling from the
-    /// persisted record.
+    /// Re-adopt a bundle left behind by a previous launch, newest first — one
+    /// whose upload finished while the app was dead. Restoring the id is enough:
+    /// the home re-entry row renders from it, and entering the wait resumes
+    /// polling from the persisted record.
     ///
     /// ONCE PER LAUNCH, and never for a bundle the user has finished with. home's
     /// `.task` re-fires on every return to `.home`, and `.complete` records are never

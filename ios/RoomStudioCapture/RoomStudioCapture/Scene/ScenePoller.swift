@@ -27,11 +27,10 @@
 ///      already visible. Otherwise a no-op — the .complete disk record is the
 ///      shared seam; onAppear reads it independently.
 ///   2. start(bundleId:) — called by RootFlowView (the connection-trouble "Try now"
-///      resume and resumePollIfUploadFinished); also by SceneStatusView.onAppear on
-///      the retained ContentView rollback path.
+///      resume and resumePollIfUploadFinished).
 ///
 /// Read by: RootFlowView (routing + lifecycle), BlobUploadManager (one outbound
-/// call), CaptureReaper (liveGET), SceneStatusView (rollback path only).
+/// call), CaptureReaper (liveGET).
 
 import Combine
 import Foundation
@@ -126,7 +125,7 @@ final class ScenePoller: ObservableObject {
 
     /// The bundle currently being polled (or last polled). Preserved across pause/resume.
     private(set) var currentBundleId: String?
-    /// True while SceneStatusView is in the view hierarchy and foregrounded.
+    /// True while a status surface is in the view hierarchy and foregrounded.
     private(set) var isVisible: Bool = false
     /// The bundle the ACTIVE flight cares about (set by each root's send site,
     /// cleared by reset()). While set, notifyBundleComplete ignores completions
@@ -283,7 +282,7 @@ final class ScenePoller: ObservableObject {
     /// finishing cross-launch) is dropped: its .complete disk record is the
     /// shared seam, and the launch restore surfaces it on a later launch.
     /// If backgrounded, this is a no-op — same record seam, read by
-    /// resumePollIfUploadFinished / SceneStatusView.onAppear independently.
+    /// resumePollIfUploadFinished independently.
     func notifyBundleComplete(bundleId: String) {
         logger.info("[ScenePoller] notifyBundleComplete \(bundleId, privacy: .public) visible=\(self.isVisible)")
         guard isVisible else { return }

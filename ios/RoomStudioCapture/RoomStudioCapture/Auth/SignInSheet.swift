@@ -1,7 +1,7 @@
 /// The sign-in moment (decisions 0051/0118): why this app asks, and the ways in.
 ///
-/// Presented from ProfileView's sign-in row (RootFlowView's profile sheet); also
-/// from ContentView's account control on the retained rollback path. Three jobs:
+/// Presented from ProfileView's sign-in row (RootFlowView's profile sheet).
+/// Three jobs:
 ///   - Say honestly why signing in matters (rooms follow the account to the
 ///     web and to a next phone) — capture itself never requires it.
 ///   - Run a provider's sign-in flow — Sign in with Apple, or Google (0094
@@ -22,7 +22,7 @@
 /// visible proof, before and after linking, that sign-in kept the same
 /// identity.
 ///
-/// Read by: ProfileView (sheet presentation); ContentView on the rollback path.
+/// Read by: ProfileView (sheet presentation).
 
 import AuthenticationServices
 import FirebaseAuth

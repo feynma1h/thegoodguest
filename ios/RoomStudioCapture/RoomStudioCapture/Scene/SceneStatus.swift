@@ -8,7 +8,7 @@
 /// returns HTTP 200 even for terminal failure states; the status field in the
 /// body is authoritative.
 ///
-/// Read by: ScenePoller, SceneStatusView.
+/// Read by: ScenePoller, ScenesListClient, RoomHistory, CaptureReaper.
 
 import Foundation
 
