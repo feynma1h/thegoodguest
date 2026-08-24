@@ -5,7 +5,7 @@
 ///   1. notifyUploadFailed(bundleId:reason:) — in-process kick from
 ///      BlobUploadManager.onFatalBlobError. In-memory only; no disk I/O.
 ///   2. refresh() — independent scan of UploadSessionStore for persisted .failed
-///      records, called from UploadFailureView's .task. Covers failures from prior
+///      records, called from RootFlowView's .task. Covers failures from prior
 ///      launches, which the kick cannot outlive.
 ///
 /// Why this surface exists: when the upload itself permanently fails, no Scene is ever
@@ -24,9 +24,8 @@
 /// When several bundles have failed, the most recent (by clientMintTimestamp — no
 /// failure timestamp is persisted) is surfaced; dismissing it lets the next one show.
 ///
-/// Read by: RootFlowView (the live root — it holds the shared instance, scans
-/// via .task, and routes dismissal) and UploadFailureView on the retained
-/// ContentView rollback path. BlobUploadManager drives it from several sites:
+/// Read by: RootFlowView, which holds the shared instance, scans via .task, and
+/// routes dismissal. BlobUploadManager drives it from several sites:
 /// one terminal notifyUploadFailed, plus the notifyUploadDeferred /
 /// clearDeferral pair that tracks whether a blob is merely waiting.
 

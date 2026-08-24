@@ -197,44 +197,4 @@ final class ScenePollExpectationTests: XCTestCase {
         XCTAssertEqual(poller.pollState, .idle)
         XCTAssertNil(poller.currentBundleId)
     }
-
-    // MARK: - Which finished bundle a launch adopts
-
-    private func candidate(_ id: String, _ phase: UploadPhase, minted: TimeInterval) -> BundleRestore.Candidate {
-        .init(bundleId: id, phase: phase, minted: Date(timeIntervalSince1970: minted))
-    }
-
-    func test_newestCompleted_picksNewest_notStoreOrder() {
-        // allBundleIds() promises no order, so an oldest-first listing must not
-        // decide which room the screen opens on.
-        let candidates = [
-            candidate("older", .complete, minted: 1_000),
-            candidate("newest", .complete, minted: 3_000),
-            candidate("middle", .complete, minted: 2_000),
-        ]
-        XCTAssertEqual(SceneStatusView.newestCompleted(from: candidates), "newest")
-    }
-
-    func test_newestCompleted_ignoresRecordsStillUploading() {
-        // A newer record whose upload has not finished has no Scene document to
-        // poll; adopting it would render "Queued for processing" for the whole
-        // upload. The finished room is the honest answer.
-        let candidates = [
-            candidate("finished", .complete, minted: 1_000),
-            candidate("in-flight", .uploadingBlobs, minted: 9_000),
-        ]
-        XCTAssertEqual(SceneStatusView.newestCompleted(from: candidates), "finished")
-    }
-
-    func test_newestCompleted_nothingFinished_isNil() {
-        let candidates = [
-            candidate("in-flight", .uploadingBlobs, minted: 9_000),
-            candidate("dead", .failed, minted: 8_000),
-        ]
-        XCTAssertNil(SceneStatusView.newestCompleted(from: candidates))
-    }
-
-    func test_newestCompleted_emptyStore_isNil() {
-        XCTAssertNil(SceneStatusView.newestCompleted(from: []))
-    }
 }

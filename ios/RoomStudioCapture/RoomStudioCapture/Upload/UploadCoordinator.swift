@@ -12,8 +12,7 @@
 /// the blob PUTs.
 ///
 /// Read by: RootFlowView, which owns the instance (@StateObject) and turns
-/// sessionState into flow state via WaitFlowState.sessionFailure. The retained
-/// ContentView rollback path holds its own instance.
+/// sessionState into flow state via WaitFlowState.sessionFailure.
 
 import Combine
 import Foundation

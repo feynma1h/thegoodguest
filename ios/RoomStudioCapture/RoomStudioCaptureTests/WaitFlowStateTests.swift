@@ -307,9 +307,9 @@ final class WaitFlowStateTests: XCTestCase {
 ///
 /// A review pass removed `isVisible = true` from `resume()` to stop a foreground
 /// transition asserting a status surface was on screen. That was right for the
-/// singleton — but `pause()` still clears the flag, and the shipping
-/// SceneStatusView's only restore is a `.task` that fires once per launch. The
-/// result was a launch-long dropped kick that all 266 tests were blind to.
+/// singleton — but `pause()` still clears the flag, and a status surface's only
+/// restore is a `.task` that fires once per launch. The result was a launch-long
+/// dropped kick that all 266 tests were blind to.
 @MainActor
 final class ScenePollerVisibilityTests: XCTestCase {
 
@@ -337,7 +337,7 @@ final class ScenePollerVisibilityTests: XCTestCase {
         let poller = makePoller()
         poller.setVisible(true)
         poller.pause()
-        poller.setVisible(true)          // what SceneStatusView/RootFlowView do on .active
+        poller.setVisible(true)          // what RootFlowView does on .active
         XCTAssertTrue(poller.isVisible)
 
         poller.notifyBundleComplete(bundleId: "b1")
