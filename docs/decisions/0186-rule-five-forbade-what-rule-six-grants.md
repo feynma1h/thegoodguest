@@ -68,14 +68,19 @@ Pinned as a capability truth in `test_guest_prompt.py` — the charter must not
 tell the guest it may not do what the tool schema offers it — rather than as
 a phrasing, which is the distinction 0172 drew and this note follows.
 
-**The full suite at this charter reads 26 passed, 1 failed**, and the one red
-is NOT this rule: it is
-`test_a_referent_the_previous_turn_fixed_is_not_re_asked`, which passed in both
-earlier full runs the same day. Recorded here rather than waved away because
-this note's edit is the only charter change between those runs, so it is the
-standing suspect at n=1 — and it cannot be separated from ordinary model
-variance until the account's usage cap resets on 2026-09-01. Every test this
-rule governs, including the whole of `TestRuleTenGrammar`, is green.
+**The full suite at this charter reads 26 passed, 1 failed, and the red is not
+this edit.** It is `test_a_referent_the_previous_turn_fixed_is_not_re_asked`,
+and because this note's edit was the only charter change between a green run
+and a red one, it was the standing suspect and was measured rather than
+argued about. Paired and interleaved against `main`'s wording, alternating arms
+sample by sample so any drift in the service loads on both equally:
+**19/20 on each arm.** Pooled over the day, 33/36 here against 34/35 on `main`
+(Fisher p ≈ 0.31). The test is a per-sample assertion over a behaviour that
+misses about 1 time in 13 on either charter.
+
+Worth keeping for whoever meets it next: the interleaved design is what made
+that cheap. The first attempt ran the arms in sequence and read 14/16 against
+15/15, which looks like a real cost and is the same 24 samples.
 
 ## Why
 
@@ -99,10 +104,11 @@ guest quoting the exact phrase in its refusals said which words to change.
 
 ## What would change this decision
 
-- **The referent red turns out to be this edit.** If measuring it after
-  2026-09-01 shows the guest re-asking materially more often than before, the
-  35 words added here are the thing to shorten — they sit in the middle of a
-  rule the guest reads carefully, and length is the cost.
+- **A later measurement separates the arms.** 19/20 against 19/20 excludes a
+  large effect and not a small one; if the referent behaviour is ever measured
+  at scale and this charter is worse, the 35 words added here are the thing to
+  shorten, because they sit in the middle of a rule the guest reads carefully
+  and length is the cost.
 - **The residual refusals return.** 14 of 14 is a small sample, and the true
   rate after the fix is not zero-with-certainty. If wall placements start being
   declined again, measure before touching anything — the harness is four lines
