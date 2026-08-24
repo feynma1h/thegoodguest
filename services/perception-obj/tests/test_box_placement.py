@@ -158,22 +158,85 @@ class TestFootprint:
 # Family map
 # ---------------------------------------------------------------------------
 
+class _FakeCategory:
+    """Just the `category` attribute `vocabulary_gaps` reads off a box."""
+
+    def __init__(self, category):
+        self.category = category
+
+
 class TestFamilies:
     @pytest.mark.parametrize("category,label,ok", [
         ("bed", "bed", True),
         ("table", "desk", True),
         ("table", "nightstand", True),
-        ("chair", "stool", True),
-        ("storage", "wardrobe", True),
-        ("sofa", "couch", True),
+        ("chair", "chair", True),
+        ("storage", "cabinet", True),
+        ("sofa", "sofa", True),
         ("television", "tv", True),
+        # The names SAM actually emits for the classes the 0077 map named
+        # only generically. `table` was operationally {desk, nightstand}
+        # until these arrived, because the prompt has no bare `table`.
+        ("table", "coffee table", True),
+        ("table", "dining table", True),
+        ("table", "side table", True),
+        ("chair", "dining chair", True),
+        # Dual-listed on purpose, like `nightstand` across table/storage.
+        ("chair", "armchair", True),
+        ("sofa", "armchair", True),
+        ("refrigerator", "cabinet", True),
         ("bed", "chair", False),
-        ("refrigerator", "cabinet", False),  # unmapped category
         (None, "bed", False),
         ("bed", None, False),
     ])
     def test_map(self, category, label, ok):
         assert box_placement.family_compatible(category, label) is ok
+
+    @pytest.mark.parametrize("category,label", [
+        ("table", "table"),      # prompt has dining/coffee/side table only
+        ("chair", "stool"),
+        ("chair", "bench"),
+        ("storage", "dresser"),
+        ("storage", "wardrobe"),
+        ("storage", "shelf"),
+        ("sofa", "couch"),
+        ("television", "television"),
+    ])
+    def test_labels_the_prompt_cannot_emit_are_not_in_the_map(
+        self, category, label
+    ):
+        """SAM 3 returns the PROMPT TERM, so a family member absent from
+        `DEFAULT_OBJECT_PROMPT` can never match anything. These eight were
+        in 0077's map and were measured inert: removing them left the
+        association census over the four preserved captures byte-identical
+        at 20/31 boxes and 28 associations."""
+        assert box_placement.family_compatible(category, label) is False
+
+    def test_vocabulary_gaps_reports_both_directions(self):
+        cats = [_FakeCategory("refrigerator"), _FakeCategory("table")]
+        unmapped, inert = box_placement.vocabulary_gaps(
+            cats, "desk,cabinet,chair,bed,sofa,tv,monitor,nightstand,bookshelf"
+        )
+        assert unmapped == []          # refrigerator is mapped now
+        # The prompt above omits the specific table/chair names, so they
+        # report as unemittable against it.
+        assert "coffee table" in inert and "armchair" in inert
+
+    def test_vocabulary_gaps_names_an_unmapped_category(self):
+        unmapped, _ = box_placement.vocabulary_gaps(
+            [_FakeCategory("bathtub")], "desk,cabinet"
+        )
+        assert unmapped == ["bathtub"]
+
+    def test_the_shipped_map_is_fully_emittable_by_the_shipped_prompt(self):
+        """The alignment this pins is the whole point of the map: every
+        family member must be a term the shipped prompt can return."""
+        import process_receiver
+
+        _, inert = box_placement.vocabulary_gaps(
+            [], process_receiver.DEFAULT_OBJECT_PROMPT
+        )
+        assert inert == []
 
 
 # ---------------------------------------------------------------------------
@@ -854,3 +917,49 @@ class TestExtentAxesDegradeLock:
     def test_emission_is_deterministic(self):
         box = _box(dims=(1.9, 0.6, 2.1), yaw=0.4)
         assert box_placement._box_dict(box, 1) == box_placement._box_dict(box, 1)
+
+
+class TestTheBoxCloudDegrades:
+    """`_box_cloud_for` (decision 0233): the third axis needs measured
+    points, and every way of not having them must yield None rather than a
+    thin cloud that produces a confident wrong number."""
+
+    class _Ctx:
+        def __init__(self, depth=None, camera=None, roomplan=None):
+            if depth is not None:
+                self.get_depth = depth
+            if camera is not None:
+                self.get_camera = camera
+            if roomplan is not None:
+                self.get_roomplan = roomplan
+
+    def _assoc(self, frame_index=0):
+        return box_placement.BoxAssociation(
+            box_index=0, frame_index=frame_index, mask_index=0,
+            overlap=1.0, in_frame_fraction=1.0, obs={},
+        )
+
+    def test_a_context_without_depth_is_none(self):
+        ctx = self._Ctx(camera=lambda fi: (FakePose(), FakeIntrinsics()))
+        assert box_placement._box_cloud_for(None, [self._assoc()], ctx) is None
+
+    def test_a_context_without_cameras_is_none(self):
+        ctx = self._Ctx(depth=lambda fi: None)
+        assert box_placement._box_cloud_for(None, [self._assoc()], ctx) is None
+
+    def test_no_associations_is_none(self):
+        ctx = self._Ctx(depth=lambda fi: None,
+                        camera=lambda fi: (FakePose(), FakeIntrinsics()))
+        assert box_placement._box_cloud_for(None, [], ctx) is None
+
+    def test_a_swept_capture_yields_none_rather_than_raising(self):
+        """A capture whose depth blobs are gone returns None per frame. The
+        cloud is empty, which is below the minimum, so the axis abstains."""
+        box = _box(dims=(1.0, 1.0, 1.0))
+        ctx = self._Ctx(depth=lambda fi: None,
+                        camera=lambda fi: (FakePose(), FakeIntrinsics()),
+                        roomplan=lambda: None)
+        assert box_placement._box_cloud_for(box, [self._assoc()], ctx) is None
+
+    def test_a_thin_cloud_is_none(self):
+        assert box_placement._ARM_S2C_MIN_CLOUD > 0

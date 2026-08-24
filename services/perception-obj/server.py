@@ -50,7 +50,10 @@ logger = logging.getLogger(__name__)
 # instead of a body model, producing 422 on every Cloud Tasks delivery.
 # See docs/decisions/0010.
 from compress_receiver import CompressRequest  # noqa: E402  (same 0010 rule)
-from process_receiver import ProcessRequest  # noqa: E402
+from process_receiver import (  # noqa: E402
+    DEFAULT_OBJECT_PROMPT,
+    ProcessRequest,
+)
 from shell_receiver import ShellRequest  # noqa: E402  (same 0010 rule for /shell)
 
 # Model classes are NOT imported at module level. Importing models.sam3 or
@@ -64,13 +67,6 @@ from shell_receiver import ShellRequest  # noqa: E402  (same 0010 rule for /shel
 # Configuration
 # -----------------------------------------------------------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-DEFAULT_OBJECT_PROMPT = (
-    "sofa,armchair,chair,dining chair,dining table,coffee table,side table,desk,"
-    "cabinet,bookshelf,bed,nightstand,rug,curtain,floor lamp,table lamp,pendant light,"
-    "ceiling fan,plant,artwork,painting,mirror,window,door,doorway,fireplace,"
-    "tv,monitor,speaker,clock"
-)
 
 # GCS bucket for perception outputs. /process (process_receiver.py) writes
 # per-scene splats and manifests under scenes/{scene_id}/ in this bucket.

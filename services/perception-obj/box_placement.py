@@ -80,8 +80,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import reproject
-from roomstudio_schemas.placement_math import project_points
-from roomstudio_schemas.pose_math import rotmat_to_quat
+from roomstudio_schemas.placement_math import project_points, trimmed_nn_rms
+from roomstudio_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
 
 logger = logging.getLogger(__name__)
 
@@ -236,13 +236,30 @@ def _parse_family_map(raw: str) -> dict[str, frozenset[str]]:
 # rest on it inherited the disagreement. Association is greedy on overlap
 # and each observation joins at most one box, so listing a label in two
 # families costs nothing but lets the right box win.
+# Every member here is a label SAM can actually emit, which is a
+# stronger constraint than it looks: SAM 3 returns the PROMPT TERM, so a
+# family member absent from `DEFAULT_OBJECT_PROMPT` can never match
+# anything. Eight of 0077's seventeen were in that position — `table`
+# included, because the prompt carries `dining table`, `coffee table` and
+# `side table` and no bare `table` — which made `table` operationally
+# {desk, nightstand} and `chair` operationally {chair}. They are gone, and
+# the specific names SAM does emit are here in their place.
+# `vocabulary_gaps` below keeps both directions of that alignment
+# observable, so prompt growth cannot silently re-orphan a family.
+#
+# `armchair` is listed under BOTH chair and sofa for the same reason
+# `nightstand` is listed under both table and storage: RoomPlan may file an
+# upholstered single seat either way, association is greedy, and each
+# observation joins at most one box, so dual listing costs nothing and lets
+# the right box win on overlap.
 _DEFAULT_FAMILIES = (
     "bed:bed"
-    "|table:table,desk,nightstand"
-    "|chair:chair,stool,bench"
-    "|storage:cabinet,dresser,wardrobe,bookshelf,shelf,nightstand"
-    "|sofa:sofa,couch"
-    "|television:tv,television,monitor"
+    "|table:desk,nightstand,dining table,coffee table,side table"
+    "|chair:chair,dining chair,armchair"
+    "|storage:cabinet,bookshelf,nightstand"
+    "|sofa:sofa,armchair"
+    "|television:tv,monitor"
+    "|refrigerator:cabinet"
 )
 BOX_LABEL_FAMILIES: dict[str, frozenset[str]] = _parse_family_map(
     os.environ.get("PLACEMENT_BOX_LABEL_FAMILIES", _DEFAULT_FAMILIES)
@@ -286,11 +303,50 @@ _ARM_FILL_MARGIN = float(
     os.environ.get("PERCEPTION_ARM_SELECT_FILL_MARGIN", "0.10")
 )
 
-# Arms scored per box, best-associated first. Each costs one splat parse
-# and nothing else — no cloud, no appearance, no GPU — but a room whose
-# sampler was told to spend its residue on boxes (0202) can hand a single
-# box many, and the budget this pass spends is not its own.
+# Arms scored per box, best-associated first. No appearance and no GPU, but
+# NOT free since 0233 added the third axis: one splat parse per arm, one
+# measured cloud per BOX (a depth back-projection per frame the box has an
+# association in, from rasters pass 1 already holds), and one trimmed
+# Chamfer per arm — the last measured at ~400 ms, capped by
+# `trimmed_nn_rms`'s 4,000-point subsample rather than by cloud size. A room
+# whose sampler was told to spend its residue on boxes (0202) can hand a
+# single box many, and the budget this pass spends is not its own.
 _ARM_SELECT_MAX = int(os.environ.get("PERCEPTION_ARM_SELECT_MAX", "4"))
+
+# Points a box's measured cloud needs before its splat->cloud distance means
+# anything. Below this the axis reports None and the rule falls back to the
+# two it shipped with, rather than deciding on a handful of points.
+_ARM_S2C_MIN_CLOUD = int(os.environ.get("PERCEPTION_ARM_S2C_MIN_CLOUD", "200"))
+
+# --- Conditional second arm (decision 0229) --------------------------------
+# Whether a box whose FIRST arm already renders well keeps its planned second
+# view. Default off. The plan emits box_best_view and box_second_view for
+# every eligible box and both reconstruct unconditionally — a bake-off at
+# 35-75 s a side on a card that OOMs.
+_CONDITIONAL_SECOND_ARM = os.environ.get(
+    "PERCEPTION_CONDITIONAL_SECOND_ARM", "0"
+) not in ("0", "false", "False", "")
+
+# What "already renders well" means. BOTH checks must agree, which is the
+# posture 0205 forced: fill reads one axis and the residual reads three, so
+# a hollow shell of the right height passes the first and fails the second.
+# spike's bed is that case exactly — fill_dist 0.029, the best in the corpus,
+# against residual 0.894, the worst — and a fill-only gate would drop the
+# second arm of the one box 0205 says nobody can adjudicate.
+#
+# Both thresholds sit at the GEOMETRIC CENTRE of a gap in the same 8-box
+# sweep `_ARM_FILL_MARGIN` was fitted from, so neither is fitted to an end:
+#   fill_dist  0.1692 -> 0.5850   centre 0.3146, 1.86x clear either side
+#   residual   0.1904 -> 0.4827   centre 0.3032, 1.59x clear either side
+# The two boxes above the fill gap are 0197's pair — the floating slab and
+# the legless desk — which are precisely the boxes whose second arm is worth
+# reconstructing.
+_SECOND_ARM_FILL_PASS = float(
+    os.environ.get("PERCEPTION_SECOND_ARM_FILL_PASS", "0.31")
+)
+_SECOND_ARM_RESIDUAL_PASS_M = float(
+    os.environ.get("PERCEPTION_SECOND_ARM_RESIDUAL_PASS_M", "0.30")
+)
 
 
 def family_compatible(category: str | None, label: str | None) -> bool:
@@ -298,6 +354,40 @@ def family_compatible(category: str | None, label: str | None) -> bool:
         return False
     family = BOX_LABEL_FAMILIES.get(category.strip().lower())
     return family is not None and label.strip().lower() in family
+
+
+def vocabulary_gaps(
+    categories, prompt: str
+) -> tuple[list[str], list[str]]:
+    """(box categories with no family, family labels the prompt cannot emit).
+
+    Both are STRUCTURAL misses — a box in the first list can never associate
+    however well its mask overlaps, and a label in the second can never be
+    returned by SAM however well it fits a family. Both were silent until
+    this existed, and both cost real objects: `refrigerator` was absent from
+    the map entirely, and eight of 0077's family members were absent from
+    the prompt.
+
+    A report, not a gate. Apple's full CapturedRoom category enum is not
+    enumerable from this repo, so the first list is the only way a category
+    nobody anticipated becomes visible — it is measured from the room in
+    hand rather than guessed at in advance.
+    """
+    emittable = {t.strip().lower() for t in prompt.split(",") if t.strip()}
+    unmapped = sorted({
+        c for c in (
+            (getattr(b, "category", None) or "").strip().lower()
+            for b in categories
+        )
+        if c and c not in BOX_LABEL_FAMILIES
+    })
+    inert = sorted({
+        label
+        for family in BOX_LABEL_FAMILIES.values()
+        for label in family
+        if label not in emittable
+    })
+    return unmapped, inert
 
 
 # ---------------------------------------------------------------------------
@@ -950,6 +1040,13 @@ class ArmFit:
     index: int  # position in the association sort; 0 is what ships today
     fill: float  # rendered vertical span / the box's MEASURED height
     residual_m: float  # sum |scale*extent - dim| over the three box axes
+    # Trimmed splat->cloud Chamfer against the box's measured points, or
+    # None when no cloud was available (decision 0233). The FIRST axis here
+    # that sees the reconstruction's interior: `fill` and `residual_m` are
+    # both functions of the same six numbers — three percentile spans of the
+    # splat and three box dimensions — so a hollow shell and a solid body
+    # with identical extents score identically on both.
+    s2c_m: float | None = None
 
     @property
     def fill_dist(self) -> float:
@@ -958,7 +1055,9 @@ class ArmFit:
         return abs(self.fill - 1.0)
 
 
-def arm_fit(box, box_index: int, object_id: str, assoc, ctx) -> ArmFit | None:
+def arm_fit(
+    box, box_index: int, object_id: str, assoc, ctx, cloud=None
+) -> ArmFit | None:
     """0197's two output-side checks for one arm, or None when it cannot be
     placed at all.
 
@@ -966,9 +1065,11 @@ def arm_fit(box, box_index: int, object_id: str, assoc, ctx) -> ArmFit | None:
     the call 0197 measured the instrument under — a single-arm list has no
     partner views to score and the extent-best mapping is what an unscored
     box ships anyway. So this is the measured instrument rather than a
-    relative of it, and it costs one splat parse: no cloud, no appearance,
-    no GPU. `allow_scoring=False` is also the recursion guard — the scored
-    path is the only one that selects.
+    relative of it. It costs one splat parse and no appearance and no GPU;
+    it BUILDS no cloud, but scores a trimmed Chamfer (~400 ms) against one
+    when the caller supplies it — `select_arm` does, per box, and 0229's
+    first-arm check deliberately does not. `allow_scoring=False` is also the
+    recursion guard — the scored path is the only one that selects.
     """
     pts = ctx.get_splat(assoc.obs["splat_gcs_uri"])
     if pts is None:
@@ -984,11 +1085,47 @@ def arm_fit(box, box_index: int, object_id: str, assoc, ctx) -> ArmFit | None:
     span = _rendered_span(pts, wt["rotation_xyzw"], float(wt["scale"]), box)
     if span is None:
         return None
+    s2c = None
+    if cloud is not None and len(cloud) >= _ARM_S2C_MIN_CLOUD:
+        placed = (
+            float(wt["scale"])
+            * (pts @ quat_to_rotmat(tuple(wt["rotation_xyzw"])).T)
+            + np.asarray(wt["position"], dtype=float)
+        )
+        s2c = trimmed_nn_rms(placed, cloud)
     return ArmFit(
         index=-1,
         fill=float((span[1] - span[0]) / height),
         residual_m=float(sum(entry.get("box_fit_residual") or [0.0])),
+        s2c_m=s2c,
     )
+
+
+def _box_cloud_for(box, associations: list, ctx):
+    """The measured points inside this box, from the frames its own arms
+    come from. None whenever the context cannot supply depth — a swept
+    capture, an ARKIT_ONLY tier, a test stub — which degrades the third axis
+    to abstention rather than to a wrong number."""
+    get_depth = getattr(ctx, "get_depth", None)
+    get_camera = getattr(ctx, "get_camera", None)
+    get_roomplan = getattr(ctx, "get_roomplan", None)
+    if get_depth is None or get_camera is None:
+        return None
+    room = get_roomplan() if get_roomplan is not None else None
+    frames = sorted({a.frame_index for a in associations})
+    if not frames:
+        return None
+    try:
+        import mask_refine  # deferred: peer module, imported for its geometry
+
+        cloud = mask_refine.box_measured_cloud(
+            box=box, room=room, frame_indices=frames,
+            get_depth=get_depth, get_camera=get_camera,
+        )
+    except Exception:
+        logger.warning("arm select: measured cloud unavailable", exc_info=True)
+        return None
+    return cloud if len(cloud) >= _ARM_S2C_MIN_CLOUD else None
 
 
 def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
@@ -1028,13 +1165,20 @@ def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
     `frames_observed` still counts every association and the facing check
     still scores every view it would have.
     """
+    # One cloud per BOX, not per arm — that is what makes the third axis
+    # comparative. Both arms score against the same measured points, so the
+    # clutter no radius can remove (probe 19) is a constant offset rather
+    # than a term that differs between them.
+    cloud = _box_cloud_for(box, associations[:_ARM_SELECT_MAX], ctx)
     fits: list[ArmFit] = []
     for i, a in enumerate(associations):
         if len(fits) >= _ARM_SELECT_MAX:
             break
-        f = arm_fit(box, box_index, object_id, a, ctx)
+        f = arm_fit(box, box_index, object_id, a, ctx, cloud=cloud)
         if f is not None:
-            fits.append(ArmFit(index=i, fill=f.fill, residual_m=f.residual_m))
+            fits.append(ArmFit(
+                index=i, fill=f.fill, residual_m=f.residual_m, s2c_m=f.s2c_m,
+            ))
     if len(fits) < 2:
         return associations, None
 
@@ -1048,6 +1192,27 @@ def select_arm(*, box, box_index: int, object_id: str, associations: list, ctx):
     return reordered, record
 
 
+def arm_passes(fit: ArmFit | None) -> bool:
+    """Does this arm render well enough that a second view buys nothing?
+
+    Deliberately conservative in one direction only: `None` — the arm could
+    not be placed or parsed at all — is NOT a pass, so an object whose first
+    view failed keeps its second. That asymmetry is the whole safety
+    property of decision 0229, because the second arm is currently carrying
+    an OOM-fallback role in six of nine affected boxes (0228), and an arm
+    that OOMed produces no `ArmFit` to ask about.
+
+    Both checks must hold. See `_SECOND_ARM_FILL_PASS` for why one is not
+    enough.
+    """
+    if fit is None:
+        return False
+    return (
+        fit.fill_dist <= _SECOND_ARM_FILL_PASS
+        and fit.residual_m <= _SECOND_ARM_RESIDUAL_PASS_M
+    )
+
+
 def choose_arm(fits: list[ArmFit]) -> tuple[ArmFit, dict]:
     """The decision, with the measurement already made. `fits[0]` is the
     arm that ships today.
@@ -1059,23 +1224,56 @@ def choose_arm(fits: list[ArmFit]) -> tuple[ArmFit, dict]:
     """
     shipped = fits[0]
     best = shipped
+    splits: list[dict] = []
     for f in fits[1:]:
+        # Every axis that can express an opinion, each smaller-is-better and
+        # each voting only PREFER-CHALLENGER or not. k-of-n with k = n: one
+        # dissent refuses. `fill` alone carries the noise margin the sweep
+        # measured; the other two must merely improve.
+        votes = {
+            "fill": (shipped.fill_dist - f.fill_dist) >= _ARM_FILL_MARGIN,
+            "residual": f.residual_m < shipped.residual_m,
+        }
+        # The third axis abstains rather than dissents when either side has
+        # no cloud. Abstention must not veto: an object in a depth-less or
+        # starved room would otherwise lose arm selection silently, which is
+        # a behaviour change wearing the costume of a stricter rule.
+        if f.s2c_m is not None and shipped.s2c_m is not None:
+            votes["s2c"] = f.s2c_m < shipped.s2c_m
+        if not all(votes.values()):
+            if any(votes.values()):
+                # A split, not a tie. Recorded either way — 0205's posture is
+                # that a disagreement is the instrument saying it cannot
+                # tell, and the count is the only evidence that will ever
+                # accumulate about how often that happens.
+                splits.append({
+                    "rank": f.index,
+                    "agreed": sorted(k for k, v in votes.items() if v),
+                    "dissented": sorted(k for k, v in votes.items() if not v),
+                })
+            continue
         gain = shipped.fill_dist - f.fill_dist
-        if gain < _ARM_FILL_MARGIN:
-            continue  # inside the noise the sweep measured
-        if f.residual_m >= shipped.residual_m:
-            continue  # the second check disagrees: refuse, do not weigh
         if gain > shipped.fill_dist - best.fill_dist:
             best = f  # strict, so ties keep the lower index
-    return best, {
+
+    def _r(v):
+        return None if v is None else round(v, 4)
+
+    record = {
         "arms": len(fits),
+        "axes": ["fill", "residual", "s2c"],
         "shipped_fill": round(shipped.fill, 4),
         "shipped_residual_m": round(shipped.residual_m, 4),
+        "shipped_s2c_m": _r(shipped.s2c_m),
         "chosen_rank": best.index,
         "chosen_fill": round(best.fill, 4),
         "chosen_residual_m": round(best.residual_m, 4),
+        "chosen_s2c_m": _r(best.s2c_m),
         "fill_gain": round(shipped.fill_dist - best.fill_dist, 4),
     }
+    if splits:
+        record["refused"] = splits
+    return best, record
 
 
 def build_box_object(

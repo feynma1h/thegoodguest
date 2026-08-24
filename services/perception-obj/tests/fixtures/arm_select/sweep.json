@@ -21,7 +21,8 @@
      "fill": 0.415,
      "residual_m": 0.633,
      "residual_m_shipped": 0.633,
-     "axis_resolved_shipped": false
+     "axis_resolved_shipped": false,
+     "s2c_m": 0.0634
     },
     {
      "rank": 1,
@@ -32,9 +33,11 @@
      "fill": 0.3563,
      "residual_m": 0.7984,
      "residual_m_shipped": 0.7984,
-     "axis_resolved_shipped": false
+     "axis_resolved_shipped": false,
+     "s2c_m": 0.1318
     }
-   ]
+   ],
+   "cloud_points": 14623
   },
   {
    "room": "rp6g1",
@@ -57,7 +60,8 @@
      "fill": 0.4061,
      "residual_m": 0.7932,
      "residual_m_shipped": 0.7932,
-     "axis_resolved_shipped": true
+     "axis_resolved_shipped": true,
+     "s2c_m": 0.118
     },
     {
      "rank": 1,
@@ -68,9 +72,11 @@
      "fill": 1.004,
      "residual_m": 0.3405,
      "residual_m_shipped": 0.3405,
-     "axis_resolved_shipped": false
+     "axis_resolved_shipped": false,
+     "s2c_m": 0.0837
     }
-   ]
+   ],
+   "cloud_points": 10765
   },
   {
    "room": "rp6g1",
@@ -93,7 +99,8 @@
      "fill": 0.8838,
      "residual_m": 0.1341,
      "residual_m_shipped": 0.1341,
-     "axis_resolved_shipped": true
+     "axis_resolved_shipped": true,
+     "s2c_m": 0.2752
     },
     {
      "rank": 1,
@@ -104,9 +111,11 @@
      "fill": 0.8822,
      "residual_m": 0.3476,
      "residual_m_shipped": 0.3476,
-     "axis_resolved_shipped": false
+     "axis_resolved_shipped": false,
+     "s2c_m": 0.3102
     }
-   ]
+   ],
+   "cloud_points": 12735
   },
   {
    "room": "rp6g1",
@@ -129,7 +138,8 @@
      "fill": 1.1692,
      "residual_m": 0.1904,
      "residual_m_shipped": 0.1904,
-     "axis_resolved_shipped": true
+     "axis_resolved_shipped": true,
+     "s2c_m": 0.0648
     },
     {
      "rank": 1,
@@ -140,9 +150,11 @@
      "fill": 0.2231,
      "residual_m": 0.8303,
      "residual_m_shipped": 0.8303,
-     "axis_resolved_shipped": true
+     "axis_resolved_shipped": true,
+     "s2c_m": 0.0674
     }
-   ]
+   ],
+   "cloud_points": 3208
   },
   {
    "room": "spike",
@@ -165,7 +177,8 @@
      "fill": 1.1502,
      "residual_m": 0.4827,
      "residual_m_shipped": 0.4827,
-     "axis_resolved_shipped": true
+     "axis_resolved_shipped": true,
+     "s2c_m": 0.2374
     },
     {
      "rank": 1,
@@ -176,9 +189,11 @@
      "fill": 1.9192,
      "residual_m": 0.9097,
      "residual_m_shipped": 0.9097,
-     "axis_resolved_shipped": true
+     "axis_resolved_shipped": true,
+     "s2c_m": 0.2636
     }
-   ]
+   ],
+   "cloud_points": 2666
   },
   {
    "room": "spike",
@@ -201,7 +216,8 @@
      "fill": 1.0291,
      "residual_m": 0.8941,
      "residual_m_shipped": 1.5021,
-     "axis_resolved_shipped": true
+     "axis_resolved_shipped": true,
+     "s2c_m": 0.2269
     },
     {
      "rank": 1,
@@ -212,9 +228,11 @@
      "fill": 0.8161,
      "residual_m": 0.2383,
      "residual_m_shipped": 0.2383,
-     "axis_resolved_shipped": false
+     "axis_resolved_shipped": false,
+     "s2c_m": 0.2404
     }
-   ]
+   ],
+   "cloud_points": 29896
   },
   {
    "room": "spike",
@@ -237,7 +255,8 @@
      "fill": 1.0743,
      "residual_m": 0.1899,
      "residual_m_shipped": 0.1899,
-     "axis_resolved_shipped": false
+     "axis_resolved_shipped": false,
+     "s2c_m": 0.1109
     },
     {
      "rank": 1,
@@ -248,9 +267,11 @@
      "fill": 0.408,
      "residual_m": 0.6423,
      "residual_m_shipped": 0.6423,
-     "axis_resolved_shipped": true
+     "axis_resolved_shipped": true,
+     "s2c_m": 0.0513
     }
-   ]
+   ],
+   "cloud_points": 1761
   },
   {
    "room": "spike",
@@ -273,7 +294,8 @@
      "fill": 0.9506,
      "residual_m": 0.0646,
      "residual_m_shipped": 0.0646,
-     "axis_resolved_shipped": false
+     "axis_resolved_shipped": false,
+     "s2c_m": 0.1484
     },
     {
      "rank": 1,
@@ -284,9 +306,16 @@
      "fill": 0.9683,
      "residual_m": 0.0518,
      "residual_m_shipped": 0.0518,
-     "axis_resolved_shipped": false
+     "axis_resolved_shipped": false,
+     "s2c_m": 0.161
     }
-   ]
+   ],
+   "cloud_points": 3431
   }
+ ],
+ "axes": [
+  "fill",
+  "residual_m",
+  "s2c_m"
  ]
 }
