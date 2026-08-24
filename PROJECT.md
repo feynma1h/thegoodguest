@@ -217,7 +217,7 @@ Suite **610**: 604 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
-### api-public — `api-public-00042-ruq`, image `20260821-005416`
+### api-public — `api-public-00044-wiz`, image `20260825-035637`
 
 Client-facing, `--allow-unauthenticated`, with in-app Firebase JWT verification
 as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
