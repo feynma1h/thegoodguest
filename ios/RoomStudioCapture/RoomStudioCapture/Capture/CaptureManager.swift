@@ -203,6 +203,9 @@ final class CaptureManager: NSObject, ObservableObject {
     private let jpegQueue   = DispatchQueue(label: "com.roomstudio.capture.jpeg", qos: .utility)
     private let ciContext   = CIContext()
     private let writeStats  = WriteStats()
+    /// Mean luma per keyframe. Measured on every capture and reported at stop
+    /// whether or not anything is dark — see FrameLuminance and decision 0240.
+    private let luminance   = LuminanceRecorder()
 
     // Logging privacy policy: UUIDs, blob paths, and enum values may be .public;
     // user identifiers and error payloads stay default-private (redacted in shipped logs).
@@ -258,7 +261,11 @@ final class CaptureManager: NSObject, ObservableObject {
         bundleOutputDir   = makeOutputDir(forLidar: hasLidar)
 
         let stats = writeStats
-        jpegQueue.async { stats.reset() }
+        let lum   = luminance
+        jpegQueue.async {
+            stats.reset()
+            lum.census.reset()
+        }
 
         let config = ARWorldTrackingConfiguration()
         config.worldAlignment = .gravity
@@ -340,6 +347,7 @@ final class CaptureManager: NSObject, ObservableObject {
         // writes, independent of how long the room build takes.
         let outDir   = bundleOutputDir!
         let stats    = writeStats
+        let lum      = luminance
         let accepted = frameCount
         let log      = logger
         jpegQueue.async {
@@ -355,6 +363,10 @@ final class CaptureManager: NSObject, ObservableObject {
               on-disk  : \(onDisk) .jpg files
               temp-dir : \(framesDir.path, privacy: .public)
             """)
+
+            // Unconditional: a capture that saw the room says so in the same
+            // words as one that did not (decision 0240).
+            log.info("[CaptureManager] stop — \(lum.census.summary, privacy: .public)")
         }
 
         // 4. Assembly gate. With a co-run, didEndWith owns the next step: on
@@ -590,9 +602,19 @@ final class CaptureManager: NSObject, ObservableObject {
         // Write JPEG on jpegQueue.
         let context = ciContext
         let stats   = writeStats
+        let lum     = luminance
         let log = logger
         let pixels = UncheckedSendable(value: pixelBuffer)
         jpegQueue.async {
+            // Measure before encoding: the statistic describes what the camera
+            // delivered, so it must not depend on the encode succeeding.
+            if let mean = FrameLuminance.meanLuma(pixelBuffer: pixels.value) {
+                lum.census.record(index: index, mean: mean)
+                if lum.census.isDark(mean) {
+                    log.info("[CaptureManager] dark keyframe \(index, privacy: .public): mean luma \(mean, privacy: .public)")
+                }
+            }
+
             let ci = CIImage(cvImageBuffer: pixels.value)
             guard
                 let cg   = context.createCGImage(ci, from: ci.extent),
