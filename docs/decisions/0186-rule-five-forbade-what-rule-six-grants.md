@@ -68,6 +68,15 @@ Pinned as a capability truth in `test_guest_prompt.py` — the charter must not
 tell the guest it may not do what the tool schema offers it — rather than as
 a phrasing, which is the distinction 0172 drew and this note follows.
 
+**The full suite at this charter reads 26 passed, 1 failed**, and the one red
+is NOT this rule: it is
+`test_a_referent_the_previous_turn_fixed_is_not_re_asked`, which passed in both
+earlier full runs the same day. Recorded here rather than waved away because
+this note's edit is the only charter change between those runs, so it is the
+standing suspect at n=1 — and it cannot be separated from ordinary model
+variance until the account's usage cap resets on 2026-09-01. Every test this
+rule governs, including the whole of `TestRuleTenGrammar`, is green.
+
 ## Why
 
 **A refusal that sounds principled is the most expensive kind of wrong
@@ -90,6 +99,10 @@ guest quoting the exact phrase in its refusals said which words to change.
 
 ## What would change this decision
 
+- **The referent red turns out to be this edit.** If measuring it after
+  2026-09-01 shows the guest re-asking materially more often than before, the
+  35 words added here are the thing to shorten — they sit in the middle of a
+  rule the guest reads carefully, and length is the cost.
 - **The residual refusals return.** 14 of 14 is a small sample, and the true
   rate after the fix is not zero-with-certainty. If wall placements start being
   declined again, measure before touching anything — the harness is four lines

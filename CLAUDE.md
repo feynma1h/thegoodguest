@@ -605,14 +605,29 @@ gains.
   Secret Manager since 2026-07-21 and the operator's own account can read it;
   nothing had connected it to the harness, and the belief that it was missing
   cost that lane two days.
-- **A SMALLER deploy gate is open in its place, and it is blocked on
-  BILLING.** 0186's fix is a charter edit, and the last full-suite run predates
-  it — the Anthropic credit balance ran out mid-lane (`400 — Your credit
-  balance is too low`). Its own effect is well measured (17/26 → 14/14 wall
-  placements, plus 24 clean samples of the rule-10 scenario, which exercises
-  rules 5, 6, 10 and 2a together), but a charter edit can disturb behaviours
-  those samples do not cover. **Do not deploy `api-public` until this runs
-  green.** Top up credits, then:
+- **The full suite RAN at the final charter and came back 26 passed, 1 failed
+  — so `PROMPT_VERSION 7` is NOT cleared for deploy.** The failure is
+  `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`:
+  told "turn it round" straight after moving the red chair, the guest asked
+  which chair instead of taking the referent from the turn before. **It is ONE
+  observation and its cause is unmeasured** — it passed in both earlier full
+  runs the same day, and its own docstring calls it "the cheapest of the six to
+  get wrong".
+  **What IS ruled out, offline and provably:** the 0220 resolver change is not
+  the mechanism. In that room `"it"` resolves to `unknown_object` with an EMPTY
+  detail on `main` and on `main`+0220 alike, and `"chair"` differs only in a
+  tail that is strictly more decisive after 0220 (it rules three unplaced
+  chairs OUT rather than lumping them in as indistinguishable). The remaining
+  candidate is 0186's 35-word charter edit, which cannot be separated from
+  ordinary model variance at n=1.
+  **Measuring it is blocked until 2026-09-01.** Not credits this time — a
+  configured account usage cap: `400 — You have reached your specified API
+  usage limits. You will regain access on 2026-09-01 at 00:00 UTC.` Raising
+  the cap in the Anthropic Console lifts it sooner; adding credits does not.
+  The rate harness is four lines over the eval suite's own `_Room` and is the
+  right instrument — **do not re-run the whole test and count pass/fail**,
+  which is the error 0215 records, because this test can fail at its setup for
+  a second reason.
   `RUN_VOICE_EVALS=1 ANTHROPIC_API_KEY="$(gcloud secrets versions access latest --secret=anthropic-api-key --project=roomstudio)" .venv/bin/pytest services/api-public/tests/test_guest_voice_evals.py -q`
 
 **iOS**
