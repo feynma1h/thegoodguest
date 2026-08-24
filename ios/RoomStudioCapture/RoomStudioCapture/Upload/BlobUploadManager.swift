@@ -293,16 +293,26 @@ actor BlobUploadManager {
         _pendingCount.withLock { $0 += 1 }
     }
 
-    /// Decrement the in-flight counter. Called from handleTaskCompletion's defer.
-    /// If the count reaches zero, spawns a Task to call fireCompletionHandlerIfReady —
-    /// the last-decrement trigger path. Decision 0044.
-    nonisolated func decrementPendingCompletions() {
+    /// Decrement the in-flight counter, and on the last decrement fire the gate —
+    /// the third of the three trigger paths. Decision 0044.
+    ///
+    /// Actor-isolated, unlike its increment counterpart, so the fire lands in the same turn
+    /// as the completion that released the last count: the sole caller is
+    /// handleTaskCompletion's defer, which already runs in this actor's isolation. That
+    /// keeps all three trigger paths uniform — each fires before its own call returns,
+    /// inside a background-execution window the OS time-boxes, rather than at a later point
+    /// no caller holds a handle on.
+    ///
+    /// The increment must stay nonisolated: BlobUploadDelegate calls it on the URLSession
+    /// delegate thread before spawning its Task, which is what keeps the counter non-zero
+    /// when urlSessionDidFinishEvents arrives. The decrement has no such caller.
+    func decrementPendingCompletions() {
         let remaining = _pendingCount.withLock { (n: inout Int) -> Int in
             n -= 1
             return n
         }
         if remaining == 0 {
-            Task { await self.fireCompletionHandlerIfReady() }
+            fireCompletionHandlerIfReady()
         }
     }
 
