@@ -947,6 +947,59 @@ _INVENTED_PROVENANCE = re.compile(
 )
 
 
+# What rule 10 actually requires, as opposed to the one word it suggests
+# (decision 0215).
+#
+# Rule 10 says "Say 'would' and mean it", and then says what that is FOR:
+# "the person must always be able to hear which room you are describing."
+# 0174 measured the literal word at 12/16 and the property at 16/16, and this
+# suite graded the word. At PROMPT_VERSION 7 the word is gone — 0 of 27 across
+# nine runs — while the property holds in every sample, expressed as
+# "that's how it stands with the sofa where it is now". That construction is
+# the one `test_a_moved_piece_speaks_its_new_distance_conditionally`'s own
+# comment always named as acceptable, so the suite was failing replies it had
+# already blessed in prose.
+#
+# Attribution was tested and REFUTED before widening anything: decision 0214
+# gave the rearranged room a provenance line opening "as it stands on screen",
+# and the guest's replies echo that verb, so the obvious suspect was the facts
+# block teaching it the register. Replacing that opening and re-running gave
+# 0 of 9 — the word does not come back, and 0214 is not the cause.
+#
+# This is deliberately NOT the same object as `_HEDGE`. That one detects the
+# conditional MOOD, and its other two uses assert the guest does not reach for
+# it on facts a change never touched; widening it there would read a scoping
+# clause as an over-hedge and fail the guest for being precise.
+_MARKED_AS_ARRANGED = re.compile(
+    r"\bwould\b(?!\s+you\b)"
+    r"|\bas (?:it|they|things) stand\b"
+    r"|\bhow (?:it|they|the room|things) stands?\b"
+    r"|\bwith the \w+(?: \w+)? (?:where|against|under|beside|nearer|by)\b"
+    r"|\bin (?:this|that) (?:arrangement|layout|spot|position)\b"
+    r"|\bnow that\b",
+    re.IGNORECASE,
+)
+
+# Plain measured grammar: what the instrument above must never accept, or it
+# has stopped measuring anything. Pinned offline in test_guest_prompt.py.
+_MEASURED_GRAMMAR_SAMPLES = (
+    "About 2.2 m between the sofa's center and the table's center.",
+    "The sofa's center and the table's center are about 2.2 m apart.",
+    "It's about 2.2 m now.",
+    "That's about 2.2 m, measured from the scan.",
+)
+
+_ARRANGED_GRAMMAR_SAMPLES = (
+    "In that arrangement it would be at least 0.6 m of clear space.",
+    "About 2.2 m between the sofa's center and the table's center — that's "
+    "how it stands with the sofa where it is now.",
+    "About 2.2 m — that's how they stand with the sofa where it is now, "
+    "against the wall.",
+    "About 2.2 m between their centers — that's how the room stands with the "
+    "sofa against the wall.",
+)
+
+
 class TestRuleTenGrammar:
     """Rule 10 and its exclusion, as a matched pair.
 
@@ -1022,15 +1075,15 @@ class TestRuleTenGrammar:
                 f"never spoke the arrangement's own distance: {r.text!r}"
             )
 
-        # Rule 10's exemplar reaches for "would"; a reply can still let the
-        # person hear which room it means without it ("that's how it stands
-        # with the sofa against the wall now"). So this is a rate, set where
-        # it catches the regression that matters — the conditional grammar
-        # going entirely. At the measured 12/16, three samples miss it about
-        # twice in a thousand runs.
-        assert any(self._HEDGE.search(t) for t in replies), (
-            "no sample marked the arrangement's distance as conditional: "
-            + repr(replies)
+        # Rule 10's requirement is that the person can hear which room is
+        # being described; "would" is the form it suggests, not the property
+        # it states (decision 0215). Still a rate rather than a per-sample
+        # rule, and still set where it catches the regression that matters —
+        # the marking going entirely, which is what would let a derived number
+        # reach the person wearing the measured room's grammar.
+        assert any(_MARKED_AS_ARRANGED.search(t) for t in replies), (
+            "no sample marked the arrangement's distance as belonging to the "
+            "arranged room: " + repr(replies)
         )
 
     def test_a_turned_piece_keeps_plain_grammar(self):

@@ -143,9 +143,9 @@ state machine, the scene read/write repositories, `UploadSessionRepository` +
 test fixtures.
 
 Suites, all re-measured on `main` with `selection-supply` landed and
-`web/public/dev-fixtures` STAGED (2026-08-25): schemas **126**;
-root **868 + 27** by bare `pytest` (which uses `testpaths` in
-`pyproject.toml`); root **886 + 27** by `pytest packages services tools
+`web/public/dev-fixtures` STAGED (2026-08-25, guest-closure landed): schemas **126**;
+root **884 + 27** by bare `pytest` (which uses `testpaths` in
+`pyproject.toml`); root **902 + 27** by `pytest packages services tools
 --ignore=services/perception-obj`, which collects 18 tests `testpaths` does
 not. **Those two commands are both called "root" in this repo and differ by
 18 tests** — "always say which" was never enough on its own, because the
@@ -233,8 +233,11 @@ as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
   verbatim, V4-signed splat URLs for placed objects, and an additive
   `asset_urls_compressed` for the SPZ tier that never narrows the PLY fallback.
 - `GET/POST /scenes/{id}/conversation` — the guest, at `FACTS_VERSION 4` and
-  `PROMPT_VERSION 6`. SSE with a disconnect shield: the turn completes and
-  persists even if the client stops listening.
+  `PROMPT_VERSION 7` on `main` (`api-public` still SERVES 6). SSE with a
+  disconnect shield: the turn completes and persists even if the client stops
+  listening. `PROMPT_SURFACE_SHA256` covers the charter, the arrangement block
+  AND `guest_tools.TOOLS`, schema included (0219) — every word the model reads
+  is under one digest, enforced by construction rather than by a list.
 - `GET/DELETE /scenes/{id}/design_spec` — the arrangement document. Every entry
   carries `measured_transform` beside `proposed_transform`; an entry that cannot
   is unrepresentable.
@@ -736,32 +739,48 @@ gains.
   colour is one of the post-passes its long tail costs it. Objects with no
   block inside a coloured room are the confidence gate working, not a
   failure.
-- **The guest's tool descriptions are instruction it reads and are NOT under
-  `PROMPT_SURFACE_SHA256`.** The pin covers the charter and the arrangement
-  block, and the comment above it says why: prose outside the pin can be
-  "reworded with no version bump and no eval trigger, which is exactly how
-  decision 0174's defect shipped and survived two bumps unnoticed".
-  `guest_tools.TOOLS` carries several hundred words of exactly that prose,
-  outside the pin. Found 2026-08-21 by the guest lane and deliberately not
-  fixed: widening a pin turns other lanes' evals red, which is a scheduling
-  call rather than a lane's.
-- **Two voice evals carry known flakiness** — one setup asks about an ambiguous
-  wall roughly 1 time in 8.
-- **`FACTS_VERSION 4` and the ambiguity refusal are MERGED BUT UNPROVEN against
-  a live model** (0213/0214, merged 2026-08-21). The voice evals are
-  fail-closed-live and need an `ANTHROPIC_API_KEY`; the lane had none and
-  neither did the coordinator, so they are **not green and not red — they never
-  ran**. The unit suite covers the resolver (370 + 102 in `api-public`), which
-  is a different question from whether the guest speaks the refusal well. The
-  lane fixed two real harness bugs while in there — both were grading a guest
-  production does not ship — and added one eval for the new refusal, so the
-  coverage is written and waiting on one run. **This is a deploy gate, not a
-  merge gate:** the code is on `main` and must not reach `api-public` until the
-  evals run once with a key.
-  The `ANTHROPIC_API_KEY` was never absent — `anthropic-api-key` has been in
-  Secret Manager since 2026-07-21 and the operator's own account can read it.
-  Nothing connected it to the eval harness. Run:
-  `RUN_VOICE_EVALS=1 ANTHROPIC_API_KEY="$(gcloud secrets versions access latest --secret=anthropic-api-key --project=roomstudio)" .venv/bin/pytest services/api-public/tests/test_guest_voice_evals.py -v`
+- **Two voice evals are flaky, both measured 2026-08-24 rather than guessed.**
+  `TestFacingCorrection::test_a_piece_with_no_second_way_round_is_refused_plainly`
+  misses about **1 run in 4** — it asks the guest to turn a rug with no measured
+  box and greps its reply for a refusal word, so the miss is phrasing, not
+  behaviour. `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`
+  misses about **1 run in 13**, on `main`'s charter and the current one alike.
+  Re-run before believing either, and **measure with the rate harness rather
+  than by re-running the test and counting pass/fail** — 0215 records why that
+  is not a rate. **The other long-recorded flake — "one setup asks about an
+  ambiguous wall roughly 1 time in 8" — is probably not a flake and its rate
+  was understated.** 0186 measured that setup refused 9 times in 26, and one
+  refusal was verbatim "only works if you tell me which wall". Re-measure
+  rather than assuming it is gone: 0186's fix took the same setup to 14/14.
+- **Rule 10's literal "would" has collapsed — 2/16 against 12/16 when 0174
+  measured it** (0215) — while the property the rule states holds at 14/16, so
+  the evals now grade the property. **0214 was the obvious suspect and is
+  RULED OUT**: on a paired, interleaved A/B of its provenance opening, the two
+  arms do not separate (2/16 vs 4/16, p = 0.33) and the arm with the suspect
+  clause REMOVED is still far below 0174's rate (p = 0.006). Removing it does
+  not bring the word back. The remaining explanation is the model behind
+  `GUEST_MODEL`, which is the suite's own trigger 2. **Do not re-open this by
+  re-running the test and counting pass/fail** — that method is what made the
+  first attempt uninterpretable.
+- **The voice evals RAN 2026-08-24 and 0213/0214's deploy gate is CLEARED**
+  (26 passed, 1 failed at `PROMPT_VERSION 6`; the single failure was not in
+  either of them). They found two defects underneath that work — 0186's charter
+  contradiction and 0215's instrument — both now fixed on `main`. **The
+  `ANTHROPIC_API_KEY` was never absent**: `anthropic-api-key` has been in
+  Secret Manager since 2026-07-21 and the operator's own account can read it;
+  nothing had connected it to the harness, and the belief that it was missing
+  cost that lane two days.
+- **`PROMPT_VERSION 7`'s voice evals are GREEN — 27 passed, 2026-08-24 — so
+  the deploy gate is CLEARED.** The run before it read 26 passed, 1 failed on
+  `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`,
+  which was measured rather than argued about and is a **pre-existing flake**:
+  paired and interleaved against `main`'s charter it reads **19/20 on both
+  arms** (33/36 vs 34/35 pooled, p = 0.32). It is a PER-SAMPLE assertion, so
+  the test goes red whenever one sample misses. **Do not re-report it as a
+  regression, and do not attribute it to 0186 or 0220** — 0220's resolver is
+  separately ruled out offline, because in that room `"it"` resolves to
+  `unknown_object` with an EMPTY detail before and after, and `"chair"` differs
+  only in a tail that is strictly more decisive afterwards.
 
 **iOS**
 
@@ -1236,7 +1255,7 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 **ALL THREE PARALLEL LANES MERGED 2026-08-09** (`stage2` → 0135–0137, `perception-emit`, `ios-residue`; worktrees removed, branches deleted). Merged-tree verification: root **724 passed + 10 skipped**, perception **704**, web **204**, iOS **523**, tsc clean, zero conflict markers. **What the lanes left owed, now written:** lane B's two notes are 0142 (`/compress` as a third `/process` stage rather than a sidecar) and 0143 (`extent_axes_m` declared per box, horizontals deliberately unnamed). The `dims` correction is lane C's **0137**, reached independently — there is no third note on it.
 
-**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2 and capture-dark merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNSPENT: 0243–0244 to perception-deploy**, the only lane with no commits of its own. **Written but UNMERGED, so invisible to `main` and not free: 0186 plus 0215 and 0219–0220 (guest-closure), 0239 (upload-flake), 0242 (privacy-labels)** — guest-closure took 0186 from the free pool beyond its block, correctly derived. **0225–0236 are SPENT by selection-supply**; **0237–0238 by ios-surfaces-2** (dead code rusts shut; one slot is what keeps the rule); **0240–0241 by capture-dark** (the dark tail is a covered lens; the capture measures darkness and does not act on it); **0245 by the name swap**. Everything else through 0245 is used.
+**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2, capture-dark and guest-closure merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNSPENT: 0243–0244 to perception-deploy**, which still has no commits of its own — the same state guest-closure was in when it was misread as finished. Do not free it. **Written but UNMERGED: 0239 (upload-flake), 0242 (privacy-labels).** **0186 and 0215 plus 0219–0220 are SPENT by guest-closure** (rule five forbade what rule six grants; the conditional survived the word; the pin covers what the model reads; the refusal names a handle); **0225–0236 by selection-supply**; **0237–0238 by ios-surfaces-2**; **0240–0241 by capture-dark**; **0245 by the name swap**. Everything else through 0245 is used.
 
 Two durable lessons, both learned by collision. **Put a session's number block INSIDE the prompt body**: a block written in a chat heading once reached nobody and two lanes claimed the same numbers, and the room-quality session was handed one stale block in its prompt and a different one in its handoff. When a prompt and this file disagree, **this file and the handoff win** — a prompt is written once, these are maintained. And **two sessions sharing one tree is how a note gets dropped**: decision 0179 was lost by the sam3d-pointmap merge and restored by `546281e`, which is why the Tooling conventions now insist every session gets its own worktree.
 

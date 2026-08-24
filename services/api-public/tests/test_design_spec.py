@@ -711,3 +711,216 @@ class TestFindingThePiece:
         geometry = self._uncoloured_geometry()
         assert _find(geometry, "first chair").object_id == "obj_000"
         assert _find(geometry, "the second chair").object_id == "obj_001"
+
+
+def _chair_room(chairs, others=(), *, scene="s"):
+    """A room of same-label pieces plus whatever else it takes to point at
+    them. `chairs` and `others` are (object_id, label, position, color_hex or
+    None, placed) — written out rather than defaulted so each test's geometry
+    is readable at the test."""
+    objects = []
+    for object_id, label, position, color_hex, placed in list(chairs) + list(others):
+        obj = {
+            "object_id": object_id, "label": label, "placed": placed,
+            "quality": {"frames_observed": 4, "cluster_spread_m": 0.05},
+        }
+        if position is not None:
+            obj["world_transform"] = {
+                "position": list(position),
+                "rotation_xyzw": [0, 0, 0, 1], "scale": 1.0,
+            }
+        if color_hex:
+            obj["color"] = {"hex": color_hex, "concentration": 0.8,
+                            "visible_fraction": 0.9, "visible_points": 9000}
+        objects.append(obj)
+    manifest = {"scene_id": scene, "manifest_version": 2, "frame_count": 9,
+                "objects": objects, "frames": []}
+    facts = derive_scene_facts(manifest)
+    return _geometry_as_the_server_builds_it(manifest, facts)
+
+
+class TestTheHandleAPersonCouldUse:
+    """The refusal names a handle a person would have used (decision 0220).
+
+    0213 shipped colour-or-count, and the colour gate declines on most pieces
+    — 0 of 45 in one real room — so the count was the majority case. Telling
+    someone nothing distinguishes their own furniture is false from where they
+    are standing: one chair is by the window and one is at the desk. These
+    pin the tier that fixes it, and the three ways a positional handle can be
+    true and still send them to the wrong chair.
+
+    Fixture-free, like `TestFindingThePiece` above, but the coordinates in the
+    rp6g2 test are the real room's.
+    """
+
+    def test_position_names_a_chair_where_colour_could_not(self):
+        """The tier this decision exists for. No colour anywhere, and the
+        refusal still hands the person something they can answer with."""
+        geometry = _chair_room(
+            chairs=[("obj_000", "chair", (0.0, 0.3, 0.0), None, True),
+                    ("obj_001", "chair", (4.0, 0.3, 0.0), None, True),
+                    ("obj_002", "chair", (4.0, 0.3, 2.0), None, True)],
+            others=[("obj_003", "desk", (0.0, 0.4, 0.6), None, True)],
+        )
+        found = _find(geometry, "chair")
+        assert isinstance(found, Refusal)
+        assert found.reason == "ambiguous_object"
+        assert found.detail == (
+            "the chair nearest the desk, and 2 more chairs that nothing "
+            "separates"
+        )
+        # And no ordinal reaches the person (0184).
+        for ordinal in ("first", "second", "third"):
+            assert ordinal not in found.detail
+
+    def test_the_margin_refuses_a_pointer_to_the_wrong_chair(self):
+        """The charter's own example: 0.90 m and 0.95 m from the desk makes
+        "nearest the desk" technically true and practically wrong. Refusing
+        cleanly beats a confident pointer at the other chair."""
+        geometry = _chair_room(
+            chairs=[("obj_000", "chair", (0.90, 0.3, 0.0), None, True),
+                    ("obj_001", "chair", (-0.95, 0.3, 0.0), None, True)],
+            others=[("obj_002", "desk", (0.0, 0.4, 0.0), None, True)],
+        )
+        found = _find(geometry, "chair")
+        assert isinstance(found, Refusal)
+        assert found.detail == "2 chairs that nothing separates"
+
+        # The same room with the chairs genuinely apart does name them.
+        geometry = _chair_room(
+            chairs=[("obj_000", "chair", (0.90, 0.3, 0.0), None, True),
+                    ("obj_001", "chair", (-2.50, 0.3, 0.0), None, True)],
+            others=[("obj_002", "desk", (0.0, 0.4, 0.0), None, True)],
+        )
+        detail = _find(geometry, "chair").detail
+        assert "nearest the desk" in detail
+        assert "furthest from the desk" in detail
+
+    def test_the_anchor_must_itself_be_findable(self):
+        """"Nearest the desk" in a two-desk room moves the ambiguity rather
+        than resolving it. The bound is the anchor's own name: an ordinal is
+        bookkeeping, and bookkeeping is not a place."""
+        two_desks = _chair_room(
+            chairs=[("obj_000", "chair", (0.0, 0.3, 0.0), None, True),
+                    ("obj_001", "chair", (4.0, 0.3, 0.0), None, True)],
+            others=[("obj_002", "desk", (0.0, 0.4, 0.6), None, True),
+                    ("obj_003", "desk", (4.0, 0.4, 0.6), None, True)],
+        )
+        assert _find(two_desks, "chair").detail == (
+            "2 chairs that nothing separates"
+        )
+
+        # One desk, same chairs: the handle appears. So it is the anchor's
+        # ambiguity doing the refusing, not the chairs'.
+        one_desk = _chair_room(
+            chairs=[("obj_000", "chair", (0.0, 0.3, 0.0), None, True),
+                    ("obj_001", "chair", (4.0, 0.3, 0.0), None, True)],
+            others=[("obj_002", "desk", (0.0, 0.4, 0.6), None, True)],
+        )
+        assert "nearest the desk" in _find(one_desk, "chair").detail
+
+        # ...and a room whose two desks the colour gate CAN tell apart offers
+        # them, because the bound is decodability rather than the label.
+        coloured_desks = _chair_room(
+            chairs=[("obj_000", "chair", (0.0, 0.3, 0.0), None, True),
+                    ("obj_001", "chair", (4.0, 0.3, 0.0), None, True)],
+            others=[("obj_002", "desk", (0.0, 0.4, 0.6), "#880607", True),
+                    ("obj_003", "desk", (9.0, 0.4, 0.6), "#151414", True)],
+        )
+        assert "nearest the red desk" in _find(coloured_desks, "chair").detail
+
+    def test_a_handle_ranges_over_every_candidate_including_named_ones(self):
+        """Uniqueness within the SET. "The chair nearest the desk" is a claim
+        about all the chairs, so if the red one is nearest the desk no other
+        chair may wear that handle — the unnamed ones fall back to a count
+        rather than inheriting a pointer that is false."""
+        geometry = _chair_room(
+            chairs=[("obj_000", "chair", (0.0, 0.3, 0.5), "#880607", True),
+                    ("obj_001", "chair", (4.0, 0.3, 0.0), None, True),
+                    ("obj_002", "chair", (4.0, 0.3, 0.3), None, True)],
+            others=[("obj_003", "desk", (0.0, 0.4, 0.0), None, True)],
+        )
+        detail = _find(geometry, "chair").detail
+        assert "nearest the desk" not in detail
+        assert detail == "red chair, and 2 more chairs that nothing separates"
+
+    def test_the_colourless_room_still_gets_a_usable_refusal(self):
+        """rp6g2's own geometry: five chairs, no colour on any of the room's
+        45 pieces, and exactly one anchor a person could find. Four of the
+        chairs sit within 0.54 m of each other in distance to it, so nothing
+        may point at those four — and the fifth is 2.39 m clear at the far
+        end, so something may point at that one.
+
+        This is the case the tier is FOR. If it degrades to a bare count
+        here, the decision has not achieved its point.
+        """
+        geometry = _chair_room(
+            chairs=[("obj_000", "chair", (0.808, -0.931, -3.346), None, True),
+                    ("obj_005", "chair", (-0.512, -1.022, 0.684), None, True),
+                    ("obj_006", "chair", (1.435, -1.231, -2.964), None, True),
+                    ("obj_012", "chair", (0.988, -0.684, -2.871), None, True),
+                    ("obj_013", "chair", (0.107, -0.459, -2.374), None, True)],
+            others=[("obj_011", "ceiling fan", (1.133, 1.151, -3.275),
+                     None, True)],
+        )
+        found = _find(geometry, "chair")
+        assert isinstance(found, Refusal)
+        assert found.detail == (
+            "the chair furthest from the ceiling fan, and 4 more chairs "
+            "that nothing separates"
+        )
+
+    def test_never_placed_pieces_are_counted_apart(self):
+        """Two different failures, and 0213 collapsed them. What separates an
+        unplaced chair from its siblings is precisely that the scan never
+        placed it — which the room knows and can say.
+
+        It is also what keeps the spatial tier honest: a "nearest" claim over
+        a set with unmeasured members is a minimum over things it cannot see.
+        """
+        geometry = _chair_room(
+            chairs=[("obj_000", "chair", (0.0, 0.3, 0.0), None, True),
+                    ("obj_001", "chair", (4.0, 0.3, 0.0), None, True),
+                    ("obj_002", "chair", None, None, False)],
+            others=[("obj_003", "desk", (0.0, 0.4, 0.6), None, True)],
+        )
+        detail = _find(geometry, "chair").detail
+        assert detail == (
+            "the chair nearest the desk, the chair furthest from the desk; "
+            "1 more chair the scan never placed"
+        )
+        assert "nothing separates" not in detail
+
+    def test_a_set_with_nothing_to_say_reads_exactly_as_it_did(self):
+        """0220 subsumes 0213 rather than replacing it. Where every piece is
+        placed and no tier can name any of them, the string is byte-identical
+        to what shipped — which is what makes this change provably additive.
+        """
+        geometry = _chair_room(
+            chairs=[("obj_000", "chair", (0.0, 0.3, 0.0), None, True),
+                    ("obj_001", "chair", (2.0, 0.3, 0.0), None, True)],
+        )
+        assert _find(geometry, "chair").detail == (
+            "2 chairs that nothing separates"
+        )
+
+    def test_one_placed_piece_is_named_by_being_the_placed_one(self):
+        """"1 monitor that nothing separates" is nonsense — there is nothing
+        to separate it from among the placed pieces. Found by running the tier
+        over the four preserved rooms, where six sets landed on it.
+
+        Refusing is still right (0213): the person may have meant the one the
+        scan never placed, and picking the actionable piece for them is the
+        silent-wrong-piece failure wearing a helpful face. But the detail can
+        say what actually tells them apart.
+        """
+        geometry = _chair_room(
+            chairs=[("obj_000", "monitor", (0.0, 0.3, 0.0), None, True),
+                    ("obj_001", "monitor", None, None, False)],
+        )
+        found = _find(geometry, "monitor")
+        assert isinstance(found, Refusal)
+        assert found.detail == (
+            "the monitor the scan placed; 1 more monitor the scan never placed"
+        )
+        assert "nothing separates" not in found.detail
