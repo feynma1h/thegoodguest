@@ -71,6 +71,21 @@ from roomstudio_schemas import CaptureBundle
 
 logger = logging.getLogger(__name__)
 
+# The segmentation vocabulary. It lives here rather than in server.py
+# because SAM 3 returns the PROMPT TERM verbatim as a detection's label, so
+# this string and `box_placement.BOX_LABEL_FAMILIES` are two halves of one
+# contract: a family member absent from here can never match a box, and a
+# term here that is in no family can never associate with one. Eight family
+# members were in the first position and nobody could see it. server.py
+# imports this; `box_placement.vocabulary_gaps` reports both directions of
+# the gap once per room, and a test pins the map fully emittable by it.
+DEFAULT_OBJECT_PROMPT = (
+    "sofa,armchair,chair,dining chair,dining table,coffee table,side table,desk,"
+    "cabinet,bookshelf,bed,nightstand,rug,curtain,floor lamp,table lamp,pendant light,"
+    "ceiling fan,plant,artwork,painting,mirror,window,door,doorway,fireplace,"
+    "tv,monitor,speaker,clock"
+)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -1028,6 +1043,11 @@ class _PlanCtx:
     masks lazy-load from their masks.npz so a warm retry's plan can see
     which box views prior attempts already reconstructed."""
 
+    # `get_appearance` is None rather than absent: `build_box_object` guards
+    # on exactly that, and a plan-time context has no business fetching
+    # colour. `arm_fit` calls that path with scoring off, so it never asks.
+    get_appearance = None
+
     def __init__(
         self, frames_by_idx: dict, states: dict, cached_masks: dict
     ) -> None:
@@ -1035,6 +1055,32 @@ class _PlanCtx:
         self._states = states
         self._cached_loaders = cached_masks  # frame_index -> () -> stack|None
         self._cached_stacks: dict[int, Any] = {}
+        self._splats: dict[str, Any] = {}
+
+    def get_splat(self, splat_gcs_uri: str):
+        """Parsed vertices for a splat this run already uploaded, memoized.
+
+        Fetched from GCS rather than kept from the reconstruction: the PLY
+        bytes are dropped eagerly inside `_reconstruct_one_object` — before
+        upload, deliberately, because they sit beside 15 keys of GPU tensors
+        — and holding them to save a download would undo that. One download
+        and parse per box evaluated, against the 35-75 s reconstruction the
+        evaluation may avoid.
+        """
+        if not splat_gcs_uri:
+            return None
+        if splat_gcs_uri not in self._splats:
+            import placement as placement_mod  # deferred with the heavy imports
+
+            try:
+                raw = _download_gcs_uri(splat_gcs_uri)
+                self._splats[splat_gcs_uri] = placement_mod.parse_ply_vertices(raw)
+            except Exception:
+                logger.warning(
+                    "conditional second arm: splat unreadable %s", splat_gcs_uri
+                )
+                self._splats[splat_gcs_uri] = None
+        return self._splats[splat_gcs_uri]
 
     def get_camera(self, frame_index):
         frame = self._frames.get(frame_index)
@@ -1206,7 +1252,82 @@ def _build_reconstruction_plan(
         "policy_skipped": len(skipped),
         "associated_boxes": sorted(f"box_{bi:02d}" for bi in assoc_by_box),
     }
-    return plan, {"info": plan_info, "skipped": skipped, "box_by_key": box_by_key}
+    # `assoc_by_box` is returned, not recomputed: decision 0229's in-loop
+    # check needs the box's first association to score the arm it produced,
+    # and the plan has already built exactly that. Returning it does not
+    # unfreeze the plan — the triple list above is unchanged and still
+    # decided before pass 2 begins.
+    return plan, {
+        "info": plan_info,
+        "skipped": skipped,
+        "box_by_key": box_by_key,
+        "assoc_by_box": assoc_by_box,
+    }
+
+
+def _first_arm_passes(
+    *, box_index: int, boxes: list, states: dict, plan_meta: dict,
+    tier1_by_box: dict, ctx,
+) -> bool:
+    """Did this box's tier-1 view render well enough to make a second one
+    pointless? Decision 0229.
+
+    Every path that is not a clear pass returns False, and that direction is
+    load-bearing rather than defensive. 0228 measured the second arm
+    currently carrying an OOM fallback in six of nine affected boxes — in
+    those, tier-1 is the view that failed and a lower-ranked one rescued the
+    box. So "tier-1 was attempted" must never license a skip; only "tier-1
+    produced an arm, and the arm fits" may. A missing entry, a soft-failed
+    one, an unreadable splat and an unplaceable arm all fall on the safe
+    side of that line by construction.
+    """
+    import box_placement  # deferred with the other heavy imports
+
+    key = tier1_by_box.get(box_index)
+    if key is None:
+        return False  # tier-1 never ran, or was not planned for this box
+    entry = states.get(key[0], {}).get("entries", {}).get(key[1])
+    if not entry or not entry.get("ok") or not entry.get("splat_gcs_uri"):
+        return False  # tier-1 soft-failed — this is the OOM case
+    assoc = next(
+        (
+            a for a in plan_meta.get("assoc_by_box", {}).get(box_index, [])
+            if (a.frame_index, a.mask_index) == key
+        ),
+        None,
+    )
+    if assoc is None:
+        return False
+    # The plan's associations carry an empty splat uri for pass-1
+    # detections — the splat did not exist when the plan was built. Point
+    # this one at what tier-1 actually produced.
+    scored = box_placement.BoxAssociation(
+        box_index=assoc.box_index,
+        frame_index=assoc.frame_index,
+        mask_index=assoc.mask_index,
+        overlap=assoc.overlap,
+        in_frame_fraction=assoc.in_frame_fraction,
+        obs={**assoc.obs, "splat_gcs_uri": entry["splat_gcs_uri"]},
+    )
+    try:
+        fit = box_placement.arm_fit(
+            boxes[box_index], box_index, f"box_{box_index:02d}", scored, ctx
+        )
+    except Exception:
+        logger.warning(
+            "conditional second arm: arm_fit raised for box %d; keeping the "
+            "second view", box_index, exc_info=True,
+        )
+        return False
+    passes = box_placement.arm_passes(fit)
+    logger.info(
+        "conditional_second_arm box=%d fill=%s residual_m=%s passes=%s",
+        box_index,
+        "-" if fit is None else round(fit.fill, 4),
+        "-" if fit is None else round(fit.residual_m, 4),
+        passes,
+    )
+    return passes
 
 
 def _mask_refiner_for(
@@ -1457,10 +1578,38 @@ def _run_census_two_pass(
         outputs_bucket, scene_id,
     )
     executed: set[tuple[int, int]] = set()
+    # Decision 0229: which box each executed tier-1 view was planned for, so
+    # a tier-2 entry can ask what its own tier-1 actually rendered. The plan
+    # emits every box_best_view before any box_second_view, so this is always
+    # populated by the time it is read — and a box whose tier-1 was already
+    # cached never reaches tier 2 at all, because `_views_left` drops below 2.
+    tier1_by_box: dict[int, tuple[int, int]] = {}
+    conditional_skipped: list[tuple[int, int]] = []
     if not budget_stopped:
+        import box_placement  # deferred with the other heavy imports
+
+        # One context for the whole loop so its splat memo survives; masks
+        # are not needed here, hence the empty cached-loader map.
+        arm_ctx = _PlanCtx(frames_by_idx, states, {})
         for frame_idx, mask_index, _tier in plan:
             st = states[frame_idx]
             det = st["detections"][mask_index]
+            box_index = plan_meta["box_by_key"].get((frame_idx, mask_index))
+            if (
+                box_placement._CONDITIONAL_SECOND_ARM
+                and _tier == "box_second_view"
+                and box_index is not None
+                and _first_arm_passes(
+                    box_index=box_index,
+                    boxes=boxes,
+                    states=states,
+                    plan_meta=plan_meta,
+                    tier1_by_box=tier1_by_box,
+                    ctx=arm_ctx,
+                )
+            ):
+                conditional_skipped.append((frame_idx, mask_index))
+                continue
             if st["depth"] is None:
                 st["depth"] = _fetch_frame_depth(st["frame"], prefix)
             depth_raster, depth_confidence, depth_intrinsics = st["depth"]
@@ -1493,7 +1642,26 @@ def _run_census_two_pass(
                 break
             st["entries"][mask_index] = entry
             executed.add((frame_idx, mask_index))
+            if _tier == "box_best_view" and box_index is not None:
+                tier1_by_box[box_index] = (frame_idx, mask_index)
             _free_gpu_memory()
+
+    # Conditional second-arm skips (decision 0229). Recorded with their own
+    # reason, never folded into `box_covered_by_other_view`: that reason
+    # means "another view of this box is planned", and this one means "this
+    # box's own first view already rendered well enough".
+    for frame_idx, mask_index in conditional_skipped:
+        st = states[frame_idx]
+        det = st["detections"][mask_index]
+        st["entries"][mask_index] = {
+            "label": det["label"],
+            "instance_idx": det["instance_idx"],
+            "bbox": det["bbox"],
+            "score": det["score"],
+            "mask_index": mask_index,
+            "ok": False,
+            "skipped_reason": "first_arm_already_fits",
+        }
 
     # Policy skips: recorded entries (deterministic — safe to cache).
     for frame_idx, mask_index in plan_meta["skipped"]:
@@ -1615,6 +1783,21 @@ def run_perception(
             "roomplan scene_id=%s source=%s walls=%d objects=%d",
             scene_id, roomplan_source, len(room_plan.walls), len(room_plan.objects),
         )
+        # Structural association misses, both directions, once per room. A
+        # box whose category has no family never associates however well its
+        # mask overlaps; a family label the prompt cannot emit never matches
+        # however well it fits. Neither is visible in any other log.
+        import box_placement  # deferred with the other heavy imports
+
+        unmapped, inert = box_placement.vocabulary_gaps(
+            room_plan.objects, object_prompt
+        )
+        if unmapped or inert:
+            logger.warning(
+                "box_vocabulary_gap scene_id=%s unmapped_categories=%s "
+                "unemittable_family_labels=%s",
+                scene_id, unmapped or "-", inert or "-",
+            )
 
     frames_total = len(bundle.frames)
     effective_max = max_frames if max_frames is not None else sampling_mod.DEFAULT_MAX_FRAMES
@@ -1626,8 +1809,41 @@ def run_perception(
         # (the degrade lock).
         import census_sampling as census_sampling_mod
 
+        # The vetoes (decision 0234) need pixels and depth, which only this
+        # layer can fetch. Both accessors are lazy and are asked only about a
+        # frame the cover pass is about to take, so a default run fetches
+        # nothing extra and a veto run fetches a handful of blobs.
+        _prefix = _bundle_prefix(bundle_uri)
+        _by_idx = {f.frame_index: f for f in bundle.frames}
+
+        def _veto_depth(frame_index: int):
+            frame = _by_idx.get(frame_index)
+            if frame is None:
+                return None
+            try:
+                return _fetch_frame_depth(frame, _prefix)
+            except Exception:
+                return None
+
+        def _veto_rgb(frame_index: int):
+            frame = _by_idx.get(frame_index)
+            if frame is None or not frame.rgb_gcs_path:
+                return None
+            try:
+                import numpy as np  # deferred with the other heavy imports
+                from PIL import Image
+
+                raw = _download_gcs_uri(_prefix + frame.rgb_gcs_path)
+                return np.asarray(Image.open(io.BytesIO(raw)).convert("L"))
+            except Exception:
+                return None
+
+        _veto_on = census_sampling_mod.VISIBILITY_VETO
         selected, census_info = census_sampling_mod.select_frames_census(
-            bundle.frames, census_boxes, effective_max
+            bundle.frames, census_boxes, effective_max,
+            room=room_plan if _veto_on else None,
+            get_depth=_veto_depth if _veto_on else None,
+            get_rgb=_veto_rgb if _veto_on else None,
         )
     else:
         selected = sampling_mod.select_frames(bundle.frames, effective_max)

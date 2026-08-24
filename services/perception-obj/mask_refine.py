@@ -45,7 +45,7 @@ tests/test_mask_refine_real_data.py.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from roomstudio_schemas import placement_math as pm
@@ -108,6 +108,19 @@ MIN_ADDED_ON_SIGNAL = float(
 ROOM_PLANE_TOL_M = float(
     os.environ.get("PERCEPTION_MASK_REFINE_PLANE_TOL_M", "0.08")
 )
+# 0.08 LOOKS like a room-scale number misapplied to an object: it reaches 8 cm
+# up into every box standing on the floor, which is where feet are, and the
+# bottom tenth of nine of eleven legged boxes is empty because of it. A
+# box-aware relaxation to 0.02 was built and MEASURED, and it is refused —
+# what it restores is the floor, not the feet (decision 0232). The floor's own
+# measured spread about the plane is p90 +2.2 to +4.3 cm across the four
+# preserved captures, so 0.02 sits INSIDE the noise, and the restored points
+# collapse by 96-100% between 0.02 and 0.06 — a thin sheet, where a leg would
+# thin out linearly. `_on_room_plane` keeps `floor_tol_m` as a parameter so
+# the measurement is one line to reproduce and so a LOCAL floor estimate could
+# use it, but no env flag ships: a switch whose measured effect is to feed the
+# detector floor is worse than no switch, because it looks live.
+
 BOX_PAD_M = float(os.environ.get("PERCEPTION_MASK_REFINE_BOX_PAD_M", "0.05"))
 
 
@@ -115,12 +128,29 @@ BOX_PAD_M = float(os.environ.get("PERCEPTION_MASK_REFINE_BOX_PAD_M", "0.05"))
 class UnclaimedSignal:
     """What the frame's own measurements say is inside this box and not in
     anybody's mask. `unclaimed_vu` is on the MASK grid, so it composes with
-    the mask stack directly."""
+    the mask stack directly.
+
+    `bands` decomposes the same points by height (decision 0231). `fraction`
+    pools the whole box volume, and pooling hides which of two different
+    defects produced it:
+
+      * the camera SAW surface in a band and the mask claimed none of it —
+        a mask defect, and the one 0198's repair is for;
+      * the camera saw NOTHING there — a view defect, which no prompt and no
+        repair can reach.
+
+    Both raise `fraction` the same way, and the pooled number cannot tell
+    them apart because a band the camera never saw contributes no considered
+    pixels at all. A band with zero considered pixels therefore reports
+    `None`, never 0.0 — the distinction is the whole point.
+    """
 
     fraction: float
     own_fraction: float
     considered_px: int
     unclaimed_vu: np.ndarray  # (N, 2) int, (row, col) on the mask grid
+    # band name -> (considered_px, unclaimed fraction or None)
+    bands: dict = field(default_factory=dict)
 
     @property
     def flagged(self) -> bool:
@@ -131,11 +161,53 @@ class UnclaimedSignal:
         )
 
     def as_record(self) -> dict:
-        return {
+        rec = {
             "unclaimed_fraction": round(self.fraction, 4),
             "own_fraction": round(self.own_fraction, 4),
             "considered_px": self.considered_px,
         }
+        for name, (n, frac) in sorted(self.bands.items()):
+            rec[f"{name}_considered_px"] = int(n)
+            # Explicitly null, not absent and not zero: a reader must be able
+            # to tell "the mask claimed none of what was seen" from "nothing
+            # was seen".
+            rec[f"{name}_unclaimed_fraction"] = (
+                None if frac is None else round(float(frac), 4)
+            )
+        return rec
+
+
+# The crude structural split: a slab and what holds it up. Deliberately not
+# tuned — 0.70 puts a tabletop in `upper` on every box in the four preserved
+# captures, and the point of the split is that pooling hides the defect, not
+# that this particular cut is optimal. `lower` starts at 0.10 because the
+# room-plane rejection above has already emptied the bottom tenth of every
+# floor-standing box.
+BAND_LOWER_MIN = 0.10
+BAND_UPPER_MIN = 0.70
+
+
+def height_bands(height_frac: np.ndarray) -> dict[str, np.ndarray]:
+    """Boolean masks over a height-fraction array (0 at the box's floor face,
+    1 at its top). Three bands, and the bottom one exists to be empty.
+
+    `foot` is [0, 0.10): the slice `_on_room_plane` deletes at the shipped
+    tolerance, because 0.08 m of floor rejection reaches 8 cm up into every
+    object standing on the floor. Measured on production's own geometry over
+    the 26 planned box views of the four preserved captures: **0.2% of all
+    considered points, and exactly zero on 24 of the 26**. Reporting it as a
+    band rather than letting it fall outside the decomposition is what made
+    a tighter floor tolerance measurable at all — every point such a
+    relaxation restores lands here and nowhere else, which is how 0232
+    measured that what comes back is floor rather than feet, and refused it.
+    No env switch ships; `_on_room_plane`'s `floor_tol_m` parameter is the
+    whole of what remains.
+    """
+    return {
+        "foot": height_frac < BAND_LOWER_MIN,
+        "lower": (height_frac >= BAND_LOWER_MIN) & (height_frac < BAND_UPPER_MIN),
+        "upper": height_frac >= BAND_UPPER_MIN,
+    }
 
 
 def _box_local(world: np.ndarray, box) -> np.ndarray:
@@ -144,19 +216,28 @@ def _box_local(world: np.ndarray, box) -> np.ndarray:
     return (world - np.asarray(box.center_world, dtype=float)) @ R
 
 
-def _on_room_plane(world: np.ndarray, room) -> np.ndarray:
+def _on_room_plane(
+    world: np.ndarray, room, floor_tol_m: float | None = None
+) -> np.ndarray:
     """Points lying within ROOM_PLANE_TOL_M of a measured floor or wall.
 
     Floors are read as a world-Y level and walls as a plane through the
     surface origin with the surface's local +Z as normal — the same
     reading `contact_priors` takes of the same entities.
+
+    `floor_tol_m` overrides the FLOOR tolerance only; walls always keep
+    ROOM_PLANE_TOL_M. Callers that have already clipped `world` to one
+    object's volume pass the tight value (decision 0232) — inside a box the
+    room-scale tolerance is not deciding what is floor, it is deleting the
+    object's feet.
     """
     on = np.zeros(len(world), dtype=bool)
     if room is None:
         return on
+    floor_tol = ROOM_PLANE_TOL_M if floor_tol_m is None else float(floor_tol_m)
     for floor in getattr(room, "floors", ()):
         y = float(np.asarray(floor.transform, dtype=float)[1, 3])
-        on |= np.abs(world[:, 1] - y) < ROOM_PLANE_TOL_M
+        on |= np.abs(world[:, 1] - y) < floor_tol
     for wall in getattr(room, "walls", ()):
         T = np.asarray(wall.transform, dtype=float)
         n = T[:3, 2]
@@ -165,6 +246,55 @@ def _on_room_plane(world: np.ndarray, room) -> np.ndarray:
             continue
         on |= np.abs((world - T[:3, 3]) @ (n / norm)) < ROOM_PLANE_TOL_M
     return on
+
+
+def box_measured_cloud(
+    *, box, room, frame_indices, get_depth, get_camera, min_confidence: int = 1
+) -> np.ndarray:
+    """The measured points inside one box, unioned over the given frames.
+
+    Exactly `unclaimed_in_box`'s geometry with the mask half removed: each
+    frame's depth back-projected with its OWN depth intrinsics (decision
+    0032), carried to world with its pose, clipped to the box's padded
+    volume, and rejected where it lies on a measured floor or wall at the
+    shipped tolerance (decision 0232 measured a tighter one re-admitting
+    floor).
+
+    Deliberately NOT a fused cloud over the whole capture. Production has
+    none and nothing here proposes one; this unions the handful of frames
+    the box already has associations in, which is what a
+    `RefinementContext` can reach. Decision 0233 records what that costs in
+    agreement with the fused instrument.
+
+    Returns an empty (0, 3) array rather than None when nothing is
+    measurable, so callers degrade on length alone.
+    """
+    half = np.asarray(box.dimensions, dtype=float) / 2.0 + BOX_PAD_M
+    acc: list[np.ndarray] = []
+    for frame_index in frame_indices:
+        payload = get_depth(frame_index) if get_depth is not None else None
+        cam = get_camera(frame_index) if get_camera is not None else None
+        if payload is None or cam is None:
+            continue
+        depth_raster, depth_confidence, depth_intrinsics = payload
+        if depth_raster is None:
+            continue
+        pointmap = pm.depth_pointmap(
+            np.asarray(depth_raster), depth_intrinsics, depth_confidence,
+            min_confidence=min_confidence,
+        )
+        flat = pointmap.reshape(-1, 3)
+        measured = np.isfinite(flat[:, 0])
+        if not measured.any():
+            continue
+        world = pm.camera_to_world(flat[measured], cam[0])
+        inside = np.all(np.abs(_box_local(world, box)) <= half, axis=1)
+        if inside.any():
+            acc.append(world[inside])
+    if not acc:
+        return np.zeros((0, 3))
+    stacked = np.concatenate(acc)
+    return stacked[~_on_room_plane(stacked, room)]
 
 
 def unclaimed_in_box(
@@ -232,11 +362,25 @@ def unclaimed_in_box(
     own = mask_stack[mask_index][mv, mu]
 
     free = ~claimed
+    # Height fraction of the same considered points, in the same order as
+    # `us`/`vs`: `keep` selected them out of the flattened pointmap, so the
+    # nonzero order of `keep.reshape(dh, dw)` and the row order of
+    # `local[keep]` are the same raster order.
+    box_height = float(box.dimensions[1])
+    kept_local = local[keep]
+    bands: dict[str, tuple[int, float | None]] = {}
+    if box_height > 0.0:
+        hf = (kept_local[:, 1] + box_height / 2.0) / box_height
+        for name, sel in height_bands(hf).items():
+            n = int(sel.sum())
+            bands[name] = (n, float(free[sel].mean()) if n else None)
+
     return UnclaimedSignal(
         fraction=float(free.mean()),
         own_fraction=float(own.mean()),
         considered_px=int(len(us)),
         unclaimed_vu=np.column_stack([mv[free], mu[free]]),
+        bands=bands,
     )
 
 

@@ -142,9 +142,16 @@ state machine, the scene read/write repositories, `UploadSessionRepository` +
 `gcs_mint_resumable_uri`, semantic manifest validation, and the capture-bundle
 test fixtures.
 
-Suites: schemas **120**, root **862 passed + 27 skipped** with
-`web/public/dev-fixtures` staged and **787 + 102** without — both measured
-2026-08-21, after 0213/0214 added 23 tests. Always say which. re-enqueue **18**.
+Suites, all re-measured on `main` with `selection-supply` landed and
+`web/public/dev-fixtures` STAGED (2026-08-25): schemas **126**;
+root **868 + 27** by bare `pytest` (which uses `testpaths` in
+`pyproject.toml`); root **886 + 27** by `pytest packages services tools
+--ignore=services/perception-obj`, which collects 18 tests `testpaths` does
+not. **Those two commands are both called "root" in this repo and differ by
+18 tests** — "always say which" was never enough on its own, because the
+figures were recorded without the command that produced them. Write the
+command. Without fixtures the second form is **811 + 102** (review worktree,
+2026-08-24). re-enqueue **18**.
 
 ### iOS capture app — `ios/RoomStudioCapture/`
 
@@ -266,8 +273,24 @@ Three stages, all Cloud Tasks driven:
   than by mask-hull overlap (0204/0205). **All three have now run live on
   0%-traffic candidates** (0211/0212), and what that measured is that they are
   not three independent switches: refine and select flip TOGETHER, refine
-  first, because refinement changes what the chooser is choosing between. The
-  residue waits on one more room.
+  first, because refinement changes what the chooser is choosing between.
+  **Refine and arm-select are RULED ON** and sit on
+  `perception-obj-00074-var` at 0% traffic; **the serving revision
+  `00062-hum` still carries neither**, so production today runs every flag
+  off. The residue is parked (0202/0212).
+  **Two more ship OFF and byte-identical off, from `selection-supply`** —
+  `PERCEPTION_CONDITIONAL_SECOND_ARM` skips a box's planned second view when
+  its FIRST arm already renders well (0229; 4 of 8 multi-arm boxes, and never
+  when tier-1 merely *ran*), and `PERCEPTION_VISIBILITY_VETO` lets frame
+  selection REJECT a frame or an (object, frame) pair, never rank one (0234).
+  **The enable ORDER is: refine, then arm-select, then
+  conditional-second-arm** — 0212's refine-before-select still holds, and
+  conditional-second-arm decides using `arm_fit`, whose input refinement
+  changes. **The veto is not in that order any more: it is measured and
+  refused** (0236, see the open defect below). `PERCEPTION_ARM_SELECT` also
+  carries a third axis — trimmed splat→cloud Chamfer, unanimous-or-refuse
+  (0233) — which is **structurally incapable of enabling a switch**, only of
+  vetoing one, and costs ~400 ms per arm plus one measured cloud per box.
 - **`/shell`** — the room envelope. shell.json **v3** on the LiDAR paths:
   method `roomplan` renders CapturedRoom geometry verbatim, method
   `anchor_envelope` is the degrade for LIDAR_ARKIT and roomplan-absent
@@ -291,9 +314,29 @@ the viewer may render, so measurement is never falsified to hide a splat
 artifact. `person` is a suppression-only concept — segmented, never shipped
 (0089).
 
-Suite **952 passed + 2 skipped** with `web/public/dev-fixtures` staged and
-**945 + 9** without (`services/perception-obj/tests`;
-903 + 9 before 0204-0205 added 42).
+**Association's label map and the segmentation prompt are ONE contract**
+(0226), and this is the one change `selection-supply` makes that is NOT behind
+a flag. SAM 3 returns the prompt term verbatim, so `BOX_LABEL_FAMILIES` and
+`DEFAULT_OBJECT_PROMPT` are two halves of one list: eight of seventeen family
+members could never be emitted (`table` among them, because the prompt carries
+`dining table`/`coffee table`/`side table` and no bare `table`), and five
+emittable furniture names sat in no family. Removing the eight is provably
+behaviour-identical; adding the five plus `refrigerator:cabinet` takes the four
+preserved captures **20/31 → 22/31 boxes matched, 28 → 30 associations**, and an
+A/B over all four run at review confirms **no pre-existing association moved** —
+both new matches are boxes that previously had none.
+`box_placement.vocabulary_gaps` logs `box_vocabulary_gap` once per room so
+neither direction can silently re-open, and `DEFAULT_OBJECT_PROMPT` now lives in
+`process_receiver.py` because `server.py` imports torch and no GPU-free test
+could read it there.
+
+Suite **1060 passed + 2 skipped** with `web/public/dev-fixtures` staged
+(`main`, 2026-08-25) and **1053 + 9** without
+(`PYTHONPATH=<tree>/packages/schemas pytest services/perception-obj/tests`,
+review worktree 2026-08-24 — the PYTHONPATH is load-bearing, see the Python
+test policy). Main measured **955 + 2** WITH the fixtures on the same day, so
+the with-fixtures figure after this merge is owed a measurement rather than
+an arithmetic guess; the spread has been seven tests.
 
 ### Web app — `web/`, live at https://roomstudio.web.app
 
@@ -425,6 +468,40 @@ mistake available in this repo.
 - **Do not tune `FUSION_CLUSTER_DIST_M` or `SHELL_WALL_MERGE_*` to chase
   under-merge symptoms** (0075). Both measured correct on real rooms; the
   symptoms are label collapse and edge truncation.
+- **The FUSED cloud makes orientation WORSE, and the same-mass rule is dead**
+  (0225). Coverage for visibility questions, PURITY for orientation ones. A
+  box-clipped cloud accumulated over every keyframe medians a **0.0287**
+  axis-assignment margin against 0081's masked single-view **0.15-0.47**,
+  clears the shipped 0.10 gate on **1 of 20** boxes, and **7 of 20 winners
+  move** under cloud perturbation. That last number refutes the claim
+  everything here rested on — that clutter cancels across rotations of one
+  splat because the point set is identical. The mass IS common; its COST is
+  not, because rotating a table moves its legs relative to a bag that stays
+  put. **The 180-degree sign speculation dies with it** and the sign stays
+  where 0171 put it. Re-opens only on a per-object cloud accumulated through
+  each frame's own SAM mask — a purity mechanism, not more views.
+- **The OOM is HEADROOM, not size, and no retry reaches it** (0228). See the
+  open-defect entry; the refused half is that **downscale-and-retry is out**
+  even though the arithmetic green-lights it (a halved request fits 12 of 12
+  box views), because 0197's bidirectionality means an altered input yields
+  **a different object under the same identity** with nothing able to detect
+  the swap. Generalised: *where a fallback must choose between altering the
+  input and not running, it must not run.* **A deferred retry at a frame or
+  object boundary is also out** — refuted before implementation, needing no
+  measurement: the existing retry already runs after `gc.collect()` +
+  `empty_cache()` with no other object in flight, so the queue it would defer
+  into is already empty.
+- **A tighter floor tolerance inside a box restores FLOOR, not feet** (0232).
+  0.08 m looks like a room-scale number misapplied at object scale; it is
+  sized for the floor plane's own error. Open floor sits up to **+4.3 cm**
+  above RoomPlan's plane, so 0.02 is inside the noise, and 96-100% of the
+  restored points vanish by tol=0.06 where a leg would thin out linearly. The
+  real fix is a floor level estimated LOCALLY from each box's own depth, and
+  it needs its own registered prediction — the numbers to beat are that the
+  restored points must NOT collapse between 0.02 and 0.06. **No env switch
+  ships**: a control that fires into a defect under a conservative default is
+  worse than one that never fires, because the metric it moves reads as
+  improvement (the inverse of 0225's unfireable gate).
 - **Generic compression buys almost nothing** (0125). Float32 splat data is
   high-entropy: gzip is 1.36×, where the SPZ tier is 5.8×.
 - **Spark is not the render bottleneck** (0123). Parse is under 1% of the wait;
@@ -491,7 +568,10 @@ gains.
   **10 of 37** planned box views (rp7 1/12, rp6g1 3/10, rp6g2 2/5, spike 4/10),
   against the warm 9 of 25 that 0201 priced from — a warm room understates it.
   **What the sitting measured that the flag report did not:** the headline
-  "0.321 → 1.122" is the **narrowest axis only**. In the box's own axes the
+  "0.321 → 1.122" is **one axis, and it is the box's HEIGHT** — `arm_fit`'s
+  `fill` divides the rendered vertical span by `box.dimensions[1]`, which for
+  this box is 0.795 m, not the 0.660 m narrowest axis both this file and the
+  throughput charter used to name. In the box's own axes the
   refined desk is 0.734 × 0.877 × 0.665 against a box of 1.291 × 0.795 × 0.660
   — **width falls to 0.569 of the box** and the three-axis error goes
   **0.626 → 0.644 m, marginally worse**. It is not rotated: its longest extent
@@ -500,9 +580,9 @@ gains.
   ruled ON having seen this**, on the merits: class-6 truncation is endemic,
   and an object standing on its measured floor at the right height beats a
   desktop floating 47 cm up. **Do not re-report the width as a fresh defect.**
-  The third Chamfer axis rides `ARM_SELECT` and needs no env of its own
+  The third Chamfer axis (0233) rides `ARM_SELECT` and needs no env of its own
   (`PERCEPTION_ARM_S2C_MIN_CLOUD` is a threshold, not a gate); the
-  band-decomposed claim rate is inert and has no flag.
+  band-decomposed claim rate (0231) is inert and has no flag.
 - **The object-aware residue is PARKED, and the spike run is refused rather
   than deferred** (0202, 0212; operator sitting 2026-08-23). It hit its
   pre-registered frame set exactly and bought spike's bed a better arm — and
@@ -522,6 +602,48 @@ gains.
   **It cannot ship until supply, repair and the vetoes draw from one
   allocator, and it belongs to the throughput charter, not to a parked flag
   with no owner.**
+- **`PERCEPTION_VISIBILITY_VETO` is MEASURED and stays OFF — a veto is a
+  re-roll, not a filter** (0234, 0236; drive run at review 2026-08-24 on the
+  serving revision with both other flags off). 0234's restriction — reject
+  only, never rank — is airtight about ORDER and says nothing about how much
+  of the answer moves: a vetoed (frame, box) pair leaves its box uncovered, so
+  the greedy cover pass spends an extra pick, which changes the seed AND the
+  count of the farthest-point residue, and the residue re-rolls. Measured
+  offline through production's own selector: **16 of 48 frames change across
+  the four captures** — rp7 5/12, rp6g1 8/12, rp6g2 3/12, spike 0/12 — where
+  0234 reports a three-frame change. On rp6g1 **one** band-vetoed pair moves
+  **8 frames**. The GPU drive then answered 0234's blocker, and
+  **answered it mostly favourably** — corpus detections **228 → 250, +10%**
+  (rp7 +46%, rp6g2 +10%, spike 0, rp6g1 **−12%**, the only room that falls —
+  and there the objects RoomPlan does not box, which is what the residue
+  exists to serve, go **33 → 27**). **The check the flag was held on is
+  not the check that decides it.** On the output-side instrument it is 0197's
+  bidirectionality again — rp7's chair **0.655 → 0.083** and rp6g1 gains a
+  box that had no arm at all, against rp7's bed **0.419 → 0.799** and rp6g1's
+  nightstand **fill 1.169 → 0.223**. **The sharpest cost is invisible to a
+  flags-off run, which is every measurement 0234 took:** the veto removes
+  rp6g1 f178 and rp7 f114, which are not those boxes' shipped arms but their
+  better ALTERNATIVES — the one walked arm-select switch and mask
+  refinement's target. Replayed through `choose_arm` over rp6g1's two
+  selections, the nightstand is the whole argument in one row: today it has
+  **two** arms and arm selection correctly refuses the bad one (fill 1.169
+  kept over 0.223); under the veto it has **one**, so the chooser has nothing
+  to choose and **fill 0.223 ships**. **The veto shrinks the candidate set
+  arm selection exists to search** — 0212's enable order already puts the
+  veto last, and this is the stronger reason for it. A supply change and a
+  chooser cannot be evaluated apart. **rp7's bed is the same argument from
+  the other side and it indicts 0205 rather than the veto**: both f294 and
+  f363 are in the veto's selection, so the chooser HAS the better arm — f294
+  wins the three-axis error by 0.38 m — and refuses it, because f294
+  overshoots vertically (fill 1.404) where f363 sits at 0.946 and unanimity
+  requires both axes. **0205's measured hole now has a price**, which is the
+  trigger that note was waiting for. Two follow-ups in 0236: **split the
+  flag** (veto 1 removes two frames that produced literally 0 detections and
+  is free; veto 2 causes the whole cascade), and **contain the cascade** by
+  relaxing a vetoed box's own bar in place rather than buying an extra cover
+  pick. Also measured and general: **adding a frame can replace a good arm
+  with a worse one on association overlap alone**, which is a property of
+  association rather than of this flag.
 - **Class-6 splat truncation is untouched and has no live route.** Reconstructions
   are missing legs, bases, and backs. Every placement fix to date positions or
   orients an incomplete reconstruction better rather than completing it, and all
@@ -531,7 +653,12 @@ gains.
 - **CUDA OOM is the largest measured loss in the corpus** (0228) — **22 of 163
   detections**, twelve of them box views, and **two boxes lost their only
   compatible mask**. It is **capacity, not scheduling**: the models hold
-  ~16.4 GiB, the forward pass needs 5.23–6.43 GiB, the card has **5.26 left**.
+  ~16.4 GiB, the forward pass PEAKS at 5.23–6.43 GiB, and the card has
+  **5.26 left**. Read the peak, not the request: **21 of the 22 failing
+  allocations are 0.500–0.861 GiB**, the median box-view shortfall is 133 MiB
+  and three cases miss by 16 MiB, so this is headroom rather than object size
+  — mask area does not predict it at all (Spearman r = −0.009 over an 84×
+  area range).
   Freeing 1.2 GiB covers 21 of the 22. **The second arm is currently the OOM
   fallback in six of nine affected boxes** (0229) — which is why
   `PERCEPTION_CONDITIONAL_SECOND_ARM` stays OFF until the throughput charter
@@ -554,6 +681,22 @@ gains.
   depth are valid, so this may be an **iOS capture defect** rather than a data
   quirk. Re-read every prior conclusion drawn from it — including the 53-item
   budget-starved tail and the 0-of-45 colour result — against this.
+  **Measured 2026-08-24 for the `capture-dark` lane:** the two black frames
+  the shipped sampler takes, f103 and f119, read mean luma **2.46** and
+  **1.88** and produce **0 detections each** — SAM 3 finds literally nothing
+  in them, so they consume two of that room's eight cover picks and return
+  nothing. That is independent of the veto and true of today's production.
+- **An unmatched RoomPlan box has FIVE causes and the two anyone looks for
+  are the smallest** (0227). Of nine unmatched boxes across the four
+  captures: 2 PLAN_SKIP, 2 DETECTION, 1 OOM, 1 COMPETITION, 1 SAMPLING, 1
+  NEVER_FRAMED, 1 LABEL. Four carry family-compatible masks at up to overlap
+  **1.0000** and are invisible to association only because `ok=False` — no
+  splat, so not an observation. Every failure is recorded faithfully in its
+  frame's `objects.json`; nothing aggregates them, which is why four boxes
+  had their answer written down and unread. **Two of the declined label
+  matches (rp6g1 b04, rp6g2 b09) are NOT label problems** — both have good
+  uncontested `cabinet` masks that OOM'd or were policy-skipped. The declines
+  stand; do not re-open them as label cases. rp6g2 b07 is confirmed LABEL.
 - **A window ships with ~30° in-plane skew.** Near-square planar objects are
   ~90°-ambiguous to the model and no instrument scores in-plane orientation.
 - **The "cabinet behind a wall" is not the declip bound** (0104). The declip pass
@@ -775,8 +918,6 @@ ever done or ruled, delete it — do not annotate it.
   outside `public/` would remove the hazard rather than guard it.
 - **Cold-start coverage is thin by design.** The first `/process` request spends
   its budget on boot and model load; warm re-drives are the coverage recipe.
-  Large single objects can transiently exceed the L4's memory even at baseline —
-  per-object soft-fail contains it. That is a capacity fact, not a lifecycle bug.
 
 ## Python test policy
 
@@ -835,12 +976,14 @@ the local path). Prefix the run with
 install — measured 2026-08-16. Same class as the roomlib trap below, and it
 bites `services/*` and root runs rather than `packages/*` ones.
 
-  **`selection-supply` repointed `roomlib.REPO` to the worktree** and added an
-  explicit `roomlib.DATA` for the captures, which fixes the trap below for that
-  branch. **Running that branch's tests needs
-  `PYTHONPATH=<worktree>/packages/schemas`** — `trimmed_nn_rms` is new in
-  `packages/schemas` and the shared `.venv` resolves to MAIN without it,
-  producing 20+ collection errors that look like a broken branch.
+  **The worktree copy of `roomlib` that `selection-supply` landed splits code
+  from data** — `REPO` is the worktree and `DATA` is the main tree, which fixes
+  the trap below wherever that copy is used. It is a copy, not the tracked
+  file: the tracked one still hardcodes MAIN, see below.
+  `PYTHONPATH=<worktree>/packages/schemas` is the general form of this and is
+  load-bearing whenever a lane adds anything to `packages/schemas` — it is how
+  `trimmed_nn_rms` produced 20+ collection errors that looked like a broken
+  branch and were the shared `.venv` resolving to MAIN.
 
 **`outputs/room-quality/roomlib.py` hardcodes the MAIN tree at `sys.path[0]`**
 (`REPO = Path("/Users/aubrey/projects/roomstudio")`). A worktree session that
@@ -1064,7 +1207,7 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 
 **ALL THREE PARALLEL LANES MERGED 2026-08-09** (`stage2` → 0135–0137, `perception-emit`, `ios-residue`; worktrees removed, branches deleted). Merged-tree verification: root **724 passed + 10 skipped**, perception **704**, web **204**, iOS **523**, tsc clean, zero conflict markers. **What the lanes left owed, now written:** lane B's two notes are 0142 (`/compress` as a third `/process` stage rather than a sidecar) and 0143 (`extent_axes_m` declared per box, horizontals deliberately unnamed). The `dims` correction is lane C's **0137**, reached independently — there is no third note on it.
 
-**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220, 0236, 0239–0242 are all live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-21, with the colour-deploy, what-the-model-sees and guest lanes merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere**, and were absent from this list until 2026-08-21, which is the fourth lag and the first in that direction. **Reserved: 0215 plus 0219–0220 to the guest-closure lane, 0236 to selection-review, 0239 to upload-flake, 0240–0241 to capture-dark, 0242 to privacy-labels, and 0243–0244 to perception-deploy — six blocks live at once. **0237–0238 are SPENT by ios-surfaces-2** — 0237 (dead code rusts shut), 0238 (one slot is what keeps the rule); **0245 is SPENT by the name swap** — 0245 (the name is the register it was built in). guest-closure had NOT started** — those three are written nowhere, and were deliberately KEPT reserved rather than freed on 2026-08-23: the lane is provisioned, was unblocked that day, and one of its three items is a live deploy gate. Never free a block on the belief a lane finished — `git branch --merged` lists a branch with no commits of its own, which is exactly what `guest-closure` is. One block live at once, each also stated inside its own charter body, which is the half that actually reaches the session. **0199–0200 are SPENT by colour-deploy** — 0199 (the inline cache destroys itself by being used), 0200 (the tag must name what Cloud Run pins); **0201–0203 are SPENT by what-the-model-sees** — 0201 (the repair is judged by what it added), 0202 (the residue was never asked where anything is), 0203 (a second arm is not a better object); **0204–0205 are SPENT by selection** — 0204 (the arm that ships is chosen by looking at it), 0205 (fill sees one axis); **0210–0212 are SPENT by ship** — 0210 (a cold room is two deletions and an audience), 0211 (the flag was never in the image), 0212 (the three flags are one decision); **0206, 0218 and 0224 are SPENT by scenes-client** — 0206 (no rooms and could not ask), 0218 (the bridge was never waiting on the fetch), 0224 (a pinned action does not share a column); **0216–0217 are SPENT by ios-surfaces** — 0216 (a count that cannot exist), 0217 (the declaration is the stand-down); **0207–0209 are SPENT by social-layer** — 0207 (a layer is not a feed), 0208 (sharing cuts where the pipeline already cut), 0209 (comparison between people is evidence, not a surface); **0221–0223 are SPENT by calling-card** — 0221 (a room's eligibility is a date, not a field), 0222 (the card draws the boundary and prints the measurement), 0223 (the yaw is not a measurement); **0213–0214 are SPENT by the guest lane** — 0213 (two candidates refuse rather than pick), 0214 (the provenance line describes the room on screen). Spent by clipped-views: **0197** (the uncropped photograph is not a better photograph) and **0198** (the mask is the photograph SAM 3D sees). Spent by geom-retire: **0192** (perception-geom is retired). Spent by the brand-mark pass: **0193** (the mark is generated, not copied). **0225–0235 are SPENT by selection-supply**, unmerged at the time of writing — which is why the union method above exists. Everything else through 0224 is used.
+**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-24, with selection-supply and ios-surfaces-2 merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNSPENT: 0243–0244 to perception-deploy**, the only lane with no commits of its own. **Written but UNMERGED, so invisible to `main` and not free: 0186 plus 0215 and 0219–0220 (guest-closure), 0239 (upload-flake), 0240–0241 (capture-dark), 0242 (privacy-labels)** — guest-closure took 0186 from the free pool beyond its block, correctly derived. **0225–0236 are SPENT by selection-supply** — its own eleven plus 0236 for the review's veto verdict; **0237–0238 are SPENT by ios-surfaces-2** — 0237 (dead code rusts shut), 0238 (one slot is what keeps the rule); **0245 is SPENT by the name swap** (the name is the register it was built in). Everything else through 0245 is used.
 
 Two durable lessons, both learned by collision. **Put a session's number block INSIDE the prompt body**: a block written in a chat heading once reached nobody and two lanes claimed the same numbers, and the room-quality session was handed one stale block in its prompt and a different one in its handoff. When a prompt and this file disagree, **this file and the handoff win** — a prompt is written once, these are maintained. And **two sessions sharing one tree is how a note gets dropped**: decision 0179 was lost by the sam3d-pointmap merge and restored by `546281e`, which is why the Tooling conventions now insist every session gets its own worktree.
 

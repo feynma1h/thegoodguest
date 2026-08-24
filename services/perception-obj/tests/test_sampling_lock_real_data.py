@@ -294,3 +294,79 @@ class TestObjectAwareResidue:
             pytest.skip(f"{name} has no hand-picked view on record")
         selected, _info = self._select(frames, boxes, object_aware=True)
         assert not (hand_picked & {f.frame_index for f in selected}), name
+
+
+class TestVisibilityVeto:
+    """The two vetoes against the real frame sets (decision 0234).
+
+    Only the parts that need no rasters are pinned here — the fixture holds
+    poses, intrinsics and the CapturedRoom, not depth or RGB. What that
+    still covers is the property that matters most: with the flag off the
+    shipped selection comes back unchanged, and with it on but no accessors
+    supplied the answer is IDENTICAL, so the flag alone is inert and only
+    real evidence can move a frame.
+
+    The measured four-capture answers with rasters — 3 unusable frames in
+    the shipped selections, none in the veto ones, and 3 band-vetoed
+    (frame, box) pairs — are recorded in 0234, reproduced by
+    `outputs/room-quality/s_item7.py` over the preserved captures.
+    """
+
+    @staticmethod
+    def _select(frames, boxes, *, veto: bool, **kw):
+        import census_sampling as cs
+
+        before = cs.VISIBILITY_VETO
+        cs.VISIBILITY_VETO = veto
+        try:
+            return cs.select_frames_census(frames, boxes, 12, **kw)
+        finally:
+            cs.VISIBILITY_VETO = before
+
+    def test_it_is_off_by_default(self):
+        assert census_sampling.VISIBILITY_VETO is False
+
+    def test_off_reproduces_the_shipped_selection(self, capture):
+        name, payload, frames, boxes = capture
+        selected, info = self._select(frames, boxes, veto=False)
+        assert [f.frame_index for f in selected] == payload[
+            "shipped_sampling"
+        ]["selected_frame_indices"], name
+        assert "veto" not in info, name
+
+    def test_on_without_evidence_changes_nothing(self, capture):
+        """The flag is not the behaviour change; the evidence is. A run with
+        the vetoes armed and no way to fetch pixels or depth must return the
+        shipped answer, because both vetoes refuse to reject what they
+        cannot assess."""
+        name, payload, frames, boxes = capture
+        selected, info = self._select(frames, boxes, veto=True)
+        assert [f.frame_index for f in selected] == payload[
+            "shipped_sampling"
+        ]["selected_frame_indices"], name
+        assert info["veto"]["unusable_frames"] == [], name
+        assert info["veto"]["band_vetoed_pairs"] == [], name
+        assert info["veto"]["relaxed_boxes"] == {}, name
+
+    def test_a_blanket_rejection_cannot_empty_the_selection(self, capture):
+        """The pathological input: every frame unusable. The pass must
+        terminate and return something rather than looping or returning an
+        empty set — a room with no usable frames is a capture problem, not a
+        reason to ship no frames."""
+        name, _payload, frames, boxes = capture
+        selected, _info = self._select(
+            frames, boxes, veto=True,
+            get_rgb=lambda _fi: __import__("numpy").zeros((16, 16)),
+        )
+        assert len(selected) >= 1, name
+
+    def test_the_overrule_is_recorded(self, capture):
+        name, payload, frames, boxes = capture
+        selected, info = self._select(
+            frames, boxes, veto=True,
+            get_rgb=lambda _fi: __import__("numpy").zeros((16, 16)),
+        )
+        assert info["veto"]["overruled"] is True, name
+        assert [f.frame_index for f in selected] == payload[
+            "shipped_sampling"
+        ]["selected_frame_indices"], name
