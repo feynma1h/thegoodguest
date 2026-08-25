@@ -203,6 +203,7 @@ _fcm_notifier = None
 _oidc_verifier = None
 _shell_oidc_verifier = None
 _compress_oidc_verifier = None
+_segment_oidc_verifier = None
 
 
 def _get_receiver_repo():
@@ -241,6 +242,23 @@ def _get_oidc_verifier():
         # If CLOUD_TASKS_INVOKER_SA is unset (local dev), verifier stays None
         # and the endpoint skips auth (see handle_process oidc_verifier=None path).
     return _oidc_verifier
+
+
+def _get_segment_oidc_verifier():
+    """Separate verifier for /segment: same invoker SA, audience
+    RECEIVER_URL + "/segment". Reusing /process's verifier would let a
+    /process token replay here, which is exactly what per-route audiences
+    exist to prevent."""
+    global _segment_oidc_verifier
+    if _segment_oidc_verifier is None:
+        from oidc import OIDCVerifier
+        from process_receiver import CLOUD_TASKS_INVOKER_SA, RECEIVER_URL
+        if CLOUD_TASKS_INVOKER_SA:
+            _segment_oidc_verifier = OIDCVerifier(
+                audience=RECEIVER_URL + "/segment",
+                allowed_email=CLOUD_TASKS_INVOKER_SA,
+            )
+    return _segment_oidc_verifier
 
 
 def _get_shell_oidc_verifier():
@@ -460,7 +478,7 @@ async def segment(
     return await handle_segment(
         request,
         req,
-        oidc_verifier=_get_oidc_verifier(),
+        oidc_verifier=_get_segment_oidc_verifier(),
         outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
         sam3_model=sam3_model,
         object_prompt=DEFAULT_OBJECT_PROMPT,
