@@ -141,12 +141,20 @@ async def handle_segment(
         _download_gcs_uri,
         _gcs_upload_for_scene,
     )
+    from oidc import OIDCError
     from roomstudio_schemas import CaptureBundle
 
+    # verify() takes the HEADER VALUE and raises; it is not async and does not
+    # take the Request. Same shape as /process, /shell and /compress.
     if oidc_verifier is not None:
-        err = await oidc_verifier.verify(request)
-        if err is not None:
-            return err
+        try:
+            oidc_verifier.verify(request.headers.get("Authorization"))
+        except OIDCError as exc:
+            logger.warning("OIDC rejected: %s %s", exc.code, exc.detail)
+            return JSONResponse(
+                status_code=401,
+                content={"error": exc.code, "detail": exc.detail},
+            )
 
     wanted = list(dict.fromkeys(req.frame_indices))[:MAX_FRAMES_PER_CALL]
     prompt = req.object_prompt or object_prompt
