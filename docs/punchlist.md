@@ -172,14 +172,22 @@ scale-to-zero GPU. The deferral has never been recorded either, which makes it
 indistinguishable from an oversight.
 **Check:** automated — at least one alert policy or uptime check must exist.
 
-### G4-02 · Python CI has been red since 2026-08-21
-**State:** open
-The root suite dies at collection with `ModuleNotFoundError: No module named
-'PIL'`. `tools/test_gen_mark.py` landed that day importing Pillow, which is
-declared only in the two perception pyprojects and so is absent from what the
-root job installs via `tools/ci_deps.py`. The other three jobs pass. The root
-suite has therefore not executed on Linux since. The fix is one declared
+### G4-02 · Python CI has been red since 2026-08-21 — fix applied, unproven
+**State:** open · the CAUSE is fixed; the entry closes on a green run
+The root suite died at collection with `ModuleNotFoundError: No module named
+'PIL'`. `tools/test_gen_mark.py` imports Pillow, which was declared only in the
+two perception pyprojects and so was absent from what the root job installs via
+`tools/ci_deps.py`. The other three jobs passed, so the root suite had not
+executed on Linux since.
+
+Pillow is now declared where it belongs — the ROOT pyproject's `dev` extra, the
+root project being the one that owns `tools/` — and `python.yml` passes that
+pyproject to `ci_deps.py` alongside the other four. That is the one declared
 dependency, not a test change.
+
+**This is unproven and must not be assumed done.** Nothing here has run on
+Linux; the checker reads the latest GitHub run, which still predates the fix.
+Do not delete this entry on the strength of the diff.
 **Check:** automated — latest `python.yml` run must conclude success.
 
 ### G4-03 · Nothing gates on CI
