@@ -134,6 +134,7 @@ async def handle_segment(
     frame index outside the bundle, an undecodable image) are reported in the
     body rather than raised: this is a probe, and a partial answer beats none.
     """
+    from oidc import OIDCError
     from PIL import Image
     from privacy import masks_npz_bytes, partition_detections, segmentation_prompt, suppressed_union
     from process_receiver import (
@@ -141,7 +142,6 @@ async def handle_segment(
         _download_gcs_uri,
         _gcs_upload_for_scene,
     )
-    from oidc import OIDCError
     from roomstudio_schemas import CaptureBundle
 
     # verify() takes the HEADER VALUE and raises; it is not async and does not
