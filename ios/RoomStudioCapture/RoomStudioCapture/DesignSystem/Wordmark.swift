@@ -36,9 +36,10 @@ enum RSBrand {
     /// The product name. The one-file swap for the name on iOS.
     ///
     /// It is also set as `INFOPLIST_KEY_CFBundleDisplayName` in the Xcode
-    /// project, which is what the Home Screen shows under the icon — that one
-    /// cannot read this constant, so the two are kept in step by
-    /// `BrandNameTests`.
+    /// project, which is what the Home Screen shows under the icon. That key
+    /// cannot read this constant, so `tools/test_gen_mark.py` reads both and
+    /// fails if they drift — without it the Home Screen falls through to
+    /// TARGET_NAME, which is how it read "RoomStudioCapture" for months.
     static let name = "The Good Guest"
 }
 
@@ -57,7 +58,68 @@ enum MarkTone {
     }
 }
 
-/// One ring of the mark: the band between two concentric tilted ellipses.
+/// Drawing primitives shared by the mark, the wordmark and the splash.
+///
+/// These take coordinates in whatever space the caller is working in and do no
+/// fitting of their own, because the splash animates BETWEEN two spaces and a
+/// shape that insisted on fitting its own rect could not be interpolated.
+enum BrandPath {
+
+    /// One ring — the band between two concentric tilted ellipses — with the
+    /// numbers already in the caller's own coordinates.
+    ///
+    /// Fill the result EVEN-ODD. Nonzero closes the interior and the mark
+    /// becomes two solid blobs.
+    static func ring(_ ring: MarkRing) -> Path {
+        var path = Path()
+        let tilt = MarkGeometry.tiltDegrees * .pi / 180
+        for ellipse in [ring.outer, ring.inner] {
+            var local = Path()
+            local.addEllipse(
+                in: CGRect(
+                    x: -ellipse.a, y: -ellipse.b,
+                    width: ellipse.a * 2, height: ellipse.b * 2
+                )
+            )
+            path.addPath(
+                local.applying(
+                    CGAffineTransform(rotationAngle: tilt)
+                        .concatenating(
+                            CGAffineTransform(translationX: ellipse.cx, y: ellipse.cy)
+                        )
+                )
+            )
+        }
+        return path
+    }
+
+    /// The lettering minus its "oo", with every point passed through `place`.
+    ///
+    /// A closure rather than a scale and an offset because the splash moves
+    /// each point on its own schedule -- an affine transform cannot express a
+    /// cascade. This is the only place that knows how the generated flat cubic
+    /// data is laid out.
+    ///
+    /// Fill EVEN-ODD; the contours carry their own counters.
+    static func script(place: (CGPoint) -> CGPoint) -> Path {
+        var path = Path()
+        for contour in WordmarkGeometry.scriptContours {
+            func at(_ i: Int) -> CGPoint {
+                place(CGPoint(x: contour[i], y: contour[i + 1]))
+            }
+            path.move(to: at(0))
+            var i = 2
+            while i + 5 < contour.count {
+                path.addCurve(to: at(i + 4), control1: at(i), control2: at(i + 2))
+                i += 6
+            }
+            path.closeSubpath()
+        }
+        return path
+    }
+}
+
+/// One ring of the mark, fitted to the view's own bounds by the mark's ink box.
 private struct MarkRingShape: Shape {
     let ring: MarkRing
 
@@ -69,30 +131,13 @@ private struct MarkRingShape: Shape {
             rect.width / MarkGeometry.inkWidth,
             rect.height / MarkGeometry.inkHeight
         )
-        let centre = CGPoint(x: rect.midX, y: rect.midY)
-        var path = Path()
-        for ellipse in [ring.outer, ring.inner] {
-            var local = Path()
-            local.addEllipse(
-                in: CGRect(
-                    x: -ellipse.a, y: -ellipse.b,
-                    width: ellipse.a * 2, height: ellipse.b * 2
-                )
+        return BrandPath.ring(ring).applying(
+            CGAffineTransform(
+                translationX: -MarkGeometry.canvas / 2, y: -MarkGeometry.canvas / 2
             )
-            let placed = local.applying(
-                CGAffineTransform(rotationAngle: MarkGeometry.tiltDegrees * .pi / 180)
-                    .concatenating(
-                        CGAffineTransform(
-                            translationX: ellipse.cx - MarkGeometry.canvas / 2,
-                            y: ellipse.cy - MarkGeometry.canvas / 2
-                        )
-                    )
-                    .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-                    .concatenating(CGAffineTransform(translationX: centre.x, y: centre.y))
-            )
-            path.addPath(placed)
-        }
-        return path
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: rect.midX, y: rect.midY))
+        )
     }
 }
 

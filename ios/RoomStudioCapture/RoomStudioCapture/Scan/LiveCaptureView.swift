@@ -87,7 +87,7 @@ struct LiveCaptureView: View {
 
     private var captureBackdrop: some View {
         RadialGradient(
-            colors: [Color(rsHex: 0x2c2214), Color(rsHex: 0x221a0f), Color.rsCaptureBase],
+            colors: [Color(rsHex: 0x25241f), Color(rsHex: 0x1c1b18), Color.rsCaptureBase],
             center: .init(x: 0.5, y: 0.42),
             startRadius: 40, endRadius: 520
         )
