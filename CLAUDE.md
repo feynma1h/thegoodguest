@@ -55,6 +55,7 @@ tools/                            local scripts (run from repo root)
                                       wordmarks consume
   build_test_bundle.py              synthesize a bundle from test_data/photos
   inspect_bundle.py                 verify a bundle parses + smoke-checks
+  punchlist_check.py                re-derive docs/punchlist.md against the live system
 
 services/
   api-public/                     client-facing API (--allow-unauthenticated, Firebase JWT verify)
@@ -66,6 +67,7 @@ web/                              Next.js static-export web app (decision 0050);
                                   contained in src/components/SplatViewer.tsx (decision 0053)
 
 infra/                            Cloud Build configs, deploy scripts
+docs/punchlist.md                 the remaining-work list — see "The punchlist" below
 docs/decisions/                   short notes on dead-ends — see "When to write a decision note"
 test_data/photos/                 9 synthetic rendered room views, for synthesis testing
 outputs/                          gitignored; generated artifacts
@@ -1301,6 +1303,34 @@ one branch deliberately not pushed is `diag-bundlepb-reason-public`.
 `docs/decisions/` holds the *why* behind decisions that aren't obvious from the code. One file per decision, filename `NNNN-short-slug.md` (zero-padded). Template at `docs/decisions/0000-template.md`.
 
 The criteria for "is this worth a note?" live in the session-end housekeeping section below.
+
+## The punchlist
+
+**`docs/punchlist.md` is the working list of what is left before "finished."**
+Twenty-nine entries in six gates, in dependency order, written 2026-08-26 from a
+full review that RAN every suite and checked the live system rather than reading
+this file. Start there for "what should I do next"; this section below is
+narrative and historical, and it decays — the punchlist is the part maintained
+as a list.
+
+**Its rules are this repo's rules.** An entry that is done or ruled gets
+DELETED, never annotated — a punchlist that accumulates closed items becomes the
+retired 207-entry tracker again. New entries are added freely in the same shape.
+IDs are stable and never reused.
+
+**Eleven of the twenty-nine carry an automated check.** Run
+`python3 tools/punchlist_check.py` (add `--offline` to skip the five that hit the
+network, or a filter like `G3` for one gate). It re-derives status from the live
+system and prints DONE / OPEN / UNKNOWN / MANUAL. **UNKNOWN is never DONE** — a
+probe that could not run reports as its own state, because "I could not tell" and
+"it is finished" are different answers.
+
+This exists because the failure mode here is documents going quietly out of date
+rather than work being forgotten. On 2026-08-26 this file asserted CI was green
+while it had been red five days, named three different serving revisions for one
+service, and said the phone held no captures when it held five. Each was one
+command away. **The checker does not edit the punchlist** — a green check is
+evidence for a human deleting an entry, not authority to.
 
 ## Next on the board
 
