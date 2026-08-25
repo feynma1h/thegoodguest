@@ -80,8 +80,16 @@ deletes at age 1 day, so GCS does not hold these:
 - `outputs/real-capture-*` — preserved capture bundles; the substrate the whole
   perception thread regresses against.
 - `outputs/device-pull/` — three RP-6/7 rooms physically pulled off the 16 Pro's
-  app container. The app reaps completed captures (0084), so the phone no
-  longer has them either.
+  app container. The app reaps completed captures (0084), so a capture that has
+  been reaped exists nowhere else.
+  **LAUNCHING A REBUILT APP RUNS THE REAPER. Pull the container BEFORE the
+  first launch, every time.** Measured 2026-08-25: the phone still held five
+  un-reaped captures, and the first launch of the re-signed build removed
+  three. Two were already here; `893663fd` (26/07, LIDAR_ROOMPLAN,
+  `uploadPhase: complete`) was not, and its raw bundle is **gone for good** —
+  the captures bucket deletes at 24 h, so nothing anywhere holds it. Only its
+  `upload_sessions/*.json` survives, in `outputs/device-evidence-2026-08-13/`.
+  The cost of pulling first is minutes; the cost of not is unbounded.
 - `outputs/roomplan-spike/` — the four-run spike RECORDING, incl. the
   722-keyframe RGB/depth archive. **The source, not a derivative.**
 - Every `outputs/reports/*.md`, `outputs/**/verdicts.md`, and the walk packs'
@@ -881,10 +889,15 @@ gains.
   can void the §11 liability cap against a consumer.
 - **Apple Developer Program enrollment CLEARED 2026-08-23** (filed 2026-07-22).
   Gate A, APNs, TestFlight, submission and Apple sign-in on the web are all
-  unblocked. **Three things follow, in order:** (1) **verify the device build**
-  — the re-sign clock passed 2026-08-19 07:15 UTC and enrollment ends the
-  7-day treadmill only once the operator re-signs and installs, so there is no
-  working install until then; (2) **check 0115** — the identity-destroying
+  unblocked. **Of the three things that followed, the first is DONE:**
+  (1) **the device build is VERIFIED — 2026-08-25.** It built with
+  `project.pbxproj` UNTOUCHED, which retires the personal-team
+  `CODE_SIGN_ENTITLEMENTS` workaround; both profiles were freshly issued and
+  expire **2027-08-25**, so **the 7-day treadmill is over**; and the app
+  installed and ran on the 16 Pro. The Team ID `3HU2SP8346` is unchanged from
+  every pre-enrollment build, so enrollment kept the team and only extended
+  profile validity — meaning the keychain access-group prefix was never a
+  variable, which independently corroborates 0138. (2) **check 0115** — the identity-destroying
   defect was flagged as possibly enrollment-gated, and if it persists it was a
   real bug hiding behind the gate and must surface **before TestFlight**;
   (3) **the product name is now live**, forced by the App Store listing.
