@@ -261,16 +261,21 @@ is never stamped.
 
 ### perception-obj — `perception-obj-00074-var`, image `sha256:c538f699…`
 
-**A flag-carrying successor is BUILT, SMOKED and PARKED AT 0%, not serving**
-(2026-08-25, 0243). `perception-obj-00074-var` pins `sha256:c538f699…` — an
-image whose layers are the same objects as the ship lane's `b19434de…`, rebuilt
-in 39 s off the buildx cache — and its env carries `PERCEPTION_MASK_REFINE=1`
-and `PERCEPTION_ARM_SELECT=1`, verified from `gcloud`, with all three parked
+**Serving 100%, carrying both ruled-on flags** (flipped 2026-08-25, 0243;
+re-verified from `gcloud` 2026-08-25). `perception-obj-00074-var` pins
+`sha256:c538f699…` — an image whose layers are the same objects as the ship
+lane's `b19434de…`, rebuilt in 39 s off the buildx cache — and its env carries
+`PERCEPTION_MASK_REFINE=1` and `PERCEPTION_ARM_SELECT=1`, with all three parked
 flags absent. `/health` answers 200 and `/process`, `/shell` and `/compress`
-are all registered. **The traffic flip did not happen** — so production still
-runs pre-fix code with the operator's ruling unapplied, and `main` remains
-undeployable-as-built until it does. The four remaining commands, in order,
-are in `outputs/reports/perception-deploy.md`.
+are all registered. The `serving` registry tag moved onto that digest at the
+flip (0200), so the image a scale-to-zero GPU service boots from is pinned by
+name rather than by recency.
+
+**The revision still carries its `candidate` tag, and that is the normal
+post-flip shape.** A candidate deploy names the revision; the flip moves
+traffic and does not rename it. So `tag: candidate` sitting beside
+`percent: 100` is NOT a parked revision — read the traffic split, which is the
+authority, never the tag.
 
 Runs as `perception-obj-runtime@` under least privilege (0090) and is
 platform-gated — only `tasks-invoker@` holds `run.invoker` (0106). Scales to
@@ -584,10 +589,10 @@ gains.
 **Perception / room quality**
 
 - **The repair and the chooser are RULED ON and flip together, refine first**
-  (0198/0201, 0204/0205, 0211/0212; operator sitting 2026-08-23). **They are
-  NOT yet serving:** the revision carrying both, `perception-obj-00074-var`,
-  is built, smoked and parked at 0% — see the perception-obj section for the
-  four commands that remain. Until that flip, production runs neither flag.
+  (0198/0201, 0204/0205, 0211/0212; operator sitting 2026-08-23). **Both are
+  SERVING** on `perception-obj-00074-var` since 2026-08-25, re-verified from
+  `gcloud`; the entry stays here for the measured residue below, not because
+  anything is unshipped.
   SAM 3D's input is RGBA with **alpha = the SAM mask** (`models/sam3d.py`), so an
   incomplete mask deletes from the model's input what the photograph actually
   contains. On a 0%-traffic candidate the repair reproduced 0198's bench **to
@@ -871,7 +876,7 @@ gains.
   restriction, 27 APIs). The key the web app ships is properly restricted.
   Closing the gap breaks the live-authed-check path every recent api-public
   deploy uses — ship a replacement first.
-- **The registry holds 4 `perception-obj` images, not 3, and that is the policy working (0190).** The keep rule is *the 3 newest PLUS anything tagged `serving` or `buildcache`* — never "exactly 3", because a lane iterating on builds pushes the live image out of the top three, and exactly-3-by-recency would then delete the image Cloud Run is running on a scale-to-zero GPU service. On 2026-08-20 three undeployed builds landed and the live `20260813-222442` sat **4th, held only by its `serving` tag**; the policy evicted `20260816-050851` automatically when the third arrived, so the count is pinned at 4 (worst case 5) and self-maintaining. **The fix for a high count is to deploy or delete the surplus builds, never to tighten the policy.** Billing confirms the mechanism: ₹420/day at 1,446.7 GiB is ₹0.2903/GiB-day (= AR's $0.10/GB-month), Aug 19's ₹140 implies a 482 GiB daily average as GC drained, and the state after the geom retirement is 154.3 GiB ≈ **₹45/day, 89% below**. Two of those four images are undeployed and untagged, worth ~₹22/day — **untagging frees nothing; deleting the version is what reclaims it.** **Updated 2026-08-20 by the colour deploy:** the live image is now `20260821-010928` / `sha256:faa005c8…`, and the count sits temporarily above 4 for two reasons worth recognising rather than "fixing" — the first buildx build published an attestation sibling alongside the image (0200; `--provenance=false` stops that recurring), and the rollback target `d15ca00d…` is deliberately held by a `serving-rollback-00044-m5p` tag, which the Keep rule matches on PREFIX. **That hold has been DROPPED (2026-08-25), so `d15ca00d…` is now eligible for eviction by recency, which is correct — it is two deploys stale.** **A second hold now exists for the same reason and is owed back on the same terms:** `serving-rollback-00062-hum` was added to `faa005c8…` on 2026-08-25, because the flip that moves `serving` off it also drops it out of the keep set, and it is the image the rollback revision boots from (0243). Drop it once `00074-var` is trusted.
+- **The `perception-obj` image count sits ABOVE 3 by design, and a high count is the policy working rather than a fault (0190).** The keep rule is *the 3 newest PLUS anything tagged `serving` or `buildcache`* — never "exactly 3", because a lane iterating on builds pushes the live image out of the top three, and exactly-3-by-recency would then delete the image Cloud Run is running on a scale-to-zero GPU service. On 2026-08-20 three undeployed builds landed and the live `20260813-222442` sat **4th, held only by its `serving` tag**; the policy evicted `20260816-050851` automatically when the third arrived, so the count is pinned at 4 (worst case 5) and self-maintaining. **The fix for a high count is to deploy or delete the surplus builds, never to tighten the policy.** Billing confirms the mechanism: ₹420/day at 1,446.7 GiB is ₹0.2903/GiB-day (= AR's $0.10/GB-month), Aug 19's ₹140 implies a 482 GiB daily average as GC drained, and the state after the geom retirement is 154.3 GiB ≈ **₹45/day, 89% below**. Two of those four images are undeployed and untagged, worth ~₹22/day — **untagging frees nothing; deleting the version is what reclaims it.** **Measured 2026-08-25, after the refine + arm-select flip: FIVE versions.** The live image is `sha256:c538f699…`, tagged `20260824-013501` + `serving`; `e5a0687c…` is `buildcache`; `faa005c8…` is held by the `serving-rollback-00062-hum` tag; and `dbec319f…` (08-21) and `5729d84d…` (08-20) are untagged and awaiting eviction. That is the documented worst case, not a fault — the Keep rule matches tags on PREFIX, so each `serving-rollback-…` hold adds one above the steady state until it is dropped. The earlier `serving-rollback-00044-m5p` hold on `d15ca00d…` was dropped 2026-08-25, correctly: it is two deploys stale. **A second hold now exists for the same reason and is owed back on the same terms:** `serving-rollback-00062-hum` was added to `faa005c8…` on 2026-08-25, because the flip that moves `serving` off it also drops it out of the keep set, and it is the image the rollback revision boots from (0243). Drop it once `00074-var` is trusted.
 - **Terms §9–§11 need an Indian lawyer.** Consumer Protection Act 2019 §2(46)
   can void the §11 liability cap against a consumer.
 - **Apple Developer Program enrollment CLEARED 2026-08-23** (filed 2026-07-22).
@@ -1134,7 +1139,7 @@ app then silently mints a new anonymous uid, and every room captured under the
 old one is orphaned. Auto-cleanup would fire that for every user on a schedule.
 It is a single checkbox in the console.
 
-**Cloud Run revision numbers are NOT chronological on `perception-obj`.** The service has produced two revisions numbered 00036 (`-xer`, RP-8; `-l9l`, the 0089/0090 security+privacy deploy), one numbered 00038 (`-ses`, the 0081/0082 wave), and `perception-obj-00037-sd9` (image `20260808-200124`, the 0104 walk-classes deploy), which served 100% for two days despite a LOWER number than 00038. Do NOT read a lower revision number as a rollback — check the image tag and the traffic split (`gcloud run services describe perception-obj --region asia-southeast1`), which are the authorities. Serving now: **`perception-obj-00062-hum`**, digest `sha256:faa005c8…` (the colour deploy, 2026-08-20) — **still, as of 2026-08-25**, with `perception-obj-00074-var` ready at 0% and awaiting a flip. Note that `faa005c8…` no longer carries its `20260821-010928` tag; identify it by digest. Its predecessor `00044-m5p` ran `20260813-222442` / `sha256:d15ca00d…` — the same digest `00043-yiz` shipped — and is the rollback target.
+**Cloud Run revision numbers are NOT chronological on `perception-obj`.** The service has produced two revisions numbered 00036 (`-xer`, RP-8; `-l9l`, the 0089/0090 security+privacy deploy), one numbered 00038 (`-ses`, the 0081/0082 wave), and `perception-obj-00037-sd9` (image `20260808-200124`, the 0104 walk-classes deploy), which served 100% for two days despite a LOWER number than 00038. Do NOT read a lower revision number as a rollback — check the image tag and the traffic split (`gcloud run services describe perception-obj --region asia-southeast1`), which are the authorities. Serving now: **`perception-obj-00074-var`**, digest `sha256:c538f699…` (the refine + arm-select flip, 2026-08-25), re-verified from `gcloud` 2026-08-25 — and note it still carries the `candidate` tag it was deployed under, which is what a post-flip candidate looks like rather than a parked revision. Its predecessor **`00062-hum`** ran `sha256:faa005c8…` (the colour deploy, 2026-08-20) and is the rollback target, held in the registry by a `serving-rollback-00062-hum` tag; it no longer carries its `20260821-010928` tag, so identify it by digest.
 
 **Old registry images are deleted by policy, and the live one is kept BY NAME
 (decision 0190).** `infra/artifact-cleanup-policy.json` is the source of truth
