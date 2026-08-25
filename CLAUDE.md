@@ -10,7 +10,7 @@ This file is the always-current state of the project. Both Claude Code (reads it
 
 This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction is the *medium*; the product is helping people make AI-based decisions about improving their room. Three product layers frame everything: the **AI layer** (understands space structurally — object relationships, traffic flow, light, proportion — with algorithmic spatial analysis before any LLM is invoked, and reasoning traces on every design decision), the **emotional layer** (feels personal, not algorithmic — the experience bar is Linear/Vercel/Figma-tier premium consumer software; conversation is the primary post-reveal interface; the cinematic reveal is the defining moment; design language is Apple-grade restraint per decision 0056 — neutral chrome, content carries the color, one sans, mono only for machine data), and the **social layer** (rooms are identity — sharing, comparison, evolution over time). Direction, not yet commitments: room health scoring, taste graph, lighting simulation, budget-aware shopping, DAG version history. Deliberately out (per the founding draft, still sound): AR overlay, social feed, photorealistic image generation, floor plans, voice input; desktop-first.
 
-**Naming: SETTLED 2026-08-23 as "The Good Guest" (0245)**, forced by the App Store listing when enrollment cleared. It is the register the whole product was built in (0072/0057) and the metaphor the calling card is already named from. Set in exactly two places — `web/src/components/Wordmark.tsx` and iOS `RSBrand.name` — plus the card's own `WORDMARK` in `lib/card/layout.ts`, which the card's privacy guard now imports rather than retypes. **The repo, GCP project, buckets and `roomstudio:` localStorage keys deliberately keep the stand-in** — infrastructure, invisible, expensive to rename for no user-visible gain. **The card still prints `roomstudio.web.app`, which is the TRUE hosting URL**: changing that string without moving hosting would print a falsehood on an artifact that leaves the browser. Re-open trigger is commerce, and renaming stays cheap until App Store submission — TestFlight needs only an app record.
+**Naming: SETTLED 2026-08-23 as "The Good Guest" (0245)**, forced by the App Store listing when enrollment cleared. It is the register the whole product was built in (0072/0057) and the metaphor the calling card is already named from. Set as a STRING in three places — `web/src/components/Wordmark.tsx`'s `BRAND_NAME`, iOS `RSBrand.name`, and `INFOPLIST_KEY_CFBundleDisplayName` in `project.pbxproj`, which is what the Home Screen shows and which cannot read either constant (`tools/test_gen_mark.py` fails if they drift). **Until 2026-08-26 the Home Screen read "RoomStudioCapture"** — the main target had no display name and fell through to `TARGET_NAME`, outside every "the name lives in N places" claim this file ever made. The card no longer prints the name at all: it carries the wordmark, which is a drawing. **The repo, GCP project, buckets and `roomstudio:` localStorage keys deliberately keep the stand-in** — infrastructure, invisible, expensive to rename for no user-visible gain. **The card still prints `roomstudio.web.app`, which is the TRUE hosting URL**: changing that string without moving hosting would print a falsehood on an artifact that leaves the browser. Re-open trigger is commerce, and renaming stays cheap until App Store submission — TestFlight needs only an app record.
 
 Three technical surfaces today:
 
@@ -50,9 +50,12 @@ packages/api-core/                shared logic consumed by both API services
 
 tools/                            local scripts (run from repo root)
   gen_proto.sh                      regenerate Python and Swift (ios/RoomStudioCapture/RoomStudioCapture/Generated/)
-  gen_mark.py                       the product mark's ONE source — regenerates the three app
-                                      icons, favicon.ico, icon.svg, and the geometry both
-                                      wordmarks consume
+  gen_mark.py                       the identity's ONE source — regenerates the three app
+                                      icons, favicon.ico, icon.svg, the mark geometry both
+                                      platforms consume, and the wordmark (whose traced
+                                      lettering is the input at tools/brand/)
+  brand/wordmark-traced.json        the lettering, traced. SOURCE, not an output — artwork,
+                                      so unlike the mark it cannot be regenerated from numbers
   build_test_bundle.py              synthesize a bundle from test_data/photos
   inspect_bundle.py                 verify a bundle parses + smoke-checks
   punchlist_check.py                re-derive docs/punchlist.md against the live system
@@ -161,7 +164,9 @@ not. **Those two commands are both called "root" in this repo and differ by
 18 tests** — "always say which" was never enough on its own, because the
 figures were recorded without the command that produced them. Write the
 command. Without fixtures the second form is **811 + 102** (review worktree,
-2026-08-24). re-enqueue **18**.
+2026-08-24). On `brand-identity` with fixtures ABSENT, bare `pytest` reads
+**822 + 102** — the eleven added are `tools/test_gen_mark.py` growing from 15 to
+26 as the mark, the wordmark and the app's own name all gained pins (0248-0251). re-enqueue **18**.
 
 ### iOS capture app — `ios/RoomStudioCapture/`
 
@@ -217,9 +222,17 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   a failed fetch never renders as zero. Rows offer a tap only where one can
   land — gated on `NetworkConfig.webBaseURL`, which is nil, exactly as the
   doorway's CTA is.
-- **The mark.** `DesignSystem/Wordmark.swift` draws the same room corner as the
-  app icon, from the generated `MarkGeometry.swift` (0193). `RSBrand.name` stays
-  the one-file swap for the name; there is no separate mark glyph.
+- **The mark.** `DesignSystem/Wordmark.swift` draws the same two interlocking
+  rings as the app icon, from the generated `MarkGeometry.swift` (0193/0248).
+  `RSBrand.name` stays the one-file swap for the name. **The mark and the name
+  are never set side by side** — the mark IS the "oo" of "the good guest", so a
+  lockup prints those two letters twice; chrome takes the mark alone.
+- **The splash.** `SplashView` is the launch, wrapped around `RootFlowView` by
+  the app entry point rather than routed to: the name arrives, the word closes
+  on its own middle, and the mark is what is left. The only place both appear,
+  and they appear in SEQUENCE. Each letter is carried as a rigid body along cuts
+  the generator finds by counting how many strokes a column crosses (0251), and
+  the morph is exact because the wordmark's rings ARE the mark's (0250).
 - **Reclaim.** `CaptureReaper` frees a capture's record and files once the user
   has *seen* the outcome — never on mere upload success.
 
@@ -393,7 +406,7 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
 - `lib/designSpec.ts` overlays the arrangement onto the assembled scene as a
   pure pass, so the renderer never learns a proposal exists. The measurement
   survives on screen as its footprint in the contour's paper tone.
-- `Wordmark.tsx` draws the room corner from generated geometry and remains the
+- `Wordmark.tsx` draws the two interlocking rings from generated geometry and remains the
   one-file swap for the product name, now "The Good Guest" (0245). It authors
   no paths and no colours: `tools/gen_mark.py` is the mark's one source across
   the app icons, the tab icon, both wordmarks and the share card (0193), and
@@ -412,12 +425,24 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
   prints only DETECTED extents (0222), and rotates the plan flat because an
   ARKit yaw is the phone's start heading rather than a measurement (0223).
   Canvas and not SVG: an SVG rasterized through an `<img>` cannot see the
-  document's fonts and would silently set the card in system faces.
+  document's fonts and would silently set the card in system faces. Since 0248
+  the card carries the **wordmark** rather than the mark — it reaches a stranger,
+  where a small abstract mark says nothing — which also removed the product name
+  from the set of strings its privacy guard has to allow, because the wordmark
+  is a drawing rather than text.
   Eligibility is a conservative `created_at` gate against the first
   suppression-armed revision (0221) — a card ships the shell and a person
   contaminates a measured albedo, so this is the rung where 0089 binds hardest.
 
-Suite **276** vitest; lint, tsc, and the static-export build are green.
+Suite **276** vitest; lint, tsc, and the static-export build are green
+(re-measured on `brand-identity`, 2026-08-26, fixtures absent).
+
+The design tokens are the new identity's (0248): cream `--paper: #f9f2ec`, warm
+near-black `--ink: #282723`, terracotta `--accent: #c04d3e`. **There are two
+terracottas and the split is load-bearing** — `--accent` is the exact value the
+mark is drawn in and reaches only 4.33:1 on the cream, so anything text-sized
+uses `--accent-deep` at 5.52:1 instead (0249). Do not set body-sized text in
+`--accent`.
 
 ### Infra and operations
 
@@ -867,8 +892,14 @@ gains.
   staged-list entry used to imply — the desk names the room in the link it
   hands over, so a list of the phone's own rooms tells it nothing (0218).
 - **`RSSound` is wired at three call sites with no cue files** — the app is
-  silent. The web has no sound at all. Branded fonts fall back to system faces.
-  The product **name** is settled (0245); the web lockup still needs re-cutting from mono to the serif.
+  silent. The web has no sound at all. **The branded-fonts claim was true of iOS
+  and false of the web, and is now stated per platform:** the web loads real
+  Google faces via `next/font/google` (Instrument Sans, Source Serif 4, and
+  JetBrains Mono since 0248); **iOS bundles no font files at all** and
+  `RSFont.swift` falls back to the spec's system substitutes — New York, SF Pro,
+  `.monospaced` — behind a named bundling seam that says to change only the
+  private face helpers. The web lockup no longer needs re-cutting: there is no
+  lockup (0248).
 - **There is no per-room deletion** — account deletion is all-or-nothing, which
   is conspicuous for a product whose thesis is that rooms are identity. **It is
   also a hard prerequisite of any hosted share link** (`docs/product/social-layer.md`
@@ -948,11 +979,14 @@ gains.
   product is Pro-only / LiDAR-first; the shipped ARKIT_ONLY path stays live and
   is strictly better than before, but no further merge-knob grinding. The
   non-LiDAR device is not a test target and must not shape decisions.
-- **The two lockups set the NAME differently and the fork is now decided by
-  the name itself** — "The Good Guest" is too long for tracked uppercase mono
-  beside the corner mark, so the display serif wins by construction (0245). The
-  mark is identical everywhere (0193). **What remains is applying it**: the web
-  lockup still renders in mono and has not been re-cut to the serif.
+- **There are no lockups, on either platform** (0248). The fork between mono
+  and serif is not resolved, it is DISSOLVED: the mark is the "oo" of the name,
+  so setting the two together prints those letters twice. Chrome takes the mark
+  alone; the calling card and the OG image take the script wordmark alone; the
+  iOS splash is the one place both appear and shows them in sequence. The mark is
+  identical everywhere (0193). **Do not re-introduce a lockup as a convenience** —
+  `tools/test_gen_mark.py` fails if any of six files draws the mark and renders
+  the name.
 - **From the founding vision, still sound:** no AR overlay, no social feed, no
   photorealistic image generation, no floor plans as a product surface, no voice
   input. Desktop-first on web.
@@ -1307,7 +1341,7 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 ## The punchlist
 
 **`docs/punchlist.md` is the working list of what is left before "finished."**
-Twenty-nine entries in six gates, in dependency order, written 2026-08-26 from a
+Thirty entries in six gates, in dependency order, written 2026-08-26 from a
 full review that RAN every suite and checked the live system rather than reading
 this file. Start there for "what should I do next"; this section below is
 narrative and historical, and it decays — the punchlist is the part maintained
@@ -1318,7 +1352,7 @@ DELETED, never annotated — a punchlist that accumulates closed items becomes t
 retired 207-entry tracker again. New entries are added freely in the same shape.
 IDs are stable and never reused.
 
-**Eleven of the twenty-nine carry an automated check.** Run
+**Eleven of the thirty carry an automated check.** Run
 `python3 tools/punchlist_check.py` (add `--offline` to skip the five that hit the
 network, or a filter like `G3` for one gate). It re-derives status from the live
 system and prints DONE / OPEN / UNKNOWN / MANUAL. **UNKNOWN is never DONE** — a
