@@ -280,7 +280,7 @@ function RoomDetail() {
 
   if (scene.status === "ready") {
     return (
-      <div className="relative min-h-dvh bg-[#1c1610]">
+      <div className="relative min-h-dvh bg-[#181715]">
         <RoomStage
           key={scene.scene_id}
           sceneId={scene.scene_id}

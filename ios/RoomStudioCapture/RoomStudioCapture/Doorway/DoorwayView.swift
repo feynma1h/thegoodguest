@@ -43,7 +43,7 @@ struct DoorwayView: View {
         ZStack {
             // Warm gold-lit darkness.
             RadialGradient(
-                colors: [Color(rsHex: 0x4a3a24), Color(rsHex: 0x2e2213), Color.rsCaptureBase],
+                colors: [Color(rsHex: 0x3f3d35), Color(rsHex: 0x26241f), Color.rsCaptureBase],
                 center: .init(x: 0.5, y: 0.34), startRadius: 20, endRadius: 560
             )
             .ignoresSafeArea()

@@ -47,4 +47,13 @@ enum WordmarkGeometry {
         MarkRing(outer: MarkEllipse(cx: 468.18, cy: 144.16, a: 48.54, b: 35.45), inner: MarkEllipse(cx: 468.18, cy: 144.16, a: 42.35, b: 29.25)),
         MarkRing(outer: MarkEllipse(cx: 517.09, cy: 144.16, a: 48.54, b: 35.45), inner: MarkEllipse(cx: 517.09, cy: 144.16, a: 42.35, b: 29.25)),
     ]
+
+    /// Where the lettering can be cut into letter-sized pieces, in x.
+    ///
+    /// Only the splash uses these, which is why they are emitted here and not
+    /// on the web: it moves each piece to the centre as a rigid body, and
+    /// joined script has no contour boundary between one letter and the next.
+    /// Each cut goes through a thin part of the drawing, so the two sides do
+    /// not tear when they separate. See letter_cuts() in tools/gen_mark.py.
+    static let letterCuts: [CGFloat] = [236.85, 414.72, 565.63, 832.73, 887.23, 931.25, 991.13]
 }

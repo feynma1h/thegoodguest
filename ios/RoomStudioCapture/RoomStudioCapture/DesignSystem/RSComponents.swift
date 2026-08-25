@@ -32,7 +32,7 @@ struct RSGoldButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(RSFont.ui(.headline, weight: .semibold))
-            .foregroundStyle(Color(rsHex: 0x2a2114))
+            .foregroundStyle(Color.rsInk)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 17)
             .background(Color.rsGold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

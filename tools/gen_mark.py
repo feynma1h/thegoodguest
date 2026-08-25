@@ -592,6 +592,81 @@ def wordmark_script_path(wm: Wordmark) -> str:
     return "".join(out)
 
 
+#: A join zone must be at least this much of the word's width to count. Below
+#: it, a single-stroke column is a thin spot INSIDE a letter rather than a
+#: connector between two.
+MIN_JOIN_WIDTH = 0.015
+
+
+def letter_cuts(wm: Wordmark) -> list[float]:
+    """Where the lettering can be cut between letters, in x.
+
+    The iOS splash carries each piece to the centre as a RIGID body, so it needs
+    somewhere to cut. Joined script has no contour boundary between one letter
+    and the next -- they are one pen stroke -- so the cut has to be found in the
+    drawing rather than read off its structure.
+
+    The test is how many separate strokes a vertical line CROSSES, not how much
+    ink it meets. Between two letters the line crosses exactly one thing: the
+    connector. Inside a letter it crosses at least two -- a bowl and a baseline,
+    an ascender and a shoulder. Total ink cannot tell those apart, and an
+    earlier version that used it put cuts through the "d" of "good" and through
+    the final "t", chopping single letters into pieces that then walked off in
+    different directions.
+
+    One-stroke columns come in runs, and the WIDTH of the run is the second
+    test. A connector runs horizontally for a while, so its zone is wide; the
+    incidental one-stroke crossings inside a letter are narrow. The cut goes
+    through the middle of each wide zone.
+
+    Zones touching either end are dropped: those are the entry and exit
+    flourishes, where the line crosses one stroke because there is only one
+    stroke left, not because a letter has ended.
+    """
+    n = 2048
+    scale = n / wm.width
+    height = int(wm.height * scale)
+    mask = Image.new("1", (n, height), 0)
+    for start, segs in wm.script:
+        pts = [start]
+        cur = start
+        for c1, c2, end in segs:
+            pts += [_cubic(cur, c1, c2, end, k / 16) for k in range(1, 17)]
+            cur = end
+        layer = Image.new("1", (n, height), 0)
+        ImageDraw.Draw(layer).polygon([(x * scale, y * scale) for x, y in pts], fill=1)
+        mask = ImageChops.logical_xor(mask, layer)
+
+    # Transposed so each column is a contiguous run of bytes -- cropping 2048
+    # single-pixel columns is the slow way to ask the same question, and a
+    # ROTATE would make them contiguous in reverse order.
+    columns = mask.convert("L").transpose(Image.Transpose.TRANSPOSE).tobytes()
+
+    def crossings(x: int) -> int:
+        count, previous = 0, 0
+        for value in columns[x * height : (x + 1) * height]:
+            if value and not previous:
+                count += 1
+            previous = value
+        return count
+
+    single = [x for x in range(n) if crossings(x) == 1]
+
+    zones: list[tuple[int, int]] = []
+    for x in single:
+        if zones and x == zones[-1][1] + 1:
+            zones[-1] = (zones[-1][0], x)
+        else:
+            zones.append((x, x))
+
+    edge = int(0.02 * n)
+    return [
+        (a + b) / 2 / scale
+        for a, b in zones
+        if b - a >= MIN_JOIN_WIDTH * n and a > edge and b < n - edge
+    ]
+
+
 def wordmark_ring_paths(wm: Wordmark) -> tuple[str, str]:
     """The mark's two rings, placed where the lettering wants its "oo"."""
     paths = []
@@ -677,6 +752,7 @@ def emit_wordmark_swift(wm: Wordmark) -> str:
         return "[" + ", ".join(flat) + "]"
 
     contours = ",\n        ".join(contour(s, g) for s, g in wm.script)
+    cuts = ", ".join(f"{c:.2f}" for c in letter_cuts(wm))
     rings = ",\n        ".join(
         "MarkRing(outer: MarkEllipse(cx: {:.2f}, cy: {:.2f}, a: {:.2f}, b: {:.2f}), "
         "inner: MarkEllipse(cx: {:.2f}, cy: {:.2f}, a: {:.2f}, b: {:.2f}))".format(
@@ -727,6 +803,15 @@ enum WordmarkGeometry {{
     static let rings: [MarkRing] = [
         {rings},
     ]
+
+    /// Where the lettering can be cut into letter-sized pieces, in x.
+    ///
+    /// Only the splash uses these, which is why they are emitted here and not
+    /// on the web: it moves each piece to the centre as a rigid body, and
+    /// joined script has no contour boundary between one letter and the next.
+    /// Each cut goes through a thin part of the drawing, so the two sides do
+    /// not tear when they separate. See letter_cuts() in tools/gen_mark.py.
+    static let letterCuts: [CGFloat] = [{cuts}]
 }}
 """
 

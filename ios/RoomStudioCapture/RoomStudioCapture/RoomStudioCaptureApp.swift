@@ -3,7 +3,8 @@
 /// Single-window app; RootFlowView is the root and coordinates the capture
 /// flow. At launch: FirebaseApp.configure(), then four .task jobs — anonymous sign-in,
 /// orphaned-capture-directory sweep, upload rehydration, and the
-/// acknowledged-flight reap (decision 0084).
+/// acknowledged-flight reap (decision 0084). The splash plays over the top of
+/// all four rather than in front of them.
 /// GoogleService-Info.plist must be present in the app bundle — obtain it
 /// from the Firebase console for project "roomstudio", iOS app bundle ID
 /// com.roomstudio.RoomStudioCapture.
@@ -38,7 +39,11 @@ struct RoomStudioCaptureApp: App {
 
     var body: some Scene {
         WindowGroup {
+            // The splash is an OVERLAY, so every launch task below starts on
+            // the first frame and runs while it plays -- it spends time the app
+            // was going to spend anyway. See SplashView.
             RootFlowView()
+                .splashOnLaunch()
                 .task {
                     // Attempt anonymous sign-in at launch so the UID is cached
                     // in Keychain before the user finishes their first capture.

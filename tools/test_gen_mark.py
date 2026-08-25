@@ -386,3 +386,50 @@ def test_the_wordmark_is_never_the_mark_at_chrome_size():
         for match in re.finditer(pattern, text, re.S):
             if match.groups():
                 assert float(match.group(1)) >= floor, relative
+
+
+# ------------------------------------------------------------- the app's name --
+
+
+def _pbxproj() -> str:
+    return (REPO / "ios/RoomStudioCapture/RoomStudioCapture.xcodeproj/project.pbxproj").read_text()
+
+
+def test_the_home_screen_name_is_the_products_name():
+    """What sits under the icon, which is the most-seen brand surface there is.
+
+    Without CFBundleDisplayName the app falls through to TARGET_NAME and the
+    Home Screen reads "RoomStudioCapture" -- which it did, unnoticed, past every
+    "the name lives in N places" claim in the repo. The key cannot read
+    RSBrand.name, so this is what keeps the two in step.
+    """
+    swift = (
+        REPO / "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/Wordmark.swift"
+    ).read_text()
+    name = re.search(r'static let name = "([^"]+)"', swift).group(1)
+
+    shown = re.findall(r'INFOPLIST_KEY_CFBundleDisplayName = "([^"]+)"', _pbxproj())
+    # Both configurations of the app, plus both of the Live Activity extension,
+    # whose own name is what the Lock Screen calls the activity.
+    assert shown.count(name) == 2, f"app display name is {shown}, expected {name} twice"
+
+
+def test_the_bundle_identifier_is_untouched():
+    """The stand-in stays wherever it is an IDENTIFIER rather than a name.
+
+    Changing this is a different app: it breaks the installed build's identity,
+    the keychain access group, and every existing room's ownership. The Home
+    Screen name is the presentation, and that is what was fixed instead.
+    """
+    assert "PRODUCT_BUNDLE_IDENTIFIER = com.roomstudio.RoomStudioCapture;" in _pbxproj()
+
+
+def test_no_user_visible_string_carries_the_old_stand_in():
+    """The permission dialog is the first sentence the product says to anyone.
+
+    It said "RoomStudio captures your room with ARKit" past the name landing.
+    Every INFOPLIST_KEY_* value is user-visible somewhere -- a permission
+    dialog, Settings, the Home Screen, the Lock Screen -- so none may carry it.
+    """
+    for key, value in re.findall(r"(INFOPLIST_KEY_\w+) = \"([^\"]+)\"", _pbxproj()):
+        assert "roomstudio" not in value.lower(), f"{key} = {value}"
