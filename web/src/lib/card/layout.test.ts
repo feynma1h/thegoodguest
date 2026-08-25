@@ -6,7 +6,7 @@ import { MockApiClient, MOCK_READY_SCENE_ID, MOCK_V3_SCENE_ID } from "@/lib/api/
 import type { SceneAssets } from "@/lib/api/types";
 import { roomTitle } from "@/lib/voice";
 import { measureRoom, type RoomMeasure } from "./measure";
-import { MARK_ASPECT } from "@/components/markGeometry";
+import { WORDMARK_ASPECT } from "@/components/wordmarkGeometry";
 import { PALETTE } from "./palette";
 import { CARD_FRAMES, CARD_SUBTITLE, formatM, layoutCard, type CardLayout, type CardVariant, type XY, DOMAIN } from "./layout";
 
@@ -33,9 +33,9 @@ function pointsOf(layout: CardLayout): XY[] {
   for (const op of layout.ops) {
     if (op.kind === "stroke" || op.kind === "fill") pts.push(...op.points);
     if (op.kind === "rect") pts.push(op.at, [op.at[0] + op.w, op.at[1] + op.h]);
-    // The mark is 1.72x wider than it is tall, so its extent is not a square.
-    if (op.kind === "mark")
-      pts.push(op.at, [op.at[0] + op.height * MARK_ASPECT, op.at[1] + op.height]);
+    // The wordmark is 4.07x wider than it is tall.
+    if (op.kind === "wordmark")
+      pts.push(op.at, [op.at[0] + op.height * WORDMARK_ASPECT, op.at[1] + op.height]);
   }
   return pts;
 }
@@ -230,7 +230,7 @@ describe("the card carries nothing on the forbidden list", () => {
   it("carries no likeness — the display list has no image op at all", () => {
     const { layout } = heroCard();
     const kinds = new Set(layout.ops.map((o) => o.kind));
-    expect([...kinds].sort()).toEqual(["fill", "glow", "mark", "rect", "stroke", "text"]);
+    expect([...kinds].sort()).toEqual(["fill", "glow", "rect", "stroke", "text", "wordmark"]);
   });
 
   it("carries no user-authored text — only the derived title and fixed copy", () => {

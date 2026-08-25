@@ -55,6 +55,12 @@ import {
   MARK_RINGS,
   MARK_VIEWBOX,
 } from "@/components/markGeometry";
+import {
+  WORDMARK_ASPECT,
+  WORDMARK_RINGS,
+  WORDMARK_SCRIPT,
+  WORDMARK_VIEWBOX,
+} from "@/components/wordmarkGeometry";
 
 /** The product name. The one-file swap for the name on the web. */
 export const BRAND_NAME = "The Good Guest";
@@ -91,6 +97,45 @@ export function Mark({
       className={`shrink-0 ${className ?? ""}`}
     >
       {MARK_RINGS.map((d) => (
+        <path key={d} d={d} fillRule="evenodd" fill={fill} />
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * The name as artwork, at the given HEIGHT. For the artifacts that leave this
+ * site and reach someone who does not know the product — never in chrome, and
+ * never beside the mark.
+ *
+ * Mind the floor. The script's x-height is only 16% of its box, because the
+ * loops run so far above and below it, so a wordmark set at 20px has an
+ * x-height of 3.3px and is illegible. The design file's minimum is an x-height
+ * of 8px, which puts the floor at a height of ~50px — about two and a half
+ * times what you would guess. This is the reason chrome takes the mark.
+ */
+export function Wordmark({
+  height = "3em",
+  tone = "ink",
+  className,
+}: {
+  height?: string;
+  tone?: MarkTone;
+  className?: string;
+}) {
+  const fill = tone === "reverse" ? MARK_REVERSE : MARK_INK;
+  return (
+    <svg
+      viewBox={WORDMARK_VIEWBOX}
+      height={height}
+      style={{ aspectRatio: WORDMARK_ASPECT }}
+      role="img"
+      aria-label={BRAND_NAME}
+      focusable="false"
+      className={`shrink-0 ${className ?? ""}`}
+    >
+      <path d={WORDMARK_SCRIPT} fillRule="evenodd" fill={fill} />
+      {WORDMARK_RINGS.map((d) => (
         <path key={d} d={d} fillRule="evenodd" fill={fill} />
       ))}
     </svg>

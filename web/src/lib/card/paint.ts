@@ -16,11 +16,12 @@
  * (next/font mints hashed families), which `resolveFonts` does.
  */
 
+import { MARK_INK } from "@/components/markGeometry";
 import {
-  MARK_INK,
-  MARK_INK_BOX,
-  MARK_RINGS,
-} from "@/components/markGeometry";
+  WORDMARK_BOX,
+  WORDMARK_RINGS,
+  WORDMARK_SCRIPT,
+} from "@/components/wordmarkGeometry";
 import { alpha } from "./palette";
 import type { CardLayout, CardOp, TextOp, XY } from "./layout";
 
@@ -141,19 +142,20 @@ function drawText(ctx: CanvasRenderingContext2D, op: TextOp, fonts: PaintFonts) 
   ctx.restore();
 }
 
-/** The mark, from the generated geometry, at `height` with `at` its top-left.
+/** The wordmark, from the generated geometry, at `height` with `at` its
+ * top-left.
  *
- * Each ring is filled EVEN-ODD, without which its interior stops being a hole
- * and the interlock is lost. The paths are authored in the 1024 design space,
- * so the transform crops to the ink box the same way the SVG viewBox does. */
-function drawMark(ctx: CanvasRenderingContext2D, at: XY, height: number) {
-  const scale = height / MARK_INK_BOX.h;
+ * Three paths, all EVEN-ODD and all in the same ink: the lettering carries its
+ * own counters, and each ring's interior has to stay a hole. Folding them into
+ * one path would punch holes where the two ring bands cross. */
+function drawWordmark(ctx: CanvasRenderingContext2D, at: XY, height: number) {
+  const scale = height / WORDMARK_BOX.h;
   ctx.save();
   ctx.translate(at[0], at[1]);
   ctx.scale(scale, scale);
-  ctx.translate(-MARK_INK_BOX.x, -MARK_INK_BOX.y);
   ctx.fillStyle = MARK_INK;
-  for (const d of MARK_RINGS) ctx.fill(new Path2D(d), "evenodd");
+  ctx.fill(new Path2D(WORDMARK_SCRIPT), "evenodd");
+  for (const d of WORDMARK_RINGS) ctx.fill(new Path2D(d), "evenodd");
   ctx.restore();
 }
 
@@ -209,8 +211,8 @@ export function paintCard(
       case "glow":
         drawGlow(ctx, op.at, op.radius, op.color, op.clip);
         break;
-      case "mark":
-        drawMark(ctx, op.at, op.height);
+      case "wordmark":
+        drawWordmark(ctx, op.at, op.height);
         break;
       case "text":
         drawText(ctx, op, fonts);

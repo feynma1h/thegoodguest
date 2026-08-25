@@ -69,7 +69,7 @@ export type CardOp =
   | { kind: "glow"; at: XY; radius: number; color: string; clip: XY[] }
   /** The product mark, drawn from the generated geometry — never a copy of
    * its paths (0193). `size` is the box it fits in. */
-  | { kind: "mark"; at: XY; height: number }
+  | { kind: "wordmark"; at: XY; height: number }
   | TextOp;
 
 export interface CardLayout {
@@ -461,10 +461,16 @@ export function layoutCard(input: CardInput): CardLayout {
   // --- the words ---------------------------------------------------
   const colW = wide ? 406 : frame.w - 2 * M;
 
-  // The mark alone, never the mark beside the name -- the mark IS the "oo" of
-  // the name, so a lockup would print those two letters twice. See
-  // components/Wordmark.tsx for the rule.
-  ops.push({ kind: "mark", at: [M, M], height: 26 });
+  // The NAME alone, never the name beside the mark -- the mark IS the "oo" of
+  // the name, so a lockup would print those two letters twice (see
+  // components/Wordmark.tsx). The card takes the name rather than the mark
+  // because it leaves the browser and reaches someone who may not know the
+  // product, and a small abstract mark tells a stranger nothing.
+  //
+  // 56 is above the wordmark's own floor, not a taste pick: the script's
+  // x-height is 16% of its box, so this sets an 9.1px x-height against the
+  // design file's 8px minimum.
+  ops.push({ kind: "wordmark", at: [M, M], height: 56 });
 
   const titleY = wide ? 206 : 150;
   ops.push({
