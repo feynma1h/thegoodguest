@@ -13,11 +13,11 @@
 
 /** The Good Guest tokens. Mirrors `:root` in app/globals.css. */
 export const PALETTE = {
-  paper: "#f7efdf",
-  parchment: "#e9e2d2",
-  ink: "#3a2d22",
-  accent: "#8e3b2f",
-  accentDeep: "#6e2d24",
+  paper: "#f9f2ec",
+  parchment: "#ebe5df",
+  ink: "#282723",
+  accent: "#c04d3e",
+  accentDeep: "#a54235",
   sun: "#c9a25e",
 } as const;
 

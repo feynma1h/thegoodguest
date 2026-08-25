@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """The product mark — the ONE source it is drawn from, for every surface.
 
-The mark is the room corner: a pointy-top hexagon divided by a three-way seam
-into two wall faces and a floor, seen at true 30 degree isometric. It appears on
-five surfaces that used to be five hand-maintained copies:
+The mark is two interlocking elliptical rings, tilted back at 35 degrees. It is
+the "oo" of "the good guest", compacted: the same two loops the wordmark draws
+in the middle of "good", pulled together and set at the angle the script leans.
+That is why the mark and the name are never shown side by side — putting them
+together would print the same two letters twice.
+
+It appears on seven generated surfaces that used to be five hand-maintained
+copies:
 
     ios/.../Assets.xcassets/AppIcon.appiconset/icon-{light,dark,tinted}-1024.png
     web/src/app/favicon.ico                     (16/32/48, legacy tab icon)
@@ -18,51 +23,59 @@ Regenerate all of them from the repo root with:
 A change to the mark is a change to this file and nothing else. `tools/
 test_gen_mark.py` fails if a generated file on disk stops matching.
 
-THE CONSTRUCTION, and why it is a fill rather than a stroke.
+THE CONSTRUCTION.
 
-Everything derives from one hexagon of circumradius R about the canvas centre.
-Its three faces are that hexagon cut by the seam from the centre to the top
-vertex and to the two lower vertices. Each face is then inset from the lines it
-touches by one of two amounts:
+One ring is an ellipse of semi-axes (a, b) swept into a band of width `band`:
+the outer edge is (a + band/2, b + band/2) and the inner edge is (a - band/2,
+b - band/2). Two of them sit on the horizontal centre line, their centres `dx`
+either side of it, and the whole pair has exact 180-degree rotational symmetry
+— so its geometric centre and its optical centre are the same point, and there
+is no fudge factor to remember when placing it.
 
-    RIM_BAND   68.0    where a face meets the hexagon's outer edge
-    SEAM_HALF  25.2    where a face meets one of the three seam lines
+Note what the band is NOT: it is not a stroke, and it is not a true constant-
+width offset of the centreline ellipse (the offset of an ellipse is not an
+ellipse). It is the region between two concentric ellipses — a shape with four
+numbers and no renderer-dependent stroke width to re-pick per size. The ring
+does read slightly heavier at the ends of the major axis than at the ends of
+the minor, by about the axis ratio; that is the same modulation a broad nib
+gives, and it is why the mark does not look mechanical.
 
-The ink is not drawn as a stroke. It is a solid hexagon *plate* laid down first,
-with the three faces painted on top; the bands are what the faces leave
-uncovered. That matters for consistency: a stroke's width is a separate number
-that has to be re-chosen per size and per renderer, and that is exactly how the
-web wordmark drifted from the icon (its band ran ~9.1% of mark height where the
-icon's runs ~7.8%, and its seam matched its outline where the icon's seam is
-deliberately lighter). With a fill there is no second number. Every surface is
-the same polygons scaled, and the band ratio is a consequence rather than a
-setting.
+Each ring is ONE even-odd path holding both ellipses, so the interior is a real
+hole. Painting the interior in the ground colour instead would erase the other
+ring's arc where it crosses, and the interlock — the only thing that makes this
+two rings rather than two circles — would break. Putting all four ellipses into
+a single even-odd path fails for the mirror reason: the two bands cross at four
+points, and even-odd would punch holes exactly there.
 
-THE TWO PLATES, and why the mark still needs two of them.
+THE FOUR MASTERS, and why a favicon cannot use the logo.
 
-The plate is the only thing that changes between appearances:
+Every master shares the axis ratio (1.4047) and the tilt (-35 degrees). What
+changes is scale, how heavy the band is relative to the mark's ink height H,
+and how far apart the rings sit:
 
-    framed     plate at R           the rim band shows; for a LIGHT field
-    frameless  plate at R_INNER     only the seams show; for a DARK field
+    logo     band 0.077 H   sep 0.538 a   the mark as drawn
+    icon     band 0.077 H   sep 0.538 a   the same drawing at 64.4%, in a tile
+    tabReg   band 0.095 H   sep 0.538 a   32 and 48 px: a heavier band survives
+    tab16    band 0.180 H   sep 0.620 a   16 px: heavier still, and opened up
 
-R_INNER is not a taste choice, it is forced: insetting a hexagon's edges by
-RIM_BAND drops its apothem to R*sqrt(3)/2 - RIM_BAND, so the plate that
-circumscribes the three faces exactly has circumradius 301.48. Decision 0176
-measured why dark needs it -- a dark icon keeping the full band sits 0.11 off
-its field and reads as a heavy ring rather than a drawn edge.
+At the logo's own proportions the band rasterises to 0.72 px in a 16 px tab
+icon — a grey smear rather than a line. tab16 carries 1.62 px and reads as two
+rings; it also opens the separation from 0.538 to 0.620 of a, because at that
+size two counters 0.538 apart merge into one dark lozenge. Side by side at the
+same size the two masters are visibly different drawings. That is deliberate,
+and it is the only way this mark holds at tab scale.
 
-The face colours are ABSOLUTE in both plates. They never inherit `currentColor`
-or the surrounding text colour. That is what makes this one logo rather than a
-shape that happens to be hexagonal: the mark carries its own cream and its own
-rust onto any background, so a person meets the same object on the phone icon,
-the browser tab, the site header and the dark room page. The web wordmark's
-old `currentColor` outline is precisely what broke that -- on the room page its
-walls went ink-dark and the mark rendered as its own negative.
+THE COLOURS are absolute on every surface. They never inherit `currentColor` or
+the surrounding text colour. That is what makes this one logo rather than a
+shape that happens to be elliptical: the mark carries its own terracotta onto
+any background, so a person meets the same object on the phone icon, the
+browser tab and the site header. Light and dark are the SAME drawing in the
+same ink — only the reversed case, on terracotta, flips to cream.
 
 Tinted is iOS 18's third appearance and is NOT a multiply of the others; the
-system re-maps luminance on its own. Decision 0176 sampled the real mapping off
-a home screen, and the four surfaces here are the authored grayscale values it
-records as landing correctly once the system is done with them.
+system re-maps luminance on its own. The two authored greys sit 83.7 luminance
+points apart (1.0% and 84.7%), where anything inside about 10 points welds once
+the system has compressed the range.
 """
 
 from __future__ import annotations
@@ -73,121 +86,177 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 REPO = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------- geometry ---
 
 CANVAS = 1024.0
-R = 380.0
-RIM_BAND = 68.0
-SEAM_HALF = 25.2
 
-S = math.sqrt(3.0) / 2.0
-#: The plate that circumscribes the three faces exactly -- see the docstring.
-R_INNER = (R * S - RIM_BAND) / S
+#: Both rings lean back by this much. Shared by every master.
+TILT_DEG = -35.0
+
+#: Circle-to-cubic constant: the control-point offset that makes four cubic
+#: segments approximate an ellipse. Standard 4*(sqrt(2)-1)/3.
+KAPPA = 4.0 * (math.sqrt(2.0) - 1.0) / 3.0
 
 Pt = tuple[float, float]
 
-#: Hexagon vertices, screen coordinates (y down), relative to the centre.
-T: Pt = (0.0, -R)
-UR: Pt = (R * S, -R / 2)
-LR: Pt = (R * S, R / 2)
-B: Pt = (0.0, R)
-LL: Pt = (-R * S, R / 2)
-UL: Pt = (-R * S, -R / 2)
-CENTRE: Pt = (0.0, 0.0)
 
-RIM = "rim"
-SEAM = "seam"
-
-#: Each face as (vertices, per-edge band). Edge i runs vertex i -> vertex i+1.
-FACES: list[tuple[list[Pt], list[str]]] = [
-    # right wall
-    ([CENTRE, T, UR, LR], [SEAM, RIM, RIM, SEAM]),
-    # left wall
-    ([CENTRE, LL, UL, T], [SEAM, RIM, RIM, SEAM]),
-    # floor
-    ([CENTRE, LR, B, LL], [SEAM, RIM, RIM, SEAM]),
-]
+def half_extents(a: float, b: float) -> Pt:
+    """Half-width and half-height of an ellipse (a, b) tilted by TILT_DEG."""
+    t = math.radians(TILT_DEG)
+    return (
+        math.hypot(a * math.cos(t), b * math.sin(t)),
+        math.hypot(a * math.sin(t), b * math.cos(t)),
+    )
 
 
-def hexagon(radius: float) -> list[Pt]:
-    """The pointy-top hexagon of the given circumradius, centred on the origin."""
-    return [
-        (radius * math.cos(math.radians(a)), radius * math.sin(math.radians(a)))
-        for a in (-90, -30, 30, 90, 150, 210)
-    ]
+@dataclass(frozen=True)
+class Master:
+    """One drawing of the mark. All four share the axis ratio and the tilt.
 
-
-def _inward_normal(p: Pt, q: Pt, inside: Pt) -> Pt:
-    dx, dy = q[0] - p[0], q[1] - p[1]
-    n = (dy, -dx)
-    length = math.hypot(*n)
-    n = (n[0] / length, n[1] / length)
-    if n[0] * (inside[0] - p[0]) + n[1] * (inside[1] - p[1]) < 0:
-        n = (-n[0], -n[1])
-    return n
-
-
-def inset(vertices: list[Pt], bands: list[str]) -> list[Pt]:
-    """Move each edge inward by its band, then re-intersect to get the corners.
-
-    Per-edge rather than uniform: a face's rim edges and its seam edges carry
-    different bands, which is what gives the mark a heavier outer edge than
-    seam. Insetting the polygon by a single amount would flatten that.
+    `a`/`b` are the CENTRELINE semi-axes -- the band straddles them, so the
+    outer ellipse is (a + band/2, b + band/2) and the inner is the same pair
+    less half the band. `dx` is half the distance between the ring centres.
     """
-    amounts = [RIM_BAND if b == RIM else SEAM_HALF for b in bands]
-    cx = sum(v[0] for v in vertices) / len(vertices)
-    cy = sum(v[1] for v in vertices) / len(vertices)
 
-    lines = []  # (nx, ny, c) with n.p == c on the offset line
-    for i, amount in enumerate(amounts):
-        p, q = vertices[i], vertices[(i + 1) % len(vertices)]
-        n = _inward_normal(p, q, (cx, cy))
-        lines.append((n[0], n[1], n[0] * p[0] + n[1] * p[1] + amount))
+    name: str
+    a: float
+    b: float
+    band: float
+    dx: float
 
-    out: list[Pt] = []
-    for i in range(len(lines)):
-        a1, b1, c1 = lines[i - 1]
-        a2, b2, c2 = lines[i]
-        det = a1 * b2 - a2 * b1
-        out.append(((c1 * b2 - c2 * b1) / det, (a1 * c2 - a2 * c1) / det))
-    return out
+    @property
+    def axis_ratio(self) -> float:
+        return self.a / self.b
+
+    @property
+    def outer(self) -> Pt:
+        return (self.a + self.band / 2.0, self.b + self.band / 2.0)
+
+    @property
+    def inner(self) -> Pt:
+        return (self.a - self.band / 2.0, self.b - self.band / 2.0)
+
+    @property
+    def ink_height(self) -> float:
+        """The mark's own ink height H -- what band and clear-space ratios use."""
+        return 2.0 * half_extents(*self.outer)[1]
+
+    @property
+    def ink_width(self) -> float:
+        return 2.0 * (self.dx + half_extents(*self.outer)[0])
+
+    @property
+    def centres(self) -> tuple[Pt, Pt]:
+        """The two ring centres, in canvas coordinates."""
+        mid = CANVAS / 2.0
+        return ((mid - self.dx, mid), (mid + self.dx, mid))
 
 
-#: The three faces, inset. Identical in every appearance -- only the plate moves.
-FACE_POLYS: list[list[Pt]] = [inset(v, b) for v, b in FACES]
+#: The mark as drawn: the logo, and what the wordmark's "oo" compacts into.
+LOGO = Master("logo", 302.40, 215.28, 41.23, 162.71)
+#: The same drawing at 64.4%, sized to sit in a 1024 app-icon tile.
+ICON = Master("icon", 194.63, 138.56, 26.53, 104.73)
+#: 32 and 48 px tab icons: a heavier band, so it still rasterises to a line.
+TAB_REG = Master("tabReg", 322.44, 229.55, 55.30, 173.50)
+#: 16 px: heavier still, and the rings opened up so both counters stay open.
+TAB_16 = Master("tab16", 289.59, 206.17, 103.74, 179.55)
+
+MASTERS = (LOGO, ICON, TAB_REG, TAB_16)
+
+
+def ellipse_cubics(centre: Pt, a: float, b: float) -> tuple[Pt, list[tuple[Pt, Pt, Pt]]]:
+    """An ellipse as a start point and four cubic segments.
+
+    Anchored at the ends of the axes and travelling +major, +minor, -major,
+    -minor, which is the same phase and direction the supplied artwork uses --
+    so a path generated here is comparable with it term by term.
+    """
+    t = math.radians(TILT_DEG)
+    ux, uy = math.cos(t), math.sin(t)  # unit vector along the major axis
+    vx, vy = -math.sin(t), math.cos(t)  # unit vector along the minor axis
+    cx, cy = centre
+
+    def at(sa: float, sb: float) -> Pt:
+        return (cx + sa * a * ux + sb * b * vx, cy + sa * a * uy + sb * b * vy)
+
+    def delta(da: float, db: float) -> Pt:
+        return (da * a * ux + db * b * vx, da * a * uy + db * b * vy)
+
+    # The tangent at the head of a quarter points along the NEXT axis, and the
+    # tangent at its tail points along the one it started from -- so both
+    # control offsets are KAPPA times an axis vector, and both are additive.
+    quarters = ((1, 0, 0, 1), (0, 1, -1, 0), (-1, 0, 0, -1), (0, -1, 1, 0))
+    start = at(1, 0)
+    segs: list[tuple[Pt, Pt, Pt]] = []
+    for sa, sb, na, nb in quarters:
+        head, tail = at(sa, sb), at(na, nb)
+        d_head, d_tail = delta(na, nb), delta(sa, sb)
+        segs.append(
+            (
+                (head[0] + KAPPA * d_head[0], head[1] + KAPPA * d_head[1]),
+                (tail[0] + KAPPA * d_tail[0], tail[1] + KAPPA * d_tail[1]),
+                tail,
+            )
+        )
+    return start, segs
+
+
+def _fmt(v: float) -> str:
+    return f"{v:.2f}".rstrip("0").rstrip(".")
+
+
+def ellipse_path(centre: Pt, a: float, b: float) -> str:
+    """One ellipse as SVG path data."""
+    start, segs = ellipse_cubics(centre, a, b)
+    body = "".join(
+        f"C{_fmt(c1[0])} {_fmt(c1[1])} {_fmt(c2[0])} {_fmt(c2[1])} "
+        f"{_fmt(e[0])} {_fmt(e[1])}"
+        for c1, c2, e in segs
+    )
+    return f"M{_fmt(start[0])} {_fmt(start[1])}{body}Z"
+
+
+def ring_paths(master: Master) -> tuple[str, str]:
+    """The two rings, each ONE even-odd path holding its outer and inner edge."""
+    return tuple(  # type: ignore[return-value]
+        ellipse_path(centre, *master.outer) + ellipse_path(centre, *master.inner)
+        for centre in master.centres
+    )
+
 
 # ---------------------------------------------------------------- palettes ---
 
 
 @dataclass(frozen=True)
 class Appearance:
-    """One rendering of the mark. `plate` is the ink hexagon's circumradius."""
+    """One rendering of the mark: which master, in what ink, on what ground."""
 
     name: str
-    plate: float
+    master: Master
     ink: str
-    wall: str
-    floor: str
     field: str | None  # None => transparent (the mark sits on the page)
 
 
-#: Absolute, and shared with the web's design tokens: --ink, --paper, --accent.
-INK = "#3a2d22"
-WALL = "#f7efdf"
-FLOOR = "#8e3b2f"
-
-FRAMED = Appearance("framed", R, INK, WALL, FLOOR, None)
-FRAMELESS = Appearance("frameless", R_INNER, INK, WALL, FLOOR, None)
+#: Absolute, and shared with the web's design tokens: --accent, --paper, --ink.
+BRAND_INK = "#c04d3e"
+LIGHT_GROUND = "#f9f2ec"
+DARK_GROUND = "#282723"
+#: The mark when it sits ON terracotta, and the tab icon in a dark UA.
+REVERSE_INK = "#fbf5f2"
 
 #: The three iOS 18 app-icon appearances, each on its own tile field.
-ICON_LIGHT = Appearance("light", R, INK, WALL, FLOOR, "#e9e2d2")
-ICON_DARK = Appearance("dark", R_INNER, INK, WALL, FLOOR, "#181109")
-#: Authored grayscale; the system re-maps it (0176). NOT a multiply of the above.
-ICON_TINTED = Appearance("tinted", R, "#242424", "#f2f2f2", "#878787", "#1a1a1a")
+ICON_LIGHT = Appearance("light", ICON, BRAND_INK, LIGHT_GROUND)
+ICON_DARK = Appearance("dark", ICON, BRAND_INK, DARK_GROUND)
+#: Authored greyscale; the system re-maps it. NOT a multiply of the above.
+ICON_TINTED = Appearance("tinted", ICON, "#ededed", "#1a1a1a")
+
+#: The tab icon, whose two masters answer the two size bands it is drawn at.
+TAB_LIGHT = Appearance("tab-light", TAB_16, BRAND_INK, None)
+TAB_DARK = Appearance("tab-dark", TAB_16, REVERSE_INK, None)
 
 # --------------------------------------------------------------- rendering ---
 
@@ -196,62 +265,82 @@ def _hex_rgb(h: str) -> tuple[int, int, int]:
     return tuple(int(h[i : i + 2], 16) for i in (1, 3, 5))  # type: ignore[return-value]
 
 
-def render(appearance: Appearance, size: int, supersample: int = 8) -> Image.Image:
-    """Rasterise the mark to a square RGBA image of the given size."""
-    n = size * supersample
+def _flatten(centre: Pt, a: float, b: float, scale: float, steps: int = 96) -> list[Pt]:
+    """An ellipse as a dense polygon, from the SAME cubics the SVG carries --
+    so the raster and the vector are provably one drawing rather than two."""
+    start, segs = ellipse_cubics(centre, a, b)
+    pts: list[Pt] = [start]
+    cur = start
+    for c1, c2, end in segs:
+        for k in range(1, steps + 1):
+            t = k / steps
+            u = 1.0 - t
+            pts.append(
+                (
+                    u**3 * cur[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t**3 * end[0],
+                    u**3 * cur[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t**3 * end[1],
+                )
+            )
+        cur = end
+    return [(x * scale, y * scale) for x, y in pts]
+
+
+def mark_mask(master: Master, n: int) -> Image.Image:
+    """A 1-bit mask of the mark at n x n pixels: each ring outer-XOR-inner, the
+    two rings joined.
+
+    XOR is what makes the ring interior a real hole; OR across the two rings is
+    what makes them interlock rather than cancel where the bands cross.
+
+    `n` is the mask's ACTUAL resolution -- callers that want antialiasing pass
+    a supersampled n and downsample the result themselves.
+    """
     scale = n / CANVAS
-    mid = n / 2.0
+    mask = Image.new("1", (n, n), 0)
+    for centre in master.centres:
+        ring = Image.new("1", (n, n), 0)
+        for axes in (master.outer, master.inner):
+            layer = Image.new("1", (n, n), 0)
+            ImageDraw.Draw(layer).polygon(_flatten(centre, *axes, scale), fill=1)
+            ring = ImageChops.logical_xor(ring, layer)
+        mask = ImageChops.logical_or(mask, ring)
+    return mask
 
-    def to_px(pts: list[Pt]) -> list[tuple[float, float]]:
-        return [(mid + x * scale, mid + y * scale) for x, y in pts]
 
+def render(appearance: Appearance, size: int, supersample: int = 8) -> Image.Image:
+    """Rasterise one appearance to a square RGBA image of the given size."""
+    n = size * supersample
     field = (*_hex_rgb(appearance.field), 255) if appearance.field else (0, 0, 0, 0)
     img = Image.new("RGBA", (n, n), field)
-    draw = ImageDraw.Draw(img)
-    draw.polygon(to_px(hexagon(appearance.plate)), fill=(*_hex_rgb(appearance.ink), 255))
-    for poly, colour in zip(
-        FACE_POLYS, (appearance.wall, appearance.wall, appearance.floor), strict=True
-    ):
-        draw.polygon(to_px(poly), fill=(*_hex_rgb(colour), 255))
+    ink = Image.new("RGBA", (n, n), (*_hex_rgb(appearance.ink), 255))
+    img.paste(ink, mask=mark_mask(appearance.master, n).convert("L"))
     return img.resize((size, size), Image.LANCZOS)
 
 
-def path_data(pts: list[Pt], centre: float = CANVAS / 2) -> str:
-    """An SVG path for a closed polygon, in the 0..1024 viewBox."""
-
-    def fmt(v: float) -> str:
-        return f"{v:.2f}".rstrip("0").rstrip(".")
-
-    head, *rest = [(centre + x, centre + y) for x, y in pts]
-    body = " ".join(f"{fmt(x)} {fmt(y)}" for x, y in rest)
-    return f"M{fmt(head[0])} {fmt(head[1])} {body}Z"
-
-
 def svg(appearance: Appearance, *, field: bool = False) -> str:
-    plate = path_data(hexagon(appearance.plate))
+    """The mark as SVG elements: a ground rect if asked, then the two rings."""
     parts = []
     if field and appearance.field:
         parts.append(f'<rect width="1024" height="1024" fill="{appearance.field}"/>')
-    parts.append(f'<path d="{plate}" fill="{appearance.ink}"/>')
-    for poly, colour in zip(
-        FACE_POLYS, (appearance.wall, appearance.wall, appearance.floor), strict=True
-    ):
-        parts.append(f'<path d="{path_data(poly)}" fill="{colour}"/>')
+    parts += [
+        f'<path fill-rule="evenodd" d="{d}" fill="{appearance.ink}"/>'
+        for d in ring_paths(appearance.master)
+    ]
     return "".join(parts)
 
 
-def write_ico(path: Path, sizes: tuple[int, ...] = (16, 32, 48)) -> None:
-    """An ICO of the framed mark on a transparent field, one PNG entry per size.
+def write_ico(path: Path) -> None:
+    """An ICO of the mark on a transparent field, one PNG entry per size.
 
-    Framed, because a .ico is the legacy fallback and cannot answer a media
-    query -- the framed plate is the one that survives on a light tab strip,
-    which is what a browser falling back to .ico is most likely showing. The
-    theme-aware answer ships alongside it as icon.svg.
+    The 16 comes from the 16 px master and the 32 and 48 from the regular one
+    -- a .ico cannot answer a media query, so each entry has to be the drawing
+    that survives at its own size. The theme-aware answer ships alongside it as
+    icon.svg.
     """
     entries = []
-    for size in sizes:
+    for size, master in ((16, TAB_16), (32, TAB_REG), (48, TAB_REG)):
         buf = BytesIO()
-        render(FRAMED, size).save(buf, format="PNG")
+        render(Appearance("ico", master, BRAND_INK, None), size).save(buf, format="PNG")
         entries.append((size, buf.getvalue()))
 
     offset = 6 + 16 * len(entries)
@@ -268,72 +357,130 @@ def write_ico(path: Path, sizes: tuple[int, ...] = (16, 32, 48)) -> None:
 
 # ----------------------------------------------------------------- targets ---
 
-BANNER_TS = "// Generated by tools/gen_mark.py. Do not edit; edit the generator."
-BANNER_SWIFT = "// Generated by tools/gen_mark.py. Do not edit; edit the generator."
+BANNER = "// Generated by tools/gen_mark.py. Do not edit; edit the generator."
 
 
 def emit_ts() -> str:
-    faces = ",\n  ".join(f'"{path_data(p)}"' for p in FACE_POLYS)
-    return f"""{BANNER_TS}
+    rings = ",\n  ".join(f'"{d}"' for d in ring_paths(LOGO))
+    x0 = CANVAS / 2.0 - LOGO.ink_width / 2.0
+    y0 = CANVAS / 2.0 - LOGO.ink_height / 2.0
+    return f"""{BANNER}
 //
-// The product mark's geometry, in a 0 0 1024 1024 viewBox. Consumed by
-// components/Wordmark.tsx. See tools/gen_mark.py for the construction and for
-// why the mark is a fill rather than a stroke.
+// The product mark's geometry. Consumed by components/Wordmark.tsx. See
+// tools/gen_mark.py for the construction, for why the mark is a pair of filled
+// rings rather than a stroke, and for why it is never set beside the wordmark.
 
-/** Ink plate for a mark sitting on a LIGHT field -- the rim band shows. */
-export const PLATE_FRAMED = "{path_data(hexagon(R))}";
-
-/** Ink plate for a mark sitting on a DARK field -- only the seams show. */
-export const PLATE_FRAMELESS = "{path_data(hexagon(R_INNER))}";
-
-/** Right wall, left wall, floor. Identical under either plate. */
-export const FACES = [
-  {faces},
+/** The two rings. Each is ONE path and MUST be filled even-odd, or its
+ * interior stops being a hole and the interlock is lost. */
+export const MARK_RINGS = [
+  {rings},
 ] as const;
 
+/** The mark's own ink bounds inside the 1024 design space the paths above are
+ * authored in. A caller sizes the DRAWING with these rather than a square
+ * canvas that is 48% empty. A canvas painter needs the numbers; SVG needs the
+ * viewBox below. */
+export const MARK_INK_BOX = {{
+  x: {x0:.2f},
+  y: {y0:.2f},
+  w: {LOGO.ink_width:.2f},
+  h: {LOGO.ink_height:.2f},
+}} as const;
+
+/** `MARK_INK_BOX` as an SVG viewBox, cropping the design space to the ink. */
+export const MARK_VIEWBOX =
+  `${{MARK_INK_BOX.x}} ${{MARK_INK_BOX.y}} ${{MARK_INK_BOX.w}} ${{MARK_INK_BOX.h}}`;
+
+/** Ink width ÷ ink height. Size the mark by HEIGHT and derive width from this
+ * — the design file's minimum sizes are all stated in terms of height. */
+export const MARK_ASPECT = {LOGO.ink_width / LOGO.ink_height:.4f};
+
 /** Absolute mark colours. These never inherit from surrounding text. */
-export const MARK_INK = "{INK}";
-export const MARK_WALL = "{WALL}";
-export const MARK_FLOOR = "{FLOOR}";
+export const MARK_INK = "{BRAND_INK}";
+/** The mark when it sits ON terracotta rather than beside it. */
+export const MARK_REVERSE = "{REVERSE_INK}";
 """
 
 
 def emit_swift() -> str:
-    def swift_poly(pts: list[Pt]) -> str:
-        body = ", ".join(
-            f"CGPoint(x: {CANVAS / 2 + x:.2f}, y: {CANVAS / 2 + y:.2f})" for x, y in pts
+    def ellipse(centre: Pt, axes: Pt) -> str:
+        return (
+            f"MarkEllipse(cx: {centre[0]:.2f}, cy: {centre[1]:.2f}, "
+            f"a: {axes[0]:.2f}, b: {axes[1]:.2f})"
         )
-        return f"[{body}]"
 
-    faces = ",\n        ".join(swift_poly(p) for p in FACE_POLYS)
-    return f"""{BANNER_SWIFT}
+    rings = ",\n        ".join(
+        f"MarkRing(outer: {ellipse(c, LOGO.outer)}, inner: {ellipse(c, LOGO.inner)})"
+        for c in LOGO.centres
+    )
+    return f"""{BANNER}
 //
 // The product mark's geometry, in a 1024x1024 design space. Consumed by
 // DesignSystem/Wordmark.swift. See tools/gen_mark.py for the construction and
-// for why the mark is a fill rather than a stroke.
+// for why the mark is never set beside the wordmark.
+//
+// Emitted as ellipse PARAMETERS rather than as path data, because the splash
+// screen animates the wordmark's "oo" into this mark by interpolating these
+// five numbers. Path data would have to be re-derived to do that.
 
 import CoreGraphics
 
+/// One ellipse of the mark, in the generated design space.
+struct MarkEllipse {{
+    let cx: CGFloat
+    let cy: CGFloat
+    let a: CGFloat
+    let b: CGFloat
+}}
+
+/// One ring: the band between two concentric ellipses. Fill it EVEN-ODD.
+struct MarkRing {{
+    let outer: MarkEllipse
+    let inner: MarkEllipse
+}}
+
 enum MarkGeometry {{
-    /// The design space the points below are expressed in.
+    /// The design space the values below are expressed in.
     static let canvas: CGFloat = {CANVAS:.0f}
 
-    /// Ink plate for a mark on a LIGHT field -- the rim band shows.
-    static let plateFramed: [CGPoint] = {swift_poly(hexagon(R))}
+    /// How far both rings lean back, in degrees.
+    static let tiltDegrees: CGFloat = {TILT_DEG}
 
-    /// Ink plate for a mark on a DARK field -- only the seams show.
-    static let plateFrameless: [CGPoint] = {swift_poly(hexagon(R_INNER))}
-
-    /// Right wall, left wall, floor. Identical under either plate.
-    static let faces: [[CGPoint]] = [
-        {faces},
+    /// The two interlocking rings, left then right.
+    static let rings: [MarkRing] = [
+        {rings},
     ]
+
+    /// The mark's own ink bounds in the design space -- what clear space
+    /// (0.5 H on every side) and the minimum sizes are measured from.
+    static let inkWidth: CGFloat = {LOGO.ink_width:.2f}
+    static let inkHeight: CGFloat = {LOGO.ink_height:.2f}
 }}
 """
 
 
 ICON_DIR = REPO / "ios/RoomStudioCapture/RoomStudioCapture/Assets.xcassets/AppIcon.appiconset"
 WEB_APP = REPO / "web/src/app"
+
+
+def icon_svg() -> str:
+    """The tab icon: one file, both schemes, absolute fills on every path.
+
+    The 16 px master, because a browser draws this at tab size whatever its
+    intrinsic viewBox says.
+    """
+    light = "".join(
+        f'<path class="ink" fill-rule="evenodd" d="{d}"/>' for d in ring_paths(TAB_16)
+    )
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">'
+        "<style>"
+        f".ink{{fill:{BRAND_INK}}}"
+        f"@media(prefers-color-scheme:dark){{.ink{{fill:{REVERSE_INK}}}}}"
+        "</style>"
+        f"{light}"
+        "</svg>"
+    )
 
 
 def main() -> None:
@@ -345,18 +492,7 @@ def main() -> None:
     write_ico(WEB_APP / "favicon.ico")
     print(f"  {(WEB_APP / 'favicon.ico').relative_to(REPO)}")
 
-    icon_svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">'
-        "<style>"
-        ".frameless{display:none}"
-        "@media(prefers-color-scheme:dark){"
-        ".framed{display:none}.frameless{display:inline}}"
-        "</style>"
-        f'<g class="framed">{svg(FRAMED)}</g>'
-        f'<g class="frameless">{svg(FRAMELESS)}</g>'
-        "</svg>"
-    )
-    (WEB_APP / "icon.svg").write_text(icon_svg + "\n")
+    (WEB_APP / "icon.svg").write_text(icon_svg() + "\n")
     print(f"  {(WEB_APP / 'icon.svg').relative_to(REPO)}")
 
     ts = REPO / "web/src/components/markGeometry.ts"

@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Instrument_Sans, Source_Serif_4 } from "next/font/google";
+import { Instrument_Sans, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 
 import SiteFooter from "@/components/SiteFooter";
 import SiteNav from "@/components/SiteNav";
+import { BRAND_NAME } from "@/components/Wordmark";
 import "./globals.css";
 
 const instrumentSans = Instrument_Sans({
@@ -18,22 +19,21 @@ const sourceSerif = Source_Serif_4({
   axes: ["opsz"],
 });
 // Mono is eyebrow labels and machine data — identifiers, coordinates,
-// reasoning traces (decision 0057).
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
+// reasoning traces (decision 0057). JetBrains Mono is the brand artwork's
+// own mono (decision 0247).
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
   subsets: ["latin"],
   weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
-  // Working title — no product name chosen yet (see Wordmark.tsx).
-  title: "The Good Guest",
+  title: BRAND_NAME,
   description:
     "Scan a room with your phone. Meet it again on your desk — real, in 3D, exactly as you live in it — with a guest who understands it.",
-  // Share card. The PNG bakes the placeholder name in, so it re-exports
-  // from docs/product/og-card.html when the real name lands (the og
-  // sibling of the Wordmark.tsx seam). og/twitter title + description
-  // inherit the fields above.
+  // Share card. The PNG is re-exported from docs/product/og-card.html
+  // whenever the identity moves. og/twitter title + description inherit
+  // the fields above.
   metadataBase: new URL("https://roomstudio.web.app"),
   openGraph: {
     type: "website",
@@ -59,7 +59,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${instrumentSans.variable} ${sourceSerif.variable} ${plexMono.variable} min-h-screen bg-paper font-sans text-ink antialiased`}
+        className={`${instrumentSans.variable} ${sourceSerif.variable} ${jetbrainsMono.variable} min-h-screen bg-paper font-sans text-ink antialiased`}
       >
         <SiteNav />
         <main>{children}</main>

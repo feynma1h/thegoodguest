@@ -73,7 +73,7 @@ export default function LegalPage({
 
       <hr className="mt-14 border-ink/10" />
       <div className="mt-5 flex items-center justify-between text-[13px]">
-        <Link href="/" className="text-accent transition-colors hover:text-accent-deep">
+        <Link href="/" className="text-accent-deep transition-colors hover:text-ink">
           ← Back
         </Link>
         <div className="flex gap-4 text-ink/50">

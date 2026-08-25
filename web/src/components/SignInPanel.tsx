@@ -121,7 +121,7 @@ export default function SignInPanel({
 
       {error && (
         <p
-          className={`mt-3 text-xs leading-relaxed text-accent ${
+          className={`mt-3 text-xs leading-relaxed text-accent-deep ${
             compact ? "text-left" : "max-w-sm text-center"
           }`}
         >

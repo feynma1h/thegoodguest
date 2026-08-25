@@ -24,13 +24,15 @@
       --virtual-time-budget=10000 \
       --screenshot=web/public/og-card.png docs/product/og-card.html
 
-  Re-export triggers: the product name landing (the eyebrow and domain bake
-  "roomstudio" into the PNG — this file is the og sibling of the
-  Wordmark.tsx one-file seam), a copy change, or the mark changing. The
-  eyebrow's mark is generated — it is tools/gen_mark.py's framed SVG pasted
-  inline, because this file has no build step to import it, and
-  tools/test_gen_mark.py fails if the two stop matching. Alternate tagline kept from
-  the design source: "No photos generated. No feed. Your rooms are yours."
+  Re-export triggers: a copy change, or the identity changing. The eyebrow is
+  generated — tools/gen_mark.py's SVG pasted inline, because this file has no
+  build step to import it, and tools/test_gen_mark.py fails if the two stop
+  matching. The eyebrow carries the MARK and never the mark beside the name:
+  the mark is the "oo" of "the good guest", so a lockup would print those two
+  letters twice (see web/src/components/Wordmark.tsx). The domain in the footer
+  is the TRUE hosting URL rather than the product name, and stays.
+  Alternate tagline kept from the design source: "No photos generated. No feed.
+  Your rooms are yours."
 -->
 <html lang="en">
 <head>
@@ -38,18 +40,18 @@
 <title>og-card 1200×630</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400;1,8..60,500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400;1,8..60,500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-body{margin:0;background:#f7efdf;font-family:'Instrument Sans',sans-serif;color:#3a2d22}
+body{margin:0;background:#f9f2ec;font-family:'Instrument Sans',sans-serif;color:#282723}
 </style>
 </head>
 <body>
-<div style="position:relative;width:1200px;height:630px;background:#f7efdf;overflow:hidden">
-  <div style="position:absolute;left:64px;top:64px;display:flex;align-items:center;gap:10px;font:500 20px 'IBM Plex Mono',monospace;letter-spacing:.18em;color:rgba(58,45,34,.7)"><svg width="25" height="25" viewBox="0 0 1024 1024" style="display:block" aria-hidden="true"><path d="M512 132 841.09 322 841.09 702 512 892 182.91 702 182.91 322Z" fill="#3a2d22"/><path d="M537.2 497.45 537.2 225.07 773.09 361.26 773.09 633.64Z" fill="#f7efdf"/><path d="M486.8 497.45 250.91 633.64 250.91 361.26 486.8 225.07Z" fill="#f7efdf"/><path d="M512 541.1 747.89 677.29 512 813.48 276.11 677.29Z" fill="#8e3b2f"/></svg><span>ROOMSTUDIO</span></div>
-  <div style="position:absolute;right:64px;top:64px;border:1.5px solid rgba(58,45,34,.3);border-radius:99px;padding:8px 18px;font:500 20px 'Instrument Sans',sans-serif;letter-spacing:.01em;color:rgba(58,45,34,.72)">iPhone Pro · LiDAR</div>
-  <div style="position:absolute;left:64px;top:170px;width:690px;font:400 68px/1.17 'Source Serif 4',serif;letter-spacing:-.015em;color:#3a2d22">Every home contains<br>a version of itself its<br>owner has never seen.</div>
-  <div style="position:absolute;left:64px;top:442px;width:690px;font:italic 400 25px/1.5 'Source Serif 4',serif;color:#8e3b2f"><span>Scan a room with your phone. Meet it again — real, in 3D.</span></div>
-  <div style="position:absolute;left:64px;bottom:64px;font:400 20px 'IBM Plex Mono',monospace;letter-spacing:.08em;color:rgba(58,45,34,.62)">roomstudio.web.app</div>
+<div style="position:relative;width:1200px;height:630px;background:#f9f2ec;overflow:hidden">
+  <div style="position:absolute;left:64px;top:64px"><svg width="45" height="26" viewBox="52.10 244.30 919.79 535.41" style="display:block" role="img" aria-label="The Good Guest"><path fill-rule="evenodd" d="M613.89 326.73C688.61 433.45 630.73 602.91 484.59 705.23C338.46 807.56 159.42 803.99 84.69 697.27C9.97 590.55 67.85 421.09 213.99 318.77C360.12 216.44 539.16 220.01 613.89 326.73ZM580.11 350.37C641.78 438.44 588.43 582.2 460.95 671.46C333.46 760.72 180.13 761.69 118.47 673.63C56.8 585.56 110.15 441.8 237.63 352.54C365.12 263.28 518.45 262.31 580.11 350.37Z" fill="#c04d3e"/><path fill-rule="evenodd" d="M939.31 326.73C1014.03 433.45 956.15 602.91 810.01 705.23C663.88 807.56 484.84 803.99 410.11 697.27C335.39 590.55 393.27 421.09 539.41 318.77C685.54 216.44 864.58 220.01 939.31 326.73ZM905.53 350.37C967.2 438.44 913.85 582.2 786.37 671.46C658.88 760.72 505.55 761.69 443.89 673.63C382.22 585.56 435.57 441.8 563.05 352.54C690.54 263.28 843.87 262.31 905.53 350.37Z" fill="#c04d3e"/></svg></div>
+  <div style="position:absolute;right:64px;top:64px;border:1.5px solid rgba(40,39,35,.3);border-radius:99px;padding:8px 18px;font:500 20px 'Instrument Sans',sans-serif;letter-spacing:.01em;color:rgba(40,39,35,.72)">iPhone Pro · LiDAR</div>
+  <div style="position:absolute;left:64px;top:170px;width:690px;font:400 68px/1.17 'Source Serif 4',serif;letter-spacing:-.015em;color:#282723">Every home contains<br>a version of itself its<br>owner has never seen.</div>
+  <div style="position:absolute;left:64px;top:442px;width:690px;font:italic 400 25px/1.5 'Source Serif 4',serif;color:#c04d3e"><span>Scan a room with your phone. Meet it again — real, in 3D.</span></div>
+  <div style="position:absolute;left:64px;bottom:64px;font:400 20px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(40,39,35,.62)">roomstudio.web.app</div>
   <svg style="position:absolute;left:736px;top:106px" width="404" height="432" viewBox="0 0 404 432" fill="none" role="img" aria-label="Measured floor plan of a scanned room, 3.02 m window wall">
     <defs>
       <radialGradient id="winglow" cx="50%" cy="50%" r="50%">
@@ -59,14 +61,14 @@ body{margin:0;background:#f7efdf;font-family:'Instrument Sans',sans-serif;color:
       </radialGradient>
       <clipPath id="roomclip"><polygon points="30,187.12 235.28,48 398.5,288.85 250.18,389.37 193.22,427.97 167.73,390.35"></polygon></clipPath>
     </defs>
-    <polygon points="30,187.12 235.28,48 398.5,288.85 250.18,389.37 193.22,427.97 167.73,390.35" fill="#715b47" fill-opacity=".07"></polygon>
+    <polygon points="30,187.12 235.28,48 398.5,288.85 250.18,389.37 193.22,427.97 167.73,390.35" fill="#6b625b" fill-opacity=".07"></polygon>
     <g clip-path="url(#roomclip)"><circle cx="189.96" cy="100.46" r="62" fill="url(#winglow)"></circle></g>
-    <path d="M214.75 61.91 L235.28 48 L398.5 288.85 L250.18 389.37 L193.22 427.97 L167.73 390.35 L30 187.12 L144.96 109.21" stroke="#3a2d22" stroke-width="2" stroke-linejoin="miter" stroke-linecap="butt" fill="none"></path>
-    <path d="M143.61 107.22 L213.4 59.92 M146.31 111.2 L216.1 63.9" stroke="#3a2d22" stroke-width="1.1"></path>
-    <path d="M142.38 105.4 L147.54 113.02 M212.17 58.1 L217.33 65.72" stroke="#3a2d22" stroke-width="1.6"></path>
-    <path d="M25.51 180.5 L9.8 157.32 M230.79 41.38 L215.08 18.2 M13.17 162.29 L218.45 23.17" stroke="#3a2d22" stroke-opacity=".5" stroke-width="1"></path>
-    <path d="M12.42 166.22 L13.92 158.36 M217.7 27.1 L219.2 19.24" stroke="#3a2d22" stroke-width="1.6"></path>
-    <text x="108.52" y="81.97" transform="rotate(-34.13 108.52 81.97)" text-anchor="middle" font-family="'IBM Plex Mono',monospace" font-size="20" font-weight="500" letter-spacing=".04em" fill="#8e3b2f">3.02 m</text>
+    <path d="M214.75 61.91 L235.28 48 L398.5 288.85 L250.18 389.37 L193.22 427.97 L167.73 390.35 L30 187.12 L144.96 109.21" stroke="#282723" stroke-width="2" stroke-linejoin="miter" stroke-linecap="butt" fill="none"></path>
+    <path d="M143.61 107.22 L213.4 59.92 M146.31 111.2 L216.1 63.9" stroke="#282723" stroke-width="1.1"></path>
+    <path d="M142.38 105.4 L147.54 113.02 M212.17 58.1 L217.33 65.72" stroke="#282723" stroke-width="1.6"></path>
+    <path d="M25.51 180.5 L9.8 157.32 M230.79 41.38 L215.08 18.2 M13.17 162.29 L218.45 23.17" stroke="#282723" stroke-opacity=".5" stroke-width="1"></path>
+    <path d="M12.42 166.22 L13.92 158.36 M217.7 27.1 L219.2 19.24" stroke="#282723" stroke-width="1.6"></path>
+    <text x="108.52" y="81.97" transform="rotate(-34.13 108.52 81.97)" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="20" font-weight="500" letter-spacing=".04em" fill="#c04d3e">3.02 m</text>
   </svg>
 </div>
 </body>

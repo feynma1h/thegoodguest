@@ -6,7 +6,9 @@ import { MockApiClient, MOCK_READY_SCENE_ID, MOCK_V3_SCENE_ID } from "@/lib/api/
 import type { SceneAssets } from "@/lib/api/types";
 import { roomTitle } from "@/lib/voice";
 import { measureRoom, type RoomMeasure } from "./measure";
-import { CARD_FRAMES, CARD_SUBTITLE, formatM, layoutCard, type CardLayout, type CardVariant, type XY, WORDMARK, DOMAIN } from "./layout";
+import { MARK_ASPECT } from "@/components/markGeometry";
+import { PALETTE } from "./palette";
+import { CARD_FRAMES, CARD_SUBTITLE, formatM, layoutCard, type CardLayout, type CardVariant, type XY, DOMAIN } from "./layout";
 
 function heroAssets(): SceneAssets {
   return JSON.parse(
@@ -31,7 +33,9 @@ function pointsOf(layout: CardLayout): XY[] {
   for (const op of layout.ops) {
     if (op.kind === "stroke" || op.kind === "fill") pts.push(...op.points);
     if (op.kind === "rect") pts.push(op.at, [op.at[0] + op.w, op.at[1] + op.h]);
-    if (op.kind === "mark") pts.push(op.at, [op.at[0] + op.size, op.at[1] + op.size]);
+    // The mark is 1.72x wider than it is tall, so its extent is not a square.
+    if (op.kind === "mark")
+      pts.push(op.at, [op.at[0] + op.height * MARK_ASPECT, op.at[1] + op.height]);
   }
   return pts;
 }
@@ -185,7 +189,9 @@ describe("the card types no numbers", () => {
     const plain = layoutCard({ measure: unobserved, title: TITLE });
     expect(plain.claims.floorAlbedoHex).toBeNull();
     expect(
-      plain.ops.filter((o) => o.kind === "rect" && o.fill !== "#f7efdf"),
+      // From the token, not retyped -- a hardcoded hex here is the same
+      // drift palette.test.ts exists to catch.
+      plain.ops.filter((o) => o.kind === "rect" && o.fill !== PALETTE.paper),
     ).toHaveLength(0);
   });
 });
@@ -238,7 +244,8 @@ describe("the card carries nothing on the forbidden list", () => {
       // Tracked from the constants, not retyped: a rename must not be
       // able to stale this guard, which is the only thing standing
       // between a new string and an artifact that leaves the browser.
-      WORDMARK.toUpperCase(),
+      // The product NAME is deliberately absent -- the card carries the
+      // mark, which is a drawing rather than a string.
       DOMAIN,
       "CEILING",
       "FLOOR",
