@@ -218,6 +218,7 @@ COPY services/perception-obj/shell_receiver.py /app/shell_receiver.py
 COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 COPY services/perception-obj/compress_receiver.py /app/compress_receiver.py
 COPY services/perception-obj/compress_enqueue.py /app/compress_enqueue.py
+COPY services/perception-obj/segment_receiver.py /app/segment_receiver.py
 
 # Deferred-import smoke: every module below is imported lazily inside
 # /process, /shell or /compress, so a missing COPY above passes /health and
@@ -242,7 +243,8 @@ RUN python -c "import placement, fusion, reproject, sampling, census_sampling, \
 budget, room_planes, roomplan_room, contact_priors, box_placement, privacy, \
 mask_refine, object_color, oidc, receiver_repo, fcm, process_receiver, \
 shell_geometry, shell_envelope, shell_observation, shell_material, \
-shell_receiver, shell_enqueue, compress_receiver, compress_enqueue, anthropic"
+shell_receiver, shell_enqueue, compress_receiver, compress_enqueue, \
+segment_receiver, anthropic"
 
 # ── The SPZ encoder: Node + Spark, for the /compress stage ───────────────────
 # The compressed splat tier (decisions 0125/0126) must be written by Spark's

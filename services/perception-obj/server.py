@@ -44,7 +44,7 @@ from fastapi.responses import JSONResponse
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
 
-# ProcessRequest must be imported before any @app.post("/process") registration.
+# Request models must be imported before the @app.post registrations that use them.
 # FastAPI resolves type annotations at decoration time; if ProcessRequest is not
 # in the module namespace then, FastAPI silently treats `req` as a query param
 # instead of a body model, producing 422 on every Cloud Tasks delivery.
@@ -54,6 +54,7 @@ from process_receiver import (  # noqa: E402
     DEFAULT_OBJECT_PROMPT,
     ProcessRequest,
 )
+from segment_receiver import SegmentRequest  # noqa: E402  (same 0010 rule for /segment)
 from shell_receiver import ShellRequest  # noqa: E402  (same 0010 rule for /shell)
 
 # Model classes are NOT imported at module level. Importing models.sam3 or
@@ -423,6 +424,47 @@ async def shell(
     )
 
 
+
+
+@app.post(
+    "/segment",
+    summary="Segmentation-only probe: SAM 3 on named frames, no reconstruction",
+    responses={
+        200: {"description": "Segmented (per-frame errors reported in the body)"},
+        401: {"description": "OIDC token missing or invalid"},
+        422: {"description": "Malformed payload"},
+        503: {"description": "SAM 3 not yet loaded; retry"},
+    },
+)
+async def segment(
+    request: Request,
+    req: SegmentRequest,
+) -> JSONResponse:
+    """Run pass 1 only on an explicit frame list and return what SAM 3 saw.
+
+    Exists because the cheap half of "would another frame reconstruct better"
+    is answerable without reconstructing: the mask IS SAM 3D's input, so a
+    truncated mask settles it for ~4s of GPU instead of ~25s an object.
+    /process cannot answer it — its payload names no frames and it always
+    reconstructs.
+
+    Loads SAM 3 ONLY. SAM 3D is never touched here, which also skips its
+    ~124s cold load. Writes exclusively under scenes/{id}/segment_probe/ and
+    never to Firestore, so a probe cannot become pipeline state or regress a
+    ready room (see segment_receiver's module docstring).
+    """
+    from segment_receiver import handle_segment
+
+    sam3_model = await asyncio.to_thread(get_sam3)
+
+    return await handle_segment(
+        request,
+        req,
+        oidc_verifier=_get_oidc_verifier(),
+        outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
+        sam3_model=sam3_model,
+        object_prompt=DEFAULT_OBJECT_PROMPT,
+    )
 
 
 @app.post(
