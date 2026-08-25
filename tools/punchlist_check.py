@@ -239,43 +239,6 @@ def check_rollback_tag():
 check_rollback_tag.tag = NET
 
 
-# ── Gate 6 ───────────────────────────────────────────────────────────────────
-
-def check_serving_revision_has_run():
-    """G6-04 — the serving perception revision must have reconstructed at least one room.
-
-    A candidate deploy is smoked on /health and route registration, neither of
-    which exercises reconstruction. This asks the only question that does: has
-    the revision carrying traffic ever actually made a room?
-    """
-    serving = _run([
-        "gcloud", "run", "services", "describe", "perception-obj",
-        "--region", "asia-southeast1",
-        "--format=value(status.traffic[0].revisionName)",
-    ]).strip()
-    if not serving:
-        raise RuntimeError("could not resolve the serving perception-obj revision")
-    out = _run([
-        "gcloud", "logging", "read",
-        (
-            'resource.type="cloud_run_revision" '
-            'AND resource.labels.service_name="perception-obj" '
-            f'AND resource.labels.revision_name="{serving}" '
-            'AND httpRequest.requestUrl:"/process"'
-        ),
-        "--limit", "1", "--format=value(timestamp)", "--freshness=30d",
-    ], timeout=300).strip()
-    if out:
-        return True, f"{serving} has served /process (most recent {out[:19]})"
-    return False, (
-        f"{serving} carries traffic and has NEVER served /process — "
-        "every existing room was built by older code"
-    )
-
-
-check_serving_revision_has_run.tag = NET
-
-
 # ── registry ─────────────────────────────────────────────────────────────────
 
 CHECKS = {
@@ -290,7 +253,6 @@ CHECKS = {
     "G4-05": check_unrestricted_api_key,
     "G4-06": check_dev_fixtures_location,
     "G4-07": check_rollback_tag,
-    "G6-04": check_serving_revision_has_run,
 }
 
 

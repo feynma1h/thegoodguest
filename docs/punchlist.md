@@ -264,37 +264,31 @@ the stated precondition has been met and this is a live choice again.
 
 ## Gate 6 — room quality, open and measured
 
-G6-04 and G6-05 DO block calling the 3D representation finished; the rest are
-quality ceilings that do not block shipping. All are measured, and all shape how
+G6-05 is ANSWERED and negative (0247), and G6-01 is its cause — together they
+block calling the 3D representation finished. The rest are quality ceilings that
+do not block shipping. All are measured, and all shape how
 good the product looks when it ships. **Read `CLAUDE.md`'s measured-dead-ends section
 before touching any of them** — re-running a refuted experiment is the most
 expensive mistake available in this repo.
 
-### G6-04 · No room has ever been reconstructed by the serving pipeline
-**State:** open · **Blocks:** G6-05, and any claim about current room quality
-`perception-obj-00074-var` carries 100% of traffic and has served **zero**
-`/process` requests. The refine + arm-select flip landed 2026-08-25 changing what
-SAM 3D is shown and which arm ships; the last room made anywhere was 2026-08-23
-on `00062-hum`. Every room anyone has looked at was produced by older code, and
-the bench evidence behind the flip came from 0%-traffic candidates on preserved
-captures rather than from a room the pipeline made end to end.
-A candidate deploy is smoked on `/health` and route registration, which does not
-exercise reconstruction at all — so this is a deploy that has never been proven
-by use.
-**Check:** automated — the serving revision must have served `/process` at least once.
-
-### G6-05 · No whole room has been judged good enough to ship
-**State:** open · **Blocks:** calling "finished" on the 3D representation
+### G6-05 · The 3D representation is NOT good enough to ship
+**State:** ANSWERED 2026-08-26, negative · **Blocks:** calling the product finished
 Gate 6's other entries are component defects measured in isolation — a truncated
 splat, an OOM'd detection, a skewed window. **Nothing asks the product question:
 does a room, rendered in the viewer and seen by a person, look good enough to put
 in front of a stranger?** That judgment is the operator's eyes and has never been
 recorded as an acceptance; the walks that exist (0085, the 2026-08-12 second walk,
 the sittings) each answered narrower questions on older pipelines.
-It needs a room captured, reconstructed on the serving revision, and walked in the
-real viewer rather than an offline render — the viewer is the product, and the
-reveal is the moment the founding vision calls defining.
-**Check:** manual — operator. Nothing else can answer it.
+**Asked and answered (0247).** A fresh 189-frame room was captured, reconstructed
+end to end on `perception-obj-00074-var`, and walked. The verdict: the objects
+are not whole. A warm re-drive that reconstructed **80% more object views**
+(15 → 27, 8 → 12 placed) changed how many things were in the room and changed
+nothing about how any of them looked — confirming a prediction registered before
+it ran, and costing every colour block to a skipped refinement pass.
+So this entry stays open not as a question but as **the defect**: it is G6-01
+wearing the product's clothes, and it is the reason the 3D representation cannot
+be called finished. It closes when G6-01 closes, and G6-01 has no live route.
+**Check:** manual — operator, on a pipeline that has changed since 0247.
 
 ### G6-01 · Class-6 splat truncation
 **State:** open, no live route
