@@ -225,7 +225,7 @@ Suite **610**: 604 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
-### api-public — `api-public-00044-wiz`, image `20260825-035637`
+### api-public — `api-public-00046-xig`, image `20260825-213937`
 
 Client-facing, `--allow-unauthenticated`, with in-app Firebase JWT verification
 as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
@@ -241,7 +241,7 @@ as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
   verbatim, V4-signed splat URLs for placed objects, and an additive
   `asset_urls_compressed` for the SPZ tier that never narrows the PLY fallback.
 - `GET/POST /scenes/{id}/conversation` — the guest, at `FACTS_VERSION 4` and
-  `PROMPT_VERSION 7` on `main` (`api-public` still SERVES 6). SSE with a
+  `PROMPT_VERSION 7`, SERVING since `api-public-00046-xig` (2026-08-25). SSE with a
   disconnect shield: the turn completes and persists even if the client stops
   listening. `PROMPT_SURFACE_SHA256` covers the charter, the arrangement block
   AND `guest_tools.TOOLS`, schema included (0219) — every word the model reads
@@ -1174,6 +1174,8 @@ second-newest, and a cleanup policy has no idea what Cloud Run is serving.
 Forgetting the tag over-keeps one stale image, which is the safe direction;
 the unsafe direction is the registry reclaiming the image a scale-to-zero GPU
 service needs to start.
+
+**Service builds are UNPINNED, so a rebuild is a real variable — and a build can capture a release that is later YANKED (decision 0246).** `packages/api-core/pyproject.toml` carries ranges (`google-cloud-firestore>=2.14,<3.0`) and the transitive set is not pinned at all, so two builds of identical source can install different code. On 2026-08-24 an api-public build picked up `google-api-core` **2.35.0** during the hours it was live on PyPI; it was then yanked for "regression in `path_template.expand`", which encoded the Firestore default database id as `%28default%29` and made every Firestore read and write 500. **The cure was a REBUILD, not a pin** — pip skips yanked releases, so the next build resolved 2.34.0 unaided, and a hand-added `<2.35` would have blocked the eventual upstream fix. **The diagnostic tell:** `pip index versions <pkg>` omits yanked releases while `pip install <pkg>==<version>` still installs them, so a version that installs but is absent from the index listing is yanked; `curl https://pypi.org/pypi/<pkg>/json` carries the reason per release. **And chase the right suspect** — the traceback named `google.cloud.firestore`, which we declare and which had also moved a minor version, and it was innocent. Bisecting the two moved packages cost three `pip install` runs; pinning the obvious one would have shipped and not worked.
 
 **A perception build that suddenly takes forever: check `PIP_EXTRA_INDEX_URL` first (decision 0182).** `pypi.ngc.nvidia.com` — first in Meta's index line, carried verbatim into our Dockerfile — went NXDOMAIN, and an extra index is consulted for EVERY package, so pip paid five DNS retries with backoff per dependency: **764 retry warnings** in one build, with `pip install -e '.[dev]'` at 25 m 38 s and still resolving when it was cancelled. Dropped 2026-08-16 (dropped, not repointed at `pypi.nvidia.com` — every recent build already resolved from PyPI proper, so removing a dead index changes nothing while adding a live one could change which wheels are selected). **The layer cache is what hid it** — every deploy since 0120 rode the cache, and the first miss fell straight into it. Two adjacent facts from the same session: the cache missed BROADLY (apt, the clone and `mamba env create` all ran) for a reason that WAS undetermined and is now measured — see the cache entry below, which closes it — and **the base image is NOT a suspect** — `condaforge/mambaforge:24.7.1-0` has not moved, verified by `rootfs.diff_ids[0]`, and an apparent difference in *compressed* layer digests is an artefact of Artifact Registry re-compressing on push. Compare diff_ids, never compressed digests, across registries. One more reading trap, which cost a wrong conclusion before the timestamps caught it: in BuildKit's plain progress output the number after a step id is **seconds since the BUILD started**, not seconds into that step.
 
