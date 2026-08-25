@@ -20,7 +20,7 @@ const sourceSerif = Source_Serif_4({
 });
 // Mono is eyebrow labels and machine data — identifiers, coordinates,
 // reasoning traces (decision 0057). JetBrains Mono is the brand artwork's
-// own mono (decision 0247).
+// own mono (decision 0248).
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
