@@ -69,7 +69,7 @@ export type CardOp =
   | { kind: "glow"; at: XY; radius: number; color: string; clip: XY[] }
   /** The product mark, drawn from the generated geometry — never a copy of
    * its paths (0193). `size` is the box it fits in. */
-  | { kind: "mark"; at: XY; size: number }
+  | { kind: "mark"; at: XY; height: number }
   | TextOp;
 
 export interface CardLayout {
@@ -377,7 +377,7 @@ function drawDimension(ops: CardOp[], wall: WallPlan, proj: Projector, text: str
     weight: 500,
     italic: false,
     tracking: 0.04,
-    fill: PALETTE.accent,
+    fill: PALETTE.accentDeep,
     align: "center",
     rotateDeg: deg,
     maxWidth: null,
@@ -401,9 +401,9 @@ export interface CardInput {
 /** The line that tells a stranger what they are looking at. */
 export const CARD_SUBTITLE = "Every line here was measured, not drawn.";
 
-/** The placeholder wordmark. One-file swap, like components/Wordmark.tsx —
- * see that file's note for everywhere else the name is rendered. */
-export const WORDMARK = "The Good Guest";
+/** The true hosting URL, printed on the card. NOT the product name and not a
+ * stand-in for it: changing this string without moving hosting would print a
+ * falsehood on an artifact that leaves the browser and reaches other people. */
 export const DOMAIN = "roomstudio.web.app";
 
 export function layoutCard(input: CardInput): CardLayout {
@@ -461,22 +461,10 @@ export function layoutCard(input: CardInput): CardLayout {
   // --- the words ---------------------------------------------------
   const colW = wide ? 406 : frame.w - 2 * M;
 
-  const markSize = 25;
-  ops.push({ kind: "mark", at: [M, M], size: markSize });
-  ops.push({
-    kind: "text",
-    text: WORDMARK.toUpperCase(),
-    at: [M + markSize + 10, M + markSize * 0.72],
-    role: "mono",
-    size: 20,
-    weight: 500,
-    italic: false,
-    tracking: 0.18,
-    fill: alpha(INK, 0.7),
-    align: "left",
-    rotateDeg: 0,
-    maxWidth: null,
-  });
+  // The mark alone, never the mark beside the name -- the mark IS the "oo" of
+  // the name, so a lockup would print those two letters twice. See
+  // components/Wordmark.tsx for the rule.
+  ops.push({ kind: "mark", at: [M, M], height: 26 });
 
   const titleY = wide ? 206 : 150;
   ops.push({
@@ -502,7 +490,7 @@ export function layoutCard(input: CardInput): CardLayout {
     weight: 400,
     italic: true,
     tracking: 0,
-    fill: PALETTE.accent,
+    fill: PALETTE.accentDeep,
     align: "left",
     rotateDeg: 0,
     maxWidth: colW,

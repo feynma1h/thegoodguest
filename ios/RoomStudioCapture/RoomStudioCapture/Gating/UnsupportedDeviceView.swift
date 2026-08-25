@@ -10,7 +10,7 @@ struct UnsupportedDeviceView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            Wordmark()
+            Mark(height: 24)
 
             Image(systemName: "cube.transparent")
                 .font(.system(size: 34, weight: .regular))

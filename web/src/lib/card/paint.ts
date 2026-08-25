@@ -17,11 +17,9 @@
  */
 
 import {
-  FACES,
-  MARK_FLOOR,
   MARK_INK,
-  MARK_WALL,
-  PLATE_FRAMED,
+  MARK_INK_BOX,
+  MARK_RINGS,
 } from "@/components/markGeometry";
 import { alpha } from "./palette";
 import type { CardLayout, CardOp, TextOp, XY } from "./layout";
@@ -143,20 +141,19 @@ function drawText(ctx: CanvasRenderingContext2D, op: TextOp, fonts: PaintFonts) 
   ctx.restore();
 }
 
-/** The mark, from the generated geometry in its 1024 viewBox. The framed
- * plate: the card is a light field, and the rim band is what separates the
- * mark from it (0176/0193). */
-function drawMark(ctx: CanvasRenderingContext2D, at: XY, size: number) {
+/** The mark, from the generated geometry, at `height` with `at` its top-left.
+ *
+ * Each ring is filled EVEN-ODD, without which its interior stops being a hole
+ * and the interlock is lost. The paths are authored in the 1024 design space,
+ * so the transform crops to the ink box the same way the SVG viewBox does. */
+function drawMark(ctx: CanvasRenderingContext2D, at: XY, height: number) {
+  const scale = height / MARK_INK_BOX.h;
   ctx.save();
   ctx.translate(at[0], at[1]);
-  ctx.scale(size / 1024, size / 1024);
+  ctx.scale(scale, scale);
+  ctx.translate(-MARK_INK_BOX.x, -MARK_INK_BOX.y);
   ctx.fillStyle = MARK_INK;
-  ctx.fill(new Path2D(PLATE_FRAMED));
-  ctx.fillStyle = MARK_WALL;
-  ctx.fill(new Path2D(FACES[0]));
-  ctx.fill(new Path2D(FACES[1]));
-  ctx.fillStyle = MARK_FLOOR;
-  ctx.fill(new Path2D(FACES[2]));
+  for (const d of MARK_RINGS) ctx.fill(new Path2D(d), "evenodd");
   ctx.restore();
 }
 
@@ -213,7 +210,7 @@ export function paintCard(
         drawGlow(ctx, op.at, op.radius, op.color, op.clip);
         break;
       case "mark":
-        drawMark(ctx, op.at, op.size);
+        drawMark(ctx, op.at, op.height);
         break;
       case "text":
         drawText(ctx, op, fonts);

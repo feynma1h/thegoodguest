@@ -65,7 +65,7 @@ struct HomeView<RoomsStrip: View, Notice: View>: View {
 
     private var header: some View {
         HStack {
-            Wordmark()
+            Mark(height: 20)
             Spacer()
             Button(action: onProfile) {
                 Image(systemName: "person.crop.circle")
@@ -150,8 +150,4 @@ extension HomeView where Notice == EmptyView {
 
 #Preview("First-time home") {
     HomeView()
-}
-
-#Preview("Cold start") {
-    ColdStartView()
 }

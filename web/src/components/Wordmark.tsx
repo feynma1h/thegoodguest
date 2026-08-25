@@ -1,104 +1,98 @@
 /**
- * The product wordmark — isolated here because NO NAME HAS BEEN CHOSEN.
- * The product name is "The Good Guest" (decision 0245). This file and
- * DesignSystem/Wordmark.swift are still the only places it is set.
- * The design file renders every wordmark slot as a literal placeholder
- * in quiet tracked mono; this component honors that — deliberately quiet,
- * because the room is the hero.
+ * The brand on the web: the mark, the name, and the rule that keeps them apart.
  *
- * The mark is the room corner: a pointy-top hexagon divided by a three-way
- * seam into two wall faces and a floor — the captured volume, seen at true
- * 30° isometric. Its geometry is NOT authored here. It comes from
- * `markGeometry.ts`, which `tools/gen_mark.py` generates from the one source
- * every surface is cut from — the app icon, the tab icon, this wordmark and
- * the share card. To change the mark, change the generator and re-run it;
- * editing the paths here would fork it again.
+ * THE RULE. The mark IS the "oo" of "the good guest" — the same two loops the
+ * script draws in the middle of "good", compacted and tilted. So the mark and
+ * the name are NEVER set side by side: a lockup of the two would print the same
+ * two letters twice, once as a drawing and once as a word. Every surface picks
+ * one. Chrome — this site's header, the room page, the iOS app — takes the mark
+ * alone, because it is a signature for someone already inside. The artifacts
+ * that leave the browser and reach a stranger — the calling card, the share
+ * card — take the script wordmark alone, because a stranger needs the name.
  *
- * The face colours are absolute and do NOT inherit `currentColor`. The mark
- * carries its own cream and its own rust onto whatever it sits on, which is
- * what lets it stay the same object on the phone icon, the browser tab and
- * both of this site's surfaces. A mark whose interior is the page showing
- * through is a different mark on every page.
+ * The only place both appear is the iOS splash, where they appear in SEQUENCE:
+ * the name resolves into the mark, which is the rule stated as a motion rather
+ * than broken.
  *
- * `tone` picks which of the two ink plates the mark sits on, and that is the
- * only thing that varies:
+ * The mark's geometry is NOT authored here. It comes from `markGeometry.ts`,
+ * which `tools/gen_mark.py` generates from the one source every surface is cut
+ * from — the app icons, the tab icon, this component and the share cards. To
+ * change the mark, change the generator and re-run it; editing the paths here
+ * would fork it again.
  *
- *   ink   → on parchment; the framed plate, whose rim band separates the
- *           mark from a light field.
- *   cream → on the room page's ink surface; the frameless plate, which
- *           circumscribes the three faces exactly so only the seams read.
- *           Decision 0176 measured why: a full band on a dark field sits
- *           0.11 off it and reads as a heavy ring rather than a drawn edge.
+ * Each ring MUST be filled even-odd. Fill it nonzero and the interior stops
+ * being a hole, the two rings become two solid blobs, and the interlock — the
+ * only thing that makes this a mark rather than an ellipse — is gone.
  *
- * Sized against the cap height of the tracked mono beside it rather than at
- * a round em: the mark is a filled object where the surrounding text is a
- * thin uppercase rule, so matching em would leave it reading as the larger
- * of the two. Judged in the browser at true size in both tones.
+ * The colours are absolute and do NOT inherit `currentColor`. The mark carries
+ * its own terracotta onto whatever it sits on, which is what lets it stay the
+ * same object on the phone icon, the browser tab and both of this site's
+ * surfaces. A mark whose interior is the page showing through is a different
+ * mark on every page.
  *
- * This is the only place the name is RENDERED AS THE MARK, but it is not the
- * only place the string appears in user-visible text. When the real name
- * lands, also update: app/layout.tsx (the tab title), and app/terms/page.tsx
- * and app/privacy/page.tsx (titles, descriptions, and body copy, including the
- * "working title" sentence in Terms §2, which stops being true). The
- * "roomstudio:"-prefixed localStorage keys in app/page.tsx, lib/seen.ts, and
- * components/NewRoomSheet.tsx are internal and can stay — renaming them
- * silently resets returning visitors.
+ * `tone` picks the ink, and that is the only thing that varies:
+ *
+ *   ink     → terracotta, for the cream chrome. The mark as drawn.
+ *   reverse → cream, for the room page's dark ink surface, matching what the
+ *             tab icon does in a dark UA. The dark APP icon deliberately keeps
+ *             terracotta instead: it is large enough to carry 3.11:1, where
+ *             chrome at 20px is not.
+ *
+ * The name is a string in exactly one more place on the web — `lib/card/
+ * layout.ts`, which cannot import from a component because the card is painted
+ * to a canvas by code with no React in it. That copy imports BRAND_NAME from
+ * here rather than retyping it.
+ *
+ * The "roomstudio:"-prefixed localStorage keys in app/page.tsx, lib/seen.ts and
+ * components/NewRoomSheet.tsx are identifiers, not presentation, and stay —
+ * renaming them silently resets returning visitors.
  */
 
 import {
-  FACES,
-  MARK_FLOOR,
+  MARK_ASPECT,
   MARK_INK,
-  MARK_WALL,
-  PLATE_FRAMED,
-  PLATE_FRAMELESS,
+  MARK_REVERSE,
+  MARK_RINGS,
+  MARK_VIEWBOX,
 } from "@/components/markGeometry";
 
+/** The product name. The one-file swap for the name on the web. */
+export const BRAND_NAME = "The Good Guest";
+
+export type MarkTone = "ink" | "reverse";
+
 /**
- * The mark on its own, at the given size. Exported for surfaces that show the
- * mark without the name beside it.
+ * The mark, at the given ink HEIGHT. The whole of the brand in chrome — never
+ * with the name beside it.
+ *
+ * Sized by height rather than by a square box: the mark is 1.72 times wider
+ * than it is tall, so a square would be 48% empty and every caller would be
+ * picking a number that means nothing. The design file's floor is height ≥ 20px
+ * — below that the ring band falls under 1.5px and greys out.
  */
 export function Mark({
-  size = "1em",
-  onDark = false,
+  height = "1em",
+  tone = "ink",
   className,
 }: {
-  size?: string;
-  onDark?: boolean;
+  height?: string;
+  tone?: MarkTone;
   className?: string;
 }) {
+  const fill = tone === "reverse" ? MARK_REVERSE : MARK_INK;
   return (
     <svg
-      viewBox="0 0 1024 1024"
-      width={size}
-      height={size}
-      aria-hidden
+      viewBox={MARK_VIEWBOX}
+      height={height}
+      style={{ aspectRatio: MARK_ASPECT }}
+      role="img"
+      aria-label={BRAND_NAME}
       focusable="false"
       className={`shrink-0 ${className ?? ""}`}
     >
-      <path d={onDark ? PLATE_FRAMELESS : PLATE_FRAMED} fill={MARK_INK} />
-      <path d={FACES[0]} fill={MARK_WALL} />
-      <path d={FACES[1]} fill={MARK_WALL} />
-      <path d={FACES[2]} fill={MARK_FLOOR} />
+      {MARK_RINGS.map((d) => (
+        <path key={d} d={d} fillRule="evenodd" fill={fill} />
+      ))}
     </svg>
-  );
-}
-
-export default function Wordmark({
-  className,
-  tone = "ink",
-}: {
-  className?: string;
-  tone?: "ink" | "cream";
-}) {
-  return (
-    <span
-      className={`inline-flex items-center gap-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] ${
-        tone === "cream" ? "text-paper/70" : "text-ink/70"
-      } ${className ?? ""}`}
-    >
-      <Mark size="13px" onDark={tone === "cream"} />
-      The Good Guest
-    </span>
   );
 }
