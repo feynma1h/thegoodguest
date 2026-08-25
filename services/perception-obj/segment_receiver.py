@@ -134,13 +134,13 @@ async def handle_segment(
     frame index outside the bundle, an undecodable image) are reported in the
     body rather than raised: this is a probe, and a partial answer beats none.
     """
+    from PIL import Image
+    from privacy import masks_npz_bytes, partition_detections, segmentation_prompt, suppressed_union
     from process_receiver import (
         _bundle_prefix,
         _download_gcs_uri,
         _gcs_upload_for_scene,
     )
-    from privacy import masks_npz_bytes, partition_detections, segmentation_prompt, suppressed_union
-    from PIL import Image
     from roomstudio_schemas import CaptureBundle
 
     if oidc_verifier is not None:

@@ -13,10 +13,8 @@ import json
 
 import numpy as np
 import pytest
-from PIL import Image
-
 import segment_receiver as sr
-
+from PIL import Image
 
 # ── fakes ────────────────────────────────────────────────────────────────────
 
@@ -208,5 +206,7 @@ class TestReporting:
 
 class TestRequestModel:
     def test_frame_indices_are_required(self):
-        with pytest.raises(Exception):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
             sr.SegmentRequest(scene_id="s", bundle_uri="gs://c/b.pb", frame_indices=[])
