@@ -436,8 +436,17 @@ Suite **276** vitest; lint, tsc, and the static-export build are green.
   when that field's value is past, so the record expires as it is written.
   Server request logs (client IP, user agent, URL) sit outside all of it at
   30 d in Cloud Logging `_Default`, and `DELETE /account` does not reach them.
-- **CI** (`.github/workflows/`): python and web are push-triggered and green on
-  Linux; iOS is `workflow_dispatch`-only on purpose — see the iOS test policy.
+- **CI** (`.github/workflows/`): python and web are push-triggered; iOS is
+  `workflow_dispatch`-only on purpose — see the iOS test policy. **Web is green;
+  PYTHON IS RED and has been since 2026-08-21** (measured 2026-08-26). The root
+  suite dies at COLLECTION with `ModuleNotFoundError: No module named 'PIL'`:
+  `tools/test_gen_mark.py` landed that day importing Pillow, which is declared
+  only in the two perception pyprojects and so is absent from what the root job
+  installs via `tools/ci_deps.py`. The other three jobs pass, so the run fails
+  on one red job among four. **Nothing gates on CI, which is why five days
+  passed unnoticed** — and it means the root suite has not actually executed on
+  Linux since then, however green it is locally. The fix is one declared
+  dependency, not a test change.
 - **Tooling.** `tools/upload_test_bundle.py` is the substitute iOS client with
   four smoke modes; `tools/reenqueue_scene.py` is the out-of-band cure for
   stranded scenes and the warm re-drive driver.
