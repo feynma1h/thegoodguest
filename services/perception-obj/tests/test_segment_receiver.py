@@ -77,12 +77,17 @@ def wired(monkeypatch):
     return uploads
 
 
-def _run(req, sam3, uploads):
+class FakeRequest:
+    def __init__(self, auth=None):
+        self.headers = {"Authorization": auth} if auth else {}
+
+
+def _run(req, sam3, uploads, verifier=None, request=None):
     return asyncio.run(
         sr.handle_segment(
-            request=None,
+            request=request if request is not None else FakeRequest(),
             req=req,
-            oidc_verifier=None,
+            oidc_verifier=verifier,
             outputs_bucket="out-bucket",
             sam3_model=sam3,
             object_prompt="chair,desk",
@@ -210,3 +215,46 @@ class TestRequestModel:
 
         with pytest.raises(ValidationError):
             sr.SegmentRequest(scene_id="s", bundle_uri="gs://c/b.pb", frame_indices=[])
+
+
+# ── auth ─────────────────────────────────────────────────────────────────────
+
+class TestOIDC:
+    """These exist because their absence shipped a 500.
+
+    Every other test passes oidc_verifier=None, which skips the branch
+    entirely — so the first live call crashed on
+    `'Request' object has no attribute 'strip'`: verify() takes the HEADER
+    VALUE, is not async, and raises rather than returning a response. A route
+    whose auth path is never exercised is a route whose auth path is untested.
+    """
+
+    def test_the_header_value_is_what_reaches_the_verifier(self, wired):
+        seen = {}
+
+        class V:
+            def verify(self, header):
+                seen["header"] = header
+
+        sam3 = FakeSam3([{"label": "chair", "score": 0.9, "mask": _mask(48, 64, 4, 20, 4, 30)}])
+        resp = _run(
+            sr.SegmentRequest(scene_id="s1", bundle_uri="gs://c/b.pb", frame_indices=[41]),
+            sam3, wired, verifier=V(), request=FakeRequest("Bearer tok-123"),
+        )
+        assert seen["header"] == "Bearer tok-123"
+        assert resp.status_code == 200
+
+    def test_a_rejected_token_is_401_not_500(self, wired):
+        from oidc import OIDCError
+
+        class V:
+            def verify(self, header):
+                raise OIDCError("missing_token", "no Authorization header")
+
+        sam3 = FakeSam3([{"label": "chair", "score": 0.9, "mask": _mask(48, 64, 4, 20, 4, 30)}])
+        resp = _run(
+            sr.SegmentRequest(scene_id="s1", bundle_uri="gs://c/b.pb", frame_indices=[41]),
+            sam3, wired, verifier=V(),
+        )
+        assert resp.status_code == 401
+        assert sam3.calls == 0, "a rejected request must not reach the model"
