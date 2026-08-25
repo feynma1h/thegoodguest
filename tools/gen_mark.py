@@ -459,6 +459,153 @@ enum MarkGeometry {{
 """
 
 
+# ---------------------------------------------------------------- wordmark ---
+#
+# The wordmark is traced artwork, not a construction -- see tools/brand/
+# wordmark-traced.json. What IS constructed is its "oo", which is replaced here
+# by the mark's own rings so the two are one shape rather than two that
+# resemble each other. That is what lets the iOS splash carry the name into the
+# mark as a plain scale-and-translate instead of a shape interpolation, and it
+# is why the mark may never be set beside the name: they would be the same
+# drawing, printed twice.
+#
+# The substitution is very nearly a no-op on the lettering. Measured against
+# the traced source, the "oo" it replaces is 138.93 x 80.46 where the mark's
+# own aspect gives 138.22 x 80.46 -- 0.5% narrower -- and a mark at that height
+# carries a band of 6.20 against the script's own 6.2 stroke. The mark IS the
+# oo at its natural size; nothing needed rescaling to fit.
+
+TRACED = REPO / "tools/brand/wordmark-traced.json"
+
+#: Which of contour 1's cubics draw the two rings rather than the lettering.
+#: Contour 1 is the connected outline of "good": it runs right-to-left along
+#: the top edge and back left-to-right along the bottom, so the ring pair
+#: occupies two runs rather than one. The segments either side of them (12 and
+#: 71) are the CONNECTOR edges where the g and the d meet the rings, and they
+#: are kept -- cutting those too would leave the letters with nothing to join.
+RING_TOP = range(13, 30)
+RING_BOTTOM = range(72, 89)
+
+
+def _parse_path(d: str) -> list[tuple[Pt, list[tuple[Pt, Pt, Pt]]]]:
+    """The traced path as contours of cubics. It uses only M, C and Z."""
+    contours: list[tuple[Pt, list[tuple[Pt, Pt, Pt]]]] = []
+    for chunk in d.split("M")[1:]:
+        nums = [float(v) for v in chunk.replace("C", " ").replace("Z", " ").split()]
+        start = (nums[0], nums[1])
+        rest = nums[2:]
+        segs = [
+            ((rest[i], rest[i + 1]), (rest[i + 2], rest[i + 3]), (rest[i + 4], rest[i + 5]))
+            for i in range(0, len(rest) - 5, 6)
+        ]
+        contours.append((start, segs))
+    return contours
+
+
+def _cubic(p0: Pt, c1: Pt, c2: Pt, p1: Pt, t: float) -> Pt:
+    u = 1.0 - t
+    return (
+        u**3 * p0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t**3 * p1[0],
+        u**3 * p0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t**3 * p1[1],
+    )
+
+
+@dataclass(frozen=True)
+class Wordmark:
+    """The lettering with its "oo" replaced by the mark.
+
+    `script` is every contour EXCEPT the two rings and their three counters,
+    filled even-odd. `oo_centre` and `oo_scale` place the mark inside it.
+    """
+
+    script: list[tuple[Pt, list[tuple[Pt, Pt, Pt]]]]
+    oo_centre: Pt
+    oo_scale: float
+    width: float
+    height: float
+    baseline: float
+    x_height: float
+
+
+def load_wordmark() -> Wordmark:
+    import json
+
+    src = json.loads(TRACED.read_text())
+    contours = _parse_path(src["d"])
+    start, segs = contours[1]
+    anchors = [start] + [s[2] for s in segs]
+
+    # Where the ring pair sits, measured off the traced artwork itself rather
+    # than assumed, so replacing the source re-measures rather than mis-places.
+    pts: list[Pt] = []
+    cur = start
+    for i, (c1, c2, end) in enumerate(segs):
+        if i in RING_TOP or i in RING_BOTTOM:
+            pts += [_cubic(cur, c1, c2, end, k / 50) for k in range(51)]
+        cur = end
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    centre = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+    scale = (max(ys) - min(ys)) / LOGO.ink_height
+
+    # A loud guard on the cut. If the traced source is ever re-supplied, these
+    # segment indices will not survive it, and a silent mis-cut would leave the
+    # lettering mangled in a way only a human eye would catch.
+    aspect = (max(xs) - min(xs)) / (max(ys) - min(ys))
+    if not 1.70 < aspect < 1.76:
+        raise SystemExit(
+            f"the cut does not look like the ring pair (aspect {aspect:.4f}); "
+            "RING_TOP/RING_BOTTOM no longer match tools/brand/wordmark-traced.json"
+        )
+
+    # "good" minus its rings: the g side, then the d side, each closed across
+    # the stroke where its ring used to begin.
+    def run(indices: list[int]) -> tuple[Pt, list[tuple[Pt, Pt, Pt]]]:
+        return (anchors[indices[0]], [segs[i] for i in indices])
+
+    g_side = run(list(range(30, 72)))
+    d_side = run(list(range(89, len(segs))) + list(range(0, 13)))
+
+    script = [c for i, c in enumerate(contours) if i not in (1, 5, 6, 7)]
+    script += [g_side, d_side]
+    return Wordmark(
+        script=script,
+        oo_centre=centre,
+        oo_scale=scale,
+        width=src["width"],
+        height=src["height"],
+        baseline=src["baseline"],
+        x_height=src["xHeight"],
+    )
+
+
+def wordmark_script_path(wm: Wordmark) -> str:
+    """The lettering minus its "oo", as ONE even-odd path."""
+    out = []
+    for start, segs in wm.script:
+        body = "".join(
+            f"C{_fmt(c1[0])} {_fmt(c1[1])} {_fmt(c2[0])} {_fmt(c2[1])} "
+            f"{_fmt(e[0])} {_fmt(e[1])}"
+            for c1, c2, e in segs
+        )
+        out.append(f"M{_fmt(start[0])} {_fmt(start[1])}{body}Z")
+    return "".join(out)
+
+
+def wordmark_ring_paths(wm: Wordmark) -> tuple[str, str]:
+    """The mark's two rings, placed where the lettering wants its "oo"."""
+    paths = []
+    for cx, _ in LOGO.centres:
+        centre = (
+            wm.oo_centre[0] + (cx - CANVAS / 2) * wm.oo_scale,
+            wm.oo_centre[1],
+        )
+        outer = tuple(v * wm.oo_scale for v in LOGO.outer)
+        inner = tuple(v * wm.oo_scale for v in LOGO.inner)
+        paths.append(ellipse_path(centre, *outer) + ellipse_path(centre, *inner))
+    return tuple(paths)  # type: ignore[return-value]
+
+
 ICON_DIR = REPO / "ios/RoomStudioCapture/RoomStudioCapture/Assets.xcassets/AppIcon.appiconset"
 WEB_APP = REPO / "web/src/app"
 
@@ -483,6 +630,107 @@ def icon_svg() -> str:
     )
 
 
+def emit_wordmark_ts(wm: Wordmark) -> str:
+    rings = ",\n  ".join(f'"{d}"' for d in wordmark_ring_paths(wm))
+    return f"""{BANNER}
+//
+// The wordmark: the lettering, and the mark sitting in it as the "oo" of
+// "good". Traced artwork -- tools/brand/wordmark-traced.json is its source and
+// it cannot be regenerated from numbers, unlike the mark.
+//
+// It ships as THREE paths rather than one because the rings must be filled
+// even-odd to keep their interiors open, and folding them into the script's
+// own even-odd path would punch holes where the two bands cross. Paint all
+// three in the same ink; their union is the wordmark.
+
+/** The lettering, minus its "oo". Fill EVEN-ODD -- it carries its counters. */
+export const WORDMARK_SCRIPT = "{wordmark_script_path(wm)}";
+
+/** The "oo": the mark's own rings, at the size and place the lettering wants
+ * them. Each is ONE path and MUST be filled even-odd. */
+export const WORDMARK_RINGS = [
+  {rings},
+] as const;
+
+/** The wordmark's own box, which the paths above are authored in. A canvas
+ * painter needs the numbers; SVG needs the viewBox. */
+export const WORDMARK_BOX = {{ w: {wm.width:.2f}, h: {wm.height:.2f} }} as const;
+
+export const WORDMARK_VIEWBOX = `0 0 ${{WORDMARK_BOX.w}} ${{WORDMARK_BOX.h}}`;
+
+/** Width ÷ height, for sizing by height. */
+export const WORDMARK_ASPECT = {wm.width / wm.height:.4f};
+
+/** The script's own baseline and x-height, for setting it against other type.
+ * Note how little of the box the x-height is: the long loops mean a legible
+ * wordmark needs roughly 6x the height you would guess from the x-height. */
+export const WORDMARK_BASELINE = {wm.baseline:.2f};
+export const WORDMARK_X_HEIGHT = {wm.x_height:.2f};
+"""
+
+
+def emit_wordmark_swift(wm: Wordmark) -> str:
+    def contour(start: Pt, segs: list[tuple[Pt, Pt, Pt]]) -> str:
+        flat = [f"{start[0]:.2f}", f"{start[1]:.2f}"]
+        for c1, c2, e in segs:
+            flat += [f"{v:.2f}" for v in (c1[0], c1[1], c2[0], c2[1], e[0], e[1])]
+        return "[" + ", ".join(flat) + "]"
+
+    contours = ",\n        ".join(contour(s, g) for s, g in wm.script)
+    rings = ",\n        ".join(
+        "MarkRing(outer: MarkEllipse(cx: {:.2f}, cy: {:.2f}, a: {:.2f}, b: {:.2f}), "
+        "inner: MarkEllipse(cx: {:.2f}, cy: {:.2f}, a: {:.2f}, b: {:.2f}))".format(
+            wm.oo_centre[0] + (cx - CANVAS / 2) * wm.oo_scale,
+            wm.oo_centre[1],
+            LOGO.outer[0] * wm.oo_scale,
+            LOGO.outer[1] * wm.oo_scale,
+            wm.oo_centre[0] + (cx - CANVAS / 2) * wm.oo_scale,
+            wm.oo_centre[1],
+            LOGO.inner[0] * wm.oo_scale,
+            LOGO.inner[1] * wm.oo_scale,
+        )
+        for cx, _ in LOGO.centres
+    )
+    return f"""{BANNER}
+//
+// The wordmark: the lettering, and the mark sitting in it as the "oo" of
+// "good". Traced artwork -- tools/brand/wordmark-traced.json is its source and
+// it cannot be regenerated from numbers, unlike the mark.
+//
+// The lettering arrives as flat cubic data rather than as generated drawing
+// calls: 634 curves would be 634 lines of `addCurve`, which is slow to
+// type-check and no clearer. Each contour is [startX, startY, then c1x c1y c2x
+// c2y endX endY per curve].
+//
+// `rings` is the SAME MarkRing type the app icon is drawn from, which is the
+// point: SplashView carries these to MarkGeometry.rings, and because both are
+// the same shape that carry is a scale and a translate rather than a shape
+// interpolation.
+
+import CoreGraphics
+
+enum WordmarkGeometry {{
+    /// The design space the values below are expressed in.
+    static let width: CGFloat = {wm.width:.2f}
+    static let height: CGFloat = {wm.height:.2f}
+
+    /// The script's own baseline and x-height within that box.
+    static let baseline: CGFloat = {wm.baseline:.2f}
+    static let xHeight: CGFloat = {wm.x_height:.2f}
+
+    /// The lettering, minus its "oo". Fill EVEN-ODD; it carries its counters.
+    static let scriptContours: [[CGFloat]] = [
+        {contours},
+    ]
+
+    /// The "oo", as the mark's own rings at the size the lettering wants.
+    static let rings: [MarkRing] = [
+        {rings},
+    ]
+}}
+"""
+
+
 def main() -> None:
     for appearance in (ICON_LIGHT, ICON_DARK, ICON_TINTED):
         out = ICON_DIR / f"icon-{appearance.name}-1024.png"
@@ -502,6 +750,16 @@ def main() -> None:
     sw = REPO / "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/MarkGeometry.swift"
     sw.write_text(emit_swift())
     print(f"  {sw.relative_to(REPO)}")
+
+    wm = load_wordmark()
+
+    wts = REPO / "web/src/components/wordmarkGeometry.ts"
+    wts.write_text(emit_wordmark_ts(wm))
+    print(f"  {wts.relative_to(REPO)}")
+
+    wsw = REPO / "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/WordmarkGeometry.swift"
+    wsw.write_text(emit_wordmark_swift(wm))
+    print(f"  {wsw.relative_to(REPO)}")
 
 
 if __name__ == "__main__":

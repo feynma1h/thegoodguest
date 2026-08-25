@@ -169,12 +169,19 @@ def test_the_two_rings_interlock_rather_than_cancel():
         "web/src/components/markGeometry.ts",
         "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/MarkGeometry.swift",
         "web/src/app/icon.svg",
+        "web/src/components/wordmarkGeometry.ts",
+        "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/WordmarkGeometry.swift",
     ],
 )
 def test_generated_text_matches_the_generator(relative: str):
     """A generated file on disk must be what the generator produces today."""
     on_disk = (REPO / relative).read_text()
-    if relative.endswith("markGeometry.ts"):
+    # Order matters: "wordmarkGeometry.ts" ends with "markGeometry.ts".
+    if relative.endswith("wordmarkGeometry.ts"):
+        assert on_disk == gen_mark.emit_wordmark_ts(gen_mark.load_wordmark())
+    elif relative.endswith("WordmarkGeometry.swift"):
+        assert on_disk == gen_mark.emit_wordmark_swift(gen_mark.load_wordmark())
+    elif relative.endswith("markGeometry.ts"):
         assert on_disk == gen_mark.emit_ts()
     elif relative.endswith("MarkGeometry.swift"):
         assert on_disk == gen_mark.emit_swift()
@@ -253,10 +260,13 @@ def test_no_surface_hand_authors_the_mark():
     ).read_text()
     assert "MarkGeometry." in wordmark_swift
 
-    # The share card has no build step, so its mark is the generator's SVG
-    # pasted inline. Pin it, or it silently becomes a sixth hand-maintained copy.
+    # The share card has no build step, so its wordmark is the generator's path
+    # data pasted inline. Pin it, or it silently becomes a hand-maintained copy.
     og_card = (REPO / "docs/product/og-card.html").read_text()
-    assert gen_mark.svg(gen_mark.Appearance("og", gen_mark.LOGO, gen_mark.BRAND_INK, None)) in og_card
+    wm = gen_mark.load_wordmark()
+    assert gen_mark.wordmark_script_path(wm) in og_card
+    for d in gen_mark.wordmark_ring_paths(wm):
+        assert d in og_card
 
     # The placeholder diamond the iOS lockup and the share card used to draw.
     for relative in (
@@ -308,3 +318,71 @@ def test_no_surface_sets_the_mark_beside_the_name():
             f"{relative} draws the mark AND renders the name -- see the rule in "
             "web/src/components/Wordmark.tsx"
         )
+
+
+# ------------------------------------------------------------------ wordmark --
+
+
+def test_the_wordmarks_oo_is_the_mark_itself():
+    """Not a shape that resembles it -- the same shape, uniformly scaled.
+
+    This is what makes the iOS splash's carry a scale-and-translate rather than
+    a shape interpolation, and it is why the two may never be set side by side.
+    """
+    wm = gen_mark.load_wordmark()
+    # Every ratio that defines the mark survives the placement.
+    a = gen_mark.LOGO.a * wm.oo_scale
+    b = gen_mark.LOGO.b * wm.oo_scale
+    band = gen_mark.LOGO.band * wm.oo_scale
+    dx = gen_mark.LOGO.dx * wm.oo_scale
+    assert a / b == pytest.approx(gen_mark.LOGO.axis_ratio)
+    assert dx / a == pytest.approx(gen_mark.LOGO.dx / gen_mark.LOGO.a)
+    assert band / a == pytest.approx(gen_mark.LOGO.band / gen_mark.LOGO.a)
+
+
+def test_the_oo_lands_at_the_scripts_own_stroke_weight():
+    """The mark IS the oo at its natural size -- nothing was rescaled to fit.
+
+    The traced script's monoline stroke is 6.2 units. A mark placed at the ring
+    pair's measured height carries a band of the same weight, which is why the
+    substitution needed no adjustment to the lettering around it.
+    """
+    wm = gen_mark.load_wordmark()
+    band = gen_mark.LOGO.band * wm.oo_scale
+    assert band == pytest.approx(6.2, abs=0.05)
+
+
+def test_the_lettering_survives_the_cut():
+    """The cut removes the ring outlines and NOTHING else.
+
+    15 contours in, 13 out: contour 1 becomes two (the g side and the d side),
+    and the three counters the old oo carried are gone with it.
+    """
+    wm = gen_mark.load_wordmark()
+    assert len(wm.script) == 13
+
+    # The lettering still spans the full width -- a mis-cut would truncate it.
+    xs = [p[0] for start, segs in wm.script for p in [start] + [s[2] for s in segs]]
+    assert min(xs) < 5
+    assert max(xs) > wm.width - 5
+
+
+def test_the_wordmark_is_never_the_mark_at_chrome_size():
+    """A guard on the one number that makes this artwork illegible.
+
+    The script's x-height is 16% of its box, so a wordmark set at a chrome size
+    has an x-height of about 3px. Every surface that sets it must clear the
+    design file's 8px floor, which puts the minimum height near 50.
+    """
+    wm = gen_mark.load_wordmark()
+    floor = 8.0 * wm.height / wm.x_height
+    assert floor == pytest.approx(49.2, abs=0.5)
+
+    for relative, pattern in (
+        ("web/src/lib/card/layout.ts", r'kind: "wordmark".*?height: (\d+)'),
+        ("docs/product/og-card.html", r'aria-label="The Good Guest"'),
+    ):
+        text = (REPO / relative).read_text()
+        for match in re.finditer(pattern, text, re.S):
+            if match.groups():
+                assert float(match.group(1)) >= floor, relative
