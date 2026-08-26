@@ -290,6 +290,23 @@ wearing the product's clothes, and it is the reason the 3D representation cannot
 be called finished. It closes when G6-01 closes, and G6-01 has no live route.
 **Check:** manual — operator, on a pipeline that has changed since 0247.
 
+### G6-06 · The mask shortlist ships the truncated reading of an object
+**State:** open · **Blocks:** part of G6-05, and it is the only truncation cause
+that survives a perfect photograph
+SAM 3 returns two `desk` masks in the same frame — the same desk at two extents,
+99.7% mutual containment — and the per-box shortlist reconstructs the SHORTER one
+in all three frames that see it, by 9-12 points of `overlap` every time. The
+operator confirms it is a single desk, so the longer mask is correct and the
+shipped one is partial.
+`mask_overlap_with_hull` is "fraction of a mask's pixels inside the hull" —
+precision with no recall term — so a mask that stops short scores near 1.0 while
+a complete one is penalised for every pixel past the box's edge. The RoomPlan box
+is a BOUND, not a silhouette, so a mask correctly covering an object bigger than
+its box is marked down for being right (0261).
+Three offline checks decide whether this is systemic or a desk curiosity; they
+are named in 0261's last section and need no GPU.
+**Check:** manual — 0261's three checks, then a decision.
+
 ### G6-01 · Class-6 splat truncation
 **State:** open, no live route
 Objects ship missing legs, bases and backs. Three attacks are measured dead:
