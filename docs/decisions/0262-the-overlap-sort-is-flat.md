@@ -66,13 +66,20 @@ generalises.** They are recorded so nobody re-runs them:
 ## What we chose
 
 Nothing. This note records the measurement; the only rule proposed anywhere is
-0263's, which is about a different failure.
+0263's, which settles which of two masks of ONE object to take and says nothing
+about which of ten views.
 
-Two things a fix must not be. **Not a threshold re-tune** —
+Three things a fix must not be. **Not a threshold re-tune** —
 `PLACEMENT_BOX_MATCH_MIN` gates admission and no value of it un-flattens a score
-that reads 1.0000 for a quarter of all candidates. **And not a new sort key that
+that reads 1.0000 for a quarter of all candidates. **Not a new sort key that
 predicts reconstruction quality**, which is what 0146/0152/0162/0197 retired
-eleven times.
+eleven times. **And not a tolerance**: 0263 measured growing the box by
+`splat_clip`'s own 0.10 m margin before scoring, which is the right fix for a
+different problem and takes saturation from **60% to 100%** here and **27% to
+79%** corpus-wide. Every candidate ties and the tie-break decides everything.
+That experiment is the sharpest evidence for this note's conclusion — the metric
+does not merely happen to saturate, it saturates harder the more correctly it
+forgives.
 
 ## Why
 
@@ -107,6 +114,14 @@ have failed.
 across all five captures makes a targeted fix possible; without one, the honest
 options are to change the tie-break to something meaningful or to accept that a
 quarter of box views are chosen by capture order.
+
+**The tie-break is the place to put a vision model.** Asked which of two
+photographs shows the object whole, it answers from the image rather than by
+predicting a reconstruction, so it is 0259's class rather than the eleven
+refuted view measures — and scoped to the tie it fires only where this metric
+has no opinion, which makes it structurally unable to override a confident
+measurement. `shell_material.py` is the precedent for a confidence-gated vision
+call with a load-bearing fallback.
 
 **The cheapest unclosed measurement is `90eebfc4`'s other seven sampled frames.**
 Only 5 of its 12 were ever segmented (0, 24, 45, 95, 109), so every claim about

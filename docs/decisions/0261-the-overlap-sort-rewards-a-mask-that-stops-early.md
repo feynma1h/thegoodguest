@@ -1,7 +1,7 @@
 # 0261 — the overlap sort rewards a mask that stops early
 
 **Date:** 2026-08-27
-**Status:** Decided (mechanism measured). The three checks below are answered in 0262 and 0263; **0263 inverts this note's reading of the desk pair** and the correction is marked inline.
+**Status:** Decided (mechanism measured). The three checks below are answered in 0262 and 0263. **This note's reading of the desk pair is correct and was briefly contradicted during 0263's work; the operator ruled and it stands.**
 
 ## Context
 
@@ -27,15 +27,16 @@ two extents — same top, same bottom, same left edge, the larger continuing
 | 109 | 117,594 px | 142,654 px | 99.7% |
 
 **The operator confirms it is a single desk with no adjoining surface**, so the
-longer mask reads here as the correct extent and the shorter one as partial.
+longer mask is the correct extent and the shorter one is partial.
 
-**Measured afterwards, this reading is wrong for the desk (0263).** What the
-longer mask adds is a thin arm cantilevered off the desktop, and 54-70% of it
-lies OUTSIDE the measured table box. The operator's confirmation stands and does
-not settle it: the arm is not an adjoining *surface*. On this pair the shortlist
-is choosing correctly. The mechanism below is real and it does cost a real
-object — the CHAIR, in frame 50, where the shorter mask drops both armrests and
-the base and 95% of that loss is inside the chair's own box.
+**What the longer mask adds is the table's own LEG** — ruled by the operator
+during 0263's work, after an intermediate reading in that lane mistook it for a
+neighbouring object and had to be withdrawn. Measured since: the leg lies
+**54.5% / 53.0% / 69.9%** outside the table's projected box in frames 50 / 51 /
+109, clearing it by a median 2.6-3.4 cm and never more than 7.7 cm. So the box
+under-covers the object by about a hand's width, and the sort marks the correct
+mask down 9-12 points for it. The mechanism this note names is real, and the
+desk is a true instance of it.
 
 The per-box shortlist sorts by `(-overlap, frame_index, mask_index)`, and
 `overlap` is `box_placement.mask_overlap_with_hull`:
@@ -96,15 +97,16 @@ the question and its answer sit together.
 1. **Does the bias hit the other objects?** The chair, bed and cabinets also
    returned multiple same-label masks in some frames. If the shorter mask wins
    there too, this is systemic rather than a desk story.
-   **ANSWERED: yes — 9 of 10 across five captures, spanning `chair`, `desk` and
-   `cabinet` in three rooms. But the shorter mask is only WRONG in four of the
-   ten, and the box says which (0263).**
+   **ANSWERED: yes — the sort takes the shorter mask in 9 of 10 pairs that
+   associate to a box, across five captures, spanning `chair`, `desk` and
+   `cabinet` in four rooms. It is wrong to do so in 7 of those 10 (0263).**
 2. **What would a recall-aware metric pick** — IoU against the hull, or
    precision gated on "not contained by a sibling of the same label"? The second
    is attractive because it changes nothing when there is no sibling.
-   **ANSWERED: the sibling gate as posed here is the wrong fix — it strikes the
-   shorter mask every time, which breaks all three desk frames. The discriminator
-   is where the added region falls relative to the box (0263).**
+   **ANSWERED: no recall-aware ranking works, and neither does making precision
+   tolerant — a 10 cm tolerance takes saturation to 100%. Precision belongs in a
+   GATE: grown-box precision >= 0.98, then prefer the larger mask. That agrees
+   with the operator's eye 10 of 10, against today's 1 of 10 (0263).**
 3. **How often does SAM 3 return nested same-label pairs at all?** Across the 19
    probed frames. Frequency decides whether this is worth a code change.
    **ANSWERED: 6 of 28 here, and 15 of 93 over the four preserved captures —
@@ -115,7 +117,8 @@ If (1) says the desk is alone in this, it is a narrow curiosity. If nested pairs
 are common, the shortlist is systematically shipping the smaller half of every
 object SAM 3 reads twice, and that is a bigger finding than anything in 0259.
 
-**Neither branch is what happened.** Nested pairs are uncommon and the shorter
-mask is usually the better input. The bigger finding was underneath: the overlap
-score is **flat** — 31 of 52 candidates tie at exactly 1.0000, so in 4 of 5 boxes
-the view is chosen by frame index rather than by any measurement (0262).
+**The second branch is what happened.** Nested pairs recur — 21 across five
+captures — and the shortlist takes the smaller half in 9 of 10 that associate,
+wrongly in 7. A bigger finding sits underneath it: the overlap score is **flat**,
+tying at exactly 1.0000 for 27% of candidates corpus-wide and 60% here, so the
+view is often chosen by frame index rather than by any measurement (0262).
