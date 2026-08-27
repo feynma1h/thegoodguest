@@ -159,3 +159,24 @@ extension View {
             .padding(.bottom, RSScreen.bottom)
     }
 }
+
+
+/// The line that sits under a primary action.
+///
+/// Home's "Takes about two minutes" and review's "Not now" are the same thing
+/// in the layout — a single small line closing the action block — and they were
+/// set differently, which is part of why the primaries above them did not line
+/// up. One style so they cannot drift again.
+///
+/// It is a touch darker than a pure caption on purpose: this one is TAPPABLE,
+/// and a control that looks exactly like a label is a control nobody presses.
+struct RSActionFootnoteStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(RSFont.ui(.footnote))
+            .foregroundStyle(Color.rsInkMuted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 2)
+            .opacity(configuration.isPressed ? 0.55 : 1)
+    }
+}

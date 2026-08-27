@@ -208,8 +208,12 @@ struct ReviewView: View {
             // rescan button and the flow has no NavigationStack — capture → review →
             // capture forever, with force-quit as the only exit. The other branches
             // only escape by sending, which is not a choice the user has to make now.
+            // The same treatment home gives the line under its scan action:
+            // one small line closing the block, rather than a third full-height
+            // button competing with the two above it.
             Button { onLeave() } label: { Text("Not now") }
-                .buttonStyle(RSQuietButtonStyle())
+                .buttonStyle(RSActionFootnoteStyle())
+                .padding(.top, 2)
         }
         .lineLimit(1)
         .minimumScaleFactor(0.6)

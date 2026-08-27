@@ -46,7 +46,7 @@ import SwiftUI
 
 /// The two ring pairs, interpolated. See the note above on why lerping these
 /// four numbers is exact rather than approximate.
-private struct MorphingRings: Shape {
+private struct MorphingRing: Shape {
     /// Lettering → mark, at the centre.
     var gather: CGFloat
     /// Mark at the centre → mark in home's header slot. Composed AFTER the
@@ -55,27 +55,23 @@ private struct MorphingRings: Shape {
     /// two is moving and the result is still a similarity of the same drawing.
     var landing: CGFloat
     /// All three in the view's own coordinates, already placed.
-    let start: [MarkRing]
-    let end: [MarkRing]
-    let slot: [MarkRing]
+    let start: MarkRing
+    let end: MarkRing
+    let slot: MarkRing
 
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { AnimatablePair(gather, landing) }
         set { gather = newValue.first; landing = newValue.second }
     }
 
-    /// The rings at this instant: gathered, then carried.
-    private var current: [MarkRing] {
-        let gathered = zip(start, end).map { lerp($0, $1, gather) }
+    /// This ring at this instant: gathered, then carried.
+    private var current: MarkRing {
+        let gathered = lerp(start, end, gather)
         guard landing > 0 else { return gathered }
-        return zip(gathered, slot).map { lerp($0, $1, landing) }
+        return lerp(gathered, slot, landing)
     }
 
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        for ring in current { path.addPath(BrandPath.ring(ring)) }
-        return path
-    }
+    func path(in rect: CGRect) -> Path { BrandPath.ring(current) }
 
     private func lerp(_ a: MarkRing, _ b: MarkRing, _ t: CGFloat) -> MarkRing {
         MarkRing(outer: lerp(a.outer, b.outer, t), inner: lerp(a.inner, b.inner, t))
@@ -91,22 +87,36 @@ private struct MorphingRings: Shape {
     }
 }
 
-/// One letter of the lettering, travelling to the centre as a rigid body.
+/// The two rings, each drawn and filled on its own.
 ///
-/// The whole word is drawn and then CLIPPED to this piece's own column, so a
-/// letter keeps its shape exactly — it slides, it does not stretch. An earlier
-/// pass moved every point by its own distance instead, which deformed the word
-/// as it went and read as the letters rolling over each other rather than
-/// being carried.
+/// ONE SHAPE PER RING, and that is the whole point rather than a structural
+/// preference. Even-odd fill is what makes a ring a ring: the outer ellipse
+/// and the inner one cancel, leaving a band. Put BOTH rings in one path and
+/// the same rule keeps counting — so where the two bands cross, the winding
+/// cancels again and the intersection is knocked out. The splash showed two
+/// white notches at the crossings that the mark it lands on does not have.
 ///
-/// The clip happens before the offset, so the column travels with its letter.
-/// Clipping after would hold a window still and wipe the letter across it.
-///
-/// Joined script has no contour boundary between a "t" and an "h", so the
-/// columns come from `WordmarkGeometry.letterCuts`, which the generator finds
-/// by looking for the thinnest part of the drawing near each letter-width
-/// interval. Cuts fall through thin strokes, which is why the pieces separate
-/// cleanly instead of tearing.
+/// `Mark` has always drawn each ring as its own shape for exactly this reason.
+/// Matching it here is what makes the splash's last frame identical to the
+/// static mark, which is the claim the whole animation rests on.
+private struct MorphingMark: View {
+    let gather: CGFloat
+    let landing: CGFloat
+    let start: [MarkRing]
+    let end: [MarkRing]
+    let slot: [MarkRing]
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<min(start.count, end.count, slot.count), id: \.self) { i in
+                MorphingRing(gather: gather, landing: landing,
+                             start: start[i], end: end[i], slot: slot[i])
+                    .fill(Color.rsAction, style: FillStyle(eoFill: true))
+            }
+        }
+    }
+}
+
 private struct LetterPiece: View {
     let index: Int
     let span: ClosedRange<CGFloat>
@@ -257,9 +267,8 @@ struct SplashView: View {
                 }
                 .opacity(scriptOpacity)
 
-                MorphingRings(gather: progress, landing: landing,
-                              start: startRings, end: endRings, slot: slotRings)
-                    .fill(Color.rsAction, style: FillStyle(eoFill: true))
+                MorphingMark(gather: progress, landing: landing,
+                             start: startRings, end: endRings, slot: slotRings)
                     .opacity(markOpacity)
             }
             .frame(width: geo.size.width, height: geo.size.height)

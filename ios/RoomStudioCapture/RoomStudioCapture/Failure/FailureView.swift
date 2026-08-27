@@ -263,7 +263,8 @@ struct FailureView: View {
                     // shared style would touch every primary in the app.
                     .opacity(actions.primaryEnabled ? 1 : 0.55)
                 Button(action: onSecondary) { Text(actions.secondaryLabel) }
-                    .buttonStyle(RSQuietButtonStyle())
+                    .buttonStyle(RSActionFootnoteStyle())
+                    .padding(.top, 2)
             }
             .padding(.horizontal, RSScreen.horizontal)
             .rsActionBar()
