@@ -67,7 +67,7 @@ struct GuidanceSheet: View {
                 .padding(.top, 20)
                 .padding(.bottom, 12)
             }
-            .padding(.horizontal, 26)
+            .padding(.horizontal, RSScreen.horizontal)
             .padding(.top, 20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
@@ -75,9 +75,8 @@ struct GuidanceSheet: View {
             // Pinned OUTSIDE the scroll region: the one action this sheet exists for
             // must stay on screen at every text size.
             startButton
-                .padding(.horizontal, 26)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
+                .padding(.horizontal, RSScreen.horizontal)
+                .rsActionBar()
                 .background(Color.rsCaptureRaised)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

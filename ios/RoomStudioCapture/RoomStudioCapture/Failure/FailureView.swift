@@ -185,6 +185,12 @@ struct FailureView: View {
     var kind: Kind = .recoverable(missingCount: 0, resend: .unavailable)
     var onPrimary: () -> Void = {}
     var onSecondary: () -> Void = {}
+    /// Non-nil when this is pushed onto home's stack, which is the only way the
+    /// recoverable variant is reached now. It then carries the same header band
+    /// every other pushed screen does, rather than starting with a 200pt art
+    /// block and no way out — an inconsistency measured across six screens
+    /// before RSScreen existed.
+    var onBack: (() -> Void)?
 
     var body: some View {
         switch kind {
@@ -199,7 +205,15 @@ struct FailureView: View {
 
     private func recoverable(missingCount: Int, resend: FailureCopy.Resend) -> some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 12)
+            if let onBack {
+                ScreenHeader(title: "What's missing", onClose: onBack)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                // Only without a header: the spacer centred a headerless
+                // screen, and under a header it pushed the first element 76pt
+                // below where every other screen's starts.
+                Spacer(minLength: 12)
+            }
 
             // The drawn sketch as ambient brand art — NOT a claim that a partial
             // room was captured; failed_incomplete is an upload gap, not a coverage
@@ -211,6 +225,8 @@ struct FailureView: View {
             }
             .frame(height: 200)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.top, onBack == nil ? 0 : RSScreen.contentGap)
+            .frame(maxWidth: .infinity)
 
             RSCard {
                 VStack(alignment: .leading, spacing: 7) {
@@ -226,8 +242,12 @@ struct FailureView: View {
             }
             .padding(.top, 16)
 
-            Spacer()
-
+            Spacer(minLength: 20)
+        }
+        .padding(.horizontal, RSScreen.horizontal)
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil))
+        .safeAreaInset(edge: .bottom) {
             // Labels come from the same table the flow binds its actions from,
             // so the button can never say one thing and do another.
             let actions = FailureCopy.recoverableActions(resend)
@@ -245,11 +265,9 @@ struct FailureView: View {
                 Button(action: onSecondary) { Text(actions.secondaryLabel) }
                     .buttonStyle(RSQuietButtonStyle())
             }
-            .padding(.bottom, 8)
+            .padding(.horizontal, RSScreen.horizontal)
+            .rsActionBar()
         }
-        .padding(.horizontal, 24)
-        .frame(maxWidth: .infinity)
-        .modifier(RSScrollableScreen(background: nil))
         .onAppear { RSHaptics.fire(.failure) }
     }
 

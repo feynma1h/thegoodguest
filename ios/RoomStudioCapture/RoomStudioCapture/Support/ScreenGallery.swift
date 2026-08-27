@@ -312,9 +312,14 @@ struct ScreenGalleryView: View {
         case "doorway":
             DoorwayView(signedIntoWeb: true, canOpenWeb: true)
         case "fail-incomplete":
-            FailureView(kind: .recoverable(missingCount: 3, resend: .available))
+            // onBack, because that is how the flow reaches it: without it the
+            // gallery photographed a screen with no header, which is not the
+            // one that ships.
+            FailureView(kind: .recoverable(missingCount: 3, resend: .available),
+                        onBack: {})
         case "fail-rescan":
-            FailureView(kind: .recoverable(missingCount: 14, resend: .unavailable))
+            FailureView(kind: .recoverable(missingCount: 14, resend: .unavailable),
+                        onBack: {})
         case "fail-terminal":
             FailureView(kind: .terminal)
         case "fail-upload":

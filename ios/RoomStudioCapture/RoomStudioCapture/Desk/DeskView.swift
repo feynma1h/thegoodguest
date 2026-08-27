@@ -120,8 +120,7 @@ struct DeskView: View {
 
             Spacer(minLength: 20)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 12)
+        .rsScreenInsets()
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .modifier(RSScrollableScreen(background: nil))
     }
@@ -158,7 +157,7 @@ struct DeskView: View {
                 .padding(.top, 22)
             }
         }
-        .padding(.top, 30)
+        .rsBelowHeader()
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -187,7 +186,7 @@ struct DeskView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.top, 30)
+        .rsBelowHeader()
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

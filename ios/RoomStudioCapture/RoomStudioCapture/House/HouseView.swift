@@ -46,15 +46,14 @@ struct HouseView: View {
             ScreenHeader(title: "The house", onClose: onBack)
 
             epigraph
-                .padding(.top, 22)
+                .rsBelowHeader()
 
             content
                 .padding(.top, 26)
 
             Spacer(minLength: 24)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 12)
+        .rsScreenInsets()
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .modifier(RSScrollableScreen(background: nil))
     }

@@ -391,7 +391,8 @@ struct RootFlowView: View {
             FailureView(
                 kind: .recoverable(missingCount: missingPaths.count, resend: resendState),
                 onPrimary: { performRecovery(actions.primary) },
-                onSecondary: { performRecovery(actions.secondary) }
+                onSecondary: { performRecovery(actions.secondary) },
+                onBack: back
             )
             .task(id: missingPaths.count) { await refreshResendOffer() }
 
