@@ -46,6 +46,8 @@ enum RSScreen {
     static let bottom: CGFloat = 12
     /// Between the scroll region and the pinned action block.
     static let actionTop: CGFloat = 14
+    /// Between the parts of the action block.
+    static let actionSpacing: CGFloat = 10
 
     /// The gap to use when the first element carries its OWN top inset — a
     /// list row with vertical padding, say. Without this the row's padding
@@ -178,5 +180,50 @@ struct RSActionFootnoteStyle: ButtonStyle {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 2)
             .opacity(configuration.isPressed ? 0.55 : 1)
+    }
+}
+
+
+// MARK: - The action block
+
+/// A screen's actions, shaped so the filled button lands at the same height on
+/// every screen.
+///
+/// THE RULE IS ABOUT WHAT SITS BELOW. A primary button's distance from the
+/// bottom of the phone is decided entirely by what follows it, so screens with
+/// different numbers of controls put theirs at different heights — measured at
+/// 77pt on home, 104pt on the recovery screen and 161pt on review, which is a
+/// jump of nearly an inch between screens a person moves straight between.
+///
+/// So the block is fixed in shape: any EXTRA controls sit above the primary,
+/// the primary comes next, and below it is exactly one small closing line —
+/// home's "Takes about two minutes", review's "Not now". Since what is beneath
+/// the primary is always the same one line, the primary is always the same
+/// height off the bottom, whatever else the screen offers.
+///
+/// The cost, stated plainly: a secondary action reads BEFORE the primary rather
+/// than after it, which is not the usual iOS order. That is the trade for the
+/// buttons lining up, and it was made deliberately.
+struct RSActions<Extra: View, Primary: View, Closing: View>: View {
+    /// Secondary actions, above the primary. Empty on most screens.
+    @ViewBuilder var extra: Extra
+    /// The one filled button.
+    @ViewBuilder var primary: Primary
+    /// Exactly one small line. Never two, or the primary moves.
+    @ViewBuilder var closing: Closing
+
+    var body: some View {
+        VStack(spacing: RSScreen.actionSpacing) {
+            extra
+            primary
+            closing
+        }
+        .rsActionBar()
+    }
+}
+
+extension RSActions where Extra == EmptyView {
+    init(@ViewBuilder primary: () -> Primary, @ViewBuilder closing: () -> Closing) {
+        self.init(extra: { EmptyView() }, primary: primary, closing: closing)
     }
 }

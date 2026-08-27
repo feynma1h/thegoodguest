@@ -251,7 +251,7 @@ struct FailureView: View {
             // Labels come from the same table the flow binds its actions from,
             // so the button can never say one thing and do another.
             let actions = FailureCopy.recoverableActions(resend)
-            VStack(spacing: 10) {
+            RSActions {
                 Button(action: onPrimary) { Text(actions.primaryLabel) }
                     .buttonStyle(RSPrimaryButtonStyle())
                     .disabled(!actions.primaryEnabled)
@@ -262,12 +262,11 @@ struct FailureView: View {
                     // established treatment for the same problem; changing the
                     // shared style would touch every primary in the app.
                     .opacity(actions.primaryEnabled ? 1 : 0.55)
+            } closing: {
                 Button(action: onSecondary) { Text(actions.secondaryLabel) }
                     .buttonStyle(RSActionFootnoteStyle())
-                    .padding(.top, 2)
             }
             .padding(.horizontal, RSScreen.horizontal)
-            .rsActionBar()
         }
         .onAppear { RSHaptics.fire(.failure) }
     }
