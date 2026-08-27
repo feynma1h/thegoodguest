@@ -1,7 +1,7 @@
 # 0265 — five instruments for one choice, and the experiment none of them needs
 
 **Date:** 2026-08-28
-**Status:** Decided (measured; nothing built)
+**Status:** SUPERSEDED by 0266 on the operator's rulings of 2026-08-28. Both author-judged labels were wrong; rescored, no discriminator beats keeping the longer mask.
 
 ## Context
 
@@ -80,6 +80,12 @@ about the photograph rather than a prediction about a model — holds for the
 border rule and holds for the grown-box gate. It does **not** obviously hold for
 "SAM 3 scored this higher" or "this mask absorbs a neighbour". Those are
 proxies, and proxies are what failed eleven times.
+
+**RULED 2026-08-28 — and the labels were wrong in the direction that mattered.**
+spike f398 is better in the longer read; rp6g2 f0 is accurate in neither. Every
+pair with a verdict wants the longer mask, and the table above is a list of
+instruments losing points for refusing one. 0266 carries the rescore. The
+paragraph below stands as the reason it was worth asking.
 
 **The labels are the weakest part of the whole comparison, and they are load
 bearing.** Of the ten, three are the operator's ruling on the desk and five are
