@@ -172,7 +172,7 @@ struct HouseView: View {
         if Calendar.current.isDate(sentAt, inSameDayAs: now) {
             return RoomHistory.clockTime(sentAt)
         }
-        return RoomHistory.monthDay(sentAt).uppercased()
+        return RoomHistory.shortStamp(sentAt)
     }
 }
 
