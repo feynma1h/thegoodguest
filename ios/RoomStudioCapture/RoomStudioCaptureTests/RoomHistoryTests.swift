@@ -92,7 +92,15 @@ final class RoomHistoryTests: XCTestCase {
 
     // MARK: - Whole-list disambiguation
 
-    func testRoomsSharingADayGainTheirTimeAndOthersDoNot() throws {
+    /// Two rooms from one day are told apart by the house's mono stamp column,
+    /// not by a time appended to the title.
+    ///
+    /// The title used to carry it, which made the disambiguation a fact about
+    /// the LIST — it needed to know whether any other room shared the day. It
+    /// is now a fact about the room: every summary carries the instant it was
+    /// sent, and the column decides what to print. So the titles are allowed to
+    /// repeat, and the thing that separates them is asserted below.
+    func testRoomsSharingADayRepeatTheirTitleAndAreSeparatedByTheirStamp() throws {
         let scenes = [
             try scene(id: "a", createdAt: date(2026, 8, 21, 16, 0)),
             try scene(id: "b", createdAt: date(2026, 8, 21, 11, 20)),
@@ -102,10 +110,24 @@ final class RoomHistoryTests: XCTestCase {
         let rows = RoomHistory.summaries(from: scenes, now: now, calendar: calendar)
 
         XCTAssertEqual(rows.map(\.title), [
-            "today's room, 4:00 pm",
-            "today's room, 11:20 am",
+            "today's room",
+            "today's room",
             "the July 12 room",
         ])
+        // What the column has to work with, and what makes the repeat legible.
+        XCTAssertEqual(rows.compactMap(\.sentAt).count, 3)
+        XCTAssertEqual(rows.compactMap(\.sentAt).map(RoomHistory.clockTime),
+                       ["4:00 pm", "11:20 am", "3:40 pm"])
+    }
+
+    /// A room whose `created_at` did not parse carries no stamp, because the
+    /// alternative is a fabricated one.
+    func testAnUnparseableDateLeavesNoStamp() throws {
+        let rows = RoomHistory.summaries(
+            from: [try scene(id: "x", rawCreatedAt: "not-a-date")],
+            now: now, calendar: calendar)
+        XCTAssertNil(rows[0].sentAt)
+        XCTAssertEqual(rows[0].title, "a room you sent")
     }
 
     func testServerOrderIsPreserved() throws {
