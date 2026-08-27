@@ -49,7 +49,9 @@ class SAM3Model:
             return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
         return nullcontext()
 
-    def segment(self, image: Image.Image, prompt: str) -> list[dict[str, Any]]:
+    def segment(
+        self, image: Image.Image, prompt: str, *, want_prob: bool = False
+    ) -> list[dict[str, Any]]:
         """Run SAM 3 with a comma-separated text prompt on a single image.
 
         Returns a list of detected object instances, each:
@@ -68,6 +70,15 @@ class SAM3Model:
         Upstream applies NO NMS and NO deduplication, so several instances of
         one object are expected output and reconciling them is our job —
         `fusion._dedup_same_frame` is where that happens.
+
+        `want_prob` additionally returns `mask_prob`, the per-pixel probability
+        the binary mask is thresholded from. Off by default because it is a
+        full-resolution float array per detection and production has no use for
+        it; the probe route asks for it. Upstream computes
+        `masks = masks_logits > 0.5` with a bare literal — `masks_logits` is
+        post-sigmoid despite its name, so 0.5 is a probability and there is no
+        parameter behind it. A part the model scored just under it is deleted
+        with no record, and this is how that record is recovered.
         """
         with self._autocast():
             inference_state = self.processor.set_image(image)
@@ -81,6 +92,9 @@ class SAM3Model:
                 masks = out.get("masks", [])
                 boxes = out.get("boxes", [])
                 scores = out.get("scores", [])
+                # Same length and order as `masks` — upstream sets both from
+                # one array in the same statement.
+                probs = out.get("masks_logits", []) if want_prob else []
 
                 # These are parallel arrays (one entry per detected instance).
                 # A length mismatch means an upstream anomaly; surface it and
@@ -111,13 +125,20 @@ class SAM3Model:
                     bbox = b.tolist() if hasattr(b, "tolist") else list(b)
                     score = s.item() if hasattr(s, "item") else float(s)
 
-                    objects.append({
+                    entry = {
                         "label": cls,
                         "instance_idx": j,
                         "bbox": bbox,
                         "score": score,
                         "mask": mask_np.astype(bool),
-                    })
+                    }
+                    if want_prob and j < len(probs):
+                        pr = probs[j]
+                        pr = pr.cpu().numpy() if hasattr(pr, "cpu") else np.asarray(pr)
+                        pr = np.squeeze(pr)
+                        if pr.shape == mask_np.shape:
+                            entry["mask_prob"] = pr.astype(np.float32)
+                    objects.append(entry)
             except Exception:
                 logger.exception("[sam3] class '%s' raised; skipping class", cls)
 

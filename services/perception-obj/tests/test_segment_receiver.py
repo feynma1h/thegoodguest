@@ -25,10 +25,27 @@ class FakeSam3:
         self._dets = dets
         self.calls = 0
 
-    def segment(self, pil, prompt):
+    def segment(self, pil, prompt, *, want_prob=False):
+        # Mirrors models.sam3.SAM3Model.segment. A stub that drops a keyword
+        # the real model takes turns a signature change into eleven unrelated
+        # failures, which is what happened when want_prob landed.
         self.calls += 1
         self.prompt = prompt
-        return [dict(d) for d in self._dets]
+        self.want_prob = want_prob
+        out = [dict(d) for d in self._dets]
+        if want_prob:
+            import numpy as np
+            for d in out:
+                m = np.asarray(d["mask"], dtype=bool)
+                # 0.9 where the mask is, 0.4 in a one-pixel skirt around it —
+                # the band the upstream 0.5 cut discards.
+                pr = np.where(m, 0.9, 0.0).astype(np.float32)
+                skirt = np.zeros_like(m)
+                skirt[1:] |= m[:-1]
+                skirt[:-1] |= m[1:]
+                pr[skirt & ~m] = 0.4
+                d["mask_prob"] = pr
+        return out
 
 
 def _mask(h, w, y0, y1, x0, x1):
@@ -258,3 +275,66 @@ class TestOIDC:
         )
         assert resp.status_code == 401
         assert sam3.calls == 0, "a rejected request must not reach the model"
+
+
+class TestProbabilityMaps:
+    """The probability map each binary mask is thresholded from.
+
+    Upstream computes `masks = masks_logits > 0.5` with a bare literal, and
+    `masks_logits` is post-sigmoid despite its name — so 0.5 is a probability
+    with no parameter behind it, and anything the model scored just under it is
+    deleted with no record. `write_prob` is how that record is kept.
+    """
+
+    def _dets(self, n=2, with_prob=True, shape=(4, 5)):
+        out = []
+        for i in range(n):
+            m = np.zeros(shape, dtype=bool)
+            m[0, i] = True
+            d = {"label": f"o{i}", "mask": m}
+            if with_prob:
+                p = np.zeros(shape, dtype=np.float32)
+                p[0, i] = 0.9
+                p[1, i] = 0.4          # just under the cut — the part that is lost
+                d["mask_prob"] = p
+            out.append(d)
+        return out
+
+    def test_none_when_no_detection_carries_one(self):
+        assert sr.probs_npz_bytes(self._dets(with_prob=False)) is None
+        assert sr.probs_npz_bytes([]) is None
+
+    def test_round_trips_the_cut_at_any_threshold(self):
+        dets = self._dets()
+        raw = sr.probs_npz_bytes(dets)
+        z = np.load(io.BytesIO(raw))
+        assert list(z["mask_index"]) == [0, 1]
+        for k, d in enumerate(dets):
+            recovered = z["probs"][k] / 255.0
+            # the shipped cut is reproduced exactly
+            assert (recovered > 0.5).tolist() == (d["mask_prob"] > 0.5).tolist()
+            # and a lower one recovers the pixel 0.5 threw away
+            assert (recovered > 0.3).sum() > (recovered > 0.5).sum()
+
+    def test_it_indexes_by_position_not_by_equality(self):
+        """These dicts hold numpy arrays, so list.index() raises rather than
+        comparing. Two detections with identical content must still map to 0
+        and 1."""
+        dets = self._dets()
+        dets[1] = {k: (v.copy() if hasattr(v, "copy") else v) for k, v in dets[0].items()}
+        z = np.load(io.BytesIO(sr.probs_npz_bytes(dets)))
+        assert list(z["mask_index"]) == [0, 1]
+
+    def test_partial_coverage_keeps_the_mapping_honest(self):
+        """A detection without a probability map must not shift the indices of
+        the ones that have it."""
+        dets = self._dets(n=3)
+        del dets[1]["mask_prob"]
+        z = np.load(io.BytesIO(sr.probs_npz_bytes(dets)))
+        assert list(z["mask_index"]) == [0, 2]
+
+    def test_the_request_defaults_to_off(self):
+        req = sr.SegmentRequest(
+            scene_id="s", bundle_uri="gs://b/x/bundle.pb", frame_indices=[1]
+        )
+        assert req.write_prob is False
