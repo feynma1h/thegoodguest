@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from contextlib import nullcontext
 from typing import Any
@@ -11,6 +12,19 @@ import torch
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+
+# SAM 3's VISUAL path (predict_inst) needs the interactive predictor, and
+# `build_sam3_image_model` leaves it OFF by default — with it off,
+# `model.inst_interactive_predictor` is None and predict_inst raises
+# `AttributeError: 'NoneType' object has no attribute 'model'`, which is how
+# this was found. Enabling it builds the video tracker and loads its weights
+# from the SAME facebook/sam3 checkpoint (`tracker.*` keys), so nothing extra
+# downloads — but it does occupy GPU memory, and 0228 measured headroom as the
+# binding constraint on this card: the models already hold ~16.4 GiB with about
+# 5.26 left, against forward passes peaking at 5.23-6.43. So it stays OFF unless
+# asked for, and turning it on in production wants that measurement first.
+INTERACTIVE_ENABLED = os.environ.get("PERCEPTION_SAM3_INTERACTIVE", "0") == "1"
 
 
 class SAM3Model:
@@ -33,7 +47,9 @@ class SAM3Model:
         from sam3.model.sam3_image_processor import Sam3Processor  # noqa: PLC0415
         from sam3.model_builder import build_sam3_image_model  # noqa: PLC0415
 
-        self.model = build_sam3_image_model()
+        self.model = build_sam3_image_model(
+            enable_inst_interactivity=INTERACTIVE_ENABLED
+        )
         self.processor = Sam3Processor(self.model)
         # SAM 3's Sam3Processor.set_image does NOT wrap the encoder in autocast,
         # so the vitdet linear layers (fp32 weights) get fed bf16 activations
@@ -192,6 +208,13 @@ class SAM3Model:
             ) / 255.0
             mask_input = ((lo * 2.0) - 1.0)[None] * 10.0
 
+        if getattr(self.model, "inst_interactive_predictor", None) is None:
+            logger.error(
+                "[sam3] predict_inst needs the interactive predictor, which is "
+                "off: set PERCEPTION_SAM3_INTERACTIVE=1 (see the note on "
+                "INTERACTIVE_ENABLED for what it costs)"
+            )
+            return None
         try:
             with self._autocast():
                 masks, scores, _logits = self.model.predict_inst(

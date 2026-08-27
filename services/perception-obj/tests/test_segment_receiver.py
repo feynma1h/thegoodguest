@@ -435,3 +435,40 @@ class TestClickRefinement:
             scene_id="s", bundle_uri="gs://b/x/bundle.pb", frame_indices=[1]
         )
         assert req.refine_seed_mask is None
+
+
+class TestInteractivePredictorIsOptional:
+    """SAM 3's visual path needs a component `build_sam3_image_model` leaves OFF.
+
+    With it off, `model.inst_interactive_predictor` is None and `predict_inst`
+    raises `AttributeError: 'NoneType' object has no attribute 'model'` deep
+    inside upstream — a failure that reached a live GPU before it was
+    understood.
+
+    Read from the SOURCE, not by importing: models/sam3.py imports torch at
+    module level, so no GPU-free test can load it. Same technique as
+    test_dockerfile_manifest.py, and the same reason.
+    """
+
+    @pytest.fixture(scope="class")
+    def src(self):
+        from pathlib import Path
+        return (Path(__file__).resolve().parents[1] / "models" / "sam3.py").read_text()
+
+    def test_the_builder_is_told_explicitly(self, src):
+        """Calling build_sam3_image_model() bare is what produced the failure:
+        the parameter defaults to False upstream."""
+        assert "enable_inst_interactivity=INTERACTIVE_ENABLED" in src
+        assert "build_sam3_image_model()" not in src
+
+    def test_the_flag_defaults_off(self, src):
+        """Enabling the tracker by default would add its weights to a card 0228
+        measured as having ~5.26 GiB of headroom."""
+        assert 'os.environ.get("PERCEPTION_SAM3_INTERACTIVE", "0") == "1"' in src
+
+    def test_the_absence_is_reported_rather_than_raised(self, src):
+        """The wrapper checks before calling, so the message names the env var
+        instead of surfacing an AttributeError from inside upstream."""
+        assert 'getattr(self.model, "inst_interactive_predictor", None) is None' in src
+        i = src.index("inst_interactive_predictor\", None) is None")
+        assert "PERCEPTION_SAM3_INTERACTIVE=1" in src[i:i + 600]
