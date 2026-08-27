@@ -52,7 +52,7 @@ struct ContentsSheet: View {
 
     private var header: some View {
         HStack {
-            Mark(size: 24)
+            ChromeMark()
             Spacer()
             Button(action: onClose) {
                 Image(systemName: "xmark")
