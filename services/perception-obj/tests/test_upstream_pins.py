@@ -39,7 +39,15 @@ REPOS = {
 }
 
 VENDORED = {
-    "sam3": ["sam3_image_processor.py", "model_builder.py", "LICENSE"],
+    "sam3": [
+        "sam3_image_processor.py", "model_builder.py",
+        # Added 2026-08-28: reading only the processor produced a claim that
+        # SAM 3's image path has no mask-quality score and takes no points.
+        # Both are false — predict_inst lives here — and the too-narrow vendor
+        # set is what made the wrong reading easy.
+        "sam3_image.py", "sam1_task_predictor.py",
+        "LICENSE",
+    ],
     "sam3d": ["inference.py", "LICENSE"],
 }
 
@@ -134,10 +142,18 @@ class TestTheProcessorFactsWeDependOn:
         assert "confidence_threshold=0.5" in processor
         assert "keep = out_probs > self.confidence_threshold" in processor
 
-    def test_there_is_no_iou_or_mask_quality_head(self, processor: str) -> None:
-        """SAM 1/2 return `iou_predictions`; SAM 3's image path does not, which
-        is why no completeness signal can be read out of it."""
+    def test_the_text_path_returns_no_mask_quality_score(self, processor: str) -> None:
+        """`set_text_prompt` has no IoU output. This is a fact about THIS file
+        and must not be read as a fact about SAM 3 — `predict_inst` in
+        sam3_image.py returns exactly such a score, and reading only this file
+        is how that got stated the wrong way round."""
         assert "iou_pred" not in processor
+
+    def test_the_point_prompted_path_is_vendored_and_returns_quality(self) -> None:
+        """The correction, pinned so it cannot be lost again."""
+        img = (UPSTREAM / "sam3" / "sam3_image.py").read_text()
+        assert "def predict_inst" in img
+        assert "inst_interactive_predictor" in img
 
     def test_the_service_reads_the_path_the_dockerfile_installs(self) -> None:
         """The comment that sent a session to a non-existent directory."""

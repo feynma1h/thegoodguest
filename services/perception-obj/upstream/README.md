@@ -17,6 +17,8 @@ the actual code.
 |---|---|---|
 | `sam3/sam3_image_processor.py` | `sam3/model/sam3_image_processor.py` | everything `models/sam3.py` calls: `set_image`, `set_text_prompt`, `add_geometric_prompt`. The score, the threshold, the returned keys. |
 | `sam3/model_builder.py` | `sam3/model_builder.py` | `build_sam3_image_model`, which is how we construct the model. |
+| `sam3/sam3_image.py` | `sam3/model/sam3_image.py` | the model object itself, and `predict_inst` — the POINT-prompted path we do not use. |
+| `sam3/sam1_task_predictor.py` | `sam3/model/sam1_task_predictor.py` | what `predict_inst` delegates to. |
 | `sam3d/inference.py` | `notebook/inference.py` | the `Inference` class `models/sam3d.py` calls. SAM 3D does not expose it in the installable package. |
 | `*/LICENSE` | `LICENSE` | Meta's SAM License. §1.b.i requires the Agreement to travel with any copy of the materials, which is why it is here rather than referenced. |
 
@@ -62,9 +64,25 @@ the twelve notebooks in `examples/` are the only authority.
 - **No NMS and no deduplication anywhere in this path.** Several instances of one
   object are expected output, and reconciling them is the caller's job. There is
   no "one segment per object" switch.
-- **No mask-quality or IoU head.** The returned state is `masks_logits`, `masks`,
-  `boxes`, `scores` and size metadata — nothing analogous to SAM 1/2's
-  `iou_predictions`.
+- **`set_text_prompt` returns no mask-quality score.** Its state is
+  `masks_logits`, `masks`, `boxes`, `scores` and size metadata, and `scores` is
+  the detection confidence above. **This does NOT generalise to SAM 3** — see
+  the next entry, which corrects an earlier reading of this file that did
+  generalise it.
+- **SAM 3 is two components sharing one backbone, and we use one of them.** The
+  paper's own framing: "an image-level detector and a memory-based video tracker
+  that share a single backbone". The detector answers Promptable CONCEPT
+  Segmentation — text in, every matching instance out — and is what
+  `Sam3Processor.set_text_prompt` wraps. The tracker answers Promptable VISUAL
+  Segmentation — points, boxes or masks in, ONE instance out — and is SAM 2's
+  task, updated.
+- **The visual path takes POINTS, and it is on the model we already build.**
+  `model.predict_inst(inference_state, point_coords=..., point_labels=...,
+  multimask_output=True)` returns `(masks, scores, logits)`, where `scores` IS a
+  mask-quality estimate and `multimask_output` returns three ranked candidates.
+  It takes the same `inference_state` `set_image` already produces, so nothing
+  new has to be loaded. `examples/sam3_for_sam1_task_example.ipynb` is the
+  worked example. `models/sam3.py` has never called it.
 - **`masks_logits` is misnamed and we throw it away.** It is post-`sigmoid()`,
   so it is a per-pixel PROBABILITY in [0, 1] at full image resolution, not a
   logit — anyone reading the name would assume otherwise. The binary mask is
@@ -77,6 +95,15 @@ the twelve notebooks in `examples/` are the only authority.
 - **Geometric prompts carry a `label`, so NEGATIVE boxes are supported**
   (`{"box": [...], "label": True/False}` in `examples/sam3_image_interactive.ipynb`).
   `models/sam3.refine_with_box` only ever sends positive ones.
+- **A box prompt rides ON TOP of the text prompt, so "this box, and it is a
+  `table`" is one call.** `add_geometric_prompt` appends to the state's
+  geometric prompt and re-runs grounding; it only substitutes the dummy text
+  `"visual"` when no text prompt was set. So the answer stays "the `table` in
+  this picture", not a fresh box-driven instance. This is exactly what
+  `refine_with_box` does today — and passing the RoomPlan box's own projected
+  bbox as that prompt is MEASURED to fail: 0198 recorded 113,465 px on rp7 f114
+  with a chair base and a stool absorbed, which is why
+  `mask_refine.prompt_box_cxcywh` deliberately does not use it.
 - **SAM 3.1 exists, is on the same `main`, and needs DIFFERENT checkpoints.** We
   download `facebook/sam3` weights. An unpinned clone could therefore pair 3.1
   code with 3.0 weights; the pin is what prevents that.
