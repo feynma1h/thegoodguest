@@ -106,7 +106,7 @@ struct GuidanceSheet: View {
                 .rsFont(.display, size: 22, weight: .medium, maxSize: 30)
                 .foregroundStyle(Color.rsOnDark)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
+        } trailing: {
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .semibold))
