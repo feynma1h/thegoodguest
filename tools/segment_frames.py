@@ -74,6 +74,13 @@ def main(argv: list[str] | None = None) -> int:
              "re-examined offline without another GPU run",
     )
     ap.add_argument("--bundle-uri", help="override; otherwise read from Firestore")
+    ap.add_argument(
+        "--prompt",
+        help="override DEFAULT_OBJECT_PROMPT for this call — comma-separated "
+             "noun phrases. SAM 3 returns the term verbatim, so a term that no "
+             "box family accepts lands in the long tail (0226); for a probe "
+             "that is fine and is the point.",
+    )
     args = ap.parse_args(argv)
 
     frames = [int(x) for x in args.frames.replace(" ", "").split(",") if x]
@@ -95,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         "frame_indices": frames,
         "write_png": not args.no_png,
         "write_prob": args.probs,
+        **({"object_prompt": args.prompt} if args.prompt else {}),
     }
     task = {
         "name": f"{queue_path}/tasks/segment-{args.scene_id}-{int(time.time())}",
