@@ -87,11 +87,15 @@ the twelve notebooks in `examples/` are the only authority.
   so it is a per-pixel PROBABILITY in [0, 1] at full image resolution, not a
   logit — anyone reading the name would assume otherwise. The binary mask is
   literally `masks_logits > 0.5`, and that 0.5 is a bare constant with no
-  parameter behind it (unlike `confidence_threshold`, which is settable). So a
-  leg the model scored 0.45 is deleted with no way to ask for it back, and the
-  only record that it was seen at all is in a tensor `models/sam3.py` does not
-  read. It is the one dense, per-pixel, DEPTH-FREE evidence of object extent
-  the model emits.
+  parameter behind it (unlike `confidence_threshold`, which is settable). It is
+  the one dense, per-pixel, DEPTH-FREE signal the model emits.
+
+  **What it is NOT, measured: a place where missing parts hide.** This file
+  once said a leg scored 0.45 would be deleted with no record. 0268 read the map
+  for the study table's three frames and swept the cut: lowering it to 0.1 grows
+  the mask by at most 18%, and 83-96% of what cut 0.40 adds lies within TWO
+  PIXELS of the existing boundary. It is a skirt, not a part. The model is not
+  uncertain about that leg — it does not see it as desk at any threshold.
 - **Geometric prompts carry a `label`, so NEGATIVE boxes are supported**
   (`{"box": [...], "label": True/False}` in `examples/sam3_image_interactive.ipynb`).
   `models/sam3.refine_with_box` only ever sends positive ones.
