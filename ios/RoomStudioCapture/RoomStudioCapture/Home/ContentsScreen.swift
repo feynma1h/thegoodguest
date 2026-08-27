@@ -2,8 +2,12 @@
 ///
 /// A book's table of contents rather than a tab bar: serif entries, dot
 /// leaders, a mono truth on the right. It is reached by tapping the mark in
-/// home's header and by no other route, which is why home teaches it once on
-/// first run.
+/// home's header and by no other route.
+///
+/// A SCREEN, NOT A SHEET. A sheet is something that happens TO the screen you
+/// are on and is dismissed by swiping it away; this is a place, and the way
+/// back out is the way you came in. It also lets the contents push onward to
+/// the four screens it lists without stacking a sheet on a sheet.
 ///
 /// WHY NOT TABS. A tab bar states four destinations permanently, in the chrome,
 /// on every screen — which is exactly the dashboard the product spent its whole
@@ -19,14 +23,14 @@
 /// The claim sits at the foot as a colophon: the contents is the one place the
 /// thesis can be restated without competing with home's own copy of it.
 ///
-/// Read by: RootFlowView, presented from HomeView's mark.
+/// Read by: RootFlowView, pushed from HomeView's mark.
 
 import SwiftUI
 
-struct ContentsSheet: View {
+struct ContentsScreen: View {
     var day: HomeDay = HomeDay()
     var onOpen: (ContentsEntry) -> Void = { _ in }
-    var onClose: () -> Void = {}
+    var onBack: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -50,18 +54,21 @@ struct ContentsSheet: View {
         .modifier(RSScrollableScreen(background: Color.rsSurface))
     }
 
+    /// A back chevron, not a close cross. The contents is a place you went to,
+    /// so the way out is the way you came — which is the whole reason this
+    /// stopped being a sheet.
     private var header: some View {
-        HStack {
-            ChromeMark()
-            Spacer()
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .semibold))
+        HStack(spacing: 10) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(Color.rsInkMuted)
                     .frame(width: 32, height: 32)
-                    .background(Color.rsInk.opacity(0.06), in: Circle())
+                    .contentShape(Rectangle())
             }
-            .accessibilityLabel("Close")
+            .accessibilityLabel("Back")
+            ChromeMark()
+            Spacer()
         }
     }
 
@@ -177,13 +184,13 @@ private struct Leaders: View {
 // MARK: - Previews
 
 #Preview("Quiet day") {
-    ContentsSheet(day: HomeDay(roomCount: 6))
+    ContentsScreen(day: HomeDay(roomCount: 6))
 }
 
 #Preview("Eventful day") {
-    ContentsSheet(day: HomeDay(needsYou: 2, hasRoomInFlight: true, roomCount: 9))
+    ContentsScreen(day: HomeDay(needsYou: 2, hasRoomInFlight: true, roomCount: 9))
 }
 
 #Preview("The house declines its count") {
-    ContentsSheet(day: HomeDay(needsYou: 1, roomCount: nil))
+    ContentsScreen(day: HomeDay(needsYou: 1, roomCount: nil))
 }

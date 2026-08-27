@@ -74,12 +74,12 @@ struct RootFlowView: View {
 
     @State private var stage: Stage = .home
     @State private var showGuidance = false
-    @State private var showProfile  = false
-    @State private var showRooms    = false
-    /// The contents, behind the mark in home's header.
-    @State private var showContents = false
-    /// Notes — the needs-you items and the news.
-    @State private var showNotes    = false
+    /// Where home has navigated to. Empty is home itself.
+    ///
+    /// A typed array rather than NavigationPath: the path only ever holds one
+    /// kind of thing, and the erased form makes every append need an annotation
+    /// while letting an unrelated Hashable compile.
+    @State private var path: [HomeRoute] = []
     /// The bundle id sent for processing — used to restart polling after a fatal
     /// poll error without depending on the current CaptureManager.
     @State private var sentBundleId: String?
@@ -296,13 +296,25 @@ struct RootFlowView: View {
         return notes
     }
 
+    /// Where home can push to. A route rather than a set of booleans: these are
+    /// screens on a stack now, not sheets over a screen, and the stack needs
+    /// something Hashable to hold.
+    enum HomeRoute: Hashable { case contents, house, desk, notes, you }
+
     private var homeScreen: some View {
-        HomeView(
-            day: homeDay,
-            onScan: { showGuidance = true },
-            onOpenContents: { showContents = true },
-            onFollowLine: follow
-        )
+        NavigationStack(path: $path) {
+            HomeView(
+                day: homeDay,
+                onScan: { showGuidance = true },
+                onOpenContents: { path.append(.contents) },
+                onFollowLine: { path.append(route(for: $0)) }
+            )
+            .navigationBarHidden(true)
+            .navigationDestination(for: HomeRoute.self) { route in
+                destination(route)
+                    .navigationBarHidden(true)
+            }
+        }
         // The kick from onFatalBlobError cannot outlive the process, so without
         // this independent store scan a failure from a previous launch (crash,
         // dead battery mid-upload) would never surface — exactly the case the
@@ -328,67 +340,71 @@ struct RootFlowView: View {
             .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showContents) {
-            ContentsSheet(
-                day: homeDay,
-                onOpen: { entry in
-                    showContents = false
-                    open(entry)
-                },
-                onClose: { showContents = false }
-            )
-            .presentationDragIndicator(.visible)
+    }
+
+    /// The pushed screens.
+    ///
+    /// Every one of them takes `back` for its own header rather than relying on
+    /// the system bar: the bars are hidden throughout, because a screen whose
+    /// title is set in the guest's display serif cannot be rendered by a
+    /// navigation bar without losing the voice.
+    @ViewBuilder
+    private func destination(_ screen: HomeRoute) -> some View {
+        switch screen {
+        case .contents:
+            ContentsScreen(day: homeDay,
+                           onOpen: { path.append(route(for: $0)) },
+                           onBack: back)
+        case .house:
+            RoomsListView(state: rooms.state,
+                          canOpenWeb: canOpenAnyRoomOnWeb,
+                          onOpen: openRoomOnWeb,
+                          onRetry: refreshRooms,
+                          onScanAnother: { path = []; showGuidance = true },
+                          onProfile: { path.append(.you) },
+                          onClose: back)
+        case .desk:
+            // The desk is the post-send surface. Entering it from here means
+            // leaving the stack: the wait owns the whole screen and has its own
+            // exits, which is the shape it already had.
+            Color.clear.onAppear { path = []; stage = .sent }
+        case .notes:
+            NotesView(needsYou: openNotes,
+                      arrival: nil,
+                      canOpenArrival: canOpenAnyRoomOnWeb,
+                      onAcknowledge: acknowledge,
+                      onOpenNote: { _ in path = []; stage = .sent },
+                      onClose: back)
+        case .you:
+            ProfileView(uid: auth.currentUID, isLinked: auth.isLinked, onClose: back)
         }
-        .sheet(isPresented: $showProfile) {
-            NavigationStack {
-                ProfileView(uid: auth.currentUID,
-                            isLinked: auth.isLinked,
-                            onClose: { showProfile = false })
-            }
-        }
-        .sheet(isPresented: $showRooms) {
-            RoomsListView(
-                state: rooms.state,
-                canOpenWeb: canOpenAnyRoomOnWeb,
-                onOpen: openRoomOnWeb,
-                onRetry: refreshRooms,
-                onScanAnother: { showRooms = false; showGuidance = true },
-                onProfile: { showRooms = false; showProfile = true },
-                onClose: { showRooms = false }
-            )
-        }
-        .sheet(isPresented: $showNotes) {
-            NotesView(
-                needsYou: openNotes,
-                arrival: nil,
-                canOpenArrival: canOpenAnyRoomOnWeb,
-                onAcknowledge: acknowledge,
-                onOpenNote: { _ in showNotes = false; stage = .sent },
-                onClose: { showNotes = false }
-            )
-        }
+    }
+
+    /// One step back, or all the way home if something already emptied the path.
+    private func back() {
+        if path.isEmpty { return }
+        path.removeLast()
     }
 
     // MARK: - Going places
 
-    /// Home's sentence, followed.
-    private func follow(_ destination: HomeDestination) {
+    /// Home's sentence, followed. The doorway is not a route — it is the
+    /// post-send surface deciding for itself what to show.
+    private func route(for destination: HomeDestination) -> HomeRoute {
         switch destination {
-        case .notes:   showNotes = true
-        case .house:   showRooms = true
-        // Both live on the post-send surface, which routes itself: the sentence
-        // only has to get the user there.
-        case .desk, .doorway: stage = .sent
+        case .notes:          return .notes
+        case .house:          return .house
+        case .desk, .doorway: return .desk
         }
     }
 
-    /// A contents entry, opened.
-    private func open(_ entry: ContentsEntry) {
+    /// A contents entry, as a route.
+    private func route(for entry: ContentsEntry) -> HomeRoute {
         switch entry {
-        case .house: showRooms = true
-        case .desk:  stage = .sent
-        case .notes: showNotes = true
-        case .you:   showProfile = true
+        case .house: return .house
+        case .desk:  return .desk
+        case .notes: return .notes
+        case .you:   return .you
         }
     }
 
@@ -403,7 +419,7 @@ struct RootFlowView: View {
         if sentBundleId != nil, SurfaceRouter.needsUser(waitScreen) {
             endFlight()
         }
-        if openNotes.count <= 1 { showNotes = false }
+        if openNotes.count <= 1 { back() }
     }
 
     // MARK: - Rooms
