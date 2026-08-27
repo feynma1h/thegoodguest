@@ -27,7 +27,7 @@ struct ProfileView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            ScreenHeader(title: "You", onClose: onClose)
 
             // Scrollable: at accessibility sizes the intro copy alone fills the
             // screen, pushing the ID card and the sign-in action off the bottom.
@@ -77,28 +77,13 @@ struct ProfileView: View {
                         .padding(.top, 28)
                         .padding(.bottom, 14)
                 }
-                .padding(.top, 16)
+                .rsBelowHeader()
             }
         }
-        .padding(.horizontal, 26)
+        .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rsParchmentScreen()
         .sheet(isPresented: $showSignIn) { SignInSheet() }
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            Button(action: onClose) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Color.rsInkMuted)
-            }
-            Text("You")
-                .rsFont(.display, size: 17, weight: .medium)
-                .foregroundStyle(Color.rsInk)
-            Spacer()
-        }
-        .padding(.top, 8)
     }
 
     private var idCard: some View {

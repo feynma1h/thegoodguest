@@ -41,15 +41,15 @@ struct ContentsScreen: View {
                     ContentsRowView(row: row) { onOpen(row.entry) }
                 }
             }
-            .padding(.top, 22)
+            // The rows pad themselves by 14; without accounting for it the
+            // first entry sat lower than every other screen's first line.
+            .rsBelowHeader(ownInset: 14)
 
             Spacer(minLength: 30)
 
             colophon
         }
-        .padding(.horizontal, 26)
-        .padding(.top, 22)
-        .padding(.bottom, 14)
+        .rsScreenInsets()
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .modifier(RSScrollableScreen(background: Color.rsSurface))
     }
@@ -58,17 +58,9 @@ struct ContentsScreen: View {
     /// so the way out is the way you came — which is the whole reason this
     /// stopped being a sheet.
     private var header: some View {
-        HStack(spacing: 10) {
-            Button(action: onBack) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Color.rsInkMuted)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Back")
+        ScreenHeaderFrame {
+            BackChevron(action: onBack)
             ChromeMark()
-            Spacer()
         }
     }
 

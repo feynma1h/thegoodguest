@@ -108,7 +108,7 @@ struct NotesView: View {
             } else {
                 if !needsYou.isEmpty {
                     Eyebrow("Needs you")
-                        .padding(.top, 26)
+                        .rsBelowHeader()
                     VStack(spacing: 12) {
                         ForEach(Array(needsYou.enumerated()), id: \.offset) { _, kind in
                             NoteCard(kind: kind,
@@ -131,8 +131,7 @@ struct NotesView: View {
 
             Spacer(minLength: 20)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 12)
+        .rsScreenInsets()
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .modifier(RSScrollableScreen(background: nil))
     }
@@ -145,7 +144,7 @@ struct NotesView: View {
             .rsFont(.guest, size: 16)
             .foregroundStyle(Color.rsInkMuted)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 30)
+            .rsBelowHeader()
     }
 }
 
@@ -241,38 +240,6 @@ private struct ArrivalCard: View {
         .background(Color.rsGold.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
             .stroke(Color.rsGold.opacity(0.45), lineWidth: 1))
-    }
-}
-
-// MARK: - Shared header
-
-/// The back-and-title header the three new screens share.
-///
-/// Top-aligned and capped, found by screenshot on the rooms list: at
-/// accessibility sizes an uncapped title wraps to two lines and a vertically
-/// centred chevron comes to rest between them, reading as a stray glyph inside
-/// the heading rather than as the way out.
-struct ScreenHeader: View {
-    let title: String
-    var onClose: () -> Void = {}
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button(action: onClose) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Color.rsInkMuted)
-                    .frame(width: 32, height: 32)
-            }
-            .accessibilityLabel("Back")
-            Text(title)
-                .rsFont(.display, size: 22, weight: .medium, maxSize: 30)
-                .foregroundStyle(Color.rsInk)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(minHeight: 32, alignment: .center)
-            Spacer(minLength: 6)
-        }
-        .padding(.top, 8)
     }
 }
 

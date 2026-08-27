@@ -50,7 +50,6 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.top, 8)
 
             // Scrollable: at accessibility sizes the claim alone exceeds the
             // space between the header and the action, and with a fixed layout
@@ -79,13 +78,13 @@ struct HomeView: View {
                         reportingLine
                     }
                 }
-                .padding(.top, 18)
+                .rsBelowHeader()
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             scanAction
         }
-        .padding(.horizontal, 26)
+        .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rsParchmentScreen()
     }
@@ -103,9 +102,8 @@ struct HomeView: View {
     /// affordance, not two, and a second glyph beside the first would make
     /// neither of them obviously the way in.
     private var header: some View {
-        HStack {
+        ScreenHeaderFrame {
             MenuPeekMark(onTap: onOpenContents)
-            Spacer()
         }
     }
 
@@ -158,7 +156,7 @@ struct HomeView: View {
                 .font(RSFont.ui(.footnote))
                 .foregroundStyle(Color.rsInkFaint)
         }
-        .padding(.bottom, 8)
+        .rsActionBar()
     }
 }
 

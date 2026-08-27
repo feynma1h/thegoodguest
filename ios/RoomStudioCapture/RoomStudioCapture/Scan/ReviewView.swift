@@ -74,13 +74,16 @@ struct ReviewView: View {
     var body: some View {
         // Scrollable: at accessibility text sizes the sketch card + verdict + three
         // actions exceed the screen, and without this nothing is reachable.
+        VStack(spacing: 0) {
         ScrollView {
             VStack(spacing: 0) {
-                Eyebrow("Your capture")
-                    .padding(.top, 8)
+                // In the shared header band, so this screen's first line sits
+                // level with every other screen's — it has no back chevron, but
+                // it has the same top strip.
+                ScreenHeaderFrame { Eyebrow("Your capture") }
 
                 sketchCard
-                    .padding(.top, 16)
+                    .rsBelowHeader()
 
                 RSCard {
                     Text(Self.cardText(verdict: verdict,
@@ -94,13 +97,17 @@ struct ReviewView: View {
                 }
                 .padding(.top, 16)
 
-                actions
-                    .padding(.top, 24)
-                    .padding(.bottom, 8)
             }
-            .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, minHeight: 0)
         }
+
+        // Outside the scroll region: the send is the decision this screen
+        // exists for, and it used to sit at the end of the content where a
+        // long capture pushed it off the bottom.
+        actions
+            .rsActionBar()
+        }
+        .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rsParchmentScreen()
     }
