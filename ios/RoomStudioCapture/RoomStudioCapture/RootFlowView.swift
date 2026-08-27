@@ -309,10 +309,14 @@ struct RootFlowView: View {
                 onOpenContents: { path.append(.contents) },
                 onFollowLine: { path.append(route(for: $0)) }
             )
-            .navigationBarHidden(true)
-            .navigationDestination(for: HomeRoute.self) { route in
-                destination(route)
-                    .navigationBarHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            // The bar is hidden because every screen sets its own title in the
+            // guest's serif; UIKit takes the swipe-back gesture away with it.
+            // See BackSwipe.
+            .rsBackSwipe()
+            .navigationDestination(for: HomeRoute.self) { screen in
+                destination(screen)
+                    .toolbar(.hidden, for: .navigationBar)
             }
         }
         // The kick from onFatalBlobError cannot outlive the process, so without
