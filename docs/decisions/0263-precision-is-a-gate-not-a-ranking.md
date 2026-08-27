@@ -1,7 +1,7 @@
 # 0263 — precision against the box is a gate, not a ranking
 
 **Date:** 2026-08-27
-**Status:** Decided (measured; no behaviour change)
+**Status:** SUPERSEDED by 0266 on the operator's rulings of 2026-08-28. The gate below scores 8 of 9, not 10 of 10, and a rule needing no gate scores 9 of 9.
 
 ## Context
 
@@ -83,14 +83,15 @@ seven keep-the-longer cases all sit at 1.0000, and the two keep-the-shorter
 cases — a `cabinet` mask that has run onto its neighbour and a `chair` mask that
 has swallowed part of a desk — sit at 0.8303 and 0.9141.
 
-**What "agrees" is measured against, stated exactly, because the ten labels do
-not have equal standing.** Three are the operator's ruling (the desk, in frames
-50, 51 and 109). Five are visually unambiguous and anyone would call them the
-same way — a chair gaining its armrests and base, a cabinet gaining its carcass
-from a mask that was only its dark glass panel. **Two are the author's judgement
-alone** (spike frame 398 `cabinet`, rp6g2 frame 0 `chair`), and they are the two
-negatives — which is to say the gate's refusals have not been independently
-confirmed by anyone. Those two are the rows to check first.
+**Both of the author-judged rows were wrong, and the operator ruled on
+2026-08-28.** spike frame 398 `cabinet` is **better in the longer read**, so the
+gate's refusal there is a miss. rp6g2 frame 0 `chair` is **accurate in
+neither** — the shorter has no legs and the longer takes another chair's legs
+and the table's — so it has no verdict and is excluded from scoring.
+
+**Rescored: this gate is 8 of 9, and "always keep the longer" is 9 of 9.**
+Every scoreable pair wants the longer mask, so every discriminator in this note
+and in 0265 loses points by vetoing a correct merge. See 0266.
 
 **Nothing ships.** The code change is not written, and what should rank the
 non-nested candidates is still open — see 0262, which is the larger defect.
