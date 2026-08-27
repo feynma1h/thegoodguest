@@ -356,13 +356,11 @@ struct RootFlowView: View {
                            onOpen: { path.append(route(for: $0)) },
                            onBack: back)
         case .house:
-            RoomsListView(state: rooms.state,
-                          canOpenWeb: canOpenAnyRoomOnWeb,
-                          onOpen: openRoomOnWeb,
-                          onRetry: refreshRooms,
-                          onScanAnother: { path = []; showGuidance = true },
-                          onProfile: { path.append(.you) },
-                          onClose: back)
+            HouseView(state: rooms.state,
+                      canOpenWeb: canOpenAnyRoomOnWeb,
+                      onOpen: openRoomOnWeb,
+                      onRetry: refreshRooms,
+                      onBack: back)
         case .desk:
             // With a room in flight the desk IS the post-send surface, which
             // owns the poller's lifecycle; without one there is nothing to

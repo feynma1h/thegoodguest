@@ -111,15 +111,15 @@ enum ScreenGallery {
               note: "The ordinary case. No illustration, no reassurance."),
 
         // ── The other history surface ───────────────────────────────────────
-        .init(id: "rooms-list",        title: "Your rooms",
-              note: "Thin by design: status and a way back to the web, nothing editable."),
-        .init(id: "rooms-stale",       title: "Your rooms · stale",
+        .init(id: "rooms-list",        title: "The house",
+              note: "The rooms that landed, and the thesis at its permanent address. No scan action."),
+        .init(id: "rooms-stale",       title: "The house · stale",
               note: "The same stale line the strip carries, on the full list."),
-        .init(id: "rooms-empty",       title: "Your rooms · empty",
+        .init(id: "rooms-empty",       title: "The house · empty",
               note: "Genuinely none sent — distinct from not being able to ask."),
-        .init(id: "rooms-loading",     title: "Your rooms · loading",
+        .init(id: "rooms-loading",     title: "The house · loading",
               note: "Nothing known yet."),
-        .init(id: "rooms-unreachable", title: "Your rooms · unreachable",
+        .init(id: "rooms-unreachable", title: "The house · unreachable",
               note: "The phone could not ask. It does not claim there are none."),
 
         // ── The capture flow ────────────────────────────────────────────────
@@ -183,14 +183,7 @@ enum ScreenGallery {
 /// carry the three states the row treatment distinguishes.
 private enum GalleryFixture {
 
-    static let rooms: [RoomSummary] = [
-        .init(id: "s1", bundleId: "b1", title: "today's room",
-              statusLine: "being rebuilt · 4 min so far", state: .processing),
-        .init(id: "s2", bundleId: "b2", title: "yesterday's room",
-              statusLine: "on your desk", state: .ready),
-        .init(id: "s3", bundleId: "b3", title: "the July 12 room",
-              statusLine: "on your desk", state: .ready),
-    ]
+    static var rooms: [RoomSummary] { RoomSummary.samples() }
 
     static let uid = "gallery-fixture-not-a-real-uid"
 
@@ -284,15 +277,15 @@ struct ScreenGalleryView: View {
 
         // Rooms
         case "rooms-list":
-            RoomsListView(state: .loaded(rooms: GalleryFixture.rooms, stale: false), onClose: {})
+            HouseView(state: .loaded(rooms: GalleryFixture.rooms, stale: false))
         case "rooms-stale":
-            RoomsListView(state: .loaded(rooms: GalleryFixture.rooms, stale: true), onClose: {})
+            HouseView(state: .loaded(rooms: GalleryFixture.rooms, stale: true))
         case "rooms-empty":
-            RoomsListView(state: .loaded(rooms: [], stale: false), onClose: {})
+            HouseView(state: .loaded(rooms: [], stale: false))
         case "rooms-loading":
-            RoomsListView(state: .loading, onClose: {})
+            HouseView(state: .loading)
         case "rooms-unreachable":
-            RoomsListView(state: .failed(reason: "offline"), onClose: {})
+            HouseView(state: .failed(reason: "offline"))
 
         // Capture flow
         case "guidance":     GuidanceSheet()
