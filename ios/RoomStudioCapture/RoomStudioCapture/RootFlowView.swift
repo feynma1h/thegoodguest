@@ -70,8 +70,10 @@ struct RootFlowView: View {
     @State private var showGuidance = false
     @State private var showProfile  = false
     @State private var showRooms    = false
-    /// The §8 invitation, offered at most once (WhySignInOffer).
-    @State private var showWhySignIn = false
+    /// The contents, behind the mark in home's header.
+    @State private var showContents = false
+    /// Notes — the needs-you items and the news.
+    @State private var showNotes    = false
     /// The bundle id sent for processing — used to restart polling after a fatal
     /// poll error without depending on the current CaptureManager.
     @State private var sentBundleId: String?
@@ -246,94 +248,68 @@ struct RootFlowView: View {
         }
     }
 
-    private var homeScreen: some View {
-        // EVERY notice this screen carries goes through HomeView's `notice` slot,
-        // which is inside its ScrollView. None of them may be stacked around
-        // HomeView: that column is shared with the pinned scan action, and at
-        // accessibility sizes the action is what gives — "Scan a room" truncated
-        // to "Scan a ro…" (decision 0224). Content scrolls; only the action is
-        // pinned.
-        //
-        // A failed rooms fetch must not simply fall back to the first-time hero:
-        // in this flow that IS the no-rooms variant, so silently showing it tells
-        // a returning user their rooms are gone. The hero still holds the space
-        // (it is true for everyone), with an honest line saying the phone could
-        // not look.
-        HomeView(
-            onScan: { showGuidance = true },
-            onProfile: { showProfile = true },
-            hasRooms: homeRooms == .strip,
-            roomsStrip: {
-                if case .loaded(let list, let stale) = rooms.state {
-                    RecentRoomsStrip(
-                        rooms: list,
-                        stale: stale,
-                        canOpenWeb: canOpenAnyRoomOnWeb,
-                        onOpen: openRoomOnWeb,
-                        onSeeAll: { showRooms = true },
-                        onRetry: refreshRooms
-                    )
-                }
-            },
-            notice: {
-                VStack(spacing: 14) {
-                    if failures.latestFailure != nil {
-                        UploadFailedBanner(
-                            reason: failures.latestFailure?.reason,
-                            onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
-                        )
-                    }
-                    // Suppressed while THIS bundle's failure is showing: the banner
-                    // and the row otherwise contradicted each other for the same
-                    // capture. Also suppressed on the PERSISTED failure, which
-                    // dismissing the banner cannot erase — otherwise the row came
-                    // back claiming a terminally failed bundle was still "on its way".
-                    if sentBundleId != nil, failures.latestFailure?.bundleId != sentBundleId,
-                       !sentBundleFailedOnDisk {
-                        ReEntryRow { stage = .sent }
-                    }
-                    if homeRooms == .heroWithTrouble {
-                        RoomsTroubleLine(onRetry: refreshRooms)
-                    }
-                }
-            }
+    /// What today looks like, reduced to what home's sentence and the contents
+    /// sheet actually read. One value feeds both, so the two cannot disagree
+    /// about whether anything needs the user.
+    private var homeDay: HomeDay {
+        let screen = waitScreen
+        let hasFlight = sentBundleId != nil && SurfaceRouter.isInFlight(screen)
+        // Two independent sources of "needs you": the flight this launch, if it
+        // ended in a note, and a terminal failure persisted from an earlier one.
+        // Counted separately because they are different rooms.
+        var needs = 0
+        if sentBundleId != nil, SurfaceRouter.needsUser(screen) { needs += 1 }
+        if let failure = failures.latestFailure, failure.bundleId != sentBundleId { needs += 1 }
+        return HomeDay(
+            needsYou: needs,
+            hasUnseenArrival: sentBundleId != nil && screen == .doorway,
+            hasRoomInFlight: hasFlight,
+            roomCount: rooms.state.knownCount,
+            // First run is "nothing has ever been sent", and an unknown count
+            // is not that: a failed fetch must never produce the screen that
+            // says you have never scanned anything.
+            isFirstRun: rooms.state.knownCount == 0 && sentBundleId == nil
         )
-        // The kick from onFatalBlobError cannot outlive the process, so without this
-        // independent store scan a failure from a previous launch (crash, dead
-        // battery mid-upload) would never surface — exactly the case the banner
-        // exists for.
+    }
+
+    /// The notes waiting for the user, newest first.
+    private var openNotes: [NoteKind] {
+        var notes: [NoteKind] = []
+        if sentBundleId != nil, case .note(let kind) = SurfaceRouter.placement(for: waitScreen) {
+            // The placement deliberately carries no reason — it is read here,
+            // at the one call site that has the monitor.
+            if case .uploadFailed = kind {
+                notes.append(.uploadFailed(reason: failures.latestFailure?.reason))
+            } else {
+                notes.append(kind)
+            }
+        }
+        if let failure = failures.latestFailure, failure.bundleId != sentBundleId {
+            notes.append(.uploadFailed(reason: failure.reason))
+        }
+        return notes
+    }
+
+    private var homeScreen: some View {
+        HomeView(
+            day: homeDay,
+            onScan: { showGuidance = true },
+            onOpenContents: { showContents = true },
+            onFollowLine: follow
+        )
+        // The kick from onFatalBlobError cannot outlive the process, so without
+        // this independent store scan a failure from a previous launch (crash,
+        // dead battery mid-upload) would never surface — exactly the case the
+        // notes screen exists for.
         .task { await UploadFailureMonitor.shared.refresh() }
-        // Relaunch recovery: adopt a bundle whose upload finished while the app
-        // was dead. Restoring the id is enough — the home re-entry row renders
-        // from it, and entering the wait resumes polling from the persisted
-        // record. Latched to one run per launch inside; this .task re-fires on
-        // every return to home.
-        //
-        // The phase refresh, by contrast, SHOULD run on every return: it is what
-        // keeps the re-entry row from advertising a bundle that failed while the
-        // user was away.
         .task {
             await restoreUnfinishedBundle()
             await refreshSentBundlePhase()
         }
         // Re-fires on every return to home, which is what makes a room the user
-        // just sent appear in the strip without a relaunch. Single-flighted in
-        // the store, so bouncing between home and the list cannot stack fetches.
-        .task {
-            await rooms.refresh()
-            // "After a first room" (§8) is, in this flow, the first time the
-            // user lands back on home with something to lose. The count is
-            // asserted to them, so the offer waits for a KNOWN one — a fetch
-            // that failed is not zero and not a reason to argue.
-            if WhySignInInvitation.shouldPresent(
-                rooms: rooms.state,
-                isLinked: auth.isLinked,
-                alreadyOffered: WhySignInOffer.hasOffered()
-            ) {
-                WhySignInOffer.markOffered()
-                showWhySignIn = true
-            }
-        }
+        // just sent appear in the house without a relaunch. Single-flighted in
+        // the store, so bouncing between screens cannot stack fetches.
+        .task { await rooms.refresh() }
         .sheet(isPresented: $showGuidance) {
             GuidanceSheet(
                 onStart: {
@@ -343,18 +319,25 @@ struct RootFlowView: View {
                 },
                 onDismiss: { showGuidance = false }
             )
-            // At accessibility sizes the .medium detent leaves almost no room for
-            // content once the pinned CTA is placed — open large instead.
             .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showContents) {
+            ContentsSheet(
+                day: homeDay,
+                onOpen: { entry in
+                    showContents = false
+                    open(entry)
+                },
+                onClose: { showContents = false }
+            )
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showProfile) {
             NavigationStack {
-                ProfileView(
-                    uid: auth.currentUID,
-                    isLinked: auth.isLinked,
-                    onClose: { showProfile = false }
-                )
+                ProfileView(uid: auth.currentUID,
+                            isLinked: auth.isLinked,
+                            onClose: { showProfile = false })
             }
         }
         .sheet(isPresented: $showRooms) {
@@ -368,22 +351,56 @@ struct RootFlowView: View {
                 onClose: { showRooms = false }
             )
         }
-        .sheet(isPresented: $showWhySignIn) {
-            // The count is re-read at presentation rather than captured at the
-            // trigger: a sheet that renders a number must take it from the same
-            // store everything else reads, and if it is somehow no longer known
-            // the sheet declines to make its argument rather than inventing one.
-            if let count = rooms.state.knownCount {
-                WhySignInInvitationSheet(roomCount: count) { showWhySignIn = false }
-                    .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
-                    .presentationDragIndicator(.visible)
-            }
+        .sheet(isPresented: $showNotes) {
+            NotesView(
+                needsYou: openNotes,
+                arrival: nil,
+                canOpenArrival: canOpenAnyRoomOnWeb,
+                onAcknowledge: acknowledge,
+                onOpenNote: { _ in showNotes = false; stage = .sent },
+                onClose: { showNotes = false }
+            )
         }
     }
 
-    // MARK: - Rooms
+    // MARK: - Going places
 
-    private var homeRooms: HomeRooms.Presentation { HomeRooms.presentation(for: rooms.state) }
+    /// Home's sentence, followed.
+    private func follow(_ destination: HomeDestination) {
+        switch destination {
+        case .notes:   showNotes = true
+        case .house:   showRooms = true
+        // Both live on the post-send surface, which routes itself: the sentence
+        // only has to get the user there.
+        case .desk, .doorway: stage = .sent
+        }
+    }
+
+    /// A contents entry, opened.
+    private func open(_ entry: ContentsEntry) {
+        switch entry {
+        case .house: showRooms = true
+        case .desk:  stage = .sent
+        case .notes: showNotes = true
+        case .you:   showProfile = true
+        }
+    }
+
+    /// Acknowledge a note, for good.
+    ///
+    /// Permanent rather than session-local: the old banner returned on every
+    /// launch because it interrupted a screen the user came to for something
+    /// else. A note is a screen they navigated to on purpose, so a tap here is
+    /// a statement that they have read it.
+    private func acknowledge(_ kind: NoteKind) {
+        Task { await UploadFailureMonitor.shared.dismiss() }
+        if sentBundleId != nil, SurfaceRouter.needsUser(waitScreen) {
+            endFlight()
+        }
+        if openNotes.count <= 1 { showNotes = false }
+    }
+
+    // MARK: - Rooms
 
     /// The doorway's `canOpenWeb`, asked once for the history surfaces. Nil
     /// webBaseURL is the deliberate state today (NetworkConfig), so this is
@@ -448,15 +465,10 @@ struct RootFlowView: View {
                 .onChange(of: waitScreen, initial: true) { _, screen in
                     LiveActivityController.shared.noteWaitScreen(screen, bundleId: sentBundleId)
                 }
-            // A terminal blob failure for a DIFFERENT (earlier) bundle is otherwise
-            // invisible here — float it over whatever this capture is doing.
-            if let failure = failures.latestFailure, failure.bundleId != sentBundleId {
-                UploadFailedBanner(
-                    reason: failure.reason,
-                    onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
-                )
-                .padding([.horizontal, .top], 20)
-            }
+            // A terminal failure for a DIFFERENT bundle no longer floats here.
+            // It is a note, counted into home's sentence and read on the notes
+            // screen — a failure belonging to an earlier room has no business
+            // interrupting the wait for this one.
         }
     }
 

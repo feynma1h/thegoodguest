@@ -13,15 +13,15 @@
 /// three review passes previously claimed coverage they did not have.
 ///
 /// So this is the screenshot half of that policy, made repeatable. It composes
-/// each screen the same way `RootFlowView` composes it — the home variants in
-/// particular go through `HomeView`'s real `notice` and `roomsStrip` slots, so a
-/// photograph taken here is a photograph of the shipping layout and not of a
-/// hand-assembled lookalike.
+/// each screen the same way `RootFlowView` composes it — the home variants are
+/// built from a `HomeDay` and compose their own sentence through the real
+/// resolver, so a photograph taken here is a photograph of the shipping routing
+/// and not of a hand-written string.
 ///
 /// HOW TO DRIVE IT, following `StagingHooks`' launch-argument convention:
 ///
 ///     xcrun simctl launch <udid> com.roomstudio.RoomStudioCapture \
-///         -rs.gallery.screen home-all
+///         -rs.gallery.screen home-needsyou
 ///
 /// Pair it with `xcrun simctl ui <udid> content_size accessibility-extra-extra-extra-large`
 /// to photograph the accessibility sizes, which is where this app's layout
@@ -64,21 +64,35 @@ enum ScreenGallery {
     }
 
     static let screens: [Entry] = [
-        // ── Home: the subject. Every variant the flow can produce. ──────────
-        .init(id: "home-first",       title: "Home · first time",
-              note: "The hero claim and one action. No rooms, nothing to say."),
-        .init(id: "home-strip",       title: "Home · returning",
-              note: "The strip replaces the hero the moment any room is known."),
-        .init(id: "home-strip-stale", title: "Home · list may be stale",
-              note: "A refresh failed after an earlier success; the rooms are kept."),
-        .init(id: "home-trouble",     title: "Home · rooms unreachable",
-              note: "Hero plus an honest line. Never the hero alone — that would read as no rooms."),
-        .init(id: "home-banner",      title: "Home · upload failed",
-              note: "A terminally failed upload from a previous launch."),
-        .init(id: "home-reentry",     title: "Home · room in flight",
-              note: "The way back into a room still being rebuilt."),
-        .init(id: "home-all",         title: "Home · everything at once",
-              note: "All three notices, the hero, and the pinned action. Nothing caps this stack."),
+        // ── Home: the claim, one sentence, one action. ──────────────────────
+        .init(id: "home-first",    title: "Home · first run",
+              note: "The claim, the support line, and the whisper that teaches where things live."),
+        .init(id: "home-quiet",    title: "Home · ordinary day",
+              note: "A standing fact, pointing at the house. The claim has not moved."),
+        .init(id: "home-flight",   title: "Home · a room in flight",
+              note: "Gold, quiet, pointing at the desk."),
+        .init(id: "home-arrival",  title: "Home · arrival",
+              note: "Gold, pointing at the doorway. The app's peak moment finally reaches home."),
+        .init(id: "home-needsyou", title: "Home · something needs you",
+              note: "Rust, pointing at Notes — and mentioning the flight without routing to it."),
+        .init(id: "home-trouble",  title: "Home · rooms unreachable",
+              note: "The count is unknown, so the sentence states no number and never a zero."),
+
+        // ── The contents, behind the mark ───────────────────────────────────
+        .init(id: "contents-quiet",    title: "Contents · quiet day",
+              note: "The whole map as a table of contents. Four entries, always the same four."),
+        .init(id: "contents-eventful", title: "Contents · eventful day",
+              note: "Rust only for what needs you; the desk reports its own count."),
+        .init(id: "contents-nocount",  title: "Contents · the house declines",
+              note: "A count the phone cannot vouch for is blank — never zero."),
+
+        // ── Notes ───────────────────────────────────────────────────────────
+        .init(id: "notes-full",  title: "Notes · needs you, and news",
+              note: "Failures first, the arrival below. Got it is permanent."),
+        .init(id: "notes-news",  title: "Notes · news only",
+              note: "The arrival card when nothing is wrong."),
+        .init(id: "notes-quiet", title: "Notes · quiet",
+              note: "The ordinary case. No illustration, no reassurance."),
 
         // ── The other history surface ───────────────────────────────────────
         .init(id: "rooms-list",        title: "Your rooms",
@@ -171,32 +185,13 @@ private enum GalleryFixture {
 
 // MARK: - Home, composed the way the flow composes it
 
-/// Home through its REAL slots. The notice stack mirrors `RootFlowView`'s
-/// composition exactly — same order, same spacing, same components — because a
-/// screenshot of a lookalike would be worth nothing to anyone deciding how to
-/// reorganise the real one.
+/// Home, from a HomeDay. The screen composes its own sentence through the real
+/// resolver, so a photograph here is a photograph of the shipping routing and
+/// not of a hand-written string.
 private struct GalleryHome: View {
-    var rooms: [RoomSummary] = []
-    var stale = false
-    var banner = false
-    var reentry = false
-    var trouble = false
+    var day: HomeDay
 
-    var body: some View {
-        HomeView(
-            hasRooms: !rooms.isEmpty,
-            roomsStrip: {
-                RecentRoomsStrip(rooms: rooms, stale: stale, canOpenWeb: false)
-            },
-            notice: {
-                VStack(spacing: 14) {
-                    if banner { UploadFailedBanner(reason: GalleryFixture.failureReason) }
-                    if reentry { ReEntryRow() }
-                    if trouble { RoomsTroubleLine() }
-                }
-            }
-        )
-    }
+    var body: some View { HomeView(day: day) }
 }
 
 /// The capture screen needs a live feed object, so it gets its own wrapper to
@@ -231,13 +226,30 @@ struct ScreenGalleryView: View {
         switch screen {
 
         // Home
-        case "home-first":       GalleryHome()
-        case "home-strip":       GalleryHome(rooms: GalleryFixture.rooms)
-        case "home-strip-stale": GalleryHome(rooms: GalleryFixture.rooms, stale: true)
-        case "home-trouble":     GalleryHome(trouble: true)
-        case "home-banner":      GalleryHome(banner: true)
-        case "home-reentry":     GalleryHome(reentry: true)
-        case "home-all":         GalleryHome(banner: true, reentry: true, trouble: true)
+        case "home-first":    GalleryHome(day: HomeDay(isFirstRun: true))
+        case "home-quiet":    GalleryHome(day: HomeDay(roomCount: 6))
+        case "home-flight":   GalleryHome(day: HomeDay(hasRoomInFlight: true, roomCount: 6))
+        case "home-arrival":  GalleryHome(day: HomeDay(hasUnseenArrival: true, roomCount: 6))
+        case "home-needsyou": GalleryHome(day: HomeDay(needsYou: 1, hasRoomInFlight: true,
+                                                       roomCount: 6))
+        case "home-trouble":  GalleryHome(day: HomeDay(roomCount: nil))
+
+        // The contents, and the screens home now points at
+        case "contents-quiet":
+            ContentsSheet(day: HomeDay(roomCount: 6))
+        case "contents-eventful":
+            ContentsSheet(day: HomeDay(needsYou: 2, hasRoomInFlight: true, roomCount: 9))
+        case "contents-nocount":
+            ContentsSheet(day: HomeDay(needsYou: 1, roomCount: nil))
+        case "notes-full":
+            NotesView(needsYou: [.uploadFailed(reason: GalleryFixture.failureReason),
+                                 .incompleteUpload(missingCount: 3)],
+                      arrival: "Yesterday's room is on your desk.",
+                      canOpenArrival: true)
+        case "notes-news":
+            NotesView(arrival: "This morning's room is on your desk.")
+        case "notes-quiet":
+            NotesView()
 
         // Rooms
         case "rooms-list":
