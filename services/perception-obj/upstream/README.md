@@ -64,8 +64,16 @@ the twelve notebooks in `examples/` are the only authority.
   no "one segment per object" switch.
 - **No mask-quality or IoU head.** The returned state is `masks_logits`, `masks`,
   `boxes`, `scores` and size metadata — nothing analogous to SAM 1/2's
-  `iou_predictions`. `masks_logits` is the only boundary-confidence signal that
-  exists, and we discard it.
+  `iou_predictions`.
+- **`masks_logits` is misnamed and we throw it away.** It is post-`sigmoid()`,
+  so it is a per-pixel PROBABILITY in [0, 1] at full image resolution, not a
+  logit — anyone reading the name would assume otherwise. The binary mask is
+  literally `masks_logits > 0.5`, and that 0.5 is a bare constant with no
+  parameter behind it (unlike `confidence_threshold`, which is settable). So a
+  leg the model scored 0.45 is deleted with no way to ask for it back, and the
+  only record that it was seen at all is in a tensor `models/sam3.py` does not
+  read. It is the one dense, per-pixel, DEPTH-FREE evidence of object extent
+  the model emits.
 - **Geometric prompts carry a `label`, so NEGATIVE boxes are supported**
   (`{"box": [...], "label": True/False}` in `examples/sam3_image_interactive.ipynb`).
   `models/sam3.refine_with_box` only ever sends positive ones.
