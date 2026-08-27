@@ -47,21 +47,33 @@ import SwiftUI
 /// The two ring pairs, interpolated. See the note above on why lerping these
 /// four numbers is exact rather than approximate.
 private struct MorphingRings: Shape {
-    var progress: CGFloat
-    /// Both in the view's own coordinates, already placed.
+    /// Lettering → mark, at the centre.
+    var gather: CGFloat
+    /// Mark at the centre → mark in home's header slot. Composed AFTER the
+    /// gather rather than blended with it: during the gather this is 0 and
+    /// during the travel the gather is 1, so at every frame exactly one of the
+    /// two is moving and the result is still a similarity of the same drawing.
+    var landing: CGFloat
+    /// All three in the view's own coordinates, already placed.
     let start: [MarkRing]
     let end: [MarkRing]
+    let slot: [MarkRing]
 
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(gather, landing) }
+        set { gather = newValue.first; landing = newValue.second }
+    }
+
+    /// The rings at this instant: gathered, then carried.
+    private var current: [MarkRing] {
+        let gathered = zip(start, end).map { lerp($0, $1, gather) }
+        guard landing > 0 else { return gathered }
+        return zip(gathered, slot).map { lerp($0, $1, landing) }
     }
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        for (from, to) in zip(start, end) {
-            path.addPath(BrandPath.ring(lerp(from, to, progress)))
-        }
+        for ring in current { path.addPath(BrandPath.ring(ring)) }
         return path
     }
 
@@ -161,11 +173,21 @@ private struct FullScript: Shape {
 }
 
 struct SplashView: View {
-    /// Called once the mark has settled and the splash has faded.
+    /// Where home's own mark sits, in this view's coordinates, measured rather
+    /// than assumed — the header's position depends on the safe area and the
+    /// text size, neither of which this file may guess at. Nil when home has
+    /// not published one (previews, the screenshot gallery), in which case the
+    /// mark simply fades where it formed, as it did before.
+    var slot: CGRect?
+    /// Called when the mark starts its travel — the moment home should begin
+    /// fading in behind it.
+    var onSettle: () -> Void = {}
+    /// Called once the mark has landed and the splash has faded.
     var onFinished: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var progress: CGFloat = 0
+    @State private var landing: CGFloat = 0
     @State private var scriptOpacity: CGFloat = 0
     @State private var markOpacity: CGFloat = 0
     @State private var veil: CGFloat = 1
@@ -200,6 +222,20 @@ struct SplashView: View {
                 )
             )
 
+            // The mark's resting place. `MarkRingShape` fits the canvas by the
+            // ink box and centres it, so reproducing that here is scale by ink
+            // height and put the canvas centre on the slot's centre — the same
+            // two lines the centred placement above uses.
+            let slotRings: [MarkRing] = {
+                guard let slot else { return endRings }
+                let s = slot.height / MarkGeometry.inkHeight
+                return placed(
+                    MarkGeometry.rings, scale: s,
+                    offset: CGPoint(x: slot.midX - MarkGeometry.canvas * s / 2,
+                                    y: slot.midY - MarkGeometry.canvas * s / 2)
+                )
+            }()
+
             ZStack {
                 ForEach(Array(letterSpans(scale: nameScale, offset: nameOrigin).enumerated()),
                         id: \.offset) { i, span in
@@ -221,7 +257,8 @@ struct SplashView: View {
                 }
                 .opacity(scriptOpacity)
 
-                MorphingRings(progress: progress, start: startRings, end: endRings)
+                MorphingRings(gather: progress, landing: landing,
+                              start: startRings, end: endRings, slot: slotRings)
                     .fill(Color.rsAction, style: FillStyle(eoFill: true))
                     .opacity(markOpacity)
             }
@@ -286,7 +323,12 @@ struct SplashView: View {
         /// collapses onto the anchor.
         static let letterFade = 0.98
         static let holdMark = 0.45
-        static let leave = 0.42
+        /// The mark walking to its place in home's header while home fades in
+        /// behind it. Slower than the leave it replaces: this beat is the hand
+        /// -off, and the eye has to be able to follow the mark to where it will
+        /// live from now on.
+        static let travel = 0.62
+        static let leave = 0.28
 
         static func ms(_ seconds: Double) -> Duration { .milliseconds(Int(seconds * 1000)) }
     }
@@ -310,8 +352,26 @@ struct SplashView: View {
         withAnimation(.easeIn(duration: Timing.letterFade)) { scriptOpacity = 0 }
         try? await Task.sleep(for: Timing.ms(Timing.gather))
 
-        // 3. A beat on the mark, then out of the way.
+        // 3. A beat on the mark.
         try? await Task.sleep(for: Timing.ms(Timing.holdMark))
+
+        // 4. The mark walks to its corner and home arrives behind it. The
+        //    splash does not cut to home; it BECOMES home's header, so the
+        //    first thing on the new screen is the thing that was just centre
+        //    stage. Skipped when nothing published a slot.
+        await land()
+    }
+
+    /// The hand-off. Shared by both timelines, because where the mark ends up
+    /// is not a motion decision — only how it gets there is.
+    private func land() async {
+        onSettle()
+        if slot != nil, !reduceMotion {
+            withAnimation(.timingCurve(0.4, 0, 0.15, 1, duration: Timing.travel)) {
+                landing = 1
+            }
+            try? await Task.sleep(for: Timing.ms(Timing.travel))
+        }
         withAnimation(.easeOut(duration: Timing.leave)) { veil = 0 }
         try? await Task.sleep(for: Timing.ms(Timing.leave))
         onFinished()
@@ -329,9 +389,10 @@ struct SplashView: View {
             markOpacity = 1
         }
         try? await Task.sleep(for: Timing.ms(Timing.letterFade + Timing.holdMark))
-        withAnimation(.easeOut(duration: Timing.leave)) { veil = 0 }
-        try? await Task.sleep(for: Timing.ms(Timing.leave))
-        onFinished()
+        // Reduced motion loses the TRAVEL, not the hand-off: the mark
+        // cross-fades in place and home arrives with it, so the same two things
+        // still happen in the same order.
+        await land()
     }
 }
 
@@ -347,15 +408,59 @@ extension View {
 
 private struct SplashOverlay: ViewModifier {
     @State private var showing = true
+    @State private var contentIn: CGFloat = 0
 
     func body(content: Content) -> some View {
-        content.overlay {
-            if showing {
-                SplashView { showing = false }
-                    .transition(.identity)
-                    .zIndex(1)
+        content
+            // Laid out from the first frame even while invisible — that is what
+            // lets home publish its mark slot before the splash needs it, and
+            // what lets the launch tasks run underneath.
+            .opacity(showing ? contentIn : 1)
+            .environment(\.splashIsPlaying, showing)
+            .overlayPreferenceValue(MarkSlotKey.self) { anchor in
+                GeometryReader { proxy in
+                    if showing {
+                        SplashView(
+                            slot: anchor.map { proxy[$0] },
+                            onSettle: {
+                                withAnimation(.easeOut(duration: 0.5)) { contentIn = 1 }
+                            },
+                            onFinished: { showing = false }
+                        )
+                        .transition(.identity)
+                    }
+                }
+                .zIndex(1)
             }
-        }
+    }
+}
+
+// MARK: - The mark's slot
+
+/// Where home's mark sits, published upward so the splash can land on it.
+///
+/// An anchor rather than a number: the header's position moves with the safe
+/// area and the text size, and a splash that guessed at it would drift on a
+/// device nobody tested. First one wins — only home publishes.
+struct MarkSlotKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
+private struct SplashIsPlayingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// True while the splash is on screen. Home's own mark reads this and holds
+    /// itself invisible, so the travelling mark is the only one on screen — two
+    /// marks converging on one spot would read as a doubling rather than a
+    /// hand-off.
+    var splashIsPlaying: Bool {
+        get { self[SplashIsPlayingKey.self] }
+        set { self[SplashIsPlayingKey.self] = newValue }
     }
 }
 

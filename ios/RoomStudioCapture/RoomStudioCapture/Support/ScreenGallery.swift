@@ -86,6 +86,22 @@ enum ScreenGallery {
         .init(id: "contents-nocount",  title: "Contents · the house declines",
               note: "A count the phone cannot vouch for is blank — never zero."),
 
+        // ── The desk. BUILT, not yet wired — the post-send surface still
+        //    routes to the old wait screens. Photographable so the copy and
+        //    the layout can be judged before it replaces them. ─────────────
+        .init(id: "desk-sending", title: "The desk · sending",
+              note: "Leaving is free, and the line says so rather than the button implying it."),
+        .init(id: "desk-working", title: "The desk · at the desk",
+              note: "Elapsed only, coarse, from the server's clock. No orb, no pill."),
+        .init(id: "desk-paused",  title: "The desk · paused",
+              note: "Finally has a surface. Nothing for the user to do, said plainly."),
+        .init(id: "desk-limited", title: "The desk · today's limit",
+              note: "Also finally has a surface. The only useful fact is when it lifts."),
+        .init(id: "desk-retry",   title: "The desk · didn't leave the phone",
+              note: "The one desk state with an action — retrying genuinely works."),
+        .init(id: "desk-clear",   title: "The desk · clear",
+              note: "The ordinary state, and it has to be the screen's best one."),
+
         // ── Notes ───────────────────────────────────────────────────────────
         .init(id: "notes-full",  title: "Notes · needs you, and news",
               note: "Failures first, the arrival below. Got it is permanent."),
@@ -237,11 +253,25 @@ struct ScreenGalleryView: View {
 
         // The contents, and the screens home now points at
         case "contents-quiet":
-            ContentsSheet(day: HomeDay(roomCount: 6))
+            ContentsScreen(day: HomeDay(roomCount: 6))
         case "contents-eventful":
-            ContentsSheet(day: HomeDay(needsYou: 2, hasRoomInFlight: true, roomCount: 9))
+            ContentsScreen(day: HomeDay(needsYou: 2, hasRoomInFlight: true, roomCount: 9))
         case "contents-nocount":
-            ContentsSheet(day: HomeDay(needsYou: 1, roomCount: nil))
+            ContentsScreen(day: HomeDay(needsYou: 1, roomCount: nil))
+        case "desk-sending":
+            DeskView(state: .sending, roomTitle: "today's room")
+        case "desk-working":
+            DeskView(state: .working(anchor: GalleryFixture.anchor, longRunning: false),
+                     roomTitle: "today's room")
+        case "desk-paused":
+            DeskView(state: .paused, roomTitle: "yesterday's room")
+        case "desk-limited":
+            DeskView(state: .rateLimited(resetsAt: GalleryFixture.anchor.addingTimeInterval(31_000)),
+                     roomTitle: "today's room")
+        case "desk-retry":
+            DeskView(state: .retryableSendFailure, roomTitle: "today's room")
+        case "desk-clear":
+            DeskView(state: nil)
         case "notes-full":
             NotesView(needsYou: [.uploadFailed(reason: GalleryFixture.failureReason),
                                  .incompleteUpload(missingCount: 3)],

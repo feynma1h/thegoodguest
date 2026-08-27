@@ -19,9 +19,10 @@
 /// moved to the house; the claim stayed. It is on screen on day one and on day
 /// four hundred.
 ///
-/// THE WAY IN IS THE MARK. Tapping it opens the contents — the whole map of the
-/// app as a sheet. It is taught once, by a line that appears only before the
-/// user has sent anything, and never again.
+/// THE WAY IN IS THE MARK, which opens the contents — the whole map of the app,
+/// as a screen you navigate to and come back from rather than a sheet that
+/// slides over. Nothing explains it: the mark is dressed as a button, which is
+/// how a control says what it is without a caption.
 ///
 /// The mark and not a lockup: the brand lane's rule is that the mark IS the two
 /// middle letters of the name, so the two are never set side by side and app
@@ -41,6 +42,8 @@ struct HomeView: View {
     /// Tapping the sentence. Nil destination means there is no sentence.
     var onFollowLine: (HomeDestination) -> Void = { _ in }
 
+    @Environment(\.splashIsPlaying) private var splashIsPlaying
+
     private var line: HomeLine? { HomeLineResolver.line(for: day) }
 
     var body: some View {
@@ -54,11 +57,6 @@ struct HomeView: View {
             // does not.
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if day.isFirstRun {
-                        whisper
-                            .padding(.bottom, 26)
-                    }
-
                     claim
 
                     if let line {
@@ -79,39 +77,54 @@ struct HomeView: View {
 
     // MARK: - Pieces
 
-    /// The mark alone, and nothing else. The old profile glyph moved into the
-    /// contents sheet: home's corner carries one affordance, not two, and a
-    /// second glyph beside the first would make neither of them obviously the
-    /// way in.
+    /// The mark, dressed as the control it is.
+    ///
+    /// THE PROBLEM WITH A BARE MARK is that a mark in a corner is a logo, and
+    /// logos are not tappable. The first attempt solved that with a caption
+    /// telling the user to tap it, which is the app explaining its own
+    /// interface — and a line of instructional chrome on the calmest screen in
+    /// the product is a worse cost than the one it was paying.
+    ///
+    /// So the affordance is carried by the treatment instead. The mark sits on
+    /// a soft plate with a hairline edge, which is this app's own button
+    /// language — the same one the profile glyph used — and a control at
+    /// standard bar position, with a visible container and a chevron, is
+    /// understood without being told. The whole plate is the target and it
+    /// clears the 44pt minimum by construction rather than by a frame nobody
+    /// can see.
     private var header: some View {
         HStack {
             Button(action: onOpenContents) {
-                // 22pt of drawn mark inside a 44pt target. The frame is the
-                // hit area, not decoration — see the note above.
-                ChromeMark()
-                    .frame(width: 44, height: 44, alignment: .leading)
-                    .contentShape(Rectangle())
+                HStack(spacing: 7) {
+                    ChromeMark()
+                        // Published for the splash to land on, and held
+                        // invisible while it is still travelling — see
+                        // `splashIsPlaying`. It still LAYS OUT, which is what
+                        // makes the anchor available before it is needed.
+                        .anchorPreference(key: MarkSlotKey.self, value: .bounds) { $0 }
+                        .opacity(splashIsPlaying ? 0 : 1)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.rsInk.opacity(0.35))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(Color.rsInk.opacity(0.045))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .stroke(Color.rsHairline, lineWidth: 1)
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
             }
             .accessibilityLabel("Contents")
-            .accessibilityHint("Everything the guest keeps")
+            .accessibilityHint("The house, the desk, notes and you")
             Spacer()
         }
     }
 
-    /// Taught once, before anything has been sent, and never shown again.
-    ///
-    /// It points by POSITION rather than by name or shape. The design's
-    /// original — "everything I keep lives behind my name" — cannot survive the
-    /// brand lane's rule that chrome shows the mark alone: there is no name on
-    /// screen to live behind. "The mark" is no better, being a word for the
-    /// thing rather than the thing. And describing the glyph would break the
-    /// moment the mark itself changes. Where it sits is true in every version.
-    private var whisper: some View {
-        Text("Tap me up in the corner — that's where I keep everything.")
-            .rsFont(.guest, size: 15)
-            .foregroundStyle(Color.rsInkFaint)
-            .fixedSize(horizontal: false, vertical: true)
-    }
 
     private var claim: some View {
         VStack(alignment: .leading, spacing: 14) {
