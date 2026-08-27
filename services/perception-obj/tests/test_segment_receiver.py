@@ -338,3 +338,100 @@ class TestProbabilityMaps:
             scene_id="s", bundle_uri="gs://b/x/bundle.pb", frame_indices=[1]
         )
         assert req.write_prob is False
+
+
+class TestClickRefinement:
+    """The loop that seeds SAM 3's visual path with a mask and clicks in its own
+    leftover. It records every round and decides nothing — the guard lives
+    offline, because the guard has been the weak link three times."""
+
+    class _Model:
+        """Grows the mask by a fixed band per call, and reports a quality score
+        that is deliberately NOT ordered by size — the whole point of taking the
+        highest-scoring candidate rather than the largest."""
+
+        def __init__(self, shape=(20, 20)):
+            self.shape = shape
+            self.calls = []
+
+        def refine_with_points(self, pil, seed, points, labels, *, multimask_output=True):
+            self.calls.append({"points": list(points), "labels": list(labels),
+                               "seeded": seed is not None})
+            n = len(self.calls)
+            big = np.zeros(self.shape, dtype=bool)
+            big[:, : 6 + 6 * n] = True            # LARGEST every round, LOW score
+            mid = np.zeros(self.shape, dtype=bool)
+            # Smaller than `big` every round — so taking the highest score and
+            # taking the largest give different answers — but growing fast
+            # enough that by round 3 it reaches the neighbouring detection at
+            # column 15, which is what the guard has to notice.
+            mid[:, : 3 + 6 * n] = True            # HIGHEST score
+            small = np.zeros(self.shape, dtype=bool)
+            small[:, :2] = True
+            return [mid, big, small], [0.9, 0.4, 0.1]
+
+    def _dets(self, shape=(20, 20)):
+        seed = np.zeros(shape, dtype=bool)
+        seed[:, :3] = True
+        other = np.zeros(shape, dtype=bool)
+        other[:, 15:] = True
+        return [{"label": "desk", "mask": seed}, {"label": "chair", "mask": other}]
+
+    def test_it_takes_the_highest_scoring_not_the_largest(self):
+        m = self._Model()
+        out = sr.click_refine(m, None, self._dets(), 0, rounds=1)
+        r = out["rounds"][0]
+        assert r["scores"] == [0.9, 0.4, 0.1]
+        # round 1: the 0.9 candidate is 9 columns, the 0.4 one is 12. The
+        # larger one must lose.
+        assert r["chosen_px"] == 20 * 9
+        assert max(r["candidate_px"]) == 20 * 12
+        assert r["chosen_px"] < max(r["candidate_px"])
+
+    def test_round_zero_seeds_with_the_mask_and_no_click(self):
+        m = self._Model()
+        sr.click_refine(m, None, self._dets(), 0, rounds=2)
+        assert m.calls[0]["points"] == [] and m.calls[0]["seeded"]
+        assert len(m.calls[1]["points"]) == 1, "later rounds must carry a click"
+        assert m.calls[1]["labels"] == [1], "the click must be positive"
+
+    def test_the_click_lands_inside_the_leftover(self):
+        m = self._Model()
+        out = sr.click_refine(m, None, self._dets(), 0, rounds=2)
+        x, y = out["rounds"][1]["click"]
+        # round 0 took columns 0..8 over a seed of 0..2, so the leftover is
+        # columns 3..8 and the click must sit inside it
+        assert 3 <= x <= 8, f"click at x={x} is not in the leftover"
+
+    def test_it_measures_what_the_growth_covers_of_others(self):
+        """The guard's input. Round 2's growth reaches column 15+, which is the
+        other detection."""
+        m = self._Model()
+        out = sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        assert out["rounds"][0]["worst_other_covered"] == 0.0
+        assert any(r["worst_other_covered"] > 0 for r in out["rounds"]), (
+            "growth onto the neighbour was never reported"
+        )
+        hit = next(r for r in out["rounds"] if r["worst_other_covered"] > 0)
+        assert hit["worst_other_index"] == 0, "reports which other mask, by index"
+
+    def test_it_decides_nothing(self):
+        """Every round is recorded even when growth swallows the neighbour."""
+        m = self._Model()
+        out = sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        assert len(out["rounds"]) == 3
+
+    def test_a_model_that_returns_nothing_is_not_an_error(self):
+        class Dead:
+            def refine_with_points(self, *a, **k):
+                return None
+        assert sr.click_refine(Dead(), None, self._dets(), 0, rounds=2) is None
+
+    def test_an_out_of_range_seed_is_refused(self):
+        assert sr.click_refine(self._Model(), None, self._dets(), 9, rounds=1) is None
+
+    def test_the_request_defaults_to_off(self):
+        req = sr.SegmentRequest(
+            scene_id="s", bundle_uri="gs://b/x/bundle.pb", frame_indices=[1]
+        )
+        assert req.refine_seed_mask is None
