@@ -21,8 +21,9 @@
 ///
 /// THE WAY IN IS THE MARK, which opens the contents — the whole map of the app,
 /// as a screen you navigate to and come back from rather than a sheet that
-/// slides over. Nothing explains it: the mark is dressed as a button, which is
-/// how a control says what it is without a caption.
+/// slides over. Nothing explains it in words and nothing dresses it up: once
+/// per launch a dotted leader and the word MENU slide out from behind it, and
+/// then it is a mark again. See MenuPeek.
 ///
 /// The mark and not a lockup: the brand lane's rule is that the mark IS the two
 /// middle letters of the name, so the two are never set side by side and app
@@ -42,7 +43,6 @@ struct HomeView: View {
     /// Tapping the sentence. Nil destination means there is no sentence.
     var onFollowLine: (HomeDestination) -> Void = { _ in }
 
-    @Environment(\.splashIsPlaying) private var splashIsPlaying
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var line: HomeLine? { HomeLineResolver.line(for: day) }
@@ -92,54 +92,22 @@ struct HomeView: View {
 
     // MARK: - Pieces
 
-    /// The mark, dressed as the control it is.
+    /// The mark, bare, with the hint that says it is a way in.
     ///
-    /// THE PROBLEM WITH A BARE MARK is that a mark in a corner is a logo, and
-    /// logos are not tappable. The first attempt solved that with a caption
-    /// telling the user to tap it, which is the app explaining its own
-    /// interface — and a line of instructional chrome on the calmest screen in
-    /// the product is a worse cost than the one it was paying.
+    /// No plate, no border, no chevron — the mark is left exactly as the brand
+    /// draws it. What makes it legible as a control is `MenuPeekMark`, which
+    /// shows what is behind it once per launch and then gets out of the way.
+    /// The tap target is still 44pt; it is simply invisible.
     ///
-    /// So the affordance is carried by the treatment instead. The mark sits on
-    /// a soft plate with a hairline edge, which is this app's own button
-    /// language — the same one the profile glyph used — and a control at
-    /// standard bar position, with a visible container and a chevron, is
-    /// understood without being told. The whole plate is the target and it
-    /// clears the 44pt minimum by construction rather than by a frame nobody
-    /// can see.
+    /// The old profile glyph moved into the contents: home's corner carries one
+    /// affordance, not two, and a second glyph beside the first would make
+    /// neither of them obviously the way in.
     private var header: some View {
         HStack {
-            Button(action: onOpenContents) {
-                HStack(spacing: 7) {
-                    ChromeMark()
-                        // Published for the splash to land on, and held
-                        // invisible while it is still travelling — see
-                        // `splashIsPlaying`. It still LAYS OUT, which is what
-                        // makes the anchor available before it is needed.
-                        .anchorPreference(key: MarkSlotKey.self, value: .bounds) { $0 }
-                        .opacity(splashIsPlaying ? 0 : 1)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.rsInk.opacity(0.35))
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(Color.rsInk.opacity(0.045))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .stroke(Color.rsHairline, lineWidth: 1)
-                        )
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            }
-            .accessibilityLabel("Contents")
-            .accessibilityHint("The house, the desk, notes and you")
+            MenuPeekMark(onTap: onOpenContents)
             Spacer()
         }
     }
-
 
     @ViewBuilder
     private var reportingLine: some View {
