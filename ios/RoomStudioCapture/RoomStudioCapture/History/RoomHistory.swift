@@ -162,6 +162,19 @@ nonisolated enum RoomHistory {
         return formatter.string(from: date)
     }
 
+    /// "AUG 27" — the house's mono stamp column.
+    ///
+    /// Abbreviated where `monthDay` is not: the column is scanned down rather
+    /// than read, and a spelled-out month wraps the row at accessibility sizes
+    /// for a fact that is three letters wide. `monthDay` keeps its long form
+    /// because it is set inside a sentence ("the August 12 room").
+    static func shortStamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale     = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date).uppercased()
+    }
+
     /// "3:40 pm" — lowercase meridiem, matching the guest's voice rather than
     /// the system's shouted AM/PM.
     static func clockTime(_ date: Date) -> String {

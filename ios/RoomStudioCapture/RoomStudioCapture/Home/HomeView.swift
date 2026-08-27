@@ -43,6 +43,7 @@ struct HomeView: View {
     var onFollowLine: (HomeDestination) -> Void = { _ in }
 
     @Environment(\.splashIsPlaying) private var splashIsPlaying
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var line: HomeLine? { HomeLineResolver.line(for: day) }
 
@@ -56,12 +57,26 @@ struct HomeView: View {
             // the clipped text was unrecoverable. Content scrolls; the action
             // does not.
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    claim
-
-                    if let line {
-                        LineButton(line: line) { onFollowLine(line.destination) }
-                            .padding(.top, 26)
+                // WHEN ONLY ONE CAN BE SEEN, THE ONE THAT CHANGES WINS.
+                //
+                // At accessibility sizes the claim alone fills the whole scroll
+                // region, and the sentence — home's entire reporting surface —
+                // went below the fold with nothing indicating it was there.
+                // Found by screenshot; the suite was green throughout, because
+                // the routing was correct and only the rendering was not. A
+                // home that cannot say "something needs you" is worse than the
+                // stacked notices this design replaced.
+                //
+                // So at those sizes the order swaps. The claim is a standing
+                // statement and can be scrolled to; the sentence is why the
+                // person opened the app.
+                VStack(alignment: .leading, spacing: 26) {
+                    if typeSize.isAccessibilitySize {
+                        reportingLine
+                        claim
+                    } else {
+                        claim
+                        reportingLine
                     }
                 }
                 .padding(.top, 18)
@@ -125,6 +140,13 @@ struct HomeView: View {
         }
     }
 
+
+    @ViewBuilder
+    private var reportingLine: some View {
+        if let line {
+            LineButton(line: line) { onFollowLine(line.destination) }
+        }
+    }
 
     private var claim: some View {
         VStack(alignment: .leading, spacing: 14) {
