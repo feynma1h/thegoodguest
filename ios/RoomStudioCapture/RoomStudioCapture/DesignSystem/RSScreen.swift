@@ -59,16 +59,32 @@ enum RSScreen {
 
 /// The header band. Whatever it holds sits centred in the same 44pt strip on
 /// every screen, so the first line of content below it starts at one height.
-struct ScreenHeaderFrame<Content: View>: View {
-    @ViewBuilder var content: Content
+///
+/// TRAILING CONTENT GOES IN ITS OWN SLOT, and that is not tidiness. The first
+/// version took one content block and appended a `Spacer`; a caller that wanted
+/// something at the right edge had to add a Spacer of its own, and the two then
+/// SPLIT the free space between them — SwiftUI divides it equally among
+/// spacers, so the guidance screen's close cross came to rest halfway across
+/// the header instead of flush right. With the slot there is nothing for a
+/// caller's spacer to fight.
+struct ScreenHeaderFrame<Leading: View, Trailing: View>: View {
+    @ViewBuilder var leading: Leading
+    @ViewBuilder var trailing: Trailing
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            content
-            Spacer(minLength: 0)
+            leading
+            Spacer(minLength: 8)
+            trailing
         }
         .frame(minHeight: RSScreen.headerHeight, alignment: .leading)
         .padding(.top, RSScreen.headerTop)
+    }
+}
+
+extension ScreenHeaderFrame where Trailing == EmptyView {
+    init(@ViewBuilder leading: () -> Leading) {
+        self.init(leading: leading, trailing: { EmptyView() })
     }
 }
 
