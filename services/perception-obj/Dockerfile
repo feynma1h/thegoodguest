@@ -51,7 +51,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # --- Clone SAM 3D Objects so we have the env file ---
-RUN git clone --depth 1 https://github.com/facebookresearch/sam-3d-objects.git /opt/sam3d
+# PINNED. An unpinned --depth 1 clone means two builds of identical source can
+# install different model code, with nothing recording which. The SHA and the
+# vendored copy of what we call are in upstream/README.md; a test asserts they
+# agree. Fetch-by-SHA keeps the clone shallow.
+RUN git init /opt/sam3d \
+    && cd /opt/sam3d \
+    && git remote add origin https://github.com/facebookresearch/sam-3d-objects.git \
+    && git fetch --depth 1 origin f91db411c50efee93d8db7aeb323885650f6f722 \
+    && git checkout FETCH_HEAD
 
 # --- Create the conda env from Meta's environments/default.yml ---
 # This installs the CUDA toolkit (12.1), gcc 12.4, Python 3.11.0, and all the
@@ -161,8 +169,15 @@ RUN sam3d_dir="$(cat /tmp/sam3d_snapshot_path.txt)" \
 
 # --- SAM 3 (segmentation) ---
 # Installed last so it picks up the same torch/cuda environment.
-RUN git clone --depth 1 https://github.com/facebookresearch/sam3.git /opt/sam3-repo \
-    && cd /opt/sam3-repo && pip install -e .
+# PINNED — see upstream/README.md. SAM 3.1 lives on this same `main` and needs
+# DIFFERENT checkpoints from the `facebook/sam3` weights downloaded above, so an
+# unpinned clone could pair 3.1 code with 3.0 weights.
+RUN git init /opt/sam3-repo \
+    && cd /opt/sam3-repo \
+    && git remote add origin https://github.com/facebookresearch/sam3.git \
+    && git fetch --depth 1 origin 8f0b7f4d4e7eda2ed606ebde6702c93359ad01da \
+    && git checkout FETCH_HEAD \
+    && pip install -e .
 
 # ── App-level deps: Layer A — google-cloud-* (brings in proto-plus → protobuf 6.x) ──
 # Install all Google Cloud and Firebase packages together so pip resolves them

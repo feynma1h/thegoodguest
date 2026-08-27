@@ -26,5 +26,6 @@ testpaths = [
     "tools/test_smoke_test_e2e.py",
     "tools/test_backfill_scene_expiry.py",
     "tools/test_gen_mark.py",
+    "tools/test_upstream_hook.py",
 ]
 addopts = "--import-mode=importlib"

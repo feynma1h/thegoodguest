@@ -17,12 +17,19 @@ class SAM3Model:
     """Thin wrapper around SAM 3 image model. One instance per container."""
 
     def __init__(self):
-        # SAM 3 is installed as an editable package at /opt/sam3. These imports
-        # are deferred to __init__ (not module level) so that importing
-        # models.sam3 does NOT trigger CUDA initialisation at server startup.
-        # The heavy work happens only when the first request constructs this
-        # instance. See docs/decisions/0007.
-        sys.path.insert(0, "/opt/sam3")
+        # SAM 3 is installed editable from /opt/sam3-repo (Dockerfile), so the
+        # `sam3` package is already importable and this insert is belt-and-
+        # braces. It named /opt/sam3 until 2026-08-28 — a directory the image
+        # has never contained, which made the insert a silent no-op and sent
+        # anyone looking for the source to a path that does not exist. A
+        # readable copy of what this file calls is vendored at
+        # ../upstream/sam3/, pinned to the commit the Dockerfile clones.
+        #
+        # The imports are deferred to __init__ (not module level) so that
+        # importing models.sam3 does NOT trigger CUDA initialisation at server
+        # startup. The heavy work happens only when the first request
+        # constructs this instance. See docs/decisions/0007.
+        sys.path.insert(0, "/opt/sam3-repo")
         from sam3.model.sam3_image_processor import Sam3Processor  # noqa: PLC0415
         from sam3.model_builder import build_sam3_image_model  # noqa: PLC0415
 
@@ -48,6 +55,19 @@ class SAM3Model:
         Returns a list of detected object instances, each:
             {label, instance_idx, bbox: [x1,y1,x2,y2], score, mask: HxW bool}
         Sorted by score descending.
+
+        WHAT `score` IS, read from the pinned processor rather than assumed
+        (../upstream/sam3/sam3_image_processor.py, and upstream/README.md):
+        `out_logits.sigmoid() * presence_logit_dec.sigmoid()` — a per-query
+        match probability times a per-image presence probability for the
+        prompted concept. It is a DETECTION confidence. Nothing in it measures
+        mask quality or completeness, and there is no IoU head to ask.
+        Upstream drops everything below `confidence_threshold` (default 0.5)
+        before returning, which is why no score here is under ~0.504.
+
+        Upstream applies NO NMS and NO deduplication, so several instances of
+        one object are expected output and reconciling them is our job —
+        `fusion._dedup_same_frame` is where that happens.
         """
         with self._autocast():
             inference_state = self.processor.set_image(image)
