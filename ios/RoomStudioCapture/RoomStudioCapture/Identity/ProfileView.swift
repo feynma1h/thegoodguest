@@ -52,30 +52,6 @@ struct ProfileView: View {
                     idCard
                         .padding(.top, 22)
 
-                    if !isLinked {
-                        // Opens the real, conflict-aware sign-in flow (SignInSheet →
-                        // AuthManager.linkAppleAccount). The native Apple button lives
-                        // inside that sheet — we don't fake it here.
-                        Button { showSignIn = true } label: {
-                            Text("Sign in to keep your rooms")
-                                .font(RSFont.ui(.headline, weight: .semibold))
-                                .foregroundStyle(Color.rsSurface)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 15)
-                                .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                        }
-                        .padding(.top, 16)
-                    }
-
-                    Text("Signing out lives on the web — this app only ever remembers you")
-                        .font(RSFont.ui(.footnote))
-                        .foregroundStyle(Color.rsInkFaint)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 28)
-                        .padding(.bottom, 14)
                 }
                 .rsBelowHeader()
             }
@@ -83,7 +59,38 @@ struct ProfileView: View {
         .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rsParchmentScreen()
+        .safeAreaInset(edge: .bottom) { signInAction }
         .sheet(isPresented: $showSignIn) { SignInSheet() }
+    }
+
+    /// Pinned, like every other screen's action. It sat at the end of the
+    /// scroll region, where the intro copy pushed it off the bottom at large
+    /// text sizes and where it landed at a different height from every other
+    /// screen's button.
+    @ViewBuilder
+    private var signInAction: some View {
+        RSActions {
+            if !isLinked {
+                // Opens the real, conflict-aware sign-in flow. The native Apple
+                // button lives inside that sheet — we don't fake it here.
+                Button { showSignIn = true } label: {
+                    Text("Sign in to keep your rooms")
+                        .font(RSFont.ui(.headline, weight: .semibold))
+                        .foregroundStyle(Color.rsSurface)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 17)
+                        .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            }
+        } closing: {
+            // One line, deliberately. The longer form ran to two at this
+            // width, which lifted the button above every other screen's — the
+            // closing slot is what holds them level, so it holds one line.
+            Text("Signing out lives on the web")
+                .font(RSFont.ui(.footnote))
+                .foregroundStyle(Color.rsInkFaint)
+        }
+        .padding(.horizontal, RSScreen.horizontal)
     }
 
     private var idCard: some View {

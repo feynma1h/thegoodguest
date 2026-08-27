@@ -2,7 +2,7 @@
 /// first.
 ///
 /// This is the fetch four surfaces were staged against and none could reach:
-/// the recent-rooms strip, RoomsListView, and WhySignInSheet's count (the
+/// the house, home's sentence, and the contents sheet's count (the
 /// history surfaces of design spec §8/§9). Before it, iOS spoke to exactly two
 /// routes — /captures/{id}/upload_session and /scenes/by-bundle/{id} — and
 /// could only ever ask about a bundle it had just sent, never about what it had

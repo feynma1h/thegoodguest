@@ -298,19 +298,21 @@ struct FailureView: View {
                     .padding(.top, 12)
             }
 
-            Spacer()
-
-            VStack(spacing: 11) {
-                Button(action: onPrimary) { Text("Scan the room again") }
-                    .buttonStyle(RSLightButtonStyle())
-                Button(action: onSecondary) { Text("Later") }
-                    .buttonStyle(RSQuietButtonStyle(onDark: true))
-            }
+            Spacer(minLength: 20)
         }
-        .padding(.horizontal, 32)
-        .padding(.bottom, 20)
+        .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(RSScrollableScreen(background: Color.rsInk))
+        .safeAreaInset(edge: .bottom) {
+            RSActions {
+                Button(action: onPrimary) { Text("Scan the room again") }
+                    .buttonStyle(RSLightButtonStyle())
+            } closing: {
+                Button(action: onSecondary) { Text("Later") }
+                    .buttonStyle(RSActionFootnoteStyle())
+            }
+            .padding(.horizontal, RSScreen.horizontal)
+        }
         .onAppear { RSHaptics.fire(.failure) }
     }
 
@@ -333,19 +335,21 @@ struct FailureView: View {
                       size: 15.5, onDark: true)
                 .padding(.top, 14)
 
-            Spacer()
-
-            VStack(spacing: 11) {
-                Button(action: onPrimary) { Text("Scan the room again") }
-                    .buttonStyle(RSLightButtonStyle())
-                Button(action: onSecondary) { Text("Later") }
-                    .buttonStyle(RSQuietButtonStyle(onDark: true))
-            }
+            Spacer(minLength: 20)
         }
-        .padding(.horizontal, 32)
-        .padding(.bottom, 20)
+        .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(RSScrollableScreen(background: Color.rsInk))
+        .safeAreaInset(edge: .bottom) {
+            RSActions {
+                Button(action: onPrimary) { Text("Scan the room again") }
+                    .buttonStyle(RSLightButtonStyle())
+            } closing: {
+                Button(action: onSecondary) { Text("Later") }
+                    .buttonStyle(RSActionFootnoteStyle())
+            }
+            .padding(.horizontal, RSScreen.horizontal)
+        }
         .onAppear { RSHaptics.fire(.failure) }
     }
 }
