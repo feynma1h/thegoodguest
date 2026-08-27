@@ -101,7 +101,7 @@ export default function HeroRoom({
       // so the handover is invisible.
       style={{
         background:
-          "radial-gradient(120% 90% at 50% 42%, #3f3226 0%, #2a2017 55%, #1c1610 100%)",
+          "radial-gradient(120% 90% at 50% 42%, #36342f 0%, #23221e 55%, #181715 100%)",
       }}
     >
       {scene && (

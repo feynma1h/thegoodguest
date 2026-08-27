@@ -31,10 +31,16 @@
 ///
 /// STILL STAGED, and not on that fetch: QRBridgeView (§9), whose blocker is
 /// deep-link infrastructure and the associated-domains entitlement, not a room
-/// list — the desk names the room in the link it hands over. And ColdStartView
-/// (§1 — the flow opens directly at .home, and identity is minted by the
-/// app-level launch task, so nothing ever waits on a splash). These have no entry point here and appear only in their own
-/// previews. §8's conflict SCREEN is not on that list: it is not built at all
+/// list — the desk names the room in the link it hands over. It has no entry
+/// point here and appears only in its own preview.
+///
+/// §1's cold start is not on that list, in either direction. The flow still
+/// opens directly at .home and identity is still minted by the app-level launch
+/// task, so nothing here WAITS on a splash — but the splash is real, and it is
+/// wrapped around this view by the app entry point rather than routed to from
+/// inside it. See SplashView.
+///
+/// §8's conflict SCREEN is not on that list: it is not built at all
 /// (decision 0216), because the count it was designed around cannot be obtained
 /// without becoming the account it asks about. SignInSheet owns the conflict.
 /// ReviewView's THIN-COVERAGE variant belongs to the staged list too:

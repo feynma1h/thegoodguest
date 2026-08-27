@@ -3,7 +3,8 @@
 /// Single-window app; RootFlowView is the root and coordinates the capture
 /// flow. At launch: FirebaseApp.configure(), then four .task jobs — anonymous sign-in,
 /// orphaned-capture-directory sweep, upload rehydration, and the
-/// acknowledged-flight reap (decision 0084).
+/// acknowledged-flight reap (decision 0084). The splash plays over the top of
+/// all four rather than in front of them.
 /// GoogleService-Info.plist must be present in the app bundle — obtain it
 /// from the Firebase console for project "roomstudio", iOS app bundle ID
 /// com.roomstudio.RoomStudioCapture.
@@ -45,7 +46,9 @@ struct RoomStudioCaptureApp: App {
             #if DEBUG
             // The screenshot harness (ScreenGallery) renders ONE screen from
             // fixtures and runs none of the launch work below — no sign-in, no
-            // sweep, no rehydration. Absent the launch argument this is inert
+            // sweep, no rehydration, and no splash: a harness that sat through
+            // the launch animation before every shot would make the capture
+            // pass slower for no gain. Absent the launch argument this is inert
             // and the live root below is what ships.
             if let screen = ScreenGallery.requestedScreen {
                 ScreenGalleryView(screen: screen)
@@ -62,6 +65,7 @@ struct RoomStudioCaptureApp: App {
     @ViewBuilder
     private var liveRoot: some View {
         RootFlowView()
+            .splashOnLaunch()
             .task {
                 // Attempt anonymous sign-in at launch so the UID is cached
                 // in Keychain before the user finishes their first capture.

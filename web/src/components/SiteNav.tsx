@@ -16,7 +16,7 @@ import { usePathname } from "next/navigation";
 
 import AccountMenu from "@/components/AccountMenu";
 import NewRoomSheet, { openNewRoomSheet } from "@/components/NewRoomSheet";
-import Wordmark from "@/components/Wordmark";
+import { Mark } from "@/components/Wordmark";
 import { PillButton } from "@/components/ui/spring";
 
 export default function SiteNav() {
@@ -28,7 +28,7 @@ export default function SiteNav() {
     <header className="sticky top-0 z-20 border-b border-ink/10 bg-paper/85 backdrop-blur-xl">
       <nav className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
         <Link href="/" className="transition-opacity hover:opacity-70">
-          <Wordmark />
+          <Mark height="20px" />
         </Link>
         <div className="flex items-center gap-5 text-sm">
           <Link

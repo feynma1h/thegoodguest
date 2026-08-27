@@ -153,8 +153,9 @@ enum ScreenGallery {
         // ── Outside the flow ────────────────────────────────────────────────
         .init(id: "unsupported", title: "No depth camera",
               note: "The root gate. Honest, and offers nothing to do."),
-        .init(id: "coldstart",   title: "Cold start",
-              note: "Built, but the flow opens straight at home."),
+        .init(id: "splash",      title: "The splash",
+              note: "The name resolving into the mark. Plays over the launch work, not in front of it.",
+              settles: true),
         .init(id: "qr",          title: "QR bridge",
               note: "Built, but blocked on deep links. The code encodes nothing."),
     ]
@@ -304,7 +305,7 @@ struct ScreenGalleryView: View {
 
         // Outside the flow
         case "unsupported": UnsupportedDeviceView()
-        case "coldstart":   ColdStartView()
+        case "splash":      SplashView()
         case "qr":          QRBridgeView()
 
         default:

@@ -107,13 +107,6 @@ storage, licence amendment or moderation surface. It ships when the web ships.
 Its own remaining question is the operator's eyes on eight batched judgments.
 **Check:** rides G2-01.
 
-### G2-03 · The web lockup is still set in mono
-**State:** open
-The name forces the serif by construction — "The Good Guest" is too long for
-tracked uppercase mono beside the corner mark (0245). iOS is done; the web
-lockup is not re-cut.
-**Check:** manual — visual.
-
 ### G2-04 · The product is silent and the branded fonts are placeholders
 **State:** open
 `RSSound` is wired at three call sites with no cue files in the bundle; the web
@@ -138,14 +131,16 @@ The user-facing wording is the operator's to approve; the two internal copies ar
 free.
 **Check:** automated — the string "7 days" must leave all three files.
 
-### G3-02 · Five further Privacy Policy corrections are drafted, not applied
+### G3-02 · Four further Privacy Policy corrections are drafted, not applied
 **State:** open
 From `privacy-nutrition-labels.md` §8: server request logs are undisclosed and
 outlive "delete everything" (F2); both policy pages are stale on iOS Google
-sign-in (F3); §5 describes push as live when it is not built (F4); §3 understates
-what a linked provider hands over (F5); and the camera permission string a user
-sees still reads "RoomStudio captures your room with ARKit." (F6).
-**Check:** automated for F6 (the permission string); manual for the rest.
+sign-in (F3); §5 describes push as live when it is not built (F4); and §3
+understates what a linked provider hands over (F5).
+F6 — the camera permission string — is done, and its guard moved into
+`tools/test_gen_mark.py`, which now refuses ANY user-visible Info.plist value
+carrying the dead name rather than watching that one key.
+**Check:** manual.
 
 ### G3-03 · There is no per-room deletion
 **State:** open · **Blocks:** every sharing rung above the card
@@ -177,14 +172,22 @@ scale-to-zero GPU. The deferral has never been recorded either, which makes it
 indistinguishable from an oversight.
 **Check:** automated — at least one alert policy or uptime check must exist.
 
-### G4-02 · Python CI has been red since 2026-08-21
-**State:** open
-The root suite dies at collection with `ModuleNotFoundError: No module named
-'PIL'`. `tools/test_gen_mark.py` landed that day importing Pillow, which is
-declared only in the two perception pyprojects and so is absent from what the
-root job installs via `tools/ci_deps.py`. The other three jobs pass. The root
-suite has therefore not executed on Linux since. The fix is one declared
+### G4-02 · Python CI has been red since 2026-08-21 — fix applied, unproven
+**State:** open · the CAUSE is fixed; the entry closes on a green run
+The root suite died at collection with `ModuleNotFoundError: No module named
+'PIL'`. `tools/test_gen_mark.py` imports Pillow, which was declared only in the
+two perception pyprojects and so was absent from what the root job installs via
+`tools/ci_deps.py`. The other three jobs passed, so the root suite had not
+executed on Linux since.
+
+Pillow is now declared where it belongs — the ROOT pyproject's `dev` extra, the
+root project being the one that owns `tools/` — and `python.yml` passes that
+pyproject to `ci_deps.py` alongside the other four. That is the one declared
 dependency, not a test change.
+
+**This is unproven and must not be assumed done.** Nothing here has run on
+Linux; the checker reads the latest GitHub run, which still predates the fix.
+Do not delete this entry on the strength of the diff.
 **Check:** automated — latest `python.yml` run must conclude success.
 
 ### G4-03 · Nothing gates on CI
