@@ -299,7 +299,7 @@ struct RootFlowView: View {
     /// Where home can push to. A route rather than a set of booleans: these are
     /// screens on a stack now, not sheets over a screen, and the stack needs
     /// something Hashable to hold.
-    enum HomeRoute: Hashable { case contents, house, desk, notes, you }
+    enum HomeRoute: Hashable { case contents, house, desk, notes, recovery, you }
 
     private var homeScreen: some View {
         NavigationStack(path: $path) {
@@ -364,17 +364,35 @@ struct RootFlowView: View {
                           onProfile: { path.append(.you) },
                           onClose: back)
         case .desk:
-            // The desk is the post-send surface. Entering it from here means
-            // leaving the stack: the wait owns the whole screen and has its own
-            // exits, which is the shape it already had.
-            Color.clear.onAppear { path = []; stage = .sent }
+            // With a room in flight the desk IS the post-send surface, which
+            // owns the poller's lifecycle; without one there is nothing to
+            // hand over to, so the clear state is drawn here in the stack.
+            if sentBundleId != nil {
+                Color.clear.onAppear { path = []; stage = .sent }
+            } else {
+                DeskView(state: nil,
+                         onOpenHouse: { path = [.house] },
+                         onClose: back)
+            }
         case .notes:
             NotesView(needsYou: openNotes,
                       arrival: nil,
                       canOpenArrival: canOpenAnyRoomOnWeb,
                       onAcknowledge: acknowledge,
-                      onOpenNote: { _ in path = []; stage = .sent },
+                      onOpenNote: { _ in path = [.notes, .recovery] },
                       onClose: back)
+        case .recovery:
+            // The one note that opens a screen rather than being acknowledged:
+            // whether the missing bytes can be re-sent is a question about this
+            // phone's disk, and the answer carries two different offers.
+            let actions = FailureCopy.recoverableActions(resendState)
+            FailureView(
+                kind: .recoverable(missingCount: missingPaths.count, resend: resendState),
+                onPrimary: { performRecovery(actions.primary) },
+                onSecondary: { performRecovery(actions.secondary) }
+            )
+            .task(id: missingPaths.count) { await refreshResendOffer() }
+
         case .you:
             ProfileView(uid: auth.currentUID, isLinked: auth.isLinked, onClose: back)
         }
@@ -419,6 +437,7 @@ struct RootFlowView: View {
         if sentBundleId != nil, SurfaceRouter.needsUser(waitScreen) {
             endFlight()
         }
+        // Last note acknowledged: nothing left on this screen to read.
         if openNotes.count <= 1 { back() }
     }
 
@@ -496,38 +515,13 @@ struct RootFlowView: View {
 
     @ViewBuilder
     private var postSendScreen: some View {
-        switch waitScreen {
-        case .sending:
-            // Covers both the session setup AND the blob upload: the poller is
-            // deliberately not started until the upload completes, so nothing here
-            // may claim the room has arrived.
-            WaitingView(phase: .sending, onLeave: { stage = .home })
-
-        case .waiting(let phase, let anchor):
-            WaitingView(phase: phase.waitingPhase,
-                        anchor: anchor,
-                        onTryNow: { ScenePoller.shared.checkNow() },
-                        onLeave: { stage = .home })
-
-        case .checkFailed(let anchor, let stopped):
-            // The room WAS uploaded, so "your room is safe up there" is honest;
-            // `stopped` swaps the "I'll keep trying quietly" half, and drives whether
-            // Try now resumes the loop or just fires an immediate tick.
-            WaitingView(phase: .connectionTrouble,
-                        anchor: anchor,
-                        pollingStopped: stopped,
-                        onTryNow: {
-                            // Fall back to the poller's own bundle: a loop started by
-                            // the completion kick can outlive/predate this view's
-                            // sentBundleId, and both branches being skipped left a
-                            // live-looking button doing nothing.
-                            if stopped, let id = sentBundleId ?? poller.currentBundleId {
-                                ScenePoller.shared.start(bundleId: id)
-                            } else {
-                                ScenePoller.shared.checkNow()
-                            }
-                        },
-                        onLeave: { stage = .home })
+        switch SurfaceRouter.placement(for: waitScreen) {
+        case .desk(let deskState):
+            DeskView(state: deskState,
+                     roomTitle: flightTitle,
+                     onAct: { deskAction(deskState) },
+                     onOpenHouse: { leaveFlight(); path = [.house] },
+                     onClose: { leaveDesk(deskState) })
 
         case .doorway:
             DoorwayView(onStepThrough: openWebDesk,
@@ -536,72 +530,69 @@ struct RootFlowView: View {
                         signedIntoWeb: auth.isLinked,
                         canOpenWeb: webRoomURL != nil)
 
-        case .processingFailed:
-            FailureView(kind: .terminal,
-                        onPrimary: rescanFromScratch,
-                        onSecondary: endFlight)
+        case .note:
+            // A room that has finished and failed is a note, not a screen the
+            // user is held on. Hand them straight to it: they were watching
+            // this room, so the kindest thing is to show them what happened
+            // rather than bounce them home to be told something needs them.
+            ParchmentBackground()
+                .onAppear { toNotes() }
 
-        case .incompleteUpload(let missingCount):
-            // failed_incomplete: an incomplete upload, not a bad scan. No region is
-            // named. The count IS named — the server sent it, and dropping it was
-            // decision 0085's finding 1.
-            //
-            // The offered path is now conditional (decisions 0084 + 0116): re-send
-            // the missing files when they are still on this phone, rescan when they
-            // are not. `resendState` is computed by the .task below, never guessed
-            // here, and both buttons bind through FailureCopy's own table so a
-            // label can never be paired with the wrong action.
-            let actions = FailureCopy.recoverableActions(resendState)
-            FailureView(
-                kind: .recoverable(missingCount: missingCount, resend: resendState),
-                onPrimary: { performRecovery(actions.primary) },
-                onSecondary: { performRecovery(actions.secondary) }
-            )
-            // Recompute on arrival AND whenever the count changes: a second
-            // round of recovery lands here again with a smaller list, and a
-            // stale offer would be describing the previous attempt.
-            .task(id: missingCount) { await refreshResendOffer() }
-
-        case .uploadFailed:
-            // The blobs for THIS bundle failed terminally: bundle.pb never lands, no
-            // Scene doc is ever created, and the poller would 404 → keep polling
-            // forever (it never hard-gives-up by design). Stop it and say so — with
-            // upload-honest copy and the reason, since the banner is suppressed here.
-            FailureView(kind: .uploadFailed(reason: failures.latestFailure?.reason),
-                        onPrimary: rescanFromScratch,
-                        onSecondary: endFlight)
-                .onAppear { ScenePoller.shared.reset() }
-
-        case .sendFailed(let terminal):
-            // Nothing was uploaded, so never the "didn't survive the trip" copy.
-            // terminal == a 4xx retrying cannot fix (our bug); the capture stays on
-            // disk for the relaunch rehydration path either way.
-            WaitingView(phase: terminal ? .sendFailedTerminal : .sendFailed,
-                        onTryNow: { if !terminal { sendItHome() } },
-                        onLeave: endFlight)
-
-        case .sendRateLimited(let resetsAt):
-            // The daily mint cap (decision 0087). No "Try now" — it would provably
-            // fail until the quota rolls — and no rescan offer: the capture on disk
-            // is fine, and rescanning would only spend a second mint against the
-            // same cap. Leaving is the only action, and it is enough: the record
-            // survives and the relaunch rehydration re-drives the send.
-            WaitingView(phase: .sendRateLimited(resetsAt: resetsAt), onLeave: endFlight)
-
-        case .sendPaused:
-            // Paused until the next launch — ending the flight is honest here:
-            // rehydrateAllUnfinishedBundles picks the bundle up on relaunch, and
-            // nothing in THIS process will move it.
-            WaitingView(phase: .sendPaused, onLeave: endFlight)
-
-        case .notOurs:
-            // Terminal-not-ours (decision 0074): the root-level onChange runs
-            // standDownNotOurs() on the same publish that produced this screen, so
-            // this renders for at most a frame on the way home. Bare parchment — a
-            // transition blink, not a message: there is no honest copy to show for
-            // a room this identity never owned, and no action to offer.
+        case .nowhere:
+            // Terminal-not-ours (decision 0074): the root-level onChange stands
+            // this down on the same publish that produced it, so this renders
+            // for at most a frame on the way home.
             ParchmentBackground()
         }
+    }
+
+    /// The room in flight, titled the way the house titles it, so one room
+    /// reads identically wherever it appears.
+    private var flightTitle: String? {
+        guard sentBundleId != nil else { return nil }
+        return RoomHistory.title(sentAt: lastSceneCreatedAt ?? Date(),
+                                 now: Date(), withTime: false)
+    }
+
+    /// The desk's one control, where it has one.
+    private func deskAction(_ state: DeskState) {
+        switch state {
+        case .retryableSendFailure:
+            sendItHome()
+        case .checkFailed(_, let stopped):
+            if stopped, let id = sentBundleId ?? poller.currentBundleId {
+                ScenePoller.shared.start(bundleId: id)
+            } else {
+                ScenePoller.shared.checkNow()
+            }
+        case .sending, .working, .paused, .rateLimited:
+            break
+        }
+    }
+
+    /// Leaving the desk, which is NOT the same as being done with the room.
+    ///
+    /// A room that is still moving keeps moving: the user just stops watching,
+    /// and home's sentence still points back here. Only the states that will
+    /// not move again on their own end the flight, which is what acknowledges
+    /// the record and lets the reaper reclaim it — ending a live flight would
+    /// orphan a room that was about to arrive.
+    private func leaveDesk(_ state: DeskState) {
+        switch state {
+        case .sending, .working, .checkFailed:
+            stage = .home
+        case .paused, .rateLimited, .retryableSendFailure:
+            endFlight()
+        }
+    }
+
+    /// Leave the flight without acknowledging it, then go home.
+    private func leaveFlight() { stage = .home }
+
+    /// Show the notes, from wherever.
+    private func toNotes() {
+        stage = .home
+        path = [.notes]
     }
 
     /// The server anchor as currently published by the poller (nil unless polling).
