@@ -48,6 +48,84 @@ PROBE_PREFIX = "segment_probe"
 MAX_FRAMES_PER_CALL = 24
 
 
+def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> dict | None:
+    """Seed SAM 3's visual path with one mask, click in its own leftover, repeat.
+
+    The loop the operator specified, with one change: the candidate taken each
+    round is the HIGHEST-SCORING, not the largest. Upstream says to select on
+    the model's predicted quality, and the largest candidate is the "object plus
+    surroundings" reading — the merge that 0198 measured at 113,465 px with a
+    chair base and a stool absorbed.
+
+    Records every round and decides nothing. Whether growth is acceptable is a
+    guard, the guard has been the weak link three times in this investigation,
+    and it belongs where it can be changed without a GPU rebuild.
+    """
+    import numpy as np
+
+    if seed_index >= len(detections):
+        return None
+    seed = np.asarray(detections[seed_index]["mask"], dtype=bool)
+    accepted = seed.copy()
+    others = [
+        np.asarray(d["mask"], dtype=bool)
+        for i, d in enumerate(detections) if i != seed_index
+    ]
+    rounds_out, stack = [], []
+    click = None   # round 0 seeds with the mask alone; later rounds add a click
+
+    for r in range(max(1, rounds)):
+        got = sam3_model.refine_with_points(
+            pil, accepted,
+            points=[] if click is None else [click],
+            labels=[] if click is None else [1],
+            multimask_output=True,
+        )
+        if got is None:
+            break
+        masks, scores = got
+        best = masks[0]                       # highest-scoring, not largest
+        grew = best & ~accepted
+        rec = {
+            "round": r,
+            "scores": [round(float(s), 4) for s in scores],
+            "candidate_px": [int(m.sum()) for m in masks],
+            "chosen_px": int(best.sum()),
+            "accepted_px": int(accepted.sum()),
+            "growth_px": int(grew.sum()),
+            "click": None if click is None else [int(click[0]), int(click[1])],
+        }
+        # how much of any OTHER detection the growth covers — the guard's input
+        worst, who = 0.0, None
+        for j, o in enumerate(others):
+            n = int(o.sum())
+            if n and grew.any():
+                sh = int((grew & o).sum()) / n
+                if sh > worst:
+                    worst, who = sh, j
+        rec["worst_other_covered"] = round(worst, 4)
+        rec["worst_other_index"] = who
+        rounds_out.append(rec)
+        stack.append(best)
+
+        # the next click goes in the centre of the largest leftover chunk
+        leftover = best & ~accepted
+        if not leftover.any():
+            break
+        ys, xs = np.nonzero(leftover)
+        click = (float(np.median(xs)), float(np.median(ys)))
+        accepted = best
+
+    if not stack:
+        return None
+    buf = io.BytesIO()
+    np.savez_compressed(
+        buf, masks=np.stack(stack), seed=seed,
+        seed_index=np.asarray([seed_index], dtype=np.int32),
+    )
+    return {"rounds": rounds_out, "npz": buf.getvalue()}
+
+
 def probs_npz_bytes(detections: list) -> bytes | None:
     """One frame's mask PROBABILITY maps, quantised to uint8, in detection
     order — or None when no detection carries one.
@@ -91,6 +169,12 @@ class SegmentRequest(BaseModel):
     # Also write the per-pixel probability map each binary mask was thresholded
     # from, so the 0.5 cut can be re-examined offline without another GPU run.
     write_prob: bool = False
+    # Click-refinement loop: seed SAM 3's VISUAL path with one detection's mask,
+    # click in its own leftover, repeat. Every round is recorded; nothing is
+    # decided here — the guard belongs offline where it can change without a
+    # rebuild.
+    refine_seed_mask: int | None = None
+    refine_rounds: int = 3
 
 
 def _mask_panels(pil, mask: np.ndarray, suppressed: np.ndarray | None):
@@ -242,6 +326,20 @@ async def handle_segment(
                     raw, "application/octet-stream",
                 )
 
+        refine_out = None
+        if req.refine_seed_mask is not None:
+            got = click_refine(
+                sam3_model, pil, detections, req.refine_seed_mask, req.refine_rounds
+            )
+            if got is not None:
+                _gcs_upload_for_scene(
+                    f"gs://{outputs_bucket}/",
+                    f"{base}/refine_{req.refine_seed_mask:02d}.npz",
+                    got["npz"], "application/octet-stream",
+                )
+                refine_out = got["rounds"]
+                logger.info("click refine: frame %d rounds=%s", fi, refine_out)
+
         objs = []
         for i, det in enumerate(detections):
             mask = np.asarray(det["mask"], dtype=bool)
@@ -271,6 +369,7 @@ async def handle_segment(
             "image_size": [pil.width, pil.height],
             "masks_gcs_uri": masks_uri,
             **({"probs_gcs_uri": probs_uri} if probs_uri else {}),
+            **({"refine": refine_out} if refine_out else {}),
             "suppressed_count": len(suppressed),
             "suppressed_px": int(union.sum()) if union is not None else 0,
             "objects": objs,

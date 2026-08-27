@@ -75,6 +75,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--bundle-uri", help="override; otherwise read from Firestore")
     ap.add_argument(
+        "--refine-seed", type=int,
+        help="mask index to seed SAM 3's VISUAL path with, then click in its "
+             "own leftover and repeat (writes refine_NN.npz)",
+    )
+    ap.add_argument("--refine-rounds", type=int, default=3)
+    ap.add_argument(
         "--prompt",
         help="override DEFAULT_OBJECT_PROMPT for this call — comma-separated "
              "noun phrases. SAM 3 returns the term verbatim, so a term that no "
@@ -103,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         "write_png": not args.no_png,
         "write_prob": args.probs,
         **({"object_prompt": args.prompt} if args.prompt else {}),
+        **({"refine_seed_mask": args.refine_seed,
+            "refine_rounds": args.refine_rounds} if args.refine_seed is not None else {}),
     }
     task = {
         "name": f"{queue_path}/tasks/segment-{args.scene_id}-{int(time.time())}",

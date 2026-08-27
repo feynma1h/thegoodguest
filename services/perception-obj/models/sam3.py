@@ -145,6 +145,76 @@ class SAM3Model:
         objects.sort(key=lambda o: -o["score"])
         return objects
 
+    def refine_with_points(
+        self,
+        image: Image.Image,
+        seed_mask: np.ndarray | None,
+        points: list[tuple[float, float]],
+        labels: list[int],
+        *,
+        multimask_output: bool = True,
+    ) -> tuple[list[np.ndarray], list[float]] | None:
+        """SAM 3's VISUAL path: clicks, optionally seeded with a mask.
+
+        This is the OTHER half of SAM 3 (upstream/README.md). `segment` above
+        drives the detector — text in, every matching instance out. This drives
+        the tracker — points in, ONE instance out, with the model's own quality
+        score per candidate. Same model object, same `inference_state`; nothing
+        extra is loaded.
+
+        Returns ([masks], [scores]) sorted best-first by the model's score, or
+        None when the model returns nothing.
+
+        `seed_mask` is off-label and says so: upstream types `mask_input` as
+        "a low resolution mask input... typically coming from a PREVIOUS
+        prediction iteration", 1x256x256. A binary detector mask is not that, so
+        it is resized and mapped to +/-10 logits. That is the conventional
+        encoding and it is still an assumption, which is why every round's
+        score is recorded rather than trusted.
+
+        Upstream's own guidance on `multimask_output`: three masks help for an
+        AMBIGUOUS prompt such as a single click, and "for non-ambiguous prompts,
+        such as multiple input prompts, multimask_output=False can give better
+        results". Candidates come back ranked by the model's predicted quality,
+        which is what upstream says to select on.
+        """
+        from PIL import Image as _Image
+
+        with self._autocast():
+            state = self.processor.set_image(image)
+
+        mask_input = None
+        if seed_mask is not None and seed_mask.any():
+            lo = np.asarray(
+                _Image.fromarray((np.asarray(seed_mask, dtype=bool) * 255).astype(np.uint8))
+                .resize((256, 256), _Image.BILINEAR),
+                dtype=np.float32,
+            ) / 255.0
+            mask_input = ((lo * 2.0) - 1.0)[None] * 10.0
+
+        try:
+            with self._autocast():
+                masks, scores, _logits = self.model.predict_inst(
+                    state,
+                    point_coords=np.asarray(points, dtype=np.float32) if points else None,
+                    point_labels=np.asarray(labels, dtype=np.int32) if labels else None,
+                    mask_input=mask_input,
+                    multimask_output=multimask_output,
+                )
+        except Exception:
+            logger.exception("[sam3] predict_inst failed")
+            return None
+
+        out = []
+        for m, sc in zip(np.asarray(masks), np.asarray(scores).ravel(), strict=False):
+            mm = np.squeeze(np.asarray(m))
+            if mm.ndim == 2:
+                out.append((float(sc), mm.astype(bool)))
+        if not out:
+            return None
+        out.sort(key=lambda t: -t[0])
+        return [m for _s, m in out], [s for s, _m in out]
+
     def refine_with_box(
         self,
         image: Image.Image,
