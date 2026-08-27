@@ -70,7 +70,6 @@ struct RootFlowView: View {
 
     @ObservedObject private var auth = AuthManager.shared
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     @State private var stage: Stage = .home
     @State private var showGuidance = false
@@ -332,7 +331,11 @@ struct RootFlowView: View {
         // just sent appear in the house without a relaunch. Single-flighted in
         // the store, so bouncing between screens cannot stack fetches.
         .task { await rooms.refresh() }
-        .sheet(isPresented: $showGuidance) {
+        // Full screen rather than a detented sheet: what it holds is the last
+        // thing read before a two-minute walk around a room, and a half-height
+        // card made it look like a disclosure to skim past. There is no drag
+        // indicator because there is no drag — the cross is the way out.
+        .fullScreenCover(isPresented: $showGuidance) {
             GuidanceSheet(
                 onStart: {
                     showGuidance = false
@@ -341,8 +344,6 @@ struct RootFlowView: View {
                 },
                 onDismiss: { showGuidance = false }
             )
-            .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
-            .presentationDragIndicator(.visible)
         }
     }
 

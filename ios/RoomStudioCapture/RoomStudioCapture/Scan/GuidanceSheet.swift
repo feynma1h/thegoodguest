@@ -8,8 +8,13 @@
 /// scanning is a fade, not a jolt. Under the LiDAR-only pivot (decision 0072) the
 /// tier chip is always "PRO CAPTURE"; the STANDARD-CAPTURE variant is not built.
 ///
-/// Presented as a medium-detent sheet (the caller sets the detents). Calls
-/// `onStart` once camera access is granted.
+/// Presented FULL SCREEN. It was a half-height sheet, which framed the last
+/// thing a person reads before walking a room for two minutes as a disclosure
+/// to skim past. Full screen also removes the drag-to-dismiss it used to have,
+/// so the cross at the top right is the only way out — which is the same shape
+/// every other screen in the app has.
+///
+/// Calls `onStart` once camera access is granted.
 
 import AVFoundation
 import SwiftUI
@@ -30,7 +35,7 @@ struct GuidanceSheet: View {
             header
 
             proChip
-                .padding(.top, 14)
+                .rsBelowHeader()
 
             VStack(alignment: .leading, spacing: 18) {
                 GuidanceRow(
@@ -68,7 +73,6 @@ struct GuidanceSheet: View {
                 .padding(.bottom, 12)
             }
             .padding(.horizontal, RSScreen.horizontal)
-            .padding(.top, 20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .safeAreaInset(edge: .bottom) {
@@ -92,18 +96,24 @@ struct GuidanceSheet: View {
 
     // MARK: - Pieces
 
+    /// The shared header band, on the dark surface. The title is set at the
+    /// same size as every other screen's now that this is a screen rather than
+    /// a card — it was two-thirds that when it was something you peered at over
+    /// the top of home.
     private var header: some View {
-        HStack {
+        ScreenHeaderFrame {
             Text("Before you start")
-                .rsFont(.display, size: 15, weight: .medium)
-                .foregroundStyle(Color.rsOnDark.opacity(0.8))
-            Spacer()
+                .rsFont(.display, size: 22, weight: .medium, maxSize: 30)
+                .foregroundStyle(Color.rsOnDark)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color.rsOnDark)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
                     .background(Color.rsOnDark.opacity(0.12), in: Circle())
+                    .contentShape(Circle())
             }
             .accessibilityLabel("Close")
         }
@@ -151,7 +161,10 @@ struct GuidanceSheet: View {
             Button {
                 requestCameraThenStart()
             } label: {
-                Label("Start scanning", systemImage: "camera.viewfinder")
+                // No glyph, matching home's scan action. Apple's viewfinder was
+                // the generic stock symbol on both, and the two buttons that
+                // start a capture should look like each other.
+                Text("Start scanning")
             }
             .buttonStyle(RSGoldButtonStyle())
         }
