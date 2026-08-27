@@ -107,6 +107,31 @@ single-chair silhouette exists from that view, and an ensemble has a clean outer
 boundary. What it lacks is a way to know when to fire that does not merge a bed
 with its nightstand.
 
+## Measured alongside, and separate: the two views land on one viewpoint
+
+Applying all of this to the study table leaves three survivors — frames 50, 51
+and 109, the operator's own picks in their order — and the per-box budget is 2,
+so SAM 3D would be handed frames 50 and 51.
+
+**Those two are 2.0 degrees apart.** Measured from the poses: 50 and 51 sit
+1.70 m and 1.75 m from the box with viewing directions two degrees apart, while
+109 is the only distinct angle in the set at 16-18 degrees. So ordering the
+survivors by box coverage spends both budget slots on one viewpoint and drops
+the one different view.
+
+This is not a mask problem and no rule in this note touches it. The census
+sampler already spreads FRAME selection by pose (farthest-point residue); the
+per-box shortlist that picks a box's second view has no such term, and 0259's
+disqualifications do not add one — they only remove frames. Worth noting before
+anyone reads "the operator's picks, in their order" as a finished result: the
+ORDER is right and the BUDGET spends it badly.
+
+The obvious response — require a box's second view to differ from its first by
+some angle — is a fact about geometry rather than a prediction about a
+reconstruction, so it is in the class 0259 established as safe. It is untested,
+and 0236 is the standing warning against evaluating a supply change apart from
+the chooser that consumes it.
+
 ## What would change this decision
 
 **A criterion that is measured rather than semantic.** The one candidate left is
