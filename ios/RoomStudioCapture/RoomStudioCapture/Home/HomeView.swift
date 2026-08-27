@@ -25,7 +25,7 @@
 ///
 /// The mark and not a lockup: the brand lane's rule is that the mark IS the two
 /// middle letters of the name, so the two are never set side by side and app
-/// chrome takes the mark alone. That makes the tap target a ~26pt glyph, so it
+/// chrome takes the mark alone. That makes the tap target a ~22pt glyph, so it
 /// is placed in a 44pt frame — the platform minimum, and not a number this
 /// screen may negotiate down.
 
@@ -86,7 +86,7 @@ struct HomeView: View {
     private var header: some View {
         HStack {
             Button(action: onOpenContents) {
-                // 26pt of drawn mark inside a 44pt target. The frame is the
+                // 22pt of drawn mark inside a 44pt target. The frame is the
                 // hit area, not decoration — see the note above.
                 ChromeMark()
                     .frame(width: 44, height: 44, alignment: .leading)
@@ -161,13 +161,13 @@ struct HomeView: View {
 
 /// The mark at chrome size, in ONE place.
 ///
-/// The brand lane is re-cutting the mark on another branch and its API differs
-/// (`Mark(height:)` against this branch's `Mark(size:)`). Routing every chrome
-/// use through here makes that a one-line change instead of a hunt through
-/// every screen, and keeps the size consistent across the header and the
-/// contents sheet.
+/// One size for the mark wherever it acts as chrome — home's header and the
+/// contents sheet — so the thing you tap and the thing at the top of what it
+/// opens are recognisably the same object. It earned its keep immediately: the
+/// brand lane's re-cut mark landed with a different API, and this was the only
+/// line that had to change.
 struct ChromeMark: View {
-    var body: some View { Mark(size: 26) }
+    var body: some View { Mark(height: 22) }
 }
 
 // MARK: - The sentence

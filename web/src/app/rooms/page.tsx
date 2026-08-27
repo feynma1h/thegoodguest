@@ -95,7 +95,7 @@ export default function RoomsPage() {
 
       {state.phase === "error" && (
         <div className="mt-10 rounded-xl border border-accent/25 bg-accent/5 p-6">
-          <p className="text-sm font-medium text-accent">
+          <p className="text-sm font-medium text-accent-deep">
             Couldn&apos;t reach your house
           </p>
           <p className="mt-1 text-sm text-ink/60">{state.message}</p>

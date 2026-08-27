@@ -93,7 +93,7 @@ export default function DeleteAccountPanel({
           <button
             type="button"
             onClick={onDelete}
-            className="mt-3 cursor-pointer text-xs font-medium text-accent hover:underline"
+            className="mt-3 cursor-pointer text-xs font-medium text-accent-deep hover:underline"
           >
             Try again
           </button>
@@ -113,7 +113,7 @@ export default function DeleteAccountPanel({
       </p>
 
       {phase.name === "error" && (
-        <p className="mt-3 text-xs leading-relaxed text-accent">{phase.line}</p>
+        <p className="mt-3 text-xs leading-relaxed text-accent-deep">{phase.line}</p>
       )}
 
       <div className="mt-4 flex items-center gap-2">
@@ -121,7 +121,7 @@ export default function DeleteAccountPanel({
           type="button"
           onClick={onDelete}
           disabled={phase.name === "working"}
-          className="cursor-pointer rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-paper transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-60"
+          className="cursor-pointer rounded-full bg-accent-deep px-4 py-2 text-[13px] font-medium text-paper transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-60"
         >
           {phase.name === "working" ? "Deleting…" : "Delete everything"}
         </button>

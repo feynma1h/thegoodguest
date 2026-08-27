@@ -7,6 +7,20 @@ requires-python = ">=3.11"
 # This root project doesn't ship as a package. It exists to coordinate
 # dev tooling across the workspace (linters, formatters, type checkers).
 # Each service and package has its own pyproject.toml for runtime deps.
+#
+# It also owns `tools/`, which is why the dev extra below exists: the root
+# suite runs `tools/test_gen_mark.py`, and nothing else in the root job's
+# install set declares Pillow. Without it CI dies at COLLECTION with
+# ModuleNotFoundError and every other root test goes unrun -- which is what
+# happened for five days from 2026-08-21 (punchlist G4-02). numpy is not
+# listed because packages/schemas already declares it for pose_math.
+
+[project.optional-dependencies]
+dev = [
+    # tools/gen_mark.py rasterises the mark; tools/test_gen_mark.py compares
+    # the shipped icons against it.
+    "pillow>=10",
+]
 
 [tool.ruff]
 line-length = 100
