@@ -88,7 +88,7 @@ struct HomeView: View {
             Button(action: onOpenContents) {
                 // 26pt of drawn mark inside a 44pt target. The frame is the
                 // hit area, not decoration — see the note above.
-                Mark(size: 26)
+                ChromeMark()
                     .frame(width: 44, height: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
@@ -100,12 +100,14 @@ struct HomeView: View {
 
     /// Taught once, before anything has been sent, and never shown again.
     ///
-    /// It does not say "my name": under the brand lane's rule the chrome shows
-    /// the mark alone, so a line pointing at a name would point at nothing on
-    /// screen. It speaks as the guest and points at the thing that is actually
-    /// there.
+    /// It points by POSITION rather than by name or shape. The design's
+    /// original — "everything I keep lives behind my name" — cannot survive the
+    /// brand lane's rule that chrome shows the mark alone: there is no name on
+    /// screen to live behind. "The mark" is no better, being a word for the
+    /// thing rather than the thing. And describing the glyph would break the
+    /// moment the mark itself changes. Where it sits is true in every version.
     private var whisper: some View {
-        Text("Tap me any time — everything I keep is behind the mark.")
+        Text("Tap me up in the corner — that's where I keep everything.")
             .rsFont(.guest, size: 15)
             .foregroundStyle(Color.rsInkFaint)
             .fixedSize(horizontal: false, vertical: true)
@@ -155,6 +157,17 @@ struct HomeView: View {
         }
         .padding(.bottom, 8)
     }
+}
+
+/// The mark at chrome size, in ONE place.
+///
+/// The brand lane is re-cutting the mark on another branch and its API differs
+/// (`Mark(height:)` against this branch's `Mark(size:)`). Routing every chrome
+/// use through here makes that a one-line change instead of a hunt through
+/// every screen, and keeps the size consistent across the header and the
+/// contents sheet.
+struct ChromeMark: View {
+    var body: some View { Mark(size: 26) }
 }
 
 // MARK: - The sentence
