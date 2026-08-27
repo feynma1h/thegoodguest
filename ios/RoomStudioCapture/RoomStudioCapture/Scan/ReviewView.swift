@@ -181,7 +181,7 @@ struct ReviewView: View {
                 // (disabled) rather than promoting the destructive rescan into it and
                 // swapping the button under the user's finger when bundle.pb lands.
                 Button {} label: {
-                    Label("Send it home", systemImage: "square.and.arrow.up")
+                    Text("Send it home")
                 }
                 .buttonStyle(RSPrimaryButtonStyle())
                 .disabled(true)
@@ -197,7 +197,7 @@ struct ReviewView: View {
                     .buttonStyle(RSQuietButtonStyle())
             } else {
                 Button { onSend() } label: {
-                    Label("Send it home", systemImage: "square.and.arrow.up")
+                    Text("Send it home")
                 }
                 .buttonStyle(RSPrimaryButtonStyle())
                 Button { onRescan() } label: { Text(rescanLabel) }
