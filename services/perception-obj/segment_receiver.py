@@ -48,6 +48,37 @@ PROBE_PREFIX = "segment_probe"
 MAX_FRAMES_PER_CALL = 24
 
 
+def probs_npz_bytes(detections: list) -> bytes | None:
+    """One frame's mask PROBABILITY maps, quantised to uint8, in detection
+    order — or None when no detection carries one.
+
+    Quantised because the question these answer is "where would the boundary be
+    at a different cut", and 1/255 is finer than any threshold anyone would
+    choose. Full float32 at 1920x1440 is 11 MB per detection; this is 2.7 MB
+    before compression and reconstructs the cut exactly at every multiple of
+    1/255.
+
+    Deliberately a SEPARATE file from masks.npz: that writer's bytes are
+    load-bearing (decision 0089 keeps them identical to the pre-suppression
+    writer) and production reads it on every warm re-drive.
+    """
+    import numpy as np
+
+    # Indexed by enumeration, never by list.index(): these dicts hold numpy
+    # arrays, and `==` on them raises rather than comparing.
+    keep = [(i, d) for i, d in enumerate(detections) if d.get("mask_prob") is not None]
+    if not keep:
+        return None
+    stack = np.stack([
+        np.clip(np.asarray(d["mask_prob"], dtype=np.float32) * 255.0, 0, 255).astype(np.uint8)
+        for _, d in keep
+    ])
+    idx = np.asarray([i for i, _ in keep], dtype=np.int32)
+    buf = io.BytesIO()
+    np.savez_compressed(buf, probs=stack, mask_index=idx)
+    return buf.getvalue()
+
+
 class SegmentRequest(BaseModel):
     """Explicit frames, because the whole point is reaching ones the sampler
     did not choose."""
@@ -57,6 +88,9 @@ class SegmentRequest(BaseModel):
     frame_indices: list[int] = Field(..., min_length=1)
     object_prompt: str | None = None
     write_png: bool = True
+    # Also write the per-pixel probability map each binary mask was thresholded
+    # from, so the 0.5 cut can be re-examined offline without another GPU run.
+    write_prob: bool = False
 
 
 def _mask_panels(pil, mask: np.ndarray, suppressed: np.ndarray | None):
@@ -178,7 +212,9 @@ async def handle_segment(
             continue
 
         try:
-            detections = sam3_model.segment(pil, segmentation_prompt(prompt))
+            detections = sam3_model.segment(
+                pil, segmentation_prompt(prompt), want_prob=req.write_prob
+            )
         except Exception as exc:
             frames_out.append({"frame_index": fi, "ok": False, "error": f"sam3: {exc}"})
             continue
@@ -196,6 +232,15 @@ async def handle_segment(
             f"gs://{outputs_bucket}/", f"{base}/masks.npz",
             masks_npz_bytes(detections, suppressed), "application/octet-stream",
         )
+
+        probs_uri = None
+        if req.write_prob:
+            raw = probs_npz_bytes(detections)
+            if raw is not None:
+                probs_uri = _gcs_upload_for_scene(
+                    f"gs://{outputs_bucket}/", f"{base}/probs.npz",
+                    raw, "application/octet-stream",
+                )
 
         objs = []
         for i, det in enumerate(detections):
@@ -225,6 +270,7 @@ async def handle_segment(
             "ok": True,
             "image_size": [pil.width, pil.height],
             "masks_gcs_uri": masks_uri,
+            **({"probs_gcs_uri": probs_uri} if probs_uri else {}),
             "suppressed_count": len(suppressed),
             "suppressed_px": int(union.sum()) if union is not None else 0,
             "objects": objs,

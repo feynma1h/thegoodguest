@@ -67,6 +67,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--candidate", action="store_true",
                     help="POST to the candidate revision instead of the serving one")
     ap.add_argument("--no-png", action="store_true", help="masks.npz only")
+    ap.add_argument(
+        "--probs", action="store_true",
+        help="also write probs.npz — the per-pixel probability map each binary "
+             "mask was thresholded from, so the upstream 0.5 cut can be "
+             "re-examined offline without another GPU run",
+    )
     ap.add_argument("--bundle-uri", help="override; otherwise read from Firestore")
     args = ap.parse_args(argv)
 
@@ -88,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         "bundle_uri": bundle_uri,
         "frame_indices": frames,
         "write_png": not args.no_png,
+        "write_prob": args.probs,
     }
     task = {
         "name": f"{queue_path}/tasks/segment-{args.scene_id}-{int(time.time())}",
