@@ -70,7 +70,6 @@ struct GuidanceSheet: View {
 
             privacyLine
                 .padding(.top, 20)
-                .padding(.bottom, 12)
             }
             .padding(.horizontal, RSScreen.horizontal)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -78,10 +77,20 @@ struct GuidanceSheet: View {
         .safeAreaInset(edge: .bottom) {
             // Pinned OUTSIDE the scroll region: the one action this sheet exists for
             // must stay on screen at every text size.
-            startButton
-                .padding(.horizontal, RSScreen.horizontal)
-                .rsActionBar()
-                .background(Color.rsCaptureRaised)
+            // The closing line is the same one home uses, for the same reason:
+            // it is true, it is one line, and one line is what keeps this
+            // screen's button level with every other screen's. The privacy
+            // disclosure stays in the scroll region where it can be two lines
+            // without moving anything.
+            RSActions {
+                startButton
+            } closing: {
+                Text("Takes about two minutes")
+                    .font(RSFont.ui(.footnote))
+                    .foregroundStyle(Color.rsOnDark.opacity(0.5))
+            }
+            .padding(.horizontal, RSScreen.horizontal)
+            .background(Color.rsCaptureRaised)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.rsCaptureRaised.ignoresSafeArea())

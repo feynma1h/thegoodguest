@@ -24,8 +24,7 @@
 ///
 /// The §8/§9 history surfaces are WIRED, all three off one RoomsStore fetch of
 /// GET /scenes: the returning-home recent-rooms strip, RoomsListView behind
-/// "all N rooms", and WhySignInSheet on the first return home with a room and
-/// an unlinked identity. A ready room's chevron is gated on
+/// A ready room's chevron is gated on
 /// NetworkConfig.webBaseURL exactly as the doorway's CTA is — with no web
 /// origin configured, rows inform rather than offer a tap that lands nowhere.
 ///

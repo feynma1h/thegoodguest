@@ -48,6 +48,9 @@ enum RSScreen {
     static let actionTop: CGFloat = 14
     /// Between the parts of the action block.
     static let actionSpacing: CGFloat = 10
+    /// The closing line's slot. One line of footnote plus a control's touch
+    /// padding, so a caption and a tappable line occupy the same height.
+    static let closingHeight: CGFloat = 26
 
     /// The gap to use when the first element carries its OWN top inset — a
     /// list row with vertical padding, say. Without this the row's padding
@@ -216,7 +219,13 @@ struct RSActions<Extra: View, Primary: View, Closing: View>: View {
         VStack(spacing: RSScreen.actionSpacing) {
             extra
             primary
+            // A FIXED SLOT, so the closing line's own height cannot move the
+            // button above it. A plain caption and a tappable footnote differ
+            // by the button style's touch padding — a few points, but enough
+            // that screens landed anywhere from 69pt to 79pt off the bottom
+            // depending on which kind of line they closed with.
             closing
+                .frame(minHeight: RSScreen.closingHeight)
         }
         .rsActionBar()
     }

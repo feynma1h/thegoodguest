@@ -34,15 +34,22 @@ struct QRBridgeView: View {
                 .padding(.horizontal, 34)
                 .padding(.top, 12)
 
-            Button(action: onScan) { Text("Scan the code") }
-                .buttonStyle(RSGoldButtonStyle())
-                .padding(.top, 24)
-
             Spacer()
         }
-        .padding(.horizontal, 34)
+        .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity)
         .modifier(RSScrollableScreen(background: Color.rsCaptureRaised))
+        .safeAreaInset(edge: .bottom) {
+            RSActions {
+                Button(action: onScan) { Text("Scan the code") }
+                    .buttonStyle(RSGoldButtonStyle())
+            } closing: {
+                Text("Opens the camera to read the code")
+                    .font(RSFont.ui(.footnote))
+                    .foregroundStyle(Color.rsOnDark.opacity(0.5))
+            }
+            .padding(.horizontal, RSScreen.horizontal)
+        }
     }
 }
 
