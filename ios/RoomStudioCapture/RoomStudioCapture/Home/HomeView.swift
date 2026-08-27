@@ -136,7 +136,7 @@ struct HomeView: View {
     }
 
     private var scanAction: some View {
-        VStack(spacing: 12) {
+        RSActions {
             Button {
                 RSHaptics.fire(.scanTapped)
                 onScan()
@@ -151,12 +151,11 @@ struct HomeView: View {
                 Text("Scan a room")
             }
             .buttonStyle(RSPrimaryButtonStyle())
-
+        } closing: {
             Text("Takes about two minutes")
                 .font(RSFont.ui(.footnote))
                 .foregroundStyle(Color.rsInkFaint)
         }
-        .rsActionBar()
     }
 }
 
