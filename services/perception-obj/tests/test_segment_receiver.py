@@ -354,9 +354,11 @@ class TestClickRefinement:
             self.shape = shape
             self.calls = []
 
-        def refine_with_points(self, pil, seed, points, labels, *, multimask_output=True):
+        def refine_with_points(self, pil, points, labels, *, seed_mask=None,
+                               mask_logits=None, multimask_output=True):
             self.calls.append({"points": list(points), "labels": list(labels),
-                               "seeded": seed is not None})
+                               "seeded": seed_mask is not None,
+                               "carried": mask_logits is not None})
             n = len(self.calls)
             big = np.zeros(self.shape, dtype=bool)
             big[:, : 6 + 6 * n] = True            # LARGEST every round, LOW score
@@ -368,7 +370,10 @@ class TestClickRefinement:
             mid[:, : 3 + 6 * n] = True            # HIGHEST score
             small = np.zeros(self.shape, dtype=bool)
             small[:, :2] = True
-            return [mid, big, small], [0.9, 0.4, 0.1]
+            # low-res logits ride along, one per candidate, as the real
+            # predictor returns them
+            lr = [np.zeros((288, 288), dtype=np.float32) for _ in range(3)]
+            return [mid, big, small], [0.9, 0.4, 0.1], lr
 
     def _dets(self, shape=(20, 20)):
         seed = np.zeros(shape, dtype=bool)
@@ -376,6 +381,12 @@ class TestClickRefinement:
         other = np.zeros(shape, dtype=bool)
         other[:, 15:] = True
         return [{"label": "desk", "mask": seed}, {"label": "chair", "mask": other}]
+
+    def test_the_mask_prompt_size_matches_the_tracker_grid(self):
+        """4 * (1008 // 14) = 288, not the 256 every upstream docstring names."""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "models" / "sam3.py").read_text()
+        assert "MASK_PROMPT_SIZE = 288" in src
 
     def test_it_takes_the_highest_scoring_not_the_largest(self):
         m = self._Model()
@@ -388,15 +399,20 @@ class TestClickRefinement:
         assert max(r["candidate_px"]) == 20 * 12
         assert r["chosen_px"] < max(r["candidate_px"])
 
-    def test_no_mask_is_ever_passed_back(self):
-        """Forced, not chosen: SAM 3's interactive predictor works on a 72x72
-        feature grid while the inherited SAM 2 mask path embeds to 64x64, so
-        seeding mask_input dies in the decoder. Measured on a live GPU."""
+    def test_round_zero_seeds_from_the_detector_mask(self):
         m = self._Model()
         sr.click_refine(m, None, self._dets(), 0, rounds=3)
-        assert all(not c["seeded"] for c in m.calls), (
-            "a mask was passed to the model; that path raises a shape mismatch"
-        )
+        assert m.calls[0]["seeded"] and not m.calls[0]["carried"]
+
+    def test_later_rounds_carry_the_models_own_logits(self):
+        """Upstream: masks returned by a previous iteration need no further
+        transformation. Re-deriving from the binary mask would throw away the
+        model's confidence and re-introduce the sizing question."""
+        m = self._Model()
+        sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        assert len(m.calls) >= 2
+        for c in m.calls[1:]:
+            assert c["carried"] and not c["seeded"]
 
     def test_the_first_click_is_inside_the_seed_mask(self):
         m = self._Model()

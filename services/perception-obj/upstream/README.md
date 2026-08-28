@@ -18,7 +18,8 @@ the actual code.
 | `sam3/sam3_image_processor.py` | `sam3/model/sam3_image_processor.py` | everything `models/sam3.py` calls: `set_image`, `set_text_prompt`, `add_geometric_prompt`. The score, the threshold, the returned keys. |
 | `sam3/model_builder.py` | `sam3/model_builder.py` | `build_sam3_image_model`, which is how we construct the model. |
 | `sam3/sam3_image.py` | `sam3/model/sam3_image.py` | the model object itself, and `predict_inst` — the POINT-prompted path we do not use. |
-| `sam3/sam1_task_predictor.py` | `sam3/model/sam1_task_predictor.py` | what `predict_inst` delegates to. |
+| `sam3/sam1_task_predictor.py` | `sam3/model/sam1_task_predictor.py` | what `predict_inst` delegates to — and the source of the stale 256 docstrings. |
+| `sam3/prompt_encoder.py` | `sam3/sam/prompt_encoder.py` | where `mask_input_size = 4 * image_embedding_size` is set, which is what makes it 288. |
 | `sam3d/inference.py` | `notebook/inference.py` | the `Inference` class `models/sam3d.py` calls. SAM 3D does not expose it in the installable package. |
 | `*/LICENSE` | `LICENSE` | Meta's SAM License. §1.b.i requires the Agreement to travel with any copy of the materials, which is why it is here rather than referenced. |
 
@@ -84,14 +85,22 @@ the twelve notebooks in `examples/` are the only authority.
   `facebook/sam3` checkpoint the loader remaps — but it builds the video tracker
   and puts it on the GPU, which 0228's headroom measurement makes a real cost.
   `PERCEPTION_SAM3_INTERACTIVE` gates it here and defaults off.
-- **Its MASK-prompt path does not work in this build.** The interactive
-  predictor declares `_bb_feat_sizes` ending at `(72, 72)` — SAM 3's 1008/14
-  backbone grid — while the mask path it inherits from SAM 2 embeds a 256x256
-  mask to 64x64. Passing `mask_input` dies in the decoder with "The size of
-  tensor a (72) must match the size of tensor b (64) at non-singleton dimension
-  3". Measured on a live GPU, 2026-08-28. **Points are unaffected** — they carry
-  no grid — so the interactive loop accumulates clicks instead, which is SAM's
-  canonical form anyway.
+- **A mask prompt must be 288x288, and EVERY DOCSTRING SAYS 256.** SAM's prompt
+  encoder sets `mask_input_size = 4 * image_embedding_size`
+  (`prompt_encoder.py`), and `build_tracker` runs this model at `image_size=1008,
+  backbone_stride=14`, so the grid is `1008 // 14 = 72` and the mask prompt is
+  `4 * 72 = 288`. The `H=W=256` in `sam1_task_predictor.py`'s docstrings is SAM
+  2's number — 1024/16 -> 64 -> 256 — inherited verbatim and stale here.
+  Passing 256 downsamples to 64 and dies in the decoder with "The size of tensor
+  a (72) must match the size of tensor b (64) at non-singleton dimension 3".
+  Measured on a live GPU, 2026-08-28, by following the docstring.
+  **The `low_res_masks` a round returns are already the right size** and
+  upstream says they "do not need further transformation" — so round-to-round
+  carry is the intended flow and the only place the 288 has to be computed is
+  when seeding from a detector mask.
+- **`masks=None` is safe**: the no-mask branch expands `no_mask_embed` to
+  `image_embedding_size`, so a points-only call gets 72x72 and cannot hit the
+  mismatch at all.
 - **The visual path takes POINTS, and it is on the model we already build.**
   `model.predict_inst(inference_state, point_coords=..., point_labels=...,
   multimask_output=True)` returns `(masks, scores, logits)`, where `scores` IS a

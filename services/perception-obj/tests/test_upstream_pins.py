@@ -46,6 +46,9 @@ VENDORED = {
         # Both are false — predict_inst lives here — and the too-narrow vendor
         # set is what made the wrong reading easy.
         "sam3_image.py", "sam1_task_predictor.py",
+        # Added 2026-08-28: the mask-prompt size is set here, and following the
+        # predictor's own docstring instead cost a GPU round trip.
+        "prompt_encoder.py",
         "LICENSE",
     ],
     "sam3d": ["inference.py", "LICENSE"],
@@ -148,6 +151,17 @@ class TestTheProcessorFactsWeDependOn:
         sam3_image.py returns exactly such a score, and reading only this file
         is how that got stated the wrong way round."""
         assert "iou_pred" not in processor
+
+    def test_the_mask_prompt_size_is_derived_not_quoted(self) -> None:
+        """`mask_input_size = 4 * image_embedding_size` is the formula; the
+        predictor's docstrings quote SAM 2's 256 and are stale for SAM 3."""
+        enc = (UPSTREAM / "sam3" / "prompt_encoder.py").read_text()
+        assert "4 * image_embedding_size[0]" in enc
+        pred = (UPSTREAM / "sam3" / "sam1_task_predictor.py").read_text()
+        assert "H=W=256" in pred, (
+            "the stale docstring is the trap this test exists to remember; if "
+            "upstream fixed it, drop this assertion and the 288 note with it"
+        )
 
     def test_the_point_prompted_path_is_vendored_and_returns_quality(self) -> None:
         """The correction, pinned so it cannot be lost again."""
