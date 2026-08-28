@@ -876,6 +876,14 @@ gains.
 
 **iOS**
 
+- **The mark's fill rule is guarded on the Python side only.**
+  `tools/gen_mark.py` warns that even-odd across both rings punches holes where
+  the bands cross, and `tools/test_gen_mark.py` pins it by building the wrong
+  version and asserting ours differs — but nothing pins the Swift or TypeScript
+  CONSUMERS. The generator warned, the test passed, and iOS's splash re-made the
+  mistake anyway (0255). All six other surfaces that draw the ring pair were
+  audited and are correct, so this is a latent gap rather than a live defect:
+  the fix is a consumer-side pin, not a better docstring.
 - **`WaitingView` is unreachable and awaiting a ruling.** The desk replaced it
   and the post-send surface no longer routes to it, but it is still in the tree:
   it is the reference the desk is being judged against, and `DeskCopy` borrows
