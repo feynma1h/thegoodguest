@@ -78,6 +78,35 @@ with a letter in two halves. Granularity was the thing to give up.
 on screen about 1.45 s before anything moves. Every duration is in one `Timing`
 enum, so that is one number to change rather than six.
 
+## Addendum — the frames were right and the rendering was not (0255)
+
+`MorphingRings` shipped putting BOTH rings into one `Path` and filling that
+even-odd, which knocked the intersection out at the two crossings: white notches
+on every frame. Diagnosed and fixed by the ui-organisation lane in `ab64eec`,
+recorded in **0255**, which carries the full account.
+
+Read carefully what that does and does not overturn. The geometry claim in 0250
+— that both ends are the same shape at two similarities, so every intermediate
+frame IS the mark at some size — was never false; the interpolation was correct
+throughout. What was false is the stronger thing this note and `SplashView`'s
+docstring implied, that the last frame therefore *looked* identical to the mark
+it lands on. Exact geometry, wrong fill rule.
+
+Two things worth keeping from how it escaped. `gen_mark.py`'s docstring names
+this exact hazard — "putting all four ellipses into a single even-odd path
+fails... the two bands cross at four points, and even-odd would punch holes
+exactly there" — and `test_gen_mark.py` guards it by building the wrong version
+and asserting ours differs. **Both live on the Python side, and nothing pins the
+Swift or TypeScript consumers**, so the generator could warn, the test could
+pass, and the consumer could re-make the mistake anyway. And it is invisible to
+reading: each ring is individually correct and only the combination is wrong,
+which is why an operator's eye caught it and no suite did.
+
+Audited across every surface that draws the pair after the fix — web `Mark`, web
+`Wordmark`, the calling-card painter, `icon.svg`, the OG eyebrow and the iOS
+static `Mark`. All six draw one path or one fill per ring and are correct;
+`MorphingRings` was the only site.
+
 ## What would change this decision
 
 If the lettering is re-traced, the cuts re-derive automatically — they are
