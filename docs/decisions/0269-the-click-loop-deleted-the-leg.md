@@ -96,3 +96,50 @@ to "extend this mask" — which is what the method wanted and not what was asked
 **And the standing constraint has not moved.** `accept_refined` still requires
 60% of added pixels inside the measured box while this leg is 30-47% inside, so
 even a loop that recovered the leg would have it discarded one stage later.
+
+## Addendum, 2026-08-29 — the runner-up had the leg
+
+The recording was re-run with all three candidates saved. **It reproduced the
+first run exactly** — same pixel counts, same scores — so this is the same draw,
+not a second sample.
+
+Round 0's three answers:
+
+| rank | score | pixels | vs seed | keeps of seed | **holds of the leg** |
+|---|---|---|---|---|---|
+| 0 (taken) | 0.9766 | 289,485 | −52,730 | 83.3% | **3.2%** |
+| **1** | **0.9727** | **350,937** | **+8,722** | **99.7%** | **98.3%** |
+| 2 | 0.9336 | 281,418 | −60,797 | 81.7% | 0.2% |
+
+**The answer was on offer and lost by 0.0039 of score.** Rank 1 keeps essentially
+everything it was handed and adds 9,789 px at mean luma 145, 92% of it inside
+the measured box.
+
+**It was offered twice.** Round 1's rank-2 candidate — scored last, at 0.9336 —
+still held 78.8% of the leg and kept 96.3% of the seed. Only from round 2, once
+the clicks had accumulated on the legless mask, did the complete reading stop
+being offered at all (best 2.9%).
+
+**Three of the five patches independently fix this, on this data:**
+
+- **Patch 4** (refuse a candidate that dropped what you gave it) selects rank 1
+  without consulting size at all: at a 95% retention bar, ranks 0 and 2 are
+  discarded on sight and only rank 1 survives.
+- **Patch 2**'s reasoning applied here — take the bigger of two readings of one
+  object — also lands on rank 1.
+- **Patch 1** (merge, never replace) makes the loss impossible regardless of
+  which candidate wins.
+
+Simulated over the real recording, Patch 4 followed by Patch 1 takes the seed
+from **342,215 px to 352,004 px with 100% of the leg and 100% of the seed
+retained**, and then correctly merges nothing in rounds 1-3 because no candidate
+clears the retention bar. Tonight's shipped answer was 292,444 px holding 1.3%
+of the leg.
+
+**What this does and does not establish.** It establishes that on this object the
+right answer was produced by the model, ranked second, and discarded by the
+selection rule — so the failure was ours and not the model's. It does not
+establish that size or retention is the right key in general: this is one
+object, one frame, one draw. The retention bar is the more defensible of the two
+because it refuses on a fact about what was handed back rather than a preference
+about size.
