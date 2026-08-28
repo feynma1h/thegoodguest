@@ -97,7 +97,7 @@ to "extend this mask" — which is what the method wanted and not what was asked
 60% of added pixels inside the measured box while this leg is 30-47% inside, so
 even a loop that recovered the leg would have it discarded one stage later.
 
-## Addendum, 2026-08-29 — the runner-up had the leg
+## Addendum, 2026-08-29 — the runner-up kept the FIRST leg, and there is no second one in the pixels
 
 The recording was re-run with all three candidates saved. **It reproduced the
 first run exactly** — same pixel counts, same scores — so this is the same draw,
@@ -143,3 +143,49 @@ establish that size or retention is the right key in general: this is one
 object, one frame, one draw. The retention bar is the more defensible of the two
 because it refuses on a fact about what was handed back rather than a preference
 about size.
+
+
+## Second addendum, same day — the correction that matters
+
+**Everything above tracks ONE leg.** "The leg region" is what the long desk mask
+adds over the short one, and that is the desk's near-side foot. The operator's
+original observation — that none of the candidate masks has the desk's SECOND
+leg — is unaddressed by any of it, and the phrasing above overstates what was
+achieved.
+
+**Rank 1 did not add a leg. It added nothing.** Its 9,789 px beyond the seed is
+**137 disconnected fragments, the largest 2% of the total** — a scatter of edge
+pixels. For scale the near foot is 58,676 px. So rank 1's merit is entirely that
+it did not DELETE; it recovered nothing.
+
+Restated honestly: **the patches prevent a loss, they do not produce a gain.**
+Patch 1 and Patch 4 stop the pipeline destroying what it already holds, which is
+real and worth having. Neither is a repair.
+
+**And for this object no repair is possible, because the second leg was never
+photographed.** Measured over the capture's camera poses around the table's box:
+
+| | |
+|---|---|
+| azimuth spread, all 189 frames | **44 degrees** |
+| frames seeing >= 90% of the box | **18** |
+| azimuth spread of those 18 | **22 degrees** |
+| frames more than 60 degrees from frame 50 | **0** |
+
+Nobody walked round the desk. Every view of it sits inside a 22-degree arc from
+one side, so the far-side foot is behind the desktop in every frame that exists.
+No mask contains it, no click can reach it, no prompt can ask for it: the pixels
+are not there. The part probe agrees — asking directly for `table leg` and
+`desk leg` returned nothing at all in these frames.
+
+**This is a capture finding wearing a segmentation costume**, and it is the case
+the operator's own patch set already anticipated: when the missing part is not
+in the frame, accept the mask and let view selection find a frame that shows it.
+Here there is no such frame to find.
+
+**What it changes about priorities.** Every mask instrument in this
+investigation has been arguing over a part that IS photographed. The parts that
+are not photographed are invisible to all of them, and nothing in the pipeline
+notices or reports that an object was only ever seen from one side. A
+per-object azimuth-coverage figure would have said so in one number, before any
+of this.
