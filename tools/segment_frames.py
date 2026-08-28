@@ -81,6 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--refine-rounds", type=int, default=3)
     ap.add_argument(
+        "--refine-click",
+        help="extra opening click as x,y in original image pixels — put it on "
+             "the part that is MISSING, not on the object",
+    )
+    ap.add_argument(
         "--prompt",
         help="override DEFAULT_OBJECT_PROMPT for this call — comma-separated "
              "noun phrases. SAM 3 returns the term verbatim, so a term that no "
@@ -111,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
         **({"object_prompt": args.prompt} if args.prompt else {}),
         **({"refine_seed_mask": args.refine_seed,
             "refine_rounds": args.refine_rounds} if args.refine_seed is not None else {}),
+        **({"refine_click": [int(v) for v in args.refine_click.split(",")]}
+           if args.refine_click else {}),
     }
     task = {
         "name": f"{queue_path}/tasks/segment-{args.scene_id}-{int(time.time())}",

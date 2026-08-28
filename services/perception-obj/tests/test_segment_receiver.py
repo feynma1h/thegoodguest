@@ -549,3 +549,39 @@ class TestEveryCandidateIsKept:
         z = np.load(io.BytesIO(out["npz"]))
         sizes = [int(c.sum()) for c in z["candidates"][0]]
         assert max(sizes) > sizes[0], "the largest candidate did not survive to disk"
+
+
+class TestAnExplicitClick:
+    """The loop's own opening click lands in the seed's interior, which asks
+    "what object is here" and can only return the object it already has. A click
+    on the MISSING part asks a different question."""
+
+    def test_the_extra_click_is_added_and_positive(self):
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        sr.click_refine(m, None, t._dets(), 0, rounds=1, extra_click=[7, 3])
+        pts = m.calls[0]["points"]
+        assert len(pts) == 2, "the derived click plus the given one"
+        assert (7.0, 3.0) in [tuple(p) for p in pts]
+        assert m.calls[0]["labels"] == [1, 1]
+
+    def test_it_is_recorded_in_the_round(self):
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        out = sr.click_refine(m, None, t._dets(), 0, rounds=1, extra_click=[7, 3])
+        assert [7, 3] in out["rounds"][0]["points"]
+
+    def test_omitting_it_reproduces_the_previous_behaviour(self):
+        """So a run with and without is a single-variable comparison."""
+        t = TestClickRefinement()
+        a, b = TestClickRefinement._Model(), TestClickRefinement._Model()
+        sr.click_refine(a, None, t._dets(), 0, rounds=1)
+        sr.click_refine(b, None, t._dets(), 0, rounds=1, extra_click=None)
+        assert a.calls[0]["points"] == b.calls[0]["points"]
+        assert len(a.calls[0]["points"]) == 1
+
+    def test_a_malformed_click_is_ignored_rather_than_raising(self):
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        assert sr.click_refine(m, None, t._dets(), 0, rounds=1, extra_click=[9]) is not None
+        assert len(m.calls[0]["points"]) == 1

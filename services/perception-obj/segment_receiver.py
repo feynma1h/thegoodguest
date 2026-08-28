@@ -48,7 +48,8 @@ PROBE_PREFIX = "segment_probe"
 MAX_FRAMES_PER_CALL = 24
 
 
-def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> dict | None:
+def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int,
+                 extra_click: list[int] | None = None) -> dict | None:
     """Seed SAM 3's visual path with one mask, click in its own leftover, repeat.
 
     The loop the operator specified, with one change: the candidate taken each
@@ -96,6 +97,9 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
     k = int(np.argmin((xs0 - cx) ** 2 + (ys0 - cy) ** 2))
     points = [(float(xs0[k]), float(ys0[k]))]
     labels = [1]
+    if extra_click is not None and len(extra_click) == 2:
+        points.append((float(extra_click[0]), float(extra_click[1])))
+        labels.append(1)
     carry = None      # the chosen candidate's low-res logits, round to round
 
     for r in range(max(1, rounds)):
@@ -211,6 +215,12 @@ class SegmentRequest(BaseModel):
     # rebuild.
     refine_seed_mask: int | None = None
     refine_rounds: int = 3
+    # An extra opening click, in ORIGINAL image pixels (x, y). The loop's own
+    # first click lands in the seed's interior, which asks "what object is
+    # here" and can only return the object it already has. A click placed on
+    # the part that is MISSING is a different question, and it is the one this
+    # investigation could not ask until the part had been located.
+    refine_click: list[int] | None = None
 
 
 def _mask_panels(pil, mask: np.ndarray, suppressed: np.ndarray | None):
@@ -365,7 +375,8 @@ async def handle_segment(
         refine_out = None
         if req.refine_seed_mask is not None:
             got = click_refine(
-                sam3_model, pil, detections, req.refine_seed_mask, req.refine_rounds
+                sam3_model, pil, detections, req.refine_seed_mask, req.refine_rounds,
+                extra_click=req.refine_click,
             )
             if got is not None:
                 _gcs_upload_for_scene(
