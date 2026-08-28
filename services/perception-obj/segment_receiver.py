@@ -57,6 +57,17 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
     surroundings" reading — the merge that 0198 measured at 113,465 px with a
     chair base and a stool absorbed.
 
+    NO MASK IS PASSED BACK TO THE MODEL, and that is forced rather than chosen.
+    SAM 3's interactive predictor declares `_bb_feat_sizes` ending at (72, 72) —
+    SAM 3's 1008/14 backbone grid — while the mask-prompt path it inherits from
+    SAM 2 embeds a 256x256 mask to 64x64. Seeding `mask_input` therefore dies in
+    the decoder with "The size of tensor a (72) must match the size of tensor b
+    (64) at non-singleton dimension 3". Measured on a live GPU, 2026-08-28.
+
+    So the loop accumulates POINTS instead, which is SAM's canonical interactive
+    form anyway: a positive click on the object, then a positive click in each
+    round's leftover. Points carry no grid and cannot hit the mismatch.
+
     Records every round and decides nothing. Whether growth is acceptable is a
     guard, the guard has been the weak link three times in this investigation,
     and it belongs where it can be changed without a GPU rebuild.
@@ -72,13 +83,18 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
         for i, d in enumerate(detections) if i != seed_index
     ]
     rounds_out, stack = [], []
-    click = None   # round 0 seeds with the mask alone; later rounds add a click
+    # The first click is the seed mask's own interior — the pixel nearest its
+    # centroid that is actually IN the mask, because a centroid can fall in the
+    # hole of a concave shape and this desk's mask is concave.
+    ys0, xs0 = np.nonzero(seed)
+    cy, cx = float(ys0.mean()), float(xs0.mean())
+    k = int(np.argmin((xs0 - cx) ** 2 + (ys0 - cy) ** 2))
+    points = [(float(xs0[k]), float(ys0[k]))]
+    labels = [1]
 
     for r in range(max(1, rounds)):
         got = sam3_model.refine_with_points(
-            pil, accepted,
-            points=[] if click is None else [click],
-            labels=[] if click is None else [1],
+            pil, None, points=list(points), labels=list(labels),
             multimask_output=True,
         )
         if got is None:
@@ -93,7 +109,7 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
             "chosen_px": int(best.sum()),
             "accepted_px": int(accepted.sum()),
             "growth_px": int(grew.sum()),
-            "click": None if click is None else [int(click[0]), int(click[1])],
+            "points": [[int(x), int(y)] for x, y in points],
         }
         # how much of any OTHER detection the growth covers — the guard's input
         worst, who = 0.0, None
@@ -108,12 +124,16 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
         rounds_out.append(rec)
         stack.append(best)
 
-        # the next click goes in the centre of the largest leftover chunk
+        # the next click goes in the leftover, and ACCUMULATES — SAM's
+        # interactive form is a growing point set, not one click at a time
         leftover = best & ~accepted
         if not leftover.any():
             break
         ys, xs = np.nonzero(leftover)
-        click = (float(np.median(xs)), float(np.median(ys)))
+        my, mx = float(ys.mean()), float(xs.mean())
+        j = int(np.argmin((xs - mx) ** 2 + (ys - my) ** 2))
+        points.append((float(xs[j]), float(ys[j])))
+        labels.append(1)
         accepted = best
 
     if not stack:
