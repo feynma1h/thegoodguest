@@ -76,6 +76,22 @@ the twelve notebooks in `examples/` are the only authority.
   `Sam3Processor.set_text_prompt` wraps. The tracker answers Promptable VISUAL
   Segmentation — points, boxes or masks in, ONE instance out — and is SAM 2's
   task, updated.
+- **The visual path is NOT BUILT unless you ask for it.**
+  `build_sam3_image_model(..., enable_inst_interactivity=False)` defaults to
+  False, so `model.inst_interactive_predictor` is None and `predict_inst` raises
+  `AttributeError: 'NoneType' object has no attribute 'model'`. Enabling it
+  downloads nothing — the weights are `tracker.*` keys in the same
+  `facebook/sam3` checkpoint the loader remaps — but it builds the video tracker
+  and puts it on the GPU, which 0228's headroom measurement makes a real cost.
+  `PERCEPTION_SAM3_INTERACTIVE` gates it here and defaults off.
+- **Its MASK-prompt path does not work in this build.** The interactive
+  predictor declares `_bb_feat_sizes` ending at `(72, 72)` — SAM 3's 1008/14
+  backbone grid — while the mask path it inherits from SAM 2 embeds a 256x256
+  mask to 64x64. Passing `mask_input` dies in the decoder with "The size of
+  tensor a (72) must match the size of tensor b (64) at non-singleton dimension
+  3". Measured on a live GPU, 2026-08-28. **Points are unaffected** — they carry
+  no grid — so the interactive loop accumulates clicks instead, which is SAM's
+  canonical form anyway.
 - **The visual path takes POINTS, and it is on the model we already build.**
   `model.predict_inst(inference_state, point_coords=..., point_labels=...,
   multimask_output=True)` returns `(masks, scores, logits)`, where `scores` IS a

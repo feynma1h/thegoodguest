@@ -388,20 +388,41 @@ class TestClickRefinement:
         assert max(r["candidate_px"]) == 20 * 12
         assert r["chosen_px"] < max(r["candidate_px"])
 
-    def test_round_zero_seeds_with_the_mask_and_no_click(self):
+    def test_no_mask_is_ever_passed_back(self):
+        """Forced, not chosen: SAM 3's interactive predictor works on a 72x72
+        feature grid while the inherited SAM 2 mask path embeds to 64x64, so
+        seeding mask_input dies in the decoder. Measured on a live GPU."""
         m = self._Model()
-        sr.click_refine(m, None, self._dets(), 0, rounds=2)
-        assert m.calls[0]["points"] == [] and m.calls[0]["seeded"]
-        assert len(m.calls[1]["points"]) == 1, "later rounds must carry a click"
-        assert m.calls[1]["labels"] == [1], "the click must be positive"
+        sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        assert all(not c["seeded"] for c in m.calls), (
+            "a mask was passed to the model; that path raises a shape mismatch"
+        )
 
-    def test_the_click_lands_inside_the_leftover(self):
+    def test_the_first_click_is_inside_the_seed_mask(self):
+        m = self._Model()
+        sr.click_refine(m, None, self._dets(), 0, rounds=1)
+        (x, y) = m.calls[0]["points"][0]
+        assert self._dets()[0]["mask"][int(y), int(x)], (
+            "the opening click must land in the seed, not merely near it — a "
+            "centroid can fall in the hole of a concave mask"
+        )
+
+    def test_points_accumulate(self):
+        m = self._Model()
+        sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        counts = [len(c["points"]) for c in m.calls]
+        assert counts == sorted(counts) and counts[0] == 1 and counts[-1] > 1, counts
+        assert all(set(c["labels"]) == {1} for c in m.calls), "all clicks positive"
+
+    def test_each_new_click_lands_inside_that_round_s_leftover(self):
         m = self._Model()
         out = sr.click_refine(m, None, self._dets(), 0, rounds=2)
-        x, y = out["rounds"][1]["click"]
-        # round 0 took columns 0..8 over a seed of 0..2, so the leftover is
-        # columns 3..8 and the click must sit inside it
-        assert 3 <= x <= 8, f"click at x={x} is not in the leftover"
+        pts = out["rounds"][1]["points"]
+        assert len(pts) == 2, "round 1 must carry the opening click plus one more"
+        x, _y = pts[-1]
+        # round 0 took columns 0..8 over a seed of 0..2, so the new click must
+        # sit in columns 3..8
+        assert 3 <= x <= 8, f"new click at x={x} is not in the leftover"
 
     def test_it_measures_what_the_growth_covers_of_others(self):
         """The guard's input. Round 2's growth reaches column 15+, which is the
