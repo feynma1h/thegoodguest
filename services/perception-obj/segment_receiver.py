@@ -84,6 +84,10 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
         for i, d in enumerate(detections) if i != seed_index
     ]
     rounds_out, stack = [], []
+    # Every candidate, not only the winner. Keeping just the chosen mask made
+    # "would the runner-up have been better" unanswerable without another GPU
+    # run — which is exactly the question the first run raised.
+    all_cands, all_scores = [], []
     # The first click is the seed mask's own interior — the pixel nearest its
     # centroid that is actually IN the mask, because a centroid can fall in the
     # hole of a concave shape and this desk's mask is concave.
@@ -128,6 +132,8 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
         rec["worst_other_index"] = who
         rounds_out.append(rec)
         stack.append(best)
+        all_cands.append(np.stack([np.asarray(c, dtype=bool) for c in masks]))
+        all_scores.append([float(x) for x in scores])
 
         # the next click goes in the leftover, and ACCUMULATES — SAM's
         # interactive form is a growing point set, not one click at a time
@@ -148,6 +154,10 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
     np.savez_compressed(
         buf, masks=np.stack(stack), seed=seed,
         seed_index=np.asarray([seed_index], dtype=np.int32),
+        # (rounds, candidates, H, W) and (rounds, candidates). `masks` above is
+        # candidate 0 of each round — the chosen one — kept for compatibility.
+        candidates=np.stack(all_cands),
+        candidate_scores=np.asarray(all_scores, dtype=np.float32),
     )
     return {"rounds": rounds_out, "npz": buf.getvalue()}
 
