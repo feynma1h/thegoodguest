@@ -509,3 +509,43 @@ class TestInteractivePredictorIsOptional:
         assert 'getattr(self.model, "inst_interactive_predictor", None) is None' in src
         i = src.index("inst_interactive_predictor\", None) is None")
         assert "PERCEPTION_SAM3_INTERACTIVE=1" in src[i:i + 600]
+
+
+class TestEveryCandidateIsKept:
+    """Keeping only the winner made "would the runner-up have been better"
+    unanswerable without another GPU run — which is the question the first run
+    raised, about a runner-up that lost by 0.0039 of score."""
+
+    def test_all_candidates_and_scores_are_written(self):
+        import io
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        out = sr.click_refine(m, None, t._dets(), 0, rounds=3)
+        z = np.load(io.BytesIO(out["npz"]))
+        assert z["candidates"].shape[:2] == (3, 3), z["candidates"].shape
+        assert z["candidate_scores"].shape == (3, 3)
+        assert np.allclose(z["candidate_scores"][0], [0.9, 0.4, 0.1]), (
+            "stored as float32, so compare with a tolerance"
+        )
+
+    def test_candidate_zero_is_the_chosen_one(self):
+        """`masks` stays the chosen stack; candidate 0 must agree with it, or
+        an analysis reading one and comparing to the other is silently wrong."""
+        import io
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        out = sr.click_refine(m, None, t._dets(), 0, rounds=2)
+        z = np.load(io.BytesIO(out["npz"]))
+        for r in range(z["masks"].shape[0]):
+            assert (z["candidates"][r][0] == z["masks"][r]).all()
+
+    def test_the_loser_is_recoverable(self):
+        """The point of the change: the larger, lower-scoring candidate must be
+        on disk."""
+        import io
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        out = sr.click_refine(m, None, t._dets(), 0, rounds=1)
+        z = np.load(io.BytesIO(out["npz"]))
+        sizes = [int(c.sum()) for c in z["candidates"][0]]
+        assert max(sizes) > sizes[0], "the largest candidate did not survive to disk"
