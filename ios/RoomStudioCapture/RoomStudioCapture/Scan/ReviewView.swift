@@ -153,14 +153,14 @@ struct ReviewView: View {
                 // over the sketch ("126 frames · LiDAR + RoomPlan" at AX sizes).
                 if let census {
                     Text(census)
-                        .rsFont(.mono, size: 10, weight: .medium, maxSize: 14)
+                        .rsFont(.mono, size: 10, weight: .medium, maxSize: 14, cap: .mono)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .tracking(0.6)
                         .foregroundStyle(Color.rsOnDark.opacity(0.75))
                 }
                 Text(metrics)
-                    .rsFont(.mono, size: 10, weight: .medium, maxSize: 14)
+                    .rsFont(.mono, size: 10, weight: .medium, maxSize: 14, cap: .mono)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .tracking(0.6)

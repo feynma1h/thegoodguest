@@ -161,13 +161,13 @@ struct DeskView: View {
         VStack(alignment: .leading, spacing: 0) {
             if let roomTitle {
                 Text(roomTitle)
-                    .rsFont(.display, size: 24, weight: .medium)
+                    .rsFont(.display, size: 24, weight: .medium, cap: .display)
                     .foregroundStyle(Color.rsInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Text(DeskCopy.status(state, now: now))
-                .rsFont(.mono, size: 10.5, weight: .semibold)
+                .rsFont(.mono, size: 10.5, weight: .semibold, cap: .mono)
                 .tracking(1.1)
                 .foregroundStyle(statusInk(state))
                 .fixedSize(horizontal: false, vertical: true)
@@ -183,7 +183,7 @@ struct DeskView: View {
             // says precisely, which is what mono is for.
             if case .rateLimited(let resetsAt) = state, let resetsAt {
                 Text(DeskCopy.resetStamp(resetsAt))
-                    .rsFont(.mono, size: 11)
+                    .rsFont(.mono, size: 11, cap: .mono)
                     .foregroundStyle(Color.rsInkFaint)
                     .padding(.top, 12)
             }
@@ -209,7 +209,7 @@ struct DeskView: View {
     private var clear: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("The desk is clear.")
-                .rsFont(.display, size: 24, weight: .medium)
+                .rsFont(.display, size: 24, weight: .medium, cap: .display)
                 .foregroundStyle(Color.rsInk)
                 .fixedSize(horizontal: false, vertical: true)
 

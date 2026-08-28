@@ -171,7 +171,7 @@ struct LiveCaptureView: View {
     private func coverageTick(_ label: String, _ coverage: SurfaceCoverage) -> some View {
         HStack(spacing: 6) {
             Text(label)
-                .rsFont(.mono, size: 10, weight: .medium, maxSize: 13)
+                .rsFont(.mono, size: 10, weight: .medium, maxSize: 13, cap: .mono)
                 .tracking(0.5)
                 .lineLimit(1)
                 .fixedSize()

@@ -177,7 +177,7 @@ private struct NoteCard: View {
 
             if case .uploadFailed(let reason) = kind, let reason {
                 Text(reason)
-                    .rsFont(.mono, size: 10, maxSize: 13)
+                    .rsFont(.mono, size: 10, maxSize: 13, cap: .mono)
                     .foregroundStyle(Color.rsOnDark.opacity(0.5))
                     .textSelection(.enabled)
                     .padding(.top, 2)

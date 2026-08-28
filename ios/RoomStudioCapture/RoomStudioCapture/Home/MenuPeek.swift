@@ -143,7 +143,7 @@ struct MenuPeekMark: View {
                 .frame(width: Peek.leaderWidth, height: 2)
 
             Text("Menu")
-                .rsFont(.mono, size: 11, weight: .medium)
+                .rsFont(.mono, size: 11, weight: .medium, cap: .mono)
                 .tracking(0.18 * 11)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.peekLabel)

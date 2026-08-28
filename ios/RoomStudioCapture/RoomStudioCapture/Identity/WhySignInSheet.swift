@@ -39,7 +39,7 @@ struct WhySignInSheet: View {
                 .background(Color.rsGold.opacity(0.22), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
             Text("Keep your rooms, wherever you are.")
-                .rsFont(.display, size: 23)
+                .rsFont(.display, size: 23, cap: .display)
                 .foregroundStyle(Color.rsInk)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 16)
@@ -74,6 +74,7 @@ struct WhySignInSheet: View {
                 Button(action: onSignIn) {
                     Text("Sign in to keep your rooms")
                         .font(RSFont.ui(.headline, weight: .semibold))
+                        .rsControlLabel()
                         .foregroundStyle(Color.rsSurface)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 17)

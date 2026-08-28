@@ -109,7 +109,7 @@ struct ScreenHeader: View {
         ScreenHeaderFrame {
             BackChevron(action: onClose)
             Text(title)
-                .rsFont(.display, size: 22, weight: .medium, maxSize: 30)
+                .rsFont(.display, size: 22, weight: .medium, maxSize: 30, cap: .display)
                 .foregroundStyle(Color.rsInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -213,6 +213,7 @@ struct RSActionFootnoteStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(RSFont.ui(.footnote))
+            .rsControlLabel()
             .foregroundStyle(Color.rsInkMuted)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 2)

@@ -14,6 +14,7 @@ struct RSPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(RSFont.ui(.headline, weight: .semibold))
+            .rsControlLabel()
             .foregroundStyle(Color.rsSurface)
             // WRAPS, NEVER TRUNCATES. A filled button's label is the only
             // statement of what the button does, and under vertical pressure
@@ -42,6 +43,7 @@ struct RSGoldButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(RSFont.ui(.headline, weight: .semibold))
+            .rsControlLabel()
             .foregroundStyle(Color.rsInk)
             // Same rule as the primary: a filled button's label wraps.
             .fixedSize(horizontal: false, vertical: true)
@@ -63,6 +65,7 @@ struct RSLightButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(RSFont.ui(.headline, weight: .semibold))
+            .rsControlLabel()
             .foregroundStyle(Color.rsInk)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
@@ -79,6 +82,7 @@ struct RSQuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(RSFont.ui(.callout, weight: .medium))
+            .rsControlLabel()
             .foregroundStyle(onDark ? Color.rsOnDark.opacity(0.75) : Color.rsInkMuted)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
@@ -129,7 +133,7 @@ struct Eyebrow: View {
 
     var body: some View {
         Text(text.uppercased())
-            .rsFont(.mono, size: 10, weight: .semibold)
+            .rsFont(.mono, size: 10, weight: .semibold, cap: .mono)
             .tracking(1.4)
             .foregroundStyle(onDark ? Color.rsOnDark.opacity(0.5) : Color.rsInkFaint)
     }

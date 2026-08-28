@@ -55,7 +55,7 @@ struct DoorwayView: View {
             VStack(spacing: 0) {
                 Spacer()
                 Text("Your room is ready.")
-                    .rsFont(.display, size: 27)
+                    .rsFont(.display, size: 27, cap: .display)
                     .foregroundStyle(Color.rsOnDark)
                     .multilineTextAlignment(.center)
 

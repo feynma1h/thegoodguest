@@ -250,7 +250,7 @@ private struct HouseRow: View {
 
     private func stampText(_ s: String) -> some View {
         Text(s)
-            .rsFont(.mono, size: 10, weight: .medium)
+            .rsFont(.mono, size: 10, weight: .medium, cap: .mono)
             .tracking(0.9)
             .foregroundStyle(Color.rsInkFaint)
             .fixedSize(horizontal: false, vertical: true)
