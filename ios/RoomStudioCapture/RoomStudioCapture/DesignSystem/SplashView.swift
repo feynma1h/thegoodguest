@@ -398,15 +398,25 @@ struct SplashView: View {
         // So the two beats are separated by a fade rather than overlapped: the
         // name arrives and is read, goes, and the mark takes its place. No
         // movement, both beats, and the same total length.
-        withAnimation(.easeOut(duration: Timing.arrive)) { scriptOpacity = 1 }
-        markOpacity = 0
+        // Both, exactly as the full timeline opens: at progress 0 the rings ARE
+        // the word's own "oo", so hiding them sets the name as "the g  d
+        // guest" — which is what this did, and what the first fix here left
+        // behind.
+        withAnimation(.easeOut(duration: Timing.arrive)) {
+            scriptOpacity = 1
+            markOpacity = 1
+        }
         try? await Task.sleep(for: Timing.ms(Timing.arrive + Timing.holdName))
 
+        // Out together, then back as the mark. The blank between them is what
+        // buys the snap below: with anything on screen, moving the rings from
+        // the word's "oo" to the centre is a jump, and a jump is motion.
         let half = Timing.letterFade / 2
-        withAnimation(.easeInOut(duration: half)) { scriptOpacity = 0 }
+        withAnimation(.easeInOut(duration: half)) {
+            scriptOpacity = 0
+            markOpacity = 0
+        }
         try? await Task.sleep(for: Timing.ms(half))
-        // Unanimated, and only once nothing is drawn: this is the gather, and
-        // the gather is the motion reduced motion asked us to remove.
         progress = 1
         withAnimation(.easeInOut(duration: half)) { markOpacity = 1 }
         try? await Task.sleep(for: Timing.ms(half + Timing.holdMark))
