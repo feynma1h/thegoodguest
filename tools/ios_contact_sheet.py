@@ -25,10 +25,19 @@ import sys
 from collections import OrderedDict
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 PASSES = ("default", "ax5")
 PASS_LABEL = {"default": "Default", "ax5": "AX5"}
+
+
+def density(path):
+    """Fraction of the body area that is inked — the same measure the density
+    guard gates on, so a card and the gate cannot disagree about a screen."""
+    a = np.asarray(Image.open(path).convert("L")).astype(int)[200:2480]
+    bg = np.median(np.concatenate([a[:, 14:56], a[:, 1150:1192]], axis=1), axis=1)
+    return float((np.abs(a - bg[:, None]) > 30).mean())
 
 
 def encode(path, width, quality):
@@ -80,6 +89,16 @@ def build(shots, out, budget_mb, seen_ids):
                                          ("id", "group", "title", "note",
                                           "delay", "reduceMotion")})
         s.setdefault("passes", []).append(row["pass"])
+
+    for st in states.values():
+        d, x = shots / "default" / f"{st['id']}.png", shots / "ax5" / f"{st['id']}.png"
+        # Skipped for the same screens the density guard skips: their ink is a
+        # drawn graphic rather than type, so the ratio measures the artwork.
+        skip = st["id"].startswith(("capture", "doorway", "splash")) or \
+            st["id"] in {"gotroom", "unsupported", "qr"}
+        if d.exists() and x.exists() and not skip:
+            dd = density(d)
+            st["ratio"] = density(x) / dd if dd else None
 
     states = list(states.values())
     groups = OrderedDict()
@@ -133,6 +152,7 @@ def render(groups, states, blobs, width, seen_ids):
         cards = []
         for s in members:
             tags = []
+            ratio = s.get("ratio")
             if s["id"] not in seen_ids:
                 tags.append('<span class="tag new">first look</span>')
             if s["reduceMotion"]:
@@ -142,7 +162,7 @@ def render(groups, states, blobs, width, seen_ids):
 <div class="meta">
 <h3>{html.escape(s['title'])}</h3>
 <p class="note">{html.escape(s['note'])}</p>
-<p class="id"><code>{html.escape(s['id'])}</code><span class="at">{s['delay']:g}s</span>{''.join(tags)}</p>
+<p class="id"><code>{html.escape(s['id'])}</code><span class="at">{s['delay']:g}s</span>{f'<span class="dens{" over" if ratio > 2 else ""}">AX5 {ratio:.1f}x denser</span>' if ratio else ''}{''.join(tags)}</p>
 </div>
 </article>""")
 
@@ -290,6 +310,9 @@ figcaption {{ font-family:"JetBrains Mono",monospace; font-size:9.5px;
 .id code {{ font-size:11px; color:var(--faint); }}
 .at {{ font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--faint);
       font-variant-numeric:tabular-nums; }}
+.dens {{ font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--faint);
+        font-variant-numeric:tabular-nums; }}
+.dens.over {{ color:var(--flag); }}
 .tag {{ font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:.11em;
        text-transform:uppercase; padding:2px 6px; border-radius:3px; }}
 .tag.new {{ color:var(--brass); border:1px solid color-mix(in srgb, var(--brass) 45%, transparent); }}
@@ -317,6 +340,10 @@ dialog.lb::backdrop {{ background:rgba(8,7,6,.88); }}
   distinct state rather than one per screen — each enum case, and each combination of the values
   those cases carry that changes what is drawn. Every frame is shown at the default text size and
   at accessibility&nbsp;XXXL, which is where this app's layout defects have actually lived.</p>
+  <p class="standfirst">Each card carries how much denser its AX5 frame is than its default one.
+  Titles now stop growing at 1.4×, machine data at 1.6×, and a control's label is clamped so
+  buttons keep their shape; reading text still scales without limit, which is why the screens made
+  of the guest's prose are the ones still marked in rust.</p>
   <div class="figures">
     <div class="figure"><b>{n_states}</b><span>states</span></div>
     <div class="figure"><b>{n_groups}</b><span>screens</span></div>
