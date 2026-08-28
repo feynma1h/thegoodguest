@@ -161,52 +161,48 @@ class SAM3Model:
         objects.sort(key=lambda o: -o["score"])
         return objects
 
+    # SAM's prompt encoder sets `mask_input_size = 4 * image_embedding_size`
+    # (upstream/sam3/prompt_encoder.py), and the tracker this model builds runs
+    # at image_size=1008 / backbone_stride=14, so its embedding grid is 72 and a
+    # mask prompt must be 288x288. Every docstring in the predictor says
+    # H=W=256; those are inherited verbatim from SAM 2 (1024/16 -> 64 -> 256)
+    # and are STALE for SAM 3. Passing 256 downsamples to 64 and dies in the
+    # decoder with "The size of tensor a (72) must match the size of tensor b
+    # (64) at non-singleton dimension 3", measured on a live GPU 2026-08-28.
+    MASK_PROMPT_SIZE = 288
+
     def refine_with_points(
         self,
         image: Image.Image,
-        seed_mask: np.ndarray | None,
         points: list[tuple[float, float]],
         labels: list[int],
         *,
+        seed_mask: np.ndarray | None = None,
+        mask_logits: np.ndarray | None = None,
         multimask_output: bool = True,
-    ) -> tuple[list[np.ndarray], list[float]] | None:
-        """SAM 3's VISUAL path: clicks, optionally seeded with a mask.
+    ) -> tuple[list[np.ndarray], list[float], list[np.ndarray]] | None:
+        """SAM 3's VISUAL path: clicks, optionally with a mask prompt.
 
-        This is the OTHER half of SAM 3 (upstream/README.md). `segment` above
-        drives the detector — text in, every matching instance out. This drives
-        the tracker — points in, ONE instance out, with the model's own quality
-        score per candidate. Same model object, same `inference_state`; nothing
-        extra is loaded.
+        This is the OTHER half of SAM 3 (upstream/README.md). `segment` drives
+        the detector — text in, every matching instance out. This drives the
+        tracker — points in, ONE instance out, with the model's own quality
+        score per candidate. Same model object, same `inference_state`.
 
-        Returns ([masks], [scores]) sorted best-first by the model's score, or
-        None when the model returns nothing.
+        Returns ([masks], [scores], [low_res_logits]) sorted best-first by the
+        model's predicted quality, or None. The low-res logits are what a
+        SUBSEQUENT round should pass as `mask_logits`: they are already the
+        right size and upstream says masks returned by a previous iteration
+        "do not need further transformation".
 
-        `seed_mask` is off-label and says so: upstream types `mask_input` as
-        "a low resolution mask input... typically coming from a PREVIOUS
-        prediction iteration", 1x256x256. A binary detector mask is not that, so
-        it is resized and mapped to +/-10 logits. That is the conventional
-        encoding and it is still an assumption, which is why every round's
-        score is recorded rather than trusted.
+        `seed_mask` is a BINARY mask from the detector and is off-label — it is
+        resized to MASK_PROMPT_SIZE and mapped to +/-10 logits. Prefer
+        `mask_logits` once a round has produced some.
 
-        Upstream's own guidance on `multimask_output`: three masks help for an
-        AMBIGUOUS prompt such as a single click, and "for non-ambiguous prompts,
-        such as multiple input prompts, multimask_output=False can give better
-        results". Candidates come back ranked by the model's predicted quality,
-        which is what upstream says to select on.
+        Upstream on `multimask_output`: three masks help for an AMBIGUOUS prompt
+        such as a single click, and "for non-ambiguous prompts, such as multiple
+        input prompts, multimask_output=False can give better results".
         """
         from PIL import Image as _Image
-
-        with self._autocast():
-            state = self.processor.set_image(image)
-
-        mask_input = None
-        if seed_mask is not None and seed_mask.any():
-            lo = np.asarray(
-                _Image.fromarray((np.asarray(seed_mask, dtype=bool) * 255).astype(np.uint8))
-                .resize((256, 256), _Image.BILINEAR),
-                dtype=np.float32,
-            ) / 255.0
-            mask_input = ((lo * 2.0) - 1.0)[None] * 10.0
 
         if getattr(self.model, "inst_interactive_predictor", None) is None:
             logger.error(
@@ -215,9 +211,26 @@ class SAM3Model:
                 "INTERACTIVE_ENABLED for what it costs)"
             )
             return None
+
+        mask_input = None
+        if mask_logits is not None:
+            mask_input = np.asarray(mask_logits, dtype=np.float32)
+            if mask_input.ndim == 2:
+                mask_input = mask_input[None]
+        elif seed_mask is not None and np.asarray(seed_mask).any():
+            n = self.MASK_PROMPT_SIZE
+            lo = np.asarray(
+                _Image.fromarray((np.asarray(seed_mask, dtype=bool) * 255).astype(np.uint8))
+                .resize((n, n), _Image.BILINEAR),
+                dtype=np.float32,
+            ) / 255.0
+            mask_input = (((lo * 2.0) - 1.0) * 10.0)[None]
+
+        with self._autocast():
+            state = self.processor.set_image(image)
         try:
             with self._autocast():
-                masks, scores, _logits = self.model.predict_inst(
+                masks, scores, low_res = self.model.predict_inst(
                     state,
                     point_coords=np.asarray(points, dtype=np.float32) if points else None,
                     point_labels=np.asarray(labels, dtype=np.int32) if labels else None,
@@ -229,14 +242,21 @@ class SAM3Model:
             return None
 
         out = []
-        for m, sc in zip(np.asarray(masks), np.asarray(scores).ravel(), strict=False):
+        for m, sc, lr in zip(
+            np.asarray(masks), np.asarray(scores).ravel(), np.asarray(low_res),
+            strict=False,
+        ):
             mm = np.squeeze(np.asarray(m))
             if mm.ndim == 2:
-                out.append((float(sc), mm.astype(bool)))
+                out.append((float(sc), mm.astype(bool), np.asarray(lr, dtype=np.float32)))
         if not out:
             return None
         out.sort(key=lambda t: -t[0])
-        return [m for _s, m in out], [s for s, _m in out]
+        return (
+            [m for _s, m, _lr in out],
+            [s for s, _m, _lr in out],
+            [lr for _s, _m, lr in out],
+        )
 
     def refine_with_box(
         self,

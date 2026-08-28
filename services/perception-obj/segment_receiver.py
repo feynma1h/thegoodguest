@@ -57,16 +57,17 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
     surroundings" reading — the merge that 0198 measured at 113,465 px with a
     chair base and a stool absorbed.
 
-    NO MASK IS PASSED BACK TO THE MODEL, and that is forced rather than chosen.
-    SAM 3's interactive predictor declares `_bb_feat_sizes` ending at (72, 72) —
-    SAM 3's 1008/14 backbone grid — while the mask-prompt path it inherits from
-    SAM 2 embeds a 256x256 mask to 64x64. Seeding `mask_input` therefore dies in
-    the decoder with "The size of tensor a (72) must match the size of tensor b
-    (64) at non-singleton dimension 3". Measured on a live GPU, 2026-08-28.
+    The mask prompt is 288x288, not the 256 every upstream docstring names.
+    SAM's prompt encoder sets `mask_input_size = 4 * image_embedding_size` and
+    this tracker runs at 1008/14, so the grid is 72 and the mask must be 288.
+    The 256 in those docstrings is SAM 2's number (1024/16 -> 64 -> 256),
+    inherited verbatim and stale. Passing 256 dies in the decoder with "The size
+    of tensor a (72) must match the size of tensor b (64) at non-singleton
+    dimension 3" — measured on a live GPU before the sizes were read.
 
-    So the loop accumulates POINTS instead, which is SAM's canonical interactive
-    form anyway: a positive click on the object, then a positive click in each
-    round's leftover. Points carry no grid and cannot hit the mismatch.
+    After round 0 the mask prompt is the model's OWN low-res logits from the
+    previous round, which upstream says need no transformation. Points
+    accumulate alongside, which is SAM's canonical interactive form.
 
     Records every round and decides nothing. Whether growth is acceptable is a
     guard, the guard has been the weak link three times in this investigation,
@@ -91,15 +92,18 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
     k = int(np.argmin((xs0 - cx) ** 2 + (ys0 - cy) ** 2))
     points = [(float(xs0[k]), float(ys0[k]))]
     labels = [1]
+    carry = None      # the chosen candidate's low-res logits, round to round
 
     for r in range(max(1, rounds)):
         got = sam3_model.refine_with_points(
-            pil, None, points=list(points), labels=list(labels),
+            pil, list(points), list(labels),
+            seed_mask=seed if carry is None else None,
+            mask_logits=carry,
             multimask_output=True,
         )
         if got is None:
             break
-        masks, scores = got
+        masks, scores, low_res = got
         best = masks[0]                       # highest-scoring, not largest
         grew = best & ~accepted
         rec = {
@@ -110,6 +114,7 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
             "accepted_px": int(accepted.sum()),
             "growth_px": int(grew.sum()),
             "points": [[int(x), int(y)] for x, y in points],
+            "mask_prompt": "seed" if carry is None else "previous round",
         }
         # how much of any OTHER detection the growth covers — the guard's input
         worst, who = 0.0, None
@@ -134,6 +139,7 @@ def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int) -> d
         j = int(np.argmin((xs - mx) ** 2 + (ys - my) ** 2))
         points.append((float(xs[j]), float(ys[j])))
         labels.append(1)
+        carry = low_res[0]          # the chosen candidate's own logits
         accepted = best
 
     if not stack:
