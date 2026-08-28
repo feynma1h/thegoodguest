@@ -60,7 +60,7 @@ the environment flag rather than simply fading home in.
 ## The bug this uncovered, in the mark itself
 
 Working on the hand-off exposed a rendering fault in the splash that predates
-it, and it is recorded here because it falsifies the same premise.
+it.
 
 Even-odd fill is what makes a ring a ring: the outer ellipse and the inner one
 cancel, leaving a band. The splash put BOTH rings into one path and filled that
@@ -69,13 +69,34 @@ cancelled again and the intersection was knocked out. Two white notches, at the
 top and bottom crossings, on every frame of the mark.
 
 `Mark` has always drawn each ring as its own shape, which is why the static mark
-never had them. So the splash's final frame was NOT the mark it lands on, which
-is precisely the claim decisions 0248 and 0251 rest on and which this note
-extends. Fixed by rendering one shape per ring, exactly as `Mark` does.
+never had them. Fixed by rendering one shape per ring, exactly as `Mark` does.
 
-The operator found it by looking at the launch animation. It is invisible to
-every test in the suite and to any amount of reading, because both renderings
-are individually correct — the fault is only in combining them.
+**WHAT THIS DID AND DID NOT FALSIFY**, corrected by the brand lane and worth
+keeping straight, because the wrong reading sends someone to re-derive the
+wrong thing.
+
+Decision 0250's claim is that the wordmark's rings ARE the mark's rings under a
+uniform similarity, so interpolating their four numbers is itself a similarity
+and every intermediate frame IS the mark at some size. That is a claim about
+GEOMETRY, it was never false, and this fix did not move a single coordinate.
+
+What was false is the weaker thing the note and the `SplashView` docstring
+implied on top of it: that the last frame therefore LOOKED identical to the mark
+it lands on. Exact geometry, wrong fill rule. Do not read this as a reason to
+re-check the interpolation — the fault was never there.
+
+**The generator already warned about it.** `tools/gen_mark.py`'s docstring names
+this exact hazard — the two bands cross at four points and even-odd would punch
+holes exactly there — and `tools/test_gen_mark.py` guards it by building the
+wrong version and asserting ours differs. Both are on the PYTHON side. Nothing
+pins the Swift or TypeScript consumers, so the generator warned, the test
+passed, and a consumer re-made the mistake anyway.
+
+The brand lane then audited every other surface that draws the ring pair — the
+web mark and wordmark, the calling-card painter, `icon.svg`, the OG eyebrow, and
+iOS's static `Mark` — and all six draw one path or one fill per ring.
+`MorphingRings` was the only site. No further audit is owed; a consumer-side pin
+is, if anyone wants this class closed rather than documented.
 
 ## What would change this decision
 
