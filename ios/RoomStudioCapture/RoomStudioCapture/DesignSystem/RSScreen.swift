@@ -159,9 +159,43 @@ extension View {
     /// established that content scrolls and the action does not, and 0253
     /// measured that the rule had reached exactly two screens out of eleven;
     /// the screens that adopt this get the rule for free.
+    ///
+    /// Two shapes of screen use this. Where the action is a sibling of the
+    /// scroll region — home, review — the screen root supplies the horizontal
+    /// margin and nothing scrolls behind it. Where it is pinned with
+    /// `safeAreaInset`, content scrolls UNDERNEATH and the bar has to be
+    /// opaque: see `rsPinnedActions`, which is the form those screens use.
     func rsActionBar() -> some View {
         padding(.top, RSScreen.actionTop)
             .padding(.bottom, RSScreen.bottom)
+    }
+
+    /// An action block pinned over a scroll region with `safeAreaInset`.
+    ///
+    /// FULL-BLEED AND OPAQUE, and that is the whole point rather than a
+    /// finish. A safe-area inset reserves room at the bottom and lets content
+    /// scroll behind what sits there, so a transparent action bar is one the
+    /// body copy renders straight through. At the default text size nothing
+    /// overflows far enough to show it; at AX5 it put the closing line
+    /// letter-on-letter over the body on profile, the recovery screen and the
+    /// QR bridge, unreadable on all three, while the suite stayed green. Only
+    /// the guidance sheet escaped, because it set a background of its own —
+    /// which is exactly the kind of per-screen memory this replaces.
+    ///
+    /// A flat fill, not the parchment gradient: measured off a real frame, the
+    /// gradient moves 3 levels across this bar's whole height, so its bottom
+    /// stop is indistinguishable from it here.
+    ///
+    /// It owns the horizontal margin too, because a bar that is inset before
+    /// it is filled leaves a transparent strip down each edge — the same bug,
+    /// 26pt wide. Padding then background and NOTHING ELSE: an added
+    /// `frame(maxWidth: .infinity)` looks redundant and is not — inside a
+    /// `safeAreaInset` it changes the height the bar is offered, and profile's
+    /// primary went from wrapping to two lines to truncating at "Sign in to
+    /// kee…". This is the shape the guidance sheet has been using all along.
+    func rsPinnedActions(surface: Color = .rsBackground) -> some View {
+        padding(.horizontal, RSScreen.horizontal)
+            .background(surface)
     }
 }
 
