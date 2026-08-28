@@ -387,17 +387,29 @@ struct SplashView: View {
     }
 
     private func playReduced() async {
-        progress = 1
+        // ONE `progress` DRIVES BOTH, which is what makes the full-motion beat
+        // coherent and what this timeline has to work around: the letters are
+        // readable only at 0 and the mark exists only at 1, so a cross-fade
+        // between them cannot be expressed. Setting it to 1 up front — which
+        // is what this did — drew the name already collapsed onto its own
+        // anchor, so reduced motion showed nothing at all for the first 1.45s
+        // and then the mark. The product's name never appeared.
+        //
+        // So the two beats are separated by a fade rather than overlapped: the
+        // name arrives and is read, goes, and the mark takes its place. No
+        // movement, both beats, and the same total length.
         withAnimation(.easeOut(duration: Timing.arrive)) { scriptOpacity = 1 }
-        // The name still comes first; only the travel is gone, so the rings
-        // wait where the mark will be rather than moving into it.
         markOpacity = 0
         try? await Task.sleep(for: Timing.ms(Timing.arrive + Timing.holdName))
-        withAnimation(.easeInOut(duration: Timing.letterFade)) {
-            scriptOpacity = 0
-            markOpacity = 1
-        }
-        try? await Task.sleep(for: Timing.ms(Timing.letterFade + Timing.holdMark))
+
+        let half = Timing.letterFade / 2
+        withAnimation(.easeInOut(duration: half)) { scriptOpacity = 0 }
+        try? await Task.sleep(for: Timing.ms(half))
+        // Unanimated, and only once nothing is drawn: this is the gather, and
+        // the gather is the motion reduced motion asked us to remove.
+        progress = 1
+        withAnimation(.easeInOut(duration: half)) { markOpacity = 1 }
+        try? await Task.sleep(for: Timing.ms(half + Timing.holdMark))
         // Reduced motion loses the TRAVEL, not the hand-off: the mark
         // cross-fades in place and home arrives with it, so the same two things
         // still happen in the same order.
