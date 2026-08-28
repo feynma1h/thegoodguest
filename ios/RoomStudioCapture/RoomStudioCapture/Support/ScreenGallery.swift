@@ -134,19 +134,6 @@ enum ScreenGallery {
         .init(id: "review",    title: "Review",
               note: "The sketch, the capture metrics, and one honest chance to scan again."),
 
-        // ── Waiting ─────────────────────────────────────────────────────────
-        .init(id: "wait-sending",   title: "Sending",
-              note: "Nothing has arrived yet, so no arrival claim and no clock."),
-        .init(id: "wait-analyzing", title: "Analyzing",
-              note: "Uploaded. The clock counts from the server's own start time."),
-        .init(id: "wait-long",      title: "Still working",
-              note: "Candid when it runs long. No ETA — the pipeline gives the phone none."),
-        .init(id: "wait-trouble",   title: "Can't reach the studio",
-              note: "The room is safe; the check is not landing."),
-        .init(id: "wait-paused",    title: "Paused",
-              note: "Resumes next launch. Nothing to do now — which the home row does not say."),
-        .init(id: "wait-limited",   title: "Daily limit",
-              note: "Not a failure treatment. The only useful fact is when it lifts."),
 
         // ── Arrival and failure ─────────────────────────────────────────────
         .init(id: "doorway",         title: "The doorway",
@@ -155,10 +142,6 @@ enum ScreenGallery {
               note: "Names the missing count. Offers a re-send only when the bytes are provably still here."),
         .init(id: "fail-rescan",     title: "Incomplete · rescan only",
               note: "The same screen when the files are gone. It promises nothing."),
-        .init(id: "fail-terminal",   title: "Terminal failure",
-              note: "Nothing survived. The deepest ink surface, one path out."),
-        .init(id: "fail-upload",     title: "Upload failed",
-              note: "The send broke, not the scan. Carries the only diagnostic the user has."),
 
         // ── Identity ────────────────────────────────────────────────────────
         .init(id: "profile",   title: "You",
@@ -299,14 +282,6 @@ struct ScreenGalleryView: View {
                        verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",
                        rescanLabel: "Scan again from scratch")
 
-        // Waiting
-        case "wait-sending":   WaitingView(phase: .sending)
-        case "wait-analyzing": WaitingView(phase: .analyzing, anchor: GalleryFixture.anchor)
-        case "wait-long":      WaitingView(phase: .longRunning, anchor: GalleryFixture.anchor)
-        case "wait-trouble":   WaitingView(phase: .connectionTrouble, anchor: GalleryFixture.anchor)
-        case "wait-paused":    WaitingView(phase: .sendPaused)
-        case "wait-limited":
-            WaitingView(phase: .sendRateLimited(resetsAt: GalleryFixture.anchor.addingTimeInterval(31_000)))
 
         // Arrival and failure
         case "doorway":
@@ -320,10 +295,6 @@ struct ScreenGalleryView: View {
         case "fail-rescan":
             FailureView(kind: .recoverable(missingCount: 14, resend: .unavailable),
                         onBack: {})
-        case "fail-terminal":
-            FailureView(kind: .terminal)
-        case "fail-upload":
-            FailureView(kind: .uploadFailed(reason: GalleryFixture.failureReason))
 
         // Identity
         case "profile":

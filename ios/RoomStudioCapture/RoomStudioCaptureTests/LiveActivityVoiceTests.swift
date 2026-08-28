@@ -50,7 +50,7 @@ final class LiveActivityVoiceTests: XCTestCase {
     // MARK: - Mirroring the app
 
     func test_titlesMirrorTheInAppSurfaces() {
-        // WaitingView's own titles.
+        // the desk's own titles.
         XCTAssertEqual(RoomActivityVoice.title(.sending(sent: 3, total: 10)), "Sending your room")
         XCTAssertEqual(RoomActivityVoice.title(.queued), "Getting in line")
         XCTAssertEqual(RoomActivityVoice.title(.analyzing), "Making sense of your room")
@@ -66,7 +66,7 @@ final class LiveActivityVoiceTests: XCTestCase {
 
     func test_noPromiseOfANotification() {
         // Push is not built (enrollment-gated), so "I'll let you know" would be a
-        // promise nothing can keep — the same rule WaitingView.longRunning follows.
+        // promise nothing can keep — the same rule the desk's long-running line follows.
         for stage in allStages {
             let text = (RoomActivityVoice.title(stage) + " " + RoomActivityVoice.line(stage)).lowercased()
             for banned in ["i'll knock", "notify", "notification", "i'll let you know", "i'll ping"] {

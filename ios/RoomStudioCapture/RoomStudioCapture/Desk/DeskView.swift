@@ -73,7 +73,7 @@ nonisolated enum DeskCopy {
         case .paused:
             return "Asleep until you next open me — there's nothing for you to do."
         case .rateLimited(let resetsAt):
-            return WaitingView.rateLimitLine(resetsAt: resetsAt, now: now)
+            return rateLimitLine(resetsAt: resetsAt, now: now)
         case .retryableSendFailure:
             return "I couldn't get it up to the desk just now, so it hasn't started yet. Nothing's lost — it's still here on your phone."
         case .checkFailed(_, let stopped):
@@ -81,6 +81,37 @@ nonisolated enum DeskCopy {
                 ? "I've lost my line to the desk. Your room is safe up there; I just can't check on it, and I've stopped trying."
                 : "I've lost my line to the desk for a moment. Your room is safe — I'll keep trying quietly."
         }
+    }
+
+    /// The guest's line for the daily cap. Pure so the honesty is testable: it must
+    /// never promise a time the server did not name, and must never say "tomorrow"
+    /// for a reset that is later today.
+    static func rateLimitLine(resetsAt: Date?, now: Date) -> String {
+        let kept = "Your scan is safe on your phone — nothing was lost, and I'll send it the moment I can."
+        guard let resetsAt, resetsAt > now else {
+            return "I've hit my limit for how many rooms I can take up today. \(kept)"
+        }
+        let hours = resetsAt.timeIntervalSince(now) / 3600
+        let when: String
+        if hours < 1 {
+            when = "in under an hour"
+        } else if hours < 2 {
+            when = "in about an hour"
+        } else if Calendar.current.isDate(resetsAt, inSameDayAs: now) {
+            when = "later today"
+        } else {
+            when = "tomorrow"
+        }
+        return "I've hit my limit for how many rooms I can take up today — I can take more \(when). \(kept)"
+    }
+
+    /// The exact reset instant, in the device's own time zone. Mono machine data,
+    /// never prose: the line above owns the human reading.
+    static func resetStamp(_ resetsAt: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale     = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM, HH:mm"
+        return "RESETS \(formatter.string(from: resetsAt))"
     }
 
     /// The one control, in the user's voice. Nil where leaving is the only
@@ -145,6 +176,17 @@ struct DeskView: View {
             GuestLine(DeskCopy.line(state, now: now), size: 16)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 18)
+
+            // The one exact fact on this screen, when the server named it.
+            // Carried over from the wait screen this replaced rather than lost
+            // with it: the line above says roughly when the cap lifts, and this
+            // says precisely, which is what mono is for.
+            if case .rateLimited(let resetsAt) = state, let resetsAt {
+                Text(DeskCopy.resetStamp(resetsAt))
+                    .rsFont(.mono, size: 11)
+                    .foregroundStyle(Color.rsInkFaint)
+                    .padding(.top, 12)
+            }
 
             if let action = DeskCopy.action(state) {
                 Button(action: onAct) {

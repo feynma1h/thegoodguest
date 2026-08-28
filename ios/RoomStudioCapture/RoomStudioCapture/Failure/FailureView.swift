@@ -19,8 +19,8 @@
 ///     No specific cause is named — the pipeline surfaces no honest per-object
 ///     reason, so the copy stays general rather than inventing one.
 ///
-/// The upload-failed relaunch banner is `UploadFailedBanner` (separate file), so
-/// a failure is never silently lost.
+/// The other two failures — nothing survived, and the send broke — are NOTES
+/// now rather than screens (0254). This file is the one that kept a screen.
 
 import SwiftUI
 
@@ -168,18 +168,18 @@ nonisolated enum FailureCopy {
 }
 
 struct FailureView: View {
+    /// One kind now. The terminal and upload-failed screens became NOTES when
+    /// the surfaces were split by what a state IS (0254): a room that has
+    /// finished failing is something to acknowledge, not a screen to be held
+    /// on. Only the incomplete upload kept a screen, because it is the one
+    /// failure with a real recovery path and that path is a question about
+    /// this phone's disk.
     enum Kind: Equatable {
         /// `missingCount` — how many blob paths the server reported absent. See
         /// FailureCopy.incompleteBody for the honesty constraint on stating it.
         /// `resend` — whether those files can actually be sent again, decided by
         /// CaptureRecovery from the disk, never from the view.
         case recoverable(missingCount: Int, resend: FailureCopy.Resend)
-        case terminal
-        /// The upload itself failed terminally (http_4xx, 308_persistent,
-        /// empty_bundle_pb, blob_unreadable_at_remint_manifest…). NOT a capture
-        /// fault: "scan slower" fixes none of these, so it gets its own copy and
-        /// carries the persisted reason, which is the only diagnostic the user has.
-        case uploadFailed(reason: String?)
     }
 
     var kind: Kind = .recoverable(missingCount: 0, resend: .unavailable)
@@ -196,8 +196,6 @@ struct FailureView: View {
         switch kind {
         case .recoverable(let missingCount, let resend):
             recoverable(missingCount: missingCount, resend: resend)
-        case .terminal:    terminal
-        case .uploadFailed(let reason): uploadFailed(reason: reason)
         }
     }
 
@@ -271,117 +269,4 @@ struct FailureView: View {
         .onAppear { RSHaptics.fire(.failure) }
     }
 
-    // MARK: Upload failed (the send broke, not the scan)
-
-    private func uploadFailed(reason: String?) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Spacer()
-
-            Image(systemName: "arrow.up.circle")
-                .font(.system(size: 34, weight: .regular))
-                .foregroundStyle(Color.rsGoldLight)
-
-            Text("I couldn't get it up to the desk.")
-                .rsFont(.display, size: 24)
-                .foregroundStyle(Color.rsOnDark)
-                .padding(.top, 24)
-
-            GuestLine("The scan itself was fine — it's the sending that broke, and it won't recover on its own. Nothing about how you scanned caused this.",
-                      size: 15.5, onDark: true)
-                .padding(.top, 14)
-
-            if let reason {
-                Text(reason)
-                    .rsFont(.mono, size: 11, maxSize: 15)
-                    .foregroundStyle(Color.rsOnDark.opacity(0.45))
-                    .textSelection(.enabled)
-                    .padding(.top, 12)
-            }
-
-            Spacer(minLength: 20)
-        }
-        .padding(.horizontal, RSScreen.horizontal)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(RSScrollableScreen(background: Color.rsInk))
-        .safeAreaInset(edge: .bottom) {
-            RSActions {
-                Button(action: onPrimary) { Text("Scan the room again") }
-                    .buttonStyle(RSLightButtonStyle())
-            } closing: {
-                Button(action: onSecondary) { Text("Later") }
-                    .buttonStyle(RSActionFootnoteStyle())
-            }
-            .padding(.horizontal, RSScreen.horizontal)
-        }
-        .onAppear { RSHaptics.fire(.failure) }
-    }
-
-    // MARK: Terminal
-
-    private var terminal: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Spacer()
-
-            Image(systemName: "exclamationmark.square")
-                .font(.system(size: 34, weight: .regular))
-                .foregroundStyle(Color.rsGoldLight)
-
-            Text("The scan didn't survive the trip.")
-                .rsFont(.display, size: 24)
-                .foregroundStyle(Color.rsOnDark)
-                .padding(.top, 24)
-
-            GuestLine("There's nothing here I could honestly show you — and it's not something you did. When you're near the room again, let's try one more pass. Slower is better this time.",
-                      size: 15.5, onDark: true)
-                .padding(.top, 14)
-
-            Spacer(minLength: 20)
-        }
-        .padding(.horizontal, RSScreen.horizontal)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(RSScrollableScreen(background: Color.rsInk))
-        .safeAreaInset(edge: .bottom) {
-            RSActions {
-                Button(action: onPrimary) { Text("Scan the room again") }
-                    .buttonStyle(RSLightButtonStyle())
-            } closing: {
-                Button(action: onSecondary) { Text("Later") }
-                    .buttonStyle(RSActionFootnoteStyle())
-            }
-            .padding(.horizontal, RSScreen.horizontal)
-        }
-        .onAppear { RSHaptics.fire(.failure) }
-    }
-}
-
-#Preview("Recoverable — can send (one file)") {
-    FailureView(kind: .recoverable(missingCount: 1, resend: .available))
-}
-
-#Preview("Recoverable — can send (several)") {
-    FailureView(kind: .recoverable(missingCount: 14, resend: .available))
-}
-
-#Preview("Recoverable — sending") {
-    FailureView(kind: .recoverable(missingCount: 14, resend: .inFlight))
-}
-
-#Preview("Recoverable — send failed") {
-    FailureView(kind: .recoverable(missingCount: 3, resend: .failed))
-}
-
-#Preview("Recoverable — rescan only") {
-    FailureView(kind: .recoverable(missingCount: 14, resend: .unavailable))
-}
-
-#Preview("Recoverable — count unknown") {
-    FailureView(kind: .recoverable(missingCount: 0, resend: .unavailable))
-}
-
-#Preview("Terminal") {
-    FailureView(kind: .terminal)
-}
-
-#Preview("Upload failed") {
-    FailureView(kind: .uploadFailed(reason: "http_403"))
 }

@@ -68,7 +68,7 @@ final class RateLimitSurfaceTests: XCTestCase {
     // MARK: - Copy honesty
 
     func test_copyNeverPromisesATimeTheServerDidNotName() {
-        let line = WaitingView.rateLimitLine(resetsAt: nil, now: now)
+        let line = DeskCopy.rateLimitLine(resetsAt: nil, now: now)
         for invented in ["tomorrow", "later today", "in an hour", "in about an hour"] {
             XCTAssertFalse(line.lowercased().contains(invented),
                            "an unstated reset must not be narrated as \(invented)")
@@ -82,9 +82,9 @@ final class RateLimitSurfaceTests: XCTestCase {
         // Anchored at 09:00 LOCAL so the assertion holds in every time zone: a
         // fixed UTC instant is late evening somewhere, where +4h really is tomorrow.
         let morning = Calendar.current.startOfDay(for: now).addingTimeInterval(9 * 3600)
-        let sameDay = WaitingView.rateLimitLine(resetsAt: morning.addingTimeInterval(4 * 3600),
+        let sameDay = DeskCopy.rateLimitLine(resetsAt: morning.addingTimeInterval(4 * 3600),
                                                 now: morning)
-        let nextDay = WaitingView.rateLimitLine(resetsAt: morning.addingTimeInterval(30 * 3600),
+        let nextDay = DeskCopy.rateLimitLine(resetsAt: morning.addingTimeInterval(30 * 3600),
                                                 now: morning)
         XCTAssertTrue(sameDay.contains("later today"))
         XCTAssertFalse(sameDay.contains("tomorrow"))
@@ -92,22 +92,22 @@ final class RateLimitSurfaceTests: XCTestCase {
     }
 
     func test_copyRoundsShortWaitsHonestly() {
-        XCTAssertTrue(WaitingView.rateLimitLine(resetsAt: now.addingTimeInterval(600), now: now)
+        XCTAssertTrue(DeskCopy.rateLimitLine(resetsAt: now.addingTimeInterval(600), now: now)
             .contains("in under an hour"))
-        XCTAssertTrue(WaitingView.rateLimitLine(resetsAt: now.addingTimeInterval(5400), now: now)
+        XCTAssertTrue(DeskCopy.rateLimitLine(resetsAt: now.addingTimeInterval(5400), now: now)
             .contains("in about an hour"))
     }
 
     func test_aResetAlreadyPastIsTreatedAsUnstated() {
         // Clock skew must not produce "I can take more in under an hour" for a
         // moment that has already gone by.
-        let line = WaitingView.rateLimitLine(resetsAt: now.addingTimeInterval(-60), now: now)
+        let line = DeskCopy.rateLimitLine(resetsAt: now.addingTimeInterval(-60), now: now)
         XCTAssertFalse(line.contains("I can take more"))
     }
 
     func test_copyOwnsTheLimitAndDoesNotBlameTheUser() {
         for resets: Date? in [nil, now.addingTimeInterval(3600), now.addingTimeInterval(30 * 3600)] {
-            let line = WaitingView.rateLimitLine(resetsAt: resets, now: now).lowercased()
+            let line = DeskCopy.rateLimitLine(resetsAt: resets, now: now).lowercased()
             XCTAssertTrue(line.contains("i've hit my limit"), "the guest owns it")
             for blame in ["you've uploaded too", "you have exceeded", "your limit", "too many"] {
                 XCTAssertFalse(line.contains(blame), "copy blames the user: \(blame)")
@@ -117,7 +117,7 @@ final class RateLimitSurfaceTests: XCTestCase {
 
     func test_resetStampIsMachineData() {
         // Mono slot: an exact instant, not prose. The line above owns the reading.
-        let stamp = WaitingView.resetStamp(Date(timeIntervalSince1970: 1_786_320_000))
+        let stamp = DeskCopy.resetStamp(Date(timeIntervalSince1970: 1_786_320_000))
         XCTAssertTrue(stamp.hasPrefix("RESETS "))
         XCTAssertFalse(stamp.contains("tomorrow"))
     }
