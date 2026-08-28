@@ -57,6 +57,26 @@ no anchor.
 **Two marks converging on one point read as a doubling, not a hand-off** — hence
 the environment flag rather than simply fading home in.
 
+## The bug this uncovered, in the mark itself
+
+Working on the hand-off exposed a rendering fault in the splash that predates
+it, and it is recorded here because it falsifies the same premise.
+
+Even-odd fill is what makes a ring a ring: the outer ellipse and the inner one
+cancel, leaving a band. The splash put BOTH rings into one path and filled that
+even-odd, so the rule kept counting — and where the two bands cross, the winding
+cancelled again and the intersection was knocked out. Two white notches, at the
+top and bottom crossings, on every frame of the mark.
+
+`Mark` has always drawn each ring as its own shape, which is why the static mark
+never had them. So the splash's final frame was NOT the mark it lands on, which
+is precisely the claim decisions 0248 and 0251 rest on and which this note
+extends. Fixed by rendering one shape per ring, exactly as `Mark` does.
+
+The operator found it by looking at the launch animation. It is invisible to
+every test in the suite and to any amount of reading, because both renderings
+are individually correct — the fault is only in combining them.
+
 ## What would change this decision
 
 If any other screen ever wants to receive the mark this way, the preference key
