@@ -64,8 +64,8 @@ nonisolated enum WaitScreen: Equatable {
     case notOurs
 }
 
-/// The narrated sub-state of an in-flight room (mirrors WaitingView.Phase's
-/// analyzing family, without the failure cases).
+/// The narrated sub-state of an in-flight room. `SurfacePlacement` turns it
+/// into a DeskState; nothing else reads it.
 nonisolated enum WaitPhase: Equatable { case queued, analyzing, longRunning }
 
 nonisolated enum WaitFlowState {
@@ -192,17 +192,5 @@ nonisolated enum WaitFlowState {
         case recoverable(missingCount: Int)
         case notOwned
         case pollError(anchor: Date?)
-    }
-}
-
-extension WaitPhase {
-    /// Presentation bridge. WaitPhase stays free of the view layer so the routing
-    /// table can be tested without SwiftUI.
-    var waitingPhase: WaitingView.Phase {
-        switch self {
-        case .queued:      return .queued
-        case .analyzing:   return .analyzing
-        case .longRunning: return .longRunning
-        }
     }
 }

@@ -287,20 +287,6 @@ final class WaitFlowStateTests: XCTestCase {
         )
     }
 
-    // MARK: - Elapsed clock
-
-    func testClockFormatsAndClampsNegativeSkew() {
-        XCTAssertEqual(WaitingView.clock(0), "00:00")
-        XCTAssertEqual(WaitingView.clock(-42), "00:00", "clock must clamp negative skew to zero")
-        XCTAssertEqual(WaitingView.clock(65), "01:05")
-        XCTAssertEqual(WaitingView.clock(599), "09:59")
-    }
-
-    func testClockRollsOverToHours() {
-        XCTAssertEqual(WaitingView.clock(3599), "59:59")
-        XCTAssertEqual(WaitingView.clock(3600), "1:00:00")
-        XCTAssertEqual(WaitingView.clock(3661), "1:01:01")
-    }
 }
 
 /// Pins ScenePoller's `isVisible` contract, which the completion kick trusts.

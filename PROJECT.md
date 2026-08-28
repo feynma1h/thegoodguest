@@ -884,13 +884,6 @@ gains.
   mistake anyway (0255). All six other surfaces that draw the ring pair were
   audited and are correct, so this is a latent gap rather than a live defect:
   the fix is a consumer-side pin, not a better docstring.
-- **`WaitingView` is unreachable and awaiting a ruling.** The desk replaced it
-  and the post-send surface no longer routes to it, but it is still in the tree:
-  it is the reference the desk is being judged against, and `DeskCopy` borrows
-  its rate-limit line. Decision 0237 is the standing rule that a dead screen
-  accrues unverified fixes and rusts shut, so this should not sit here long.
-  `FailureView`'s `terminal` and `uploadFailed` branches are unreachable for the
-  same reason — both became notes — and go with it.
 - **Notes has no past.** The design gives news an "EARLIER" list of observed
   facts; that needs the phone to remember what it previously saw and diff
   successive fetches, which nothing does today. Deferred by operator ruling; the
