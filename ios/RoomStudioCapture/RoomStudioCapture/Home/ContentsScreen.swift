@@ -124,14 +124,14 @@ private struct ContentsRowView: View {
 
     private var title: some View {
         Text(row.entry.title)
-            .rsFont(.display, size: 20, weight: .medium)
+            .rsFont(.display, size: 20, weight: .medium, cap: .display)
             .foregroundStyle(Color.rsInk)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private func statusText(_ status: String) -> some View {
         Text(status)
-            .rsFont(.mono, size: 10.5, weight: .semibold)
+            .rsFont(.mono, size: 10.5, weight: .semibold, cap: .mono)
             .tracking(1.1)
             .foregroundStyle(ink)
             .fixedSize(horizontal: false, vertical: true)

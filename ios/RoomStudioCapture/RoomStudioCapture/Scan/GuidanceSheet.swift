@@ -129,7 +129,7 @@ struct GuidanceSheet: View {
     private var header: some View {
         ScreenHeaderFrame {
             Text("Before you start")
-                .rsFont(.display, size: 22, weight: .medium, maxSize: 30)
+                .rsFont(.display, size: 22, weight: .medium, maxSize: 30, cap: .display)
                 .foregroundStyle(Color.rsOnDark)
                 .fixedSize(horizontal: false, vertical: true)
         } trailing: {
@@ -149,7 +149,7 @@ struct GuidanceSheet: View {
         HStack(spacing: 7) {
             Circle().fill(Color.rsGold).frame(width: 7, height: 7)
             Text("LiDAR READY · PRO CAPTURE")
-                .rsFont(.mono, size: 11, weight: .medium)
+                .rsFont(.mono, size: 11, weight: .medium, cap: .mono)
                 .tracking(0.8)
                 .foregroundStyle(Color.rsGoldLight)
         }

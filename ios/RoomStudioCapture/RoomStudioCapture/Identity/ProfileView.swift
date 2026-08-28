@@ -76,6 +76,7 @@ struct ProfileView: View {
                 Button { showSignIn = true } label: {
                     Text("Sign in to keep your rooms")
                         .font(RSFont.ui(.headline, weight: .semibold))
+                        .rsControlLabel()
                         .foregroundStyle(Color.rsSurface)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 17)
@@ -101,7 +102,7 @@ struct ProfileView: View {
                     Text(uid)
                         // Wraps rather than truncates: a partial ID can't serve as
                         // proof of identity continuity, which is this card's job.
-                        .rsFont(.mono, size: 13.5, weight: .medium, maxSize: 20)
+                        .rsFont(.mono, size: 13.5, weight: .medium, maxSize: 20, cap: .mono)
                         .fixedSize(horizontal: false, vertical: true)
                         .foregroundStyle(Color.rsInk)
                 } else {
