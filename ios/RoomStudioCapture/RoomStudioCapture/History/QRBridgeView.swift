@@ -48,7 +48,7 @@ struct QRBridgeView: View {
                     .font(RSFont.ui(.footnote))
                     .foregroundStyle(Color.rsOnDark.opacity(0.5))
             }
-            .padding(.horizontal, RSScreen.horizontal)
+            .rsPinnedActions(surface: .rsCaptureRaised)
         }
     }
 }

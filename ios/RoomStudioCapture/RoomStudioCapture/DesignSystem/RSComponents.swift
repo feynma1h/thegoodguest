@@ -15,6 +15,16 @@ struct RSPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(RSFont.ui(.headline, weight: .semibold))
             .foregroundStyle(Color.rsSurface)
+            // WRAPS, NEVER TRUNCATES. A filled button's label is the only
+            // statement of what the button does, and under vertical pressure
+            // Text's default is to truncate it: at AX5, review's dormant
+            // thin-coverage branch — the one arrangement with a quiet button
+            // ABOVE the primary — squeezed "Scan again from scratch" down to
+            // "Scan again fr…", which names no action at all. The same label
+            // wraps to two lines correctly in every other arrangement, so
+            // nothing about the label was the problem.
+            .fixedSize(horizontal: false, vertical: true)
+            .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 17)
             .background(Color.rsAction, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -33,6 +43,9 @@ struct RSGoldButtonStyle: ButtonStyle {
         configuration.label
             .font(RSFont.ui(.headline, weight: .semibold))
             .foregroundStyle(Color.rsInk)
+            // Same rule as the primary: a filled button's label wraps.
+            .fixedSize(horizontal: false, vertical: true)
+            .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 17)
             .background(Color.rsGold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

@@ -90,7 +90,7 @@ struct ProfileView: View {
                 .font(RSFont.ui(.footnote))
                 .foregroundStyle(Color.rsInkFaint)
         }
-        .padding(.horizontal, RSScreen.horizontal)
+        .rsPinnedActions()
     }
 
     private var idCard: some View {

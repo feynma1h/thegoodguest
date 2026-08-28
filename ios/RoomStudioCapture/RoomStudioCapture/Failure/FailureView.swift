@@ -264,7 +264,7 @@ struct FailureView: View {
                 Button(action: onSecondary) { Text(actions.secondaryLabel) }
                     .buttonStyle(RSActionFootnoteStyle())
             }
-            .padding(.horizontal, RSScreen.horizontal)
+            .rsPinnedActions()
         }
         .onAppear { RSHaptics.fire(.failure) }
     }

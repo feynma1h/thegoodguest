@@ -83,7 +83,7 @@ struct WhySignInSheet: View {
                 Button(action: onNotNow) { Text("Not now") }
                     .buttonStyle(RSActionFootnoteStyle())
             }
-            .padding(.horizontal, RSScreen.horizontal)
+            .rsPinnedActions(surface: .rsSurface)
         }
     }
 
