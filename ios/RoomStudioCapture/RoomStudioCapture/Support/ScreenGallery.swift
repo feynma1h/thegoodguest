@@ -1,22 +1,41 @@
 /// DEBUG-only screen gallery: renders exactly one screen, in isolation, from
-/// fixtures — so every surface in the app can be photographed without staging
-/// the state that would normally produce it.
+/// fixtures — so every surface in the app can be photographed in every state it
+/// can reach, without staging the state that would normally produce it.
 ///
 /// WHY THIS EXISTS: most of the app's screens cannot be reached on demand. The
 /// home notices need a terminally failed upload record, a bundle mid-flight and
 /// a failed rooms fetch — three independent conditions, one of which requires a
-/// real capture to have failed. The wait and failure screens need a round trip
-/// to the backend. The doorway needs a room to have finished rebuilding. Every
+/// real capture to have failed. The desk's rate limit needs the server to
+/// refuse a mint. The doorway needs a room to have finished rebuilding. Every
 /// one of them is a design surface someone has to be able to LOOK at, and the
 /// iOS test policy is explicit that a green suite says nothing about rendering:
 /// layout claims at accessibility sizes have to be verified by screenshot, and
 /// three review passes previously claimed coverage they did not have.
 ///
-/// So this is the screenshot half of that policy, made repeatable. It composes
-/// each screen the same way `RootFlowView` composes it — the home variants are
-/// built from a `HomeDay` and compose their own sentence through the real
-/// resolver, so a photograph taken here is a photograph of the shipping routing
-/// and not of a hand-written string.
+/// So this is the screenshot half of that policy, made repeatable.
+///
+/// ONE ENTRY IS ONE STATE, NOT ONE SCREEN. A screen photographed in one of the
+/// several states it can reach has been photographed in none of the others, and
+/// the ones nobody looks at are exactly where the defects are: a two-line
+/// closing sentence, a wrapped title or a singular/plural swap moves everything
+/// under it. So the catalogue enumerates the state space — every case of every
+/// enum a screen switches on, and every combination of the values those cases
+/// carry that changes what is drawn. Where an associated value does NOT change
+/// the drawing, that is recorded in the note rather than given an entry.
+///
+/// IT COMPOSES, IT DOES NOT IMITATE. Each screen is built the way `RootFlowView`
+/// builds it — the home variants are built from a `HomeDay` and compose their
+/// own sentence through the real resolver, the desk renders `DeskCopy`'s own
+/// table, the recovery screen reads `FailureCopy`'s. A photograph taken here is
+/// a photograph of the shipping layout. If a state can only be reached by
+/// hand-assembling a lookalike, the state is not reachable, and that is a
+/// finding rather than an entry.
+///
+/// EVERY FIXTURE IS PINNED TO A FIXED CLOCK. `GalleryClock.now` is a constant,
+/// and every date a screen renders is derived from it — so "4 MIN SO FAR",
+/// "RESETS 29 Aug, 04:20" and the house's stamps are the same pixels on every
+/// run. Wired to `Date()` these shots drifted: the rate-limit line reads "later
+/// today" or "tomorrow" depending on what time the capture pass happened to run.
 ///
 /// HOW TO DRIVE IT, following `StagingHooks`' launch-argument convention:
 ///
@@ -25,7 +44,7 @@
 ///
 /// Pair it with `xcrun simctl ui <udid> content_size accessibility-extra-extra-extra-large`
 /// to photograph the accessibility sizes, which is where this app's layout
-/// defects have actually lived (decisions 0224 and 0238).
+/// defects have actually lived (decisions 0224, 0238 and 0266).
 ///
 /// `ScreenGallery.screens` is the catalogue and the ONE list — the capture
 /// script enumerates it rather than carrying its own copy, so a screen added
@@ -37,6 +56,7 @@
 
 #if DEBUG
 
+import AVFoundation
 import SwiftUI
 
 // MARK: - Catalogue
@@ -53,127 +73,371 @@ enum ScreenGallery {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// Every photographable screen: id, the caption a reader needs, and whether
-    /// the screen animates on arrival (the capture script waits longer for those
-    /// rather than photographing a half-played bloom).
+    /// One photographable state.
     struct Entry {
         let id: String
+        /// Which screen this is a state OF. The contact sheet groups on it, so
+        /// two states of one screen are read side by side rather than found by
+        /// scrolling — and it is stated rather than parsed out of the id, which
+        /// would make `fail-incomplete` and `fail-rescan` a group called "fail"
+        /// only by luck of naming.
+        let group: String
         let title: String
+        /// What state this is, and what makes it different from its neighbours.
         let note: String
-        var settles = false
+        /// When to photograph it, in seconds after launch.
+        ///
+        /// A NUMBER RATHER THAN A FLAG, because several screens play a timeline
+        /// and the interesting frame is at a particular moment in it, not
+        /// "after it settles": the splash has two beats worth having, and home's
+        /// menu peek is out between about 2.0 s and 3.5 s and gone by 5.2 s.
+        var delay: Double = 2
+        /// Render with Reduce Motion on. The environment value is what the
+        /// screens actually read, so setting it is the real input rather than a
+        /// second code path — see `ScreenGalleryView`.
+        var reduceMotion = false
     }
 
     static let screens: [Entry] = [
-        // ── Home: the claim, one sentence, one action. ──────────────────────
-        .init(id: "home-first",    title: "Home · first run",
-              note: "The claim, the support line, and the whisper that teaches where things live."),
-        .init(id: "home-quiet",    title: "Home · ordinary day",
-              note: "A standing fact, pointing at the house. The claim has not moved."),
-        .init(id: "home-flight",   title: "Home · a room in flight",
-              note: "Gold, quiet, pointing at the desk."),
-        .init(id: "home-arrival",  title: "Home · arrival",
-              note: "Gold, pointing at the doorway. The app's peak moment finally reaches home."),
-        .init(id: "home-needsyou", title: "Home · something needs you",
-              note: "Rust, pointing at Notes — and mentioning the flight without routing to it."),
-        .init(id: "home-trouble",  title: "Home · rooms unreachable",
-              note: "The count is unknown, so the sentence states no number and never a zero."),
 
-        // ── The contents, behind the mark ───────────────────────────────────
-        .init(id: "contents-quiet",    title: "Contents · quiet day",
-              note: "The whole map as a table of contents. Four entries, always the same four."),
-        .init(id: "contents-eventful", title: "Contents · eventful day",
-              note: "Rust only for what needs you; the desk reports its own count."),
-        .init(id: "contents-nocount",  title: "Contents · the house declines",
-              note: "A count the phone cannot vouch for is blank — never zero."),
+        // Home. HomeDay is needsYou x hasUnseenArrival x hasRoomInFlight x
+        // roomCount x isFirstRun, and `HomeLineResolver` collapses it to four
+        // tones in a fixed priority order. What is enumerated here is every
+        // sentence the resolver can produce — including the three the count
+        // decides, which is where the singular and the never-a-zero rule live.
+        //
+        // Photographed at 6 s: the menu peek is out from about 2 s and gone by
+        // 5.2 s, so a shorter wait photographs a transient. The peek has its
+        // own entries below.
+        .init(id: "home-first", group: "Home", title: "First run",
+              note: "No sentence at all — there is nothing yet to report, and the space goes to the support line teaching how to walk a room.",
+              delay: 6),
+        .init(id: "home-quiet", group: "Home", title: "Ordinary day, many rooms",
+              note: "A standing fact, pointing at the house. Muted ink, no accent.",
+              delay: 6),
+        .init(id: "home-one-room", group: "Home", title: "Ordinary day, one room",
+              note: "The singular: \"one room\", spelled, not \"1 rooms\". The count branch an eye skips and a screenshot does not.",
+              delay: 6),
+        .init(id: "home-none-sent", group: "Home", title: "Ordinary day, nothing sent",
+              note: "A known zero, said plainly. This is the one place a zero is honest, because the phone asked and got an answer.",
+              delay: 6),
+        .init(id: "home-trouble", group: "Home", title: "Rooms unreachable",
+              note: "An unknown count. States no number and never a zero — the same refusal RoomsLoadState makes, carried into the sentence.",
+              delay: 6),
+        .init(id: "home-flight", group: "Home", title: "A room in flight",
+              note: "Gold, quiet, pointing at the desk.",
+              delay: 6),
+        .init(id: "home-arrival", group: "Home", title: "Arrival",
+              note: "Gold, pointing at the doorway. Outranks the flight below it.",
+              delay: 6),
+        .init(id: "home-needsyou", group: "Home", title: "Needs you, and a flight",
+              note: "Rust. Mentions the flight in a subordinate clause while routing to Notes — one sentence, one destination.",
+              delay: 6),
+        .init(id: "home-needsyou-only", group: "Home", title: "Needs you, alone",
+              note: "The same tone with nothing in flight, so the clause is gone. Four words, and the shortest line home can show.",
+              delay: 6),
 
-        // ── The desk. BUILT, not yet wired — the post-send surface still
-        //    routes to the old wait screens. Photographable so the copy and
-        //    the layout can be judged before it replaces them. ─────────────
-        .init(id: "desk-sending", title: "The desk · sending",
-              note: "Leaving is free, and the line says so rather than the button implying it."),
-        .init(id: "desk-working", title: "The desk · at the desk",
-              note: "Elapsed only, coarse, from the server's clock. No orb, no pill."),
-        .init(id: "desk-paused",  title: "The desk · paused",
-              note: "Finally has a surface. Nothing for the user to do, said plainly."),
-        .init(id: "desk-limited", title: "The desk · today's limit",
-              note: "Also finally has a surface. The only useful fact is when it lifts."),
-        .init(id: "desk-retry",   title: "The desk · didn't leave the phone",
-              note: "The one desk state with an action — retrying genuinely works."),
-        .init(id: "desk-clear",   title: "The desk · clear",
-              note: "The ordinary state, and it has to be the screen's best one."),
+        // The menu peek: the once-per-launch hint that the mark is a way in. It
+        // is a timeline, so it is photographed at a moment rather than at rest,
+        // and its reduced-motion path is genuinely different — the row appears
+        // whole instead of being uncovered.
+        .init(id: "home-peek", group: "Menu peek", title: "The peek, out",
+              note: "The dotted leader and MENU, uncovered from behind the mark. Plays once per launch, about 2.0 to 3.5 s in.",
+              delay: 2.4),
+        .init(id: "home-peek-reduced", group: "Menu peek", title: "The peek, reduce motion",
+              note: "Same information, no movement: the row is simply present for as long as it would have been readable. The mask animation is skipped entirely.",
+              delay: 2.4, reduceMotion: true),
+        .init(id: "home-peek-after", group: "Menu peek", title: "After it retracts",
+              note: "What home looks like from 5.2 s onward, and for the rest of the launch. The mark is left exactly as the brand draws it.",
+              delay: 6),
 
-        // ── Notes ───────────────────────────────────────────────────────────
-        .init(id: "notes-full",  title: "Notes · needs you, and news",
-              note: "Failures first, the arrival below. Got it is permanent."),
-        .init(id: "notes-news",  title: "Notes · news only",
-              note: "The arrival card when nothing is wrong."),
-        .init(id: "notes-quiet", title: "Notes · quiet",
-              note: "The ordinary case. No illustration, no reassurance."),
+        // The contents: four rows, always the same four. What varies is the
+        // mono status column and its tone, which `Contents.rows` decides —
+        // including the blank a count the phone cannot vouch for must produce.
+        .init(id: "contents-quiet", group: "Contents", title: "Quiet day",
+              note: "The whole map as a table of contents. Every column filled, nothing accented.",
+              delay: 2),
+        .init(id: "contents-eventful", group: "Contents", title: "Eventful day",
+              note: "Rust on Notes, gold on the desk. \"2 NEED YOU\" is the plural verb agreement.",
+              delay: 2),
+        .init(id: "contents-nocount", group: "Contents", title: "The house declines its count",
+              note: "The house row's column is BLANK and its leaders are gone with it — a dotted rule to an empty column points at nothing. \"1 NEEDS YOU\" is the singular.",
+              delay: 2),
+        .init(id: "contents-news", group: "Contents", title: "News, and one room",
+              note: "Notes reads NEWS in gold rather than rust: an arrival is not a decision. \"1 ROOM\" is the house's singular.",
+              delay: 2),
+        .init(id: "contents-firstrun", group: "Contents", title: "Nothing sent yet",
+              note: "\"NO ROOMS YET\" — a known zero, in words. Distinct from the blank above, which is a zero the phone cannot claim.",
+              delay: 2),
 
-        // ── The other history surface ───────────────────────────────────────
-        .init(id: "rooms-list",        title: "The house",
-              note: "The rooms that landed, and the thesis at its permanent address. No scan action."),
-        .init(id: "rooms-stale",       title: "The house · stale",
-              note: "The same stale line the strip carries, on the full list."),
-        .init(id: "rooms-empty",       title: "The house · empty",
-              note: "Genuinely none sent — distinct from not being able to ask."),
-        .init(id: "rooms-loading",     title: "The house · loading",
-              note: "Nothing known yet."),
-        .init(id: "rooms-unreachable", title: "The house · unreachable",
-              note: "The phone could not ask. It does not claim there are none."),
+        // The desk. DeskState is six cases, three of which carry values that
+        // change what is drawn. Every combination that changes the drawing is
+        // here. NOT here, deliberately: `checkFailed`'s `anchor`. The status
+        // line for that case is fixed and the guest line reads only `stopped`,
+        // so the anchor it carries is never rendered.
+        .init(id: "desk-sending", group: "The desk", title: "Sending",
+              note: "Gold status. Leaving is free, and the line says so rather than the button implying it.",
+              delay: 2),
+        .init(id: "desk-working", group: "The desk", title: "At the desk",
+              note: "The ordinary rebuild. Elapsed only, coarse, counted from the server's clock — never an estimate.",
+              delay: 2),
+        .init(id: "desk-working-long", group: "The desk", title: "At the desk, taking a while",
+              note: "Past the threshold the copy turns candid. Same status line, a different sentence — the one desk state where the guest volunteers that it is slow.",
+              delay: 2),
+        .init(id: "desk-working-noanchor", group: "The desk", title: "At the desk, no clock yet",
+              note: "Before the first successful poll there is no server anchor, so the status states the place and stops. No elapsed figure is invented.",
+              delay: 2),
+        .init(id: "desk-working-noanchor-long", group: "The desk", title: "Taking a while, no clock yet",
+              note: "Both at once: the candid line with nothing to count from. The two values are independent, and this is the corner they make.",
+              delay: 2),
+        .init(id: "desk-paused", group: "The desk", title: "Paused",
+              note: "Finally has a surface — it used to be a state you could only see by being trapped in it. Nothing for the user to do, said plainly.",
+              delay: 2),
+        .init(id: "desk-limited-tomorrow", group: "The desk", title: "Today's limit, tomorrow",
+              note: "The cap, with the reset on another day. Prose says roughly when; the mono stamp says exactly, in the device's own time zone.",
+              delay: 2),
+        .init(id: "desk-limited-today", group: "The desk", title: "Today's limit, later today",
+              note: "Same state, same day. The branch that must never read \"tomorrow\" for a reset a few hours off.",
+              delay: 2),
+        .init(id: "desk-limited-hour", group: "The desk", title: "Today's limit, about an hour",
+              note: "Under two hours. The line narrows as the reset approaches; the stamp beneath does not change form.",
+              delay: 2),
+        .init(id: "desk-limited-soon", group: "The desk", title: "Today's limit, under an hour",
+              note: "The nearest branch. Still no countdown — the phone reports the instant it was given, not a clock it is running.",
+              delay: 2),
+        .init(id: "desk-limited-unknown", group: "The desk", title: "Today's limit, no time given",
+              note: "The server did not say when. The line promises no time and the mono stamp is absent entirely, so the screen loses its one exact fact.",
+              delay: 2),
+        .init(id: "desk-retry", group: "The desk", title: "Didn't leave the phone",
+              note: "The one desk state with an action, because retrying genuinely works. A bordered capsule, not a filled button — the desk has no primary.",
+              delay: 2),
+        .init(id: "desk-checkfailed", group: "The desk", title: "Can't check, still trying",
+              note: "Uploaded, but the status check is not landing. No action: the loop is still trying, so there is nothing to tap.",
+              delay: 2),
+        .init(id: "desk-checkfailed-stopped", group: "The desk", title: "Can't check, gave up",
+              note: "The same state once the loop stops. All a Bool changes here: a sentence, and a \"Look again\" that appears.",
+              delay: 2),
+        .init(id: "desk-clear", group: "The desk", title: "Clear",
+              note: "The ordinary state, and it has to be the screen's best one — most days nothing is in flight.",
+              delay: 2),
 
-        // ── The capture flow ────────────────────────────────────────────────
-        .init(id: "guidance",  title: "Before you start",
-              note: "What the scan button opens. Camera permission is asked here, in context."),
-        .init(id: "capture",   title: "Capturing",
-              note: "The room drawing itself in ink. Tracking pill, coverage ticks, one spoken line."),
-        .init(id: "capture-dark", title: "Capturing · too dark",
-              note: "Tracking truth outranks anything the guest would otherwise say."),
-        .init(id: "gotroom",   title: "I've got the room",
-              note: "The single joyful beat. Holds 1.8 s, then review.", settles: true),
-        .init(id: "review",    title: "Review",
-              note: "The sketch, the capture metrics, and one honest chance to scan again."),
+        // Notes: four NoteKinds, each its own card, plus the three countClause
+        // branches the incomplete note can take and the two the arrival card can.
+        .init(id: "notes-upload-failed", group: "Notes", title: "Upload failed, with a reason",
+              note: "The persisted reason, in mono and selectable — the only diagnostic the user has. \"Got it\" is permanent.",
+              delay: 2),
+        .init(id: "notes-upload-failed-bare", group: "Notes", title: "Upload failed, no reason",
+              note: "The same note when nothing was persisted. The mono line is absent rather than blank or \"unknown\".",
+              delay: 2),
+        .init(id: "notes-processing-failed", group: "Notes", title: "Processing failed",
+              note: "The pipeline finished hard-failed. Owns it — \"not something you did\" — and names no cause, because none is honestly available.",
+              delay: 2),
+        .init(id: "notes-send-failed", group: "Notes", title: "Send refused",
+              note: "Refused in a way retrying cannot fix, so the card says trying again won't move it rather than offering a button that would.",
+              delay: 2),
+        .init(id: "notes-incomplete-many", group: "Notes", title: "Incomplete, several files",
+              note: "The one note whose action opens a screen rather than acknowledging. \"3 files\" is the plural.",
+              delay: 2),
+        .init(id: "notes-incomplete-one", group: "Notes", title: "Incomplete, one file",
+              note: "The singular clause. Same card, same action, one word different.",
+              delay: 2),
+        .init(id: "notes-incomplete-none", group: "Notes", title: "Incomplete, no count",
+              note: "The server can omit the paths. Degrades to \"Some of it\" — \"0 files didn't arrive\" is both false and absurd.",
+              delay: 2),
+        .init(id: "notes-full", group: "Notes", title: "Needs you, and news",
+              note: "Both sections. Failures first: an arrival is pleasant and a failure is unresolved, and leading with the pleasant one buries the point.",
+              delay: 2),
+        .init(id: "notes-news-open", group: "Notes", title: "News, openable",
+              note: "The arrival card with somewhere to go. The gold CTA is the light-semantic peak outside the doorway itself.",
+              delay: 2),
+        .init(id: "notes-news", group: "Notes", title: "News, nowhere to open",
+              note: "No web origin configured. The card still reports the arrival, because it happened — it just offers no tap that lands nowhere.",
+              delay: 2),
+        .init(id: "notes-quiet", group: "Notes", title: "Quiet",
+              note: "The ordinary case. No illustration and no reassurance — an empty Notes screen is not a state that needs softening.",
+              delay: 2),
 
+        // The house: RoomsLoadState's four states, plus the stale flag and
+        // canOpenWeb. The rows carry all three room treatments in every loaded
+        // shot.
+        .init(id: "rooms-list", group: "The house", title: "Rooms, nowhere to open",
+              note: "No web origin: every chevron is hidden and no row is tappable, rather than offering taps that land nowhere.",
+              delay: 2),
+        .init(id: "rooms-openable", group: "The house", title: "Rooms, openable",
+              note: "With a web origin the two READY rooms gain a chevron and a tap. The processing and failed rows do not — there is nothing to open yet.",
+              delay: 2),
+        .init(id: "rooms-stale", group: "The house", title: "Rooms, possibly stale",
+              note: "The refresh line above the list. Says \"might be\" — the phone does not know that it is.",
+              delay: 2),
+        .init(id: "rooms-empty", group: "The house", title: "Empty",
+              note: "Genuinely none sent, and the phone asked. Distinct from being unable to ask.",
+              delay: 2),
+        .init(id: "rooms-loading", group: "The house", title: "Loading",
+              note: "Nothing known yet. Idle renders identically — the two are one state to this screen.",
+              delay: 2),
+        .init(id: "rooms-unreachable", group: "The house", title: "Unreachable",
+              note: "The phone could not ask. Declines to guess at a count rather than rendering an empty list, and offers a retry.",
+              delay: 2),
 
-        // ── Arrival and failure ─────────────────────────────────────────────
-        .init(id: "doorway",         title: "The doorway",
-              note: "The arrival. Never auto-navigates — the user chooses to step through.", settles: true),
-        .init(id: "fail-incomplete", title: "Incomplete upload",
-              note: "Names the missing count. Offers a re-send only when the bytes are provably still here."),
-        .init(id: "fail-rescan",     title: "Incomplete · rescan only",
-              note: "The same screen when the files are gone. It promises nothing."),
+        // The capture flow.
+        .init(id: "guidance", group: "Before you start", title: "Camera not yet asked",
+              note: "What the scan button opens. Permission is requested here, in context, on the gold CTA — never at launch.",
+              delay: 2),
+        .init(id: "guidance-denied", group: "Before you start", title: "Camera refused",
+              note: "The CTA becomes Open Settings, with its glyph. Reached at first render now, rather than one tap later.",
+              delay: 2),
+        .init(id: "capture-start", group: "Capturing", title: "Nothing measured yet",
+              note: "The first seconds: tracking good, all three coverage ticks empty, no plan drawn. Nothing is claimed about a room not yet seen.",
+              delay: 2),
+        .init(id: "capture", group: "Capturing", title: "Tracking is good",
+              note: "The room drawing itself in ink. Green pill with a lit dot, ticks part filled, one spoken line.",
+              delay: 2),
+        .init(id: "capture-slow", group: "Capturing", title: "Going too fast",
+              note: "Gold pill, unlit dot, and the mesh pauses — the sketch stops rather than drawing something the tracker does not trust.",
+              delay: 2),
+        .init(id: "capture-finding", group: "Capturing", title: "Finding the room",
+              note: "Initializing or relocalizing. Names no cause, because there is not one to name.",
+              delay: 2),
+        .init(id: "capture-dark", group: "Capturing", title: "Too dark to see",
+              note: "Red pill, the mesh dimmed, and an override line that outranks anything the guest would otherwise say.",
+              delay: 2),
+        .init(id: "gotroom", group: "I've got the room", title: "The single joyful beat",
+              note: "Holds 1.8 s, then review. The one moment in the capture flow with nothing to decide.",
+              delay: 2.6),
+        .init(id: "review", group: "Review", title: "A clean capture",
+              note: "The built room's own floor plan, the census and the metrics. Send leads; the rescan sits above it so the filled button lands at one height on every screen.",
+              delay: 2),
+        .init(id: "review-sketch", group: "Review", title: "No plan, no census",
+              note: "A capture whose room did not ship. Falls back to the generic sketch and shows no census — that line describes what the server will see, so it must not appear.",
+              delay: 2),
+        .init(id: "review-preparing", group: "Review", title: "Still packing",
+              note: "Transient, so the send stays in the primary slot, disabled and dimmed, rather than swapping the destructive rescan under the user's finger when the bundle lands.",
+              delay: 2),
+        .init(id: "review-cannot-send", group: "Review", title: "Nothing to send",
+              note: "The rescan is promoted to primary and the send is withheld — better than letting the backend refuse it and reporting that as a broken upload.",
+              delay: 2),
+        .init(id: "review-thin", group: "Review", title: "Thin coverage (dormant)",
+              note: "BUILT AND UNREACHABLE: thinCoverage is never set true. Photographed so the designed treatment can be judged, not as something the screen can say today.",
+              delay: 2),
 
-        // ── Identity ────────────────────────────────────────────────────────
-        .init(id: "profile",   title: "You",
-              note: "The device ID as proof of continuity. Signing out lives on the web."),
-        .init(id: "whysignin", title: "Why sign in",
-              note: "Auto-presented once. Its whole argument is a count."),
+        // Arrival: canOpenWeb x signedIntoWeb is four screens, and the pair
+        // changes both the control and the caption under it.
+        .init(id: "doorway", group: "The doorway", title: "Openable, signed in",
+              note: "The peak. Gold CTA, and the caption adds that you are already signed in over there.",
+              delay: 2.8),
+        .init(id: "doorway-unsigned", group: "The doorway", title: "Openable, not signed in",
+              note: "Same CTA, shorter caption. The claim about being signed in is dropped rather than softened — an anonymous UID does not carry across devices.",
+              delay: 2.8),
+        .init(id: "doorway-noweb-signed", group: "The doorway", title: "No web origin, signed in",
+              note: "The CTA is gone entirely rather than shown as a control that does nothing. The caption points at the computer instead.",
+              delay: 2.8),
+        .init(id: "doorway-noweb", group: "The doorway", title: "No web origin, not signed in",
+              note: "The one corner with nothing to promise: it points at signing in, because for an unlinked user there is no computer where this room exists.",
+              delay: 2.8),
 
-        // ── Outside the flow ────────────────────────────────────────────────
-        .init(id: "unsupported", title: "No depth camera",
-              note: "The root gate. Honest, and offers nothing to do."),
-        .init(id: "splash",      title: "The splash",
-              note: "The name resolving into the mark. Plays over the launch work, not in front of it.",
-              settles: true),
-        .init(id: "qr",          title: "QR bridge",
-              note: "Built, but blocked on deep links. The code encodes nothing."),
+        // Recovery: FailureCopy.Resend is four states, and each changes both
+        // buttons AND the body copy. The count clause is the second axis.
+        .init(id: "fail-incomplete", group: "What's missing", title: "Re-send available",
+              note: "The files are on this phone, so the screen promises a re-send. The only state that promises anything.",
+              delay: 2),
+        .init(id: "fail-one", group: "What's missing", title: "Re-send available, one file",
+              note: "The singular count clause. Same promise, one word.",
+              delay: 2),
+        .init(id: "fail-inflight", group: "What's missing", title: "Sending",
+              note: "The primary reads \"Sending...\", disabled and dimmed at the call site — a bare .disabled() on the shared style is invisible, which is a defect a screenshot caught and reading did not.",
+              delay: 2),
+        .init(id: "fail-failed", group: "What's missing", title: "The re-send failed",
+              note: "The offer stands, because the files are still here — and the rescan moves UP into the secondary slot, replacing \"Not now\", as the real alternative.",
+              delay: 2),
+        .init(id: "fail-rescan", group: "What's missing", title: "Rescan only",
+              note: "The bytes are gone. The count is stated as a fact and the only path is a full pass — naming a count must not imply files that can be sent.",
+              delay: 2),
+        .init(id: "fail-none", group: "What's missing", title: "Rescan only, no count",
+              note: "The server named nothing usable, so the count degrades out of the sentence entirely.",
+              delay: 2),
+
+        // Identity.
+        .init(id: "profile", group: "You", title: "A guest",
+              note: "The device ID as proof of continuity, wrapped rather than truncated. The pinned action invites sign-in.",
+              delay: 2),
+        .init(id: "profile-linked", group: "You", title: "Signed in",
+              note: "The action slot is EMPTY and the closing line stands alone — the screen loses its filled button entirely, which is the state the pinned-action rule is least often tested against.",
+              delay: 2),
+        .init(id: "profile-noid", group: "You", title: "No ID yet",
+              note: "Offline first launch. The card says so rather than showing a placeholder that would be copyable as an identity, and the copy button is gone with it.",
+              delay: 2),
+        .init(id: "whysignin", group: "Why sign in", title: "Several rooms",
+              note: "Auto-presented once. Its whole argument is a count, asserted twice — in the sentence and in the checklist.",
+              delay: 2),
+        .init(id: "whysignin-one", group: "Why sign in", title: "One room",
+              note: "The sentence reads \"one room\" and the checklist reads \"Your 1 rooms\": the two count words are not written in one place.",
+              delay: 2),
+
+        // Outside the flow.
+        .init(id: "unsupported", group: "No depth camera", title: "The root gate",
+              note: "Honest, and offers nothing to do. Pro-only is a design decision, not a failure to support.",
+              delay: 2),
+        .init(id: "splash-name", group: "The splash", title: "The name",
+              note: "Beat one: the name is on screen long enough to be read before anything moves.",
+              delay: 1.6),
+        .init(id: "splash-mark", group: "The splash", title: "The mark",
+              note: "Beat two: the word has closed on its own \"oo\" and opened into the mark. One progress value drives both, so the letters cannot arrive where the rings are not.",
+              delay: 3.7),
+        .init(id: "splash-name-reduced", group: "The splash", title: "The name, reduce motion",
+              note: "The name still comes first; the rings simply wait where the mark will be instead of travelling into it.",
+              delay: 1.6, reduceMotion: true),
+        .init(id: "splash-mark-reduced", group: "The splash", title: "The mark, reduce motion",
+              note: "The cross-fade rather than the gather. Reduced motion loses the travel, not the hand-off — the same two things happen in the same order.",
+              delay: 3.4, reduceMotion: true),
+        .init(id: "qr", group: "QR bridge", title: "Built, blocked on deep links",
+              note: "The code encodes nothing and the caption says so. Kept photographable so the surface does not rot unseen.",
+              delay: 2),
     ]
 }
 
 // MARK: - Fixtures
 
+/// One clock for the whole gallery.
+///
+/// Every date any screen renders is derived from this, so a re-shoot produces
+/// the same pixels. Wired to `Date()` these fixtures drifted in ways that read
+/// as changes to the app: the desk's rate-limit line says "later today" or
+/// "tomorrow" depending on the hour the capture pass ran, and the house's
+/// stamps switch between a clock time and a date at midnight.
+///
+/// Built through `Calendar.current` rather than from an absolute instant,
+/// because the copy branches that matter — same day versus not — are decided in
+/// the device's own time zone, and a fixture pinned to UTC would land on a
+/// different branch on a differently configured machine.
+private enum GalleryClock {
+    static let now: Date = {
+        var c = DateComponents()
+        c.year = 2026; c.month = 8; c.day = 28
+        c.hour = 14; c.minute = 20
+        return Calendar.current.date(from: c) ?? Date(timeIntervalSinceReferenceDate: 841_242_000)
+    }()
+
+    /// A server anchor far enough back that the elapsed clock reads as a real
+    /// wait: 4 min 28 s, which `elapsedPhrase` renders as "4 min".
+    static var anchor: Date { now.addingTimeInterval(-268) }
+
+    static var resetsTomorrow: Date { now.addingTimeInterval(14 * 3600) }
+    static var resetsToday: Date { now.addingTimeInterval(5 * 3600) }
+    static var resetsInAnHour: Date { now.addingTimeInterval(5_400) }
+    static var resetsSoon: Date { now.addingTimeInterval(1_500) }
+}
+
 /// Synthetic, and obviously so: no real capture, no real identity. The rooms
 /// carry the three states the row treatment distinguishes.
 private enum GalleryFixture {
 
-    static var rooms: [RoomSummary] { RoomSummary.samples() }
+    static var rooms: [RoomSummary] { RoomSummary.samples(now: GalleryClock.now) }
 
     static let uid = "gallery-fixture-not-a-real-uid"
 
     static let failureReason = "blob_unreadable_at_remint_manifest"
 
-    /// A server anchor far enough back that the elapsed clock reads as a real wait.
-    static var anchor: Date { Date().addingTimeInterval(-268) }
+    static let verdict = "Here's your capture. Send it, and I'll start making sense of it on your desk."
 }
 
 // MARK: - Home, composed the way the flow composes it
@@ -191,6 +455,12 @@ private struct GalleryHome: View {
 /// own one for the view's lifetime rather than rebuilding it every render.
 private struct GalleryCapture: View {
     var tracking: TrackingQuality = .good
+    var floor: SurfaceCoverage = .full
+    var walls: SurfaceCoverage = .partial(0.62)
+    var corners: SurfaceCoverage = .partial(0.5)
+    /// False for the opening seconds, when nothing has been measured and the
+    /// plan would otherwise appear fully drawn on the first frame.
+    var drawn = true
 
     @StateObject private var feed = FloorPlanFeed()
 
@@ -199,12 +469,12 @@ private struct GalleryCapture: View {
             state: CaptureHUDState(
                 tracking: tracking,
                 guestLine: "Move slowly and I'll sketch the room as you go.",
-                floor: .full, walls: .partial(0.62), corners: .partial(0.5)
+                floor: floor, walls: walls, corners: corners
             ),
             feed: feed
         )
         .onAppear {
-            feed.publish(snapshot: .previewRoom)
+            if drawn { feed.publish(snapshot: .previewRoom) }
             feed.publish(camera: .previewCamera)
         }
     }
@@ -215,101 +485,229 @@ private struct GalleryCapture: View {
 struct ScreenGalleryView: View {
     let screen: String
 
+    /// REDUCE MOTION IS NOT SET HERE, and cannot be.
+    ///
+    /// `\.accessibilityReduceMotion` is read-only in `EnvironmentValues` — it
+    /// has a getter and no setter — so an entry that wants it gets it from the
+    /// device instead: the capture script writes
+    /// `com.apple.Accessibility ReduceMotionEnabled` before launching. That is
+    /// the same switch a person flips, which makes it the more faithful input
+    /// of the two anyway; it just cannot be scoped to one view, so the script
+    /// has to order the passes rather than interleave them.
     var body: some View {
         switch screen {
 
         // Home
-        case "home-first":    GalleryHome(day: HomeDay(isFirstRun: true))
-        case "home-quiet":    GalleryHome(day: HomeDay(roomCount: 6))
-        case "home-flight":   GalleryHome(day: HomeDay(hasRoomInFlight: true, roomCount: 6))
-        case "home-arrival":  GalleryHome(day: HomeDay(hasUnseenArrival: true, roomCount: 6))
-        case "home-needsyou": GalleryHome(day: HomeDay(needsYou: 1, hasRoomInFlight: true,
-                                                       roomCount: 6))
-        case "home-trouble":  GalleryHome(day: HomeDay(roomCount: nil))
+        case "home-first":         GalleryHome(day: HomeDay(isFirstRun: true))
+        case "home-quiet":         GalleryHome(day: HomeDay(roomCount: 6))
+        case "home-one-room":      GalleryHome(day: HomeDay(roomCount: 1))
+        case "home-none-sent":     GalleryHome(day: HomeDay(roomCount: 0))
+        case "home-trouble":       GalleryHome(day: HomeDay(roomCount: nil))
+        case "home-flight":        GalleryHome(day: HomeDay(hasRoomInFlight: true, roomCount: 6))
+        case "home-arrival":       GalleryHome(day: HomeDay(hasUnseenArrival: true, roomCount: 6))
+        case "home-needsyou":      GalleryHome(day: HomeDay(needsYou: 1, hasRoomInFlight: true,
+                                                            roomCount: 6))
+        case "home-needsyou-only": GalleryHome(day: HomeDay(needsYou: 1, roomCount: 6))
 
-        // The contents, and the screens home now points at
+        // The peek is home; only the moment it is photographed at differs.
+        case "home-peek", "home-peek-reduced", "home-peek-after":
+            GalleryHome(day: HomeDay(roomCount: 6))
+
+        // The contents
         case "contents-quiet":
             ContentsScreen(day: HomeDay(roomCount: 6))
         case "contents-eventful":
             ContentsScreen(day: HomeDay(needsYou: 2, hasRoomInFlight: true, roomCount: 9))
         case "contents-nocount":
             ContentsScreen(day: HomeDay(needsYou: 1, roomCount: nil))
+        case "contents-news":
+            ContentsScreen(day: HomeDay(hasUnseenArrival: true, roomCount: 1))
+        case "contents-firstrun":
+            ContentsScreen(day: HomeDay(roomCount: 0))
+
+        // The desk
         case "desk-sending":
-            DeskView(state: .sending, roomTitle: "today's room")
+            desk(.sending)
         case "desk-working":
-            DeskView(state: .working(anchor: GalleryFixture.anchor, longRunning: false),
-                     roomTitle: "today's room")
+            desk(.working(anchor: GalleryClock.anchor, longRunning: false))
+        case "desk-working-long":
+            desk(.working(anchor: GalleryClock.anchor, longRunning: true))
+        case "desk-working-noanchor":
+            desk(.working(anchor: nil, longRunning: false))
+        case "desk-working-noanchor-long":
+            desk(.working(anchor: nil, longRunning: true))
         case "desk-paused":
-            DeskView(state: .paused, roomTitle: "yesterday's room")
-        case "desk-limited":
-            DeskView(state: .rateLimited(resetsAt: GalleryFixture.anchor.addingTimeInterval(31_000)),
-                     roomTitle: "today's room")
+            desk(.paused, title: "yesterday's room")
+        case "desk-limited-tomorrow":
+            desk(.rateLimited(resetsAt: GalleryClock.resetsTomorrow))
+        case "desk-limited-today":
+            desk(.rateLimited(resetsAt: GalleryClock.resetsToday))
+        case "desk-limited-hour":
+            desk(.rateLimited(resetsAt: GalleryClock.resetsInAnHour))
+        case "desk-limited-soon":
+            desk(.rateLimited(resetsAt: GalleryClock.resetsSoon))
+        case "desk-limited-unknown":
+            desk(.rateLimited(resetsAt: nil))
         case "desk-retry":
-            DeskView(state: .retryableSendFailure, roomTitle: "today's room")
+            desk(.retryableSendFailure)
+        case "desk-checkfailed":
+            desk(.checkFailed(anchor: GalleryClock.anchor, stopped: false))
+        case "desk-checkfailed-stopped":
+            desk(.checkFailed(anchor: GalleryClock.anchor, stopped: true))
         case "desk-clear":
-            DeskView(state: nil)
+            DeskView(state: nil, now: GalleryClock.now)
+
+        // Notes
+        case "notes-upload-failed":
+            NotesView(needsYou: [.uploadFailed(reason: GalleryFixture.failureReason)])
+        case "notes-upload-failed-bare":
+            NotesView(needsYou: [.uploadFailed(reason: nil)])
+        case "notes-processing-failed":
+            NotesView(needsYou: [.processingFailed])
+        case "notes-send-failed":
+            NotesView(needsYou: [.sendFailedTerminal])
+        case "notes-incomplete-many":
+            NotesView(needsYou: [.incompleteUpload(missingCount: 3)])
+        case "notes-incomplete-one":
+            NotesView(needsYou: [.incompleteUpload(missingCount: 1)])
+        case "notes-incomplete-none":
+            NotesView(needsYou: [.incompleteUpload(missingCount: 0)])
         case "notes-full":
             NotesView(needsYou: [.uploadFailed(reason: GalleryFixture.failureReason),
                                  .incompleteUpload(missingCount: 3)],
                       arrival: "Yesterday's room is on your desk.",
                       canOpenArrival: true)
+        case "notes-news-open":
+            NotesView(arrival: "This morning's room is on your desk.", canOpenArrival: true)
         case "notes-news":
             NotesView(arrival: "This morning's room is on your desk.")
         case "notes-quiet":
             NotesView()
 
-        // Rooms
+        // The house
         case "rooms-list":
-            HouseView(state: .loaded(rooms: GalleryFixture.rooms, stale: false))
+            house(.loaded(rooms: GalleryFixture.rooms, stale: false))
+        case "rooms-openable":
+            house(.loaded(rooms: GalleryFixture.rooms, stale: false), canOpenWeb: true)
         case "rooms-stale":
-            HouseView(state: .loaded(rooms: GalleryFixture.rooms, stale: true))
+            house(.loaded(rooms: GalleryFixture.rooms, stale: true))
         case "rooms-empty":
-            HouseView(state: .loaded(rooms: [], stale: false))
+            house(.loaded(rooms: [], stale: false))
         case "rooms-loading":
-            HouseView(state: .loading)
+            house(.loading)
         case "rooms-unreachable":
-            HouseView(state: .failed(reason: "offline"))
+            house(.failed(reason: "offline"))
 
-        // Capture flow
-        case "guidance":     GuidanceSheet()
-        case "capture":      GalleryCapture()
-        case "capture-dark": GalleryCapture(tracking: .tooDark)
-        case "gotroom":      GotTheRoomView()
+        // The capture flow
+        case "guidance":
+            GuidanceSheet(cameraStatus: { .notDetermined })
+        case "guidance-denied":
+            GuidanceSheet(cameraStatus: { .denied })
+        case "capture-start":
+            GalleryCapture(floor: .empty, walls: .empty, corners: .empty, drawn: false)
+        case "capture":
+            GalleryCapture()
+        case "capture-slow":
+            GalleryCapture(tracking: .slowDown)
+        case "capture-finding":
+            GalleryCapture(tracking: .finding)
+        case "capture-dark":
+            GalleryCapture(tracking: .tooDark)
+        case "gotroom":
+            GotTheRoomView()
         case "review":
             ReviewView(metrics: "126 frames · LiDAR + RoomPlan",
                        census: "9 objects · 13 walls · 2 doors",
                        floorPlan: .previewRoom,
-                       verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",
+                       verdict: GalleryFixture.verdict,
+                       rescanLabel: "Scan again from scratch")
+        case "review-sketch":
+            ReviewView(metrics: "48 frames · LiDAR",
+                       verdict: GalleryFixture.verdict,
+                       rescanLabel: "Scan again from scratch")
+        case "review-preparing":
+            ReviewView(metrics: "126 frames · LiDAR + RoomPlan",
+                       census: "9 objects · 13 walls · 2 doors",
+                       floorPlan: .previewRoom,
+                       verdict: "Packing it up — one moment.",
+                       isPreparing: true,
+                       rescanLabel: "Scan again from scratch")
+        case "review-cannot-send":
+            ReviewView(metrics: "3 frames · LiDAR",
+                       verdict: "I didn't get enough to send. Let's walk it again — it only takes a couple of minutes.",
+                       canSend: false,
+                       rescanLabel: "Scan again from scratch")
+        case "review-thin":
+            ReviewView(metrics: "48 frames · LiDAR + RoomPlan",
+                       census: "2 objects · 3 walls",
+                       verdict: GalleryFixture.verdict,
+                       thinCoverage: true,
                        rescanLabel: "Scan again from scratch")
 
-
-        // Arrival and failure
+        // Arrival
         case "doorway":
             DoorwayView(signedIntoWeb: true, canOpenWeb: true)
+        case "doorway-unsigned":
+            DoorwayView(signedIntoWeb: false, canOpenWeb: true)
+        case "doorway-noweb-signed":
+            DoorwayView(signedIntoWeb: true, canOpenWeb: false)
+        case "doorway-noweb":
+            DoorwayView(signedIntoWeb: false, canOpenWeb: false)
+
+        // Recovery. onBack, because that is how the flow reaches it: without it
+        // the gallery photographed a screen with no header, which is not the
+        // one that ships.
         case "fail-incomplete":
-            // onBack, because that is how the flow reaches it: without it the
-            // gallery photographed a screen with no header, which is not the
-            // one that ships.
-            FailureView(kind: .recoverable(missingCount: 3, resend: .available),
-                        onBack: {})
+            FailureView(kind: .recoverable(missingCount: 3, resend: .available), onBack: {})
+        case "fail-one":
+            FailureView(kind: .recoverable(missingCount: 1, resend: .available), onBack: {})
+        case "fail-inflight":
+            FailureView(kind: .recoverable(missingCount: 3, resend: .inFlight), onBack: {})
+        case "fail-failed":
+            FailureView(kind: .recoverable(missingCount: 3, resend: .failed), onBack: {})
         case "fail-rescan":
-            FailureView(kind: .recoverable(missingCount: 14, resend: .unavailable),
-                        onBack: {})
+            FailureView(kind: .recoverable(missingCount: 14, resend: .unavailable), onBack: {})
+        case "fail-none":
+            FailureView(kind: .recoverable(missingCount: 0, resend: .unavailable), onBack: {})
 
         // Identity
         case "profile":
             ProfileView(uid: GalleryFixture.uid)
+        case "profile-linked":
+            ProfileView(uid: GalleryFixture.uid, isLinked: true)
+        case "profile-noid":
+            ProfileView(uid: nil)
         case "whysignin":
             WhySignInSheet(roomCount: 3)
+        case "whysignin-one":
+            WhySignInSheet(roomCount: 1)
 
         // Outside the flow
-        case "unsupported": UnsupportedDeviceView()
-        case "splash":      SplashView()
-        case "qr":          QRBridgeView()
+        case "unsupported":
+            UnsupportedDeviceView()
+        case "splash-name", "splash-mark",
+             "splash-name-reduced", "splash-mark-reduced":
+            SplashView()
+        case "qr":
+            QRBridgeView()
 
         default:
             unknown
         }
+    }
+
+    // MARK: Builders
+
+    /// Every desk state on the one fixed clock, so the elapsed phrase and the
+    /// reset stamp are the same pixels on every run.
+    private func desk(_ state: DeskState, title: String = "today's room") -> some View {
+        DeskView(state: state, roomTitle: title, now: GalleryClock.now)
+    }
+
+    /// Likewise the house: its stamps switch between a clock time and a date at
+    /// midnight, which would make an overnight re-shoot look like a change.
+    private func house(_ state: RoomsLoadState, canOpenWeb: Bool = false) -> some View {
+        HouseView(state: state, canOpenWeb: canOpenWeb, now: GalleryClock.now)
     }
 
     /// An unrecognised id is stated plainly rather than silently photographed as
@@ -329,7 +727,7 @@ struct ScreenGalleryView: View {
     }
 }
 
-#Preview("Gallery · home, everything at once") {
+#Preview("Gallery · unknown id") {
     ScreenGalleryView(screen: "home-all")
 }
 

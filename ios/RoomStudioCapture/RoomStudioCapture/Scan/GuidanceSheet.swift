@@ -22,6 +22,24 @@ import SwiftUI
 struct GuidanceSheet: View {
     var onStart: () -> Void = {}
     var onDismiss: () -> Void = {}
+    /// How the camera's authorization is read. Production asks AVFoundation;
+    /// nothing else does.
+    ///
+    /// A CLOSURE, not a captured value, because this is asked twice and the two
+    /// answers must be able to differ: once as the sheet appears, and again
+    /// every time the app comes back to the foreground, which is how returning
+    /// from Settings with access granted clears the denial. A stored status
+    /// would freeze the first answer and leave the sheet offering "Open
+    /// Settings" forever.
+    ///
+    /// It is a seam because the denied branch is otherwise unphotographable:
+    /// `simctl privacy` has no camera service, so a simulator cannot be put
+    /// into the state a person reaches by tapping Don't Allow. The screen still
+    /// decides for itself what counts as denied — the seam only supplies the
+    /// status, which is the same thing AVFoundation supplies.
+    var cameraStatus: () -> AVAuthorizationStatus = {
+        AVCaptureDevice.authorizationStatus(for: .video)
+    }
 
     @State private var permissionDenied = false
     @Environment(\.scenePhase) private var scenePhase
@@ -89,17 +107,16 @@ struct GuidanceSheet: View {
                     .font(RSFont.ui(.footnote))
                     .foregroundStyle(Color.rsOnDark.opacity(0.5))
             }
-            .padding(.horizontal, RSScreen.horizontal)
-            .background(Color.rsCaptureRaised)
+            .rsPinnedActions(surface: .rsCaptureRaised)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.rsCaptureRaised.ignoresSafeArea())
+        .onAppear { permissionDenied = Self.isDenied(cameraStatus()) }
         // Coming back from Settings with permission granted must clear the denied
         // state; otherwise the sheet keeps offering "Open Settings" forever.
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
-            permissionDenied = AVCaptureDevice.authorizationStatus(for: .video) == .denied
-                || AVCaptureDevice.authorizationStatus(for: .video) == .restricted
+            permissionDenied = Self.isDenied(cameraStatus())
         }
     }
 
@@ -181,8 +198,15 @@ struct GuidanceSheet: View {
 
     // MARK: - Camera permission (in context)
 
+    /// One reading of "denied", shared by the first render and every return
+    /// from Settings — the two used to be written out separately, which is how
+    /// they would come to disagree about `.restricted`.
+    static func isDenied(_ status: AVAuthorizationStatus) -> Bool {
+        status == .denied || status == .restricted
+    }
+
     private func requestCameraThenStart() {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        switch cameraStatus() {
         case .authorized:
             onStart()
         case .notDetermined:
