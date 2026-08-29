@@ -279,6 +279,20 @@ control's label is clamped at `xxxLarge` by `rsControlLabel()` so a button keeps
 the shape its fixed padding gives it. Reading text scales freely to the ceiling
 and is capped by nothing else.
 
+**Machine truth is set in mono, uncontained — and the tracker now is too.**
+The capture screen's tracking indicator was a bordered capsule with a coloured
+status dot, the only element in the app in that shape; it is a mono readout in
+the same idiom as the coverage ticks below it and the desk's status line. Three
+things went with it: **the ordinary state is now the quiet one** (`.good` had
+carried the component's only glow, so nothing-is-wrong was the loudest thing on
+screen, and it is now set in the coverage labels' muted ink), the dot is gone
+and nothing replaces it (`.slowDown` and `.finding` share a colour, so it
+carried three values where the words carry four), and **the readout reports
+STATE while the guest's line keeps the instruction** — "Go a little slower"
+became `MOVING TOO FAST`, because an instruction in a status readout duplicates
+the channel the app already has for advice. All four strings sit in one switch
+in `LiveCaptureView.trackingReadout`.
+
 **Nothing is dropped, reordered or restacked to fit.** The three
 `isAccessibilitySize` re-compositions are GONE — home's claim/sentence swap,
 the contents row stacking, the house's stamp dropping to its own line. Each was
