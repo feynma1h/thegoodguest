@@ -340,6 +340,14 @@ Three pipeline stages plus a probe, all Cloud Tasks driven:
   and the plane ships a clean matte in its measured albedo.
 - **`/compress`** — transcodes each PLY to SPZ beside it plus a
   `compressed.json` index. ~5.8× smaller, Gaussian counts preserved exactly.
+- **Nested-mask collapse** rides association rather than being a stage:
+  `PERCEPTION_KEEP_LONGER_MASK` (default `0`, on `segment-quality`, unbuilt into
+  any image) collapses same-frame same-label nested pairs before the per-box
+  shortlist scores them, keeping the LARGER. The survivor competes at its pair's
+  best overlap — dropping the loser outright re-ranks it against every
+  observation, and on a saturated metric with capture order as the tie-break
+  that hands the box to whoever was photographed first (0274). It does NOT fix
+  0262's flat metric and a reading that says so is wrong.
 - **`/segment`** — a segmentation-only probe, built on `segment-quality` and
   deployed only to a 0%-traffic candidate (`perception-obj-00088-vot`, carrying
   `PERCEPTION_SAM3_INTERACTIVE=1`). **The serving revision does not carry this
@@ -644,8 +652,12 @@ gains.
   the pick; the SECOND leg is **100% inside** the box, so the box is not the
   obstacle there. A click placed on the missing part takes second-leg coverage
   **0.1% → 75.0%**, and merging every candidate that kept what it was given
-  retains 100% of the seed and near foot. **Nothing ships** — the pointer was a
-  human eye, and no automated search found the region. **Read
+  retains 100% of the seed and near foot. **The keep-the-longer rule is now
+  BUILT and OFF** behind `PERCEPTION_KEEP_LONGER_MASK` (0274) — 4 of 25 boxes
+  across the four captures change their planned views, three to a longer mask in
+  the same frame, none losing an association, byte-identical off. The click
+  repair is NOT built: the pointer was a human eye, and no automated search
+  found the region. **Read
   `outputs/segment-quality/targets/README.md` before quoting any coverage
   figure**: the denominator is a rectangle that includes floor, so every such
   number understates what was recovered.
