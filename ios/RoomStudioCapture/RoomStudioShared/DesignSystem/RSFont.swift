@@ -82,6 +82,48 @@ enum RSTypeCap: CGFloat {
     case mono = 1.6
 }
 
+// MARK: - The ceiling
+
+enum RSTypeSize {
+
+    /// The largest Dynamic Type step the app renders at.
+    ///
+    /// WHY A CEILING EXISTS AT ALL. The tiers below stop titles, machine data
+    /// and control labels, and measured across all 83 states they hit their
+    /// target on every screen those cover — a median 1.73x denser at AX5, 29 of
+    /// 30 under 2x. They could not touch the screens made of the guest's prose,
+    /// which stayed at a median 3.93x, because reading text scaled without
+    /// limit. On this app that is most of it: the desk, notes and the house are
+    /// a title, an eyebrow and a paragraph, and at the top step the paragraph
+    /// is the screen.
+    ///
+    /// WHY UNIFORM, AND NOT A READING TIER. A tier for prose would have to be
+    /// tighter than the display tier above it to help, which inverts the
+    /// hierarchy — a colophon set larger than the titles it sits under. One
+    /// ceiling applied to the whole tree keeps every ratio between every pair
+    /// of styles exactly where the default size has it, so the accessibility
+    /// layout is the same layout, larger. Nothing is dropped, reordered or
+    /// summarised to make it fit; that was the constraint.
+    ///
+    /// WHAT IT COSTS, plainly: someone who sets the top step asks for body text
+    /// at 53pt and gets 33. That is a real reduction for the people the setting
+    /// exists for, and it is the reason this is ONE constant rather than a
+    /// number spread across call sites. Raising it is a one-line change, and
+    /// `tools/ios_density_guard.py` will say what it costs in crowding.
+    static let ceiling: DynamicTypeSize = .accessibility2
+}
+
+extension View {
+
+    /// Hold the whole tree at `RSTypeSize.ceiling`.
+    ///
+    /// Applied ONCE, at the app's root, so no screen can forget it and no
+    /// screen can disagree with another about how large is too large.
+    func rsTypeCeiling() -> some View {
+        dynamicTypeSize(...RSTypeSize.ceiling)
+    }
+}
+
 // MARK: - The control tier
 
 extension View {

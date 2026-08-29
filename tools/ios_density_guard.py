@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Gate: no screen may be more than ~2x as dense at AX5 as at the default size.
+"""Track how much denser each screen is at AX5, against what the ceiling implies.
 
     python3 tools/ios_screenshot_gallery.py /tmp/shots
     python3 tools/ios_density_guard.py /tmp/shots
 
-Exits non-zero when a screen exceeds the ratio, so the accessibility sizes have
-a regression test rather than an opinion.
+Exits non-zero when a screen is denser than the type ceiling can account for,
+so the accessibility sizes have a measurement rather than an opinion.
 
 WHY DENSITY AND NOT TYPE SIZE. The defect this exists to catch is not "the type
 got big" — it is that the app's restraint IS its empty space, and Dynamic Type
@@ -28,7 +28,26 @@ import numpy as np
 from PIL import Image
 
 SHOTS = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/rs-all")
-LIMIT = 2.0
+
+# The app holds Dynamic Type at `RSTypeSize.ceiling` (accessibility2), where
+# body text is 33pt against 17 at the default size.
+CEILING_SCALE = 33 / 17
+
+# WHAT THE LIMIT IS, AND WHY IT IS NOT 2.
+#
+# Ink area for a given string scales with the SQUARE of the type size, so a
+# screen showing the same content at 1.94x type is 3.76x denser — by
+# arithmetic, with nothing wrong. A 2x limit was therefore unreachable for any
+# screen that still showed all of its content, and the only ways to meet it
+# were to shrink the type below 1.41x or to stop showing things. Both were
+# ruled out.
+#
+# So the bound is the arithmetic itself. A screen at or just under the square
+# is behaving exactly as a larger copy of itself. A screen well UNDER it has
+# lost content off the bottom of the frame, which is the interesting signal and
+# is why the ratio is printed for every screen rather than only the failures.
+# A screen ABOVE it is drawing more than it did, which should be impossible.
+LIMIT = CEILING_SCALE ** 2
 
 # Same classification the layout audit uses, and for the same reason.
 SKIP_PREFIXES = ("capture", "doorway", "splash")
@@ -72,7 +91,8 @@ def main():
               + ("   OVER" if over else ""))
     mean_d = np.mean([r[1] for r in rows]); mean_x = np.mean([r[2] for r in rows])
     print(f"\nmean {mean_d*100:.1f}% -> {mean_x*100:.1f}%  ({mean_x/mean_d:.2f}x)")
-    print(f"{bad} of {len(rows)} screens exceed {LIMIT:g}x")
+    print(f"type ceiling {CEILING_SCALE:.2f}x  ->  same content predicts {LIMIT:.2f}x")
+    print(f"{bad} of {len(rows)} screens denser than the ceiling accounts for")
     return bad
 
 

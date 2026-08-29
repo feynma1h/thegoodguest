@@ -52,11 +52,14 @@ struct RoomStudioCaptureApp: App {
             // and the live root below is what ships.
             if let screen = ScreenGallery.requestedScreen {
                 ScreenGalleryView(screen: screen)
+                    .rsTypeCeiling()
             } else {
                 liveRoot
+                    .rsTypeCeiling()
             }
             #else
             liveRoot
+                .rsTypeCeiling()
             #endif
         }
     }
