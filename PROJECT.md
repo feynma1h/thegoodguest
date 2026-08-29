@@ -269,24 +269,38 @@ enforced at AX5** — the first content line and the button's offset off the
 bottom both move legitimately when the header glyph above one and the closing
 line below the other grow (0252).
 
-**Type grows by TIER, not uniformly** (0258). Reading text — body copy, the
-guest's voice, status sentences, instructions — scales without limit. Serif
-titles stop at **1.4×** (`RSTypeCap.display`), machine data at **1.6×**
-(`.mono`), and a control's label is **clamped** at `xxxLarge` by
-`rsControlLabel()` so a button keeps the shape its fixed padding gives it. The
-clamp is not a `maxSize`, deliberately: every filled label is set from a
-semantic style, which `maxSize` cannot reach, and rewriting them as fixed
-sizes made the primary button visibly SHORTER at the DEFAULT size, because a
-text style carries its own line height and a bare point size does not. A
-BLANKET cap remains wrong for the reason `RSFont.swift` already gave.
-`tools/ios_density_guard.py` gates it: **currently 38 of 67 over the 2×
-target**, and that split is the finding rather than a failure — control- and
-title-dominated screens are a median **1.73×** with 29 of 30 passing, while
-prose-dominated screens are a median **3.93×** with none passing. Reading text
-scales without limit by design, so the gate cannot go green without reducing
-what those screens SHOW, which is the next pass and an open decision. Read a
-density RISE carefully: capping the house's stamp fit more rows on screen and
-took it 3.73× → 3.96× while it visibly improved.
+**Type stops at a CEILING, and tiers stop some of it earlier** (0258). The app
+holds Dynamic Type at `RSTypeSize.ceiling` — `.accessibility2`, body 17 → 33pt
+— applied ONCE at the app root by `rsTypeCeiling()`. Uniform, so every ratio
+between every pair of styles stays exactly where the default size has it: the
+accessibility layout is the same layout, larger. Within that, serif titles stop
+at **1.4×** (`RSTypeCap.display`), machine data at **1.6×** (`.mono`), and a
+control's label is clamped at `xxxLarge` by `rsControlLabel()` so a button keeps
+the shape its fixed padding gives it. Reading text scales freely to the ceiling
+and is capped by nothing else.
+
+**Nothing is dropped, reordered or restacked to fit.** The three
+`isAccessibilitySize` re-compositions are GONE — home's claim/sentence swap,
+the contents row stacking, the house's stamp dropping to its own line. Each was
+the right fix for unbounded type and each is dead weight under a ceiling: a
+second layout to verify, for no gain. `ContentsRowView` instead gives the title
+and the status `layoutPriority(1)` and lets the dot leaders yield, because a
+leader is filler — without that, "The house" wrapped to two lines at the ceiling
+while "The desk" did not.
+
+**Measured across all 83 states, 2026-08-29:** mean density 10.2% → 14.5%
+(**1.42×**), layout audit **0 of 62** at both sizes.
+`tools/ios_density_guard.py` bounds it by the arithmetic rather than by taste —
+ink area scales with the SQUARE of type size, so the same content at 1.94× is
+3.77× denser with nothing wrong, and **0 of 67** screens exceed that. A 2×
+target was arithmetically unreachable while showing everything: meeting it
+needed type below 1.41× or content removed, and both were ruled out. Read a
+ratio well BELOW the square as the interesting signal — it means content is
+falling off the bottom of the frame.
+
+**What it costs, plainly:** someone who sets the top step asks for 53pt body
+text and gets 33. That is a real reduction for the people the setting exists
+for, and it is why the ceiling is ONE constant.
 
 **The splash hands the mark over** rather than cutting to home (0255): the mark
 walks to the exact rectangle home publishes as an anchor preference, while home
