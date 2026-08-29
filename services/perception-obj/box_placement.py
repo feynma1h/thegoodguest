@@ -80,7 +80,11 @@ from dataclasses import dataclass
 
 import numpy as np
 import reproject
-from roomstudio_schemas.placement_math import project_points, trimmed_nn_rms
+from roomstudio_schemas.placement_math import (
+    mask_containment,
+    project_points,
+    trimmed_nn_rms,
+)
 from roomstudio_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
 
 logger = logging.getLogger(__name__)
@@ -283,6 +287,39 @@ SURFACE_TOP_CATEGORIES = frozenset(
 # missing mass at one end, and centring it puts half the deficit at each.
 _SEAT_MIN_FILL = float(os.environ.get("PLACEMENT_BOX_SEAT_MIN_FILL", "0.85"))
 _SEAT_PCTL = 1.0
+
+# --- Nested-mask collapse (decision 0266) -----------------------------------
+# When SAM 3 returns one object at two nested extents in one frame, which one
+# does the shortlist get to see? Today: whichever the overlap sort prefers, and
+# that sort is precision with no recall term, so it takes the SHORTER mask in
+# 9 of the 10 nested pairs that associate to a box across five captures (0263).
+# Rescored against the operator's rulings, keeping the longer is right 9 of 9 —
+# better than every gate built for the job, and it needs no gate, no score and
+# no box (0266).
+#
+# The pipeline already believes this. `fusion._dedup_same_frame_per_label`
+# collapses exactly these pairs, and it runs AFTER the shortlist has spent a
+# reconstruction on the loser. The defect is ORDERING, not judgement, so this
+# moves the same decision in front of association and changes only the
+# tie-break: fusion keeps the higher-scoring member, this keeps the LARGER.
+# 0266 measured both — SAM 3's score is right 5 of 5 where it can be scored at
+# all, area 9 of 9 — so area is chosen for coverage, not because score is wrong.
+#
+# Default off, like every placement behaviour change since 0198: the candidate
+# lane exists so a flip can be A/B'd on a real room, and `collapse_nested_masks`
+# is a no-op when unset.
+_KEEP_LONGER = os.environ.get("PERCEPTION_KEEP_LONGER_MASK", "0") not in (
+    "0", "false", "False", ""
+)
+
+# Intersection-over-smaller, above which two same-label masks in one frame are
+# two readings of one object. Deliberately the SAME env var fusion's later pass
+# reads, because two thresholds for one question is how they drift apart. The
+# default needs no tuning: containment across 121 same-label pairs in five
+# captures is bimodal — 21 at >= 0.989, 99 at <= 0.003, exactly one in between
+# (0266) — so anything in the gap gives the same partition.
+_NESTED_CONTAINMENT = float(os.environ.get("PLACEMENT_DEDUP_CONTAINMENT", "0.8"))
+
 
 # --- Arm selection (decision 0204) -----------------------------------------
 # Whether an object's shipped reconstruction is CHOSEN among the arms it
@@ -526,6 +563,104 @@ class BoxAssociation:
     obs: dict
 
 
+def collapse_nested_masks(
+    observations: list[dict], ctx
+) -> tuple[list[dict], list[dict], dict[tuple, list]]:
+    """(kept observations, collapse records, absorbed map) — one object at two
+    extents in one frame becomes the LONGER of the two (decision 0266).
+
+    A pair collapses only when it is a MUTUAL SINGLETON: within one frame and
+    one RAW label, i's only >= threshold containment partner is j and j's is i.
+    That guard is `fusion._dedup_same_frame_per_label`'s and it is load-bearing
+    for the same reason — a coarse parent region containing several genuinely
+    separate same-label children fails the test for every child and is left
+    alone, so "disjoint same-label masks are different objects" survives.
+
+    Containment is intersection-over-SMALLER-area and therefore symmetric, so
+    "nested" here is one relation rather than a direction to get right: a mask
+    wholly inside another scores 1.000 whichever way it is asked.
+
+    Grouping is by RAW label, not by confusable family. Family grouping asks
+    which observations can describe one object ACROSS frames (0149); this asks
+    whether two detections in ONE frame are one detection twice, and two
+    different words for a thing are not evidence of that.
+
+    The dropped member is NOT simply deleted from the pool. Deleting it changes
+    its rank against EVERY other observation, not just against its own partner,
+    and the sort underneath is 0262's flat metric with capture order as the
+    tie-break — so removing a candidate that scored 1.0000 promotes whatever
+    happened to be photographed earliest. Measured on spike box 0: dropping the
+    frame-398 `cabinet` outright cost the box a 415,585 px mask at overlap
+    1.0000 and handed it a 111,070 px mask from an earlier frame, while the
+    longer mask the rule meant to promote sat unused at rank 2. So each record
+    also names what the survivor ABSORBED, and `associate_observations` scores
+    the survivor at the pair's best overlap. The pair then competes as one
+    object, which is what it is, and nothing outside the pair moves.
+
+    A no-op returning the input list unchanged when the flag is off, and a
+    report either way — the records say what was collapsed and what it cost, so
+    a room where this fires can be told from one where it never applied.
+    """
+    if not _KEEP_LONGER:
+        return observations, [], {}
+
+    by_key: dict[tuple, list[int]] = {}
+    for idx, o in enumerate(observations):
+        by_key.setdefault((o["frame_index"], o.get("label")), []).append(idx)
+
+    dropped: set[int] = set()
+    records: list[dict] = []
+    absorbed: dict[tuple, list] = {}
+    for (frame_index, label), idxs in by_key.items():
+        if len(idxs) < 2:
+            continue
+        masks = [ctx.mask_for(frame_index, observations[i].get("mask_index"))
+                 for i in idxs]
+        if any(m is None for m in masks):
+            continue
+        areas = [int(np.asarray(m, dtype=bool).sum()) for m in masks]
+        if any(a == 0 for a in areas):
+            continue
+        n = len(idxs)
+        neighbors: list[list[int]] = []
+        for i in range(n):
+            neighbors.append([
+                j for j in range(n)
+                if j != i and mask_containment(masks[i], masks[j]) >= _NESTED_CONTAINMENT
+            ])
+        for i in range(n):
+            if len(neighbors[i]) != 1:
+                continue
+            j = neighbors[i][0]
+            if i >= j or neighbors[j] != [i]:
+                continue  # only a clean, mutual, singleton pair collapses
+            small, large = (i, j) if areas[i] <= areas[j] else (j, i)
+            dropped.add(idxs[small])
+            records.append({
+                "frame_index": frame_index,
+                "label": label,
+                "kept_mask_index": observations[idxs[large]].get("mask_index"),
+                "dropped_mask_index": observations[idxs[small]].get("mask_index"),
+                "kept_px": areas[large],
+                "dropped_px": areas[small],
+                "containment": float(mask_containment(masks[i], masks[j])),
+            })
+            absorbed.setdefault(
+                (frame_index, observations[idxs[large]].get("mask_index")), []
+            ).append(observations[idxs[small]].get("mask_index"))
+
+    if records:
+        logger.info(
+            "[placement] nested_mask_collapse pairs=%d frames=%d",
+            len(records), len({r["frame_index"] for r in records}),
+        )
+    return (
+        [o for i, o in enumerate(observations) if i not in dropped],
+        records,
+        absorbed,
+    )
+
+
 def associate_observations(
     boxes: list, observations: list[dict], ctx
 ) -> dict[int, list[BoxAssociation]]:
@@ -533,7 +668,14 @@ def associate_observations(
     compatibility AND footprint overlap >= PLACEMENT_BOX_MATCH_MIN; each
     observation joins at most one box (highest overlap wins; ties by frame
     then mask then box index). Deterministic. Returns box_index →
-    associations sorted by (-overlap, frame_index)."""
+    associations sorted by (-overlap, frame_index).
+
+    Under PERCEPTION_KEEP_LONGER_MASK the observations are first passed through
+    `collapse_nested_masks`, so a pair of nested same-label masks reaches the
+    sort as the longer one alone. That is upstream of scoring on purpose: the
+    sort cannot prefer a mask it never sees, and no gate on the sort was able
+    to beat simply not offering it the shorter one (0263 vs 0266)."""
+    observations, _collapsed, _absorbed = collapse_nested_masks(observations, ctx)
     footprints: dict[tuple[int, int], tuple] = {}  # (frame, box) → (hull, frac)
 
     def _footprint(frame_index: int, box_index: int):
@@ -562,6 +704,14 @@ def associate_observations(
             if hull is None:
                 continue
             overlap = mask_overlap_with_hull(mask, hull)
+            # A survivor competes at its PAIR's best overlap. Its own score is
+            # precision, so the longer reading of one object is marked down for
+            # every pixel past the box's edge and would lose to observations it
+            # has nothing to do with. See collapse_nested_masks.
+            for _mi in _absorbed.get((o["frame_index"], o.get("mask_index")), ()):
+                _m = ctx.mask_for(o["frame_index"], _mi)
+                if _m is not None:
+                    overlap = max(overlap, mask_overlap_with_hull(_m, hull))
             if overlap >= _BOX_MATCH_MIN:
                 candidates.append(
                     (overlap, o["frame_index"], o.get("mask_index") or 0, bi, o, in_frame)
