@@ -189,8 +189,6 @@ private struct HouseRow: View {
     var canOpenWeb: Bool = false
     var onOpen: (RoomSummary) -> Void = { _ in }
 
-    @Environment(\.dynamicTypeSize) private var typeSize
-
     private var isOpenable: Bool { RoomHistory.isOpenable(room, canOpenWeb: canOpenWeb) }
 
     var body: some View {
@@ -207,24 +205,21 @@ private struct HouseRow: View {
     }
 
     private var row: some View {
-        // At accessibility sizes the title and the stamp each need the full
-        // width, so the column becomes a line beneath rather than a stub
-        // squeezed against the edge.
+        // ONE ROW SHAPE, AT EVERY SIZE. This used to drop the stamp onto a line
+        // of its own at accessibility sizes, when the title and the column each
+        // needed the full width. `RSTypeSize.ceiling` keeps them side by side,
+        // so the stamp stays a column that can be scanned down rather than a
+        // fact repeated under every title.
         VStack(alignment: .leading, spacing: 5) {
-            if typeSize.isAccessibilitySize {
+            HStack(alignment: .top, spacing: 12) {
                 titleAndStatus
-                if let stamp { stampText(stamp) }
-            } else {
-                HStack(alignment: .top, spacing: 12) {
-                    titleAndStatus
-                    Spacer(minLength: 8)
-                    if let stamp { stampText(stamp).padding(.top, 3) }
-                    if isOpenable {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.rsInk.opacity(0.35))
-                            .frame(height: 22, alignment: .center)
-                    }
+                Spacer(minLength: 8)
+                if let stamp { stampText(stamp).padding(.top, 3) }
+                if isOpenable {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.rsInk.opacity(0.35))
+                        .frame(height: 22, alignment: .center)
                 }
             }
         }

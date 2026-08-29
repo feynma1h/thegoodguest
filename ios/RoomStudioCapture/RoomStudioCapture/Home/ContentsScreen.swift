@@ -87,28 +87,32 @@ private struct ContentsRowView: View {
     let row: ContentsRow
     var onTap: () -> Void = {}
 
-    @Environment(\.dynamicTypeSize) private var typeSize
-
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 6) {
-                if typeSize.isAccessibilitySize {
-                    title
-                    if let status = row.status { statusText(status) }
+            // ONE ROW SHAPE, AT EVERY SIZE. This used to stack the status
+            // under the title at accessibility sizes, because leaders between
+            // two blocks that each need the full width point at nothing. With
+            // `RSTypeSize.ceiling` the pair fits on one line at every size the
+            // app renders, so the contents reads as a contents page throughout.
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                // THE LEADERS YIELD, and the two ends do not. A dotted rule is
+                // filler: it should take whatever is left after the title and
+                // the status have the width they need. Without saying so it
+                // competes with them as an equal flexible child, and at the
+                // type ceiling that wrapped "The house" onto two lines while
+                // "The desk" — two characters shorter — stayed on one.
+                title
+                    .layoutPriority(1)
+                // Leaders only when they lead somewhere. A dotted rule
+                // running the width of the row to an empty column
+                // points at nothing, which is exactly the impression
+                // the blank-not-zero rule exists to avoid.
+                if let status = row.status {
+                    Leaders()
+                    statusText(status)
+                        .layoutPriority(1)
                 } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        title
-                        // Leaders only when they lead somewhere. A dotted rule
-                        // running the width of the row to an empty column
-                        // points at nothing, which is exactly the impression
-                        // the blank-not-zero rule exists to avoid.
-                        if let status = row.status {
-                            Leaders()
-                            statusText(status)
-                        } else {
-                            Spacer(minLength: 0)
-                        }
-                    }
+                    Spacer(minLength: 0)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

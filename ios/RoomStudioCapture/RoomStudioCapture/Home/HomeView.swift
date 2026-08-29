@@ -43,8 +43,6 @@ struct HomeView: View {
     /// Tapping the sentence. Nil destination means there is no sentence.
     var onFollowLine: (HomeDestination) -> Void = { _ in }
 
-    @Environment(\.dynamicTypeSize) private var typeSize
-
     private var line: HomeLine? { HomeLineResolver.line(for: day) }
 
     var body: some View {
@@ -56,27 +54,18 @@ struct HomeView: View {
             // the clipped text was unrecoverable. Content scrolls; the action
             // does not.
             ScrollView {
-                // WHEN ONLY ONE CAN BE SEEN, THE ONE THAT CHANGES WINS.
+                // ONE ORDER, AT EVERY SIZE.
                 //
-                // At accessibility sizes the claim alone fills the whole scroll
-                // region, and the sentence — home's entire reporting surface —
-                // went below the fold with nothing indicating it was there.
-                // Found by screenshot; the suite was green throughout, because
-                // the routing was correct and only the rendering was not. A
-                // home that cannot say "something needs you" is worse than the
-                // stacked notices this design replaced.
-                //
-                // So at those sizes the order swaps. The claim is a standing
-                // statement and can be scrolled to; the sentence is why the
-                // person opened the app.
+                // This used to swap at accessibility sizes, because the claim
+                // alone filled the scroll region and pushed the sentence —
+                // home's entire reporting surface — below the fold with nothing
+                // indicating it was there. That was the right fix for unbounded
+                // type. `RSTypeSize.ceiling` bounds it, both now fit, and a
+                // reading order that depends on the reader's text size is a
+                // second layout to verify for no remaining gain.
                 VStack(alignment: .leading, spacing: 26) {
-                    if typeSize.isAccessibilitySize {
-                        reportingLine
-                        claim
-                    } else {
-                        claim
-                        reportingLine
-                    }
+                    claim
+                    reportingLine
                 }
                 .rsBelowHeader()
                 .frame(maxWidth: .infinity, alignment: .leading)
