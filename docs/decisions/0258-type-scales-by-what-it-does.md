@@ -85,20 +85,81 @@ compresses one, and past a certain size it reverses it. Ruled acceptable for
 now because the alternative measured worse: at full size those titles were the
 single largest thing on the screen and the whole complaint.
 
+## What the tiers could not reach, and what did
+
+The tiers were measured and reported before this note closed, and the split was
+clean: screens whose ink is controls and titles came out a median **1.73×**,
+29 of 30 under a 2× target; screens whose ink is the guest's prose came out a
+median **3.93×**, 0 of 37 under it. Read on their own those are two facts. Put
+against the operator's judgement — *the screens still look crowded* — they are
+one: the caps did everything they were allowed to, and the residue was the
+category rule 1 protected.
+
+Two ways to close it, and only one was available. Showing less at accessibility
+sizes was ruled out explicitly: nothing may be dropped or omitted, and both
+sizes must read as the same structure. That leaves stopping the growth.
+
+**A tier for reading text would have been wrong**, and the arithmetic says why.
+To help, a prose ceiling has to be tighter than the display tier above it,
+which is the inversion this file already warns about — the contents page's
+colophon set larger than the row titles it sits under, which the tier-only pass
+had in fact produced.
+
+**So the ceiling is uniform and sits above everything**: `RSTypeSize.ceiling`,
+`.accessibility2`, body 17 → 33pt, applied once at the app root. Uniform is the
+whole point — every ratio between every pair of styles stays exactly where the
+default size has it, so the accessibility layout is the same layout, larger.
+The tiers still bind underneath it and still serve their own purposes; the
+ceiling is what makes them safe, because with prose bounded the display tier no
+longer inverts anything.
+
+**Three re-compositions were deleted rather than kept**: home's claim/sentence
+swap, the contents row stacking, the house dropping its stamp onto its own
+line. Each was the right fix for unbounded type — the sentence really did go
+below the fold — and each is dead weight under a ceiling: a second layout to
+verify, for no remaining gain, on a brief whose constraint is that the two
+sizes look structurally the same. `ContentsRowView` needed one thing in
+exchange: the title and the status take `layoutPriority(1)` so the dot leaders
+yield, a leader being filler. Without it "The house" wrapped to two lines at the
+ceiling while "The desk", two characters shorter, did not.
+
+Measured after, across all 83 states: mean density **10.2% → 14.5% (1.42×)**,
+layout audit **0 of 62** at both sizes, and every screen inside what the
+ceiling's arithmetic accounts for. Verified by looking at all 83 accessibility
+frames, not only by the numbers: profile's ID card and the doorway's CTA are on
+screen at AX5 for the first time, both having previously been below the fold.
+
+## What the density gate actually bounds
+
+Ink area scales with the SQUARE of type size, so a screen showing the same
+content at 1.94× is **3.77×** denser with nothing whatever wrong. The 2× target
+was therefore unreachable by construction while showing everything: meeting it
+needed either type below 1.41× — barely an accessibility size — or content
+removed. The gate now bounds by that arithmetic, and the informative reading is
+inverted from the obvious one: a ratio at the square means the screen is a
+faithful larger copy of itself, and a ratio well BELOW it means content is
+falling off the bottom of the frame.
+
 ## What would change this decision
 
-If reading text ever gains a ceiling, the display tier has to move with it, or
-the inversions above get worse rather than better. The two numbers are related:
-a title cap only preserves hierarchy while it stays above the scaled body size,
-which at AX5 means about 2.2× for a 24pt title, not 1.4×.
+**The ceiling is the number to argue with, and it is one line.** It trades a
+real thing away: someone who sets the top step asks for 53pt body text and gets
+33. Raising it costs crowding and `tools/ios_density_guard.py` will price that
+in ink; lowering it buys quiet at the expense of the people the setting exists
+for. Nothing else in this decision has to move when it does — that is what
+being uniform buys.
+
+If reading text ever gains a ceiling of its OWN, below the uniform one, the
+display tier has to move with it or the inversions return. The two numbers are
+related: a title cap only preserves hierarchy while it stays above the scaled
+body size, which without the uniform ceiling meant about 2.2× for a 24pt title,
+not 1.4×.
 
 If a screen gains a fixed non-text element — the doorway's portal is the
-existing proof that this works — its density ratio should fall towards 1.0
-without any type change at all, and that is the cheaper lever for the
-prose-heavy screens than capping prose.
+existing proof that this works — its density falls towards 1.0 with no type
+change at all. That remains the cheaper lever than lowering the ceiling, and it
+is the only one that costs a low-vision reader nothing.
 
-The density gate assumes the amount of content on screen is held still. It is
-not scale-invariant: capping the house's stamp fit more rows into the viewport
-and took it 3.73× → 3.96× while the screen visibly improved. If a later pass
-starts hiding content at accessibility sizes, this measure stops being
-comparable across passes and needs replacing with ink-per-glyph.
+The three deleted re-compositions are deleted, not parked. If the ceiling is
+ever raised far enough that content stops fitting, the answer is not to restore
+them — it is that the ceiling went too high.

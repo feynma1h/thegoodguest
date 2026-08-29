@@ -29,6 +29,10 @@ import numpy as np
 from PIL import Image
 
 PASSES = ("default", "ax5")
+# What the type ceiling accounts for: ink area scales with the square of type
+# size, and the ceiling puts body text at 33pt against 17. A card is marked only
+# above this, because below it the screen is a faithful larger copy of itself.
+DENSITY_EXPECTED = (33 / 17) ** 2
 PASS_LABEL = {"default": "Default", "ax5": "AX5"}
 
 
@@ -162,7 +166,7 @@ def render(groups, states, blobs, width, seen_ids):
 <div class="meta">
 <h3>{html.escape(s['title'])}</h3>
 <p class="note">{html.escape(s['note'])}</p>
-<p class="id"><code>{html.escape(s['id'])}</code><span class="at">{s['delay']:g}s</span>{f'<span class="dens{" over" if ratio > 2 else ""}">AX5 {ratio:.1f}x denser</span>' if ratio else ''}{''.join(tags)}</p>
+<p class="id"><code>{html.escape(s['id'])}</code><span class="at">{s['delay']:g}s</span>{f'<span class="dens{" over" if ratio > DENSITY_EXPECTED else ""}">AX5 {ratio:.1f}x denser</span>' if ratio else ''}{''.join(tags)}</p>
 </div>
 </article>""")
 
@@ -340,10 +344,14 @@ dialog.lb::backdrop {{ background:rgba(8,7,6,.88); }}
   distinct state rather than one per screen — each enum case, and each combination of the values
   those cases carry that changes what is drawn. Every frame is shown at the default text size and
   at accessibility&nbsp;XXXL, which is where this app's layout defects have actually lived.</p>
+  <p class="standfirst">Dynamic Type is held at one ceiling — body text reaches 33pt against 17 at
+  the default size — so the accessibility layout is the same layout, larger: nothing is dropped,
+  reordered or restacked to make it fit. Within that, titles stop at 1.4×, machine data at 1.6×,
+  and a control's label is clamped so buttons keep their shape.</p>
   <p class="standfirst">Each card carries how much denser its AX5 frame is than its default one.
-  Titles now stop growing at 1.4×, machine data at 1.6×, and a control's label is clamped so
-  buttons keep their shape; reading text still scales without limit, which is why the screens made
-  of the guest's prose are the ones still marked in rust.</p>
+  Ink area scales with the <em>square</em> of type size, so a screen showing all of its content at
+  the ceiling reads about 3.8× and is behaving exactly as a larger copy of itself; a figure well
+  below that means content is falling off the bottom of the frame.</p>
   <div class="figures">
     <div class="figure"><b>{n_states}</b><span>states</span></div>
     <div class="figure"><b>{n_groups}</b><span>screens</span></div>
