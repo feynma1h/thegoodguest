@@ -73,8 +73,17 @@ MIN_HULL_FRAC_OF_FRAME = 0.01
 # Below this the instance is not really claiming the box; without a floor the
 # "winner" of an empty frame is whichever mask happens to graze it.
 MIN_CLAIM_IOU = 0.10
-# A handoff is a disappearance and a reappearance close in TIME and PLACE.
-HANDOFF_MAX_GAP_FRAMES = 3
+# Purity is a share of the frames that CLAIMED the box, so one claimed frame
+# scores 1.000. That is not a stable id, it is an absent one, and reporting it
+# as perfect is how an instrument flatters a result — caught on a dry run where
+# a box visible in 90 frames and claimed in 1 came back at purity 1.000. Below
+# this many claims purity is None, and the mean says how many it excluded.
+MIN_CLAIMED_FRAMES = 5
+# A handoff is a disappearance and a reappearance close in TIME and PLACE. The
+# gap is counted in TRACKED POSITIONS, not frame indices: a run over every
+# fifth frame would otherwise need a threshold five times larger to mean the
+# same thing.
+HANDOFF_MAX_GAP_STEPS = 3
 HANDOFF_MIN_IOU = 0.30
 
 
@@ -221,6 +230,7 @@ def measure_box_purity(
         dominant, dom_n = (
             max(counts.items(), key=lambda kv: kv[1]) if counts else (None, 0)
         )
+        enough = len(winners) >= MIN_CLAIMED_FRAMES
         results.append({
             "box_id": getattr(box, "identifier", None) or getattr(box, "box_id", "?"),
             "category": getattr(box, "category", "?"),
@@ -228,9 +238,16 @@ def measure_box_purity(
             "frames_claimed": len(winners),
             "dominant_instance": dominant,
             "dominant_frames": dom_n,
+            # Coverage is reported beside purity and never folded into it.
+            # They answer different questions: coverage is "did the tracker
+            # find this object", purity is "when it did, was it the same id".
+            # Only the second is the acceptance test, and only the first can
+            # tell you the second is meaningless.
+            "coverage": round(len(winners) / visible, 4) if visible else None,
             # The headline: of the frames where SOMETHING claimed this box, how
-            # many did the single dominant id win.
-            "purity": round(dom_n / len(winners), 4) if winners else None,
+            # many did the single dominant id win. None below MIN_CLAIMED_FRAMES.
+            "purity": round(dom_n / len(winners), 4) if enough else None,
+            "purity_withheld_too_few_claims": not enough,
             "fragments": len(counts),
             "all_claimants": dict(sorted(counts.items(), key=lambda kv: -kv[1])),
         })
@@ -249,12 +266,20 @@ def measure_handoffs(tracks: dict[str, dict], instances: list[dict]) -> list[dic
     events = []
     for concept, insts in by_concept.items():
         entry = tracks[concept]
+        # Frame index -> position in the tracked sequence, so a gap is counted
+        # in frames the tracker actually saw.
+        order = {
+            int(f): i
+            for i, f in enumerate(entry["meta"].get("frame_indices", []))
+        }
         for a in insts:
             for b in insts:
                 if a["obj_id"] == b["obj_id"]:
                     continue
-                gap = b["first_frame"] - a["last_frame"]
-                if not (0 < gap <= HANDOFF_MAX_GAP_FRAMES):
+                if a["last_frame"] not in order or b["first_frame"] not in order:
+                    continue
+                gap = order[b["first_frame"]] - order[a["last_frame"]]
+                if not (0 < gap <= HANDOFF_MAX_GAP_STEPS):
                     continue
                 ma = _mask_of(entry, a["last_frame"], a["obj_id"])
                 mb = _mask_of(entry, b["first_frame"], b["obj_id"])
@@ -267,7 +292,8 @@ def measure_handoffs(tracks: dict[str, dict], instances: list[dict]) -> list[dic
                         "from": f"{concept}#{a['obj_id']}",
                         "to": f"{concept}#{b['obj_id']}",
                         "at_frame": a["last_frame"],
-                        "gap_frames": gap,
+                        "resumes_frame": b["first_frame"],
+                        "gap_steps": gap,
                         "iou": round(score, 4),
                     })
     events.sort(key=lambda e: -e["iou"])
@@ -319,20 +345,28 @@ def main(argv: list[str] | None = None) -> int:
     if purity:
         print()
         print("box purity (RoomPlan-grounded)")
-        print("  box                         vis  claimed  purity  frags  dominant")
+        print("  box                         vis  claimed  cover  purity  frags  dominant")
         for r in purity:
-            p = "n/a" if r["purity"] is None else f"{r['purity']:.3f}"
+            pu = "  --  " if r["purity"] is None else f"{r['purity']:.3f}"
+            cv = " -- " if r["coverage"] is None else f"{r['coverage']:.3f}"
             print(f"  {str(r['category'])[:24]:<26} {r['frames_visible']:>4}"
-                  f"  {r['frames_claimed']:>7}  {p:>6}  {r['fragments']:>5}"
+                  f"  {r['frames_claimed']:>7}  {cv:>5}  {pu:>6}  {r['fragments']:>5}"
                   f"  {r['dominant_instance']}")
         vals = [r["purity"] for r in purity if r["purity"] is not None]
+        withheld = sum(1 for r in purity if r["purity_withheld_too_few_claims"])
         if vals:
-            print(f"  MEAN PURITY over {len(vals)} boxes: {float(np.mean(vals)):.4f}")
+            print(f"  MEAN PURITY over {len(vals)} of {len(purity)} boxes: "
+                  f"{float(np.mean(vals)):.4f}"
+                  + (f"   ({withheld} withheld: under {MIN_CLAIMED_FRAMES} claims)"
+                     if withheld else ""))
+        else:
+            print(f"  NO BOX cleared {MIN_CLAIMED_FRAMES} claims — purity unmeasurable")
     print()
     print(f"handoff events (possible splits): {len(handoffs)}")
     for e in handoffs[:15]:
         print(f"  {e['from']} -> {e['to']} at frame {e['at_frame']} "
-              f"(gap {e['gap_frames']}, IoU {e['iou']:.3f})")
+              f"(resumes {e['resumes_frame']}, gap {e['gap_steps']} steps, "
+              f"IoU {e['iou']:.3f})")
     print()
     print(f"written: {os.path.join(out_dir, 'object_frame_map.json')}")
     return 0
