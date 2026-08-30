@@ -51,7 +51,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # --- Clone SAM 3D Objects so we have the env file ---
-RUN git clone --depth 1 https://github.com/facebookresearch/sam-3d-objects.git /opt/sam3d
+# PINNED. An unpinned --depth 1 clone means two builds of identical source can
+# install different model code, with nothing recording which. Fetch-by-SHA keeps
+# the clone shallow. This is also the form the shared :buildcache is written
+# from — an unpinned line here misses at layer 4 and rebuilds the mamba env and
+# every sam3d pip layer below it, which is a ~50 minute build instead of ~8.
+RUN git init /opt/sam3d \
+    && cd /opt/sam3d \
+    && git remote add origin https://github.com/facebookresearch/sam-3d-objects.git \
+    && git fetch --depth 1 origin f91db411c50efee93d8db7aeb323885650f6f722 \
+    && git checkout FETCH_HEAD
 
 # --- Create the conda env from Meta's environments/default.yml ---
 # This installs the CUDA toolkit (12.1), gcc 12.4, Python 3.11.0, and all the
