@@ -15,7 +15,10 @@ is to report the number and not build on it.
 
 ## What we tried
 
-SAM 3.1's multiplex tracker, all 189 frames, one text concept per pass. Purity
+SAM 3.1's multiplex tracker, **all 189 frames, all 30 concepts of
+`DEFAULT_OBJECT_PROMPT`**, one concept per pass. It found **48 instances; 6
+correspond to a RoomPlan box and 42 do not** — the six/nine split 0271 named,
+now measured over the whole vocabulary rather than 19 sampled frames. Purity
 is the share of a RoomPlan box's claimed frames won by its single dominant
 instance; coverage is the share of frames where the box is on screen and
 *anything* claimed it.
@@ -25,11 +28,11 @@ instance; coverage is the share of frames where the box is on screen and
 | bed | 90 | 0.967 | **0.977** | 2 |
 | storage `587D623F` | 25 | 0.840 | **1.000** | 1 |
 | storage `4878C92B` | 63 | 0.730 | **0.478** | 3 |
-| table | 92 | 0.913 | **0.536** | 6 |
-| chair | 108 | 0.944 | **0.471** | 9 |
+| table | 92 | 0.913 | **0.500** | 8 |
+| chair | 108 | 0.944 | **0.471** | 10 |
 | storage `FB1F7793` | 86 | 0.837 | **0.417** | 4 |
 
-**Mean purity 0.6464 over 6 of 6 boxes — below the 0.70 floor, so the
+**Mean purity 0.6404 over 6 of 6 boxes — below the 0.70 floor, so the
 pre-registered verdict is UNSTABLE.**
 
 **But the scalar hides the shape, and the shape is the finding.** Coverage is
@@ -53,8 +56,8 @@ visits, named three times.
 **And it is not a clean rule.** `bed#0` holds one ID across a 28-frame absence
 and scores 0.977; `cabinet#0` holds one across a **124-frame** absence and
 scores 1.000. So the tracker *can* re-identify after a long gap — it just does
-not do so reliably. 15 of 21 instances are internally contiguous; the other six
-carry gaps of up to 124 frames and keep their ID anyway.
+not do so reliably. **32 of 48 instances are internally contiguous**; the other
+sixteen carry gaps of up to 130 frames and keep their ID anyway.
 
 ## What we chose
 
