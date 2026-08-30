@@ -92,6 +92,17 @@ deletes at age 1 day, so GCS does not hold these:
   the captures bucket deletes at 24 h, so nothing anywhere holds it. Only its
   `upload_sessions/*.json` survives, in `outputs/device-evidence-2026-08-13/`.
   The cost of pulling first is minutes; the cost of not is unbounded.
+- `outputs/capture-90eebfc4/` — **the 2026-08-25 capture, and the ONLY copy.**
+  189 frames, `bundle.pb`, and the `/segment` probe output. GCS swept the
+  original at its 24 h lifecycle on 2026-08-26; this was pulled hours before.
+  It is the room decisions 0247, 0259-0263 and 0266-0272 are all measured on,
+  the substrate for the SAM 3.1 object→frame work, and the only capture whose
+  frame-by-frame candidates the operator has judged by eye. Tier 3
+  (LIDAR_ROOMPLAN) but carrying **no depth at all** (0267), which is itself
+  what several of those notes turn on.
+  Restoring it to GCS for a re-drive is supported and documented — write the
+  blobs directly, per 0164; the mint path is a trust boundary, not a storage
+  mechanism.
 - `outputs/roomplan-spike/` — the four-run spike RECORDING, incl. the
   722-keyframe RGB/depth archive. **The source, not a derivative.**
 - Every `outputs/reports/*.md`, `outputs/**/verdicts.md`, and the walk packs'
