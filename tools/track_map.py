@@ -86,6 +86,23 @@ MIN_CLAIMED_FRAMES = 5
 HANDOFF_MAX_GAP_STEPS = 3
 HANDOFF_MIN_IOU = 0.30
 
+# ── the acceptance criterion, fixed BEFORE the measurement ───────────────────
+# 0271 makes id stability the acceptance test, and this repo's own discipline
+# (0197, 0202) is to register a prediction before spending the GPU rather than
+# to pick a threshold that the result happens to clear. So the bands are here,
+# in the tool, committed ahead of the first real run.
+#
+# Purity is the share of a box's claimed frames won by its single dominant id.
+# The bands are about what a downstream consumer could do with the map:
+#   >= 0.90  one id owns its object in nine frames out of ten. A per-object
+#            frame list can be taken at face value.
+#   >= 0.70  the map is real but fragmentation is material: an object's frames
+#            are split across ids and something has to merge them before use.
+#   <  0.70  measurably unstable. 0271 says do not build the map anyway — it
+#            would look complete and silently conflate objects.
+PURITY_STABLE = 0.90
+PURITY_MARGINAL = 0.70
+
 
 def _load_tracks(track_dir: str) -> dict[str, dict]:
     """{concept: {"meta": tracks.json, "masks": npz}} for every concept written."""
@@ -391,6 +408,16 @@ def main(argv: list[str] | None = None) -> int:
                      if withheld else ""))
         else:
             print(f"  NO BOX cleared {MIN_CLAIMED_FRAMES} claims — purity unmeasurable")
+        if vals:
+            mean = float(np.mean(vals))
+            verdict = (
+                "STABLE — a per-object frame list can be taken at face value"
+                if mean >= PURITY_STABLE
+                else "MARGINAL — real, but fragmentation must be merged before use"
+                if mean >= PURITY_MARGINAL
+                else "UNSTABLE — 0271 says do not build the map on these ids"
+            )
+            print(f"  VERDICT against thresholds fixed before the run: {verdict}")
     print()
     print(f"handoff events (possible splits): {len(handoffs)}")
     for e in handoffs[:15]:
