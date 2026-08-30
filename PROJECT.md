@@ -820,7 +820,12 @@ gains.
   gates, so exactly one reading survives and score decides which. **This is
   the video path, not the version.** The knob (raising both thresholds above
   0.995) also disables NMS and would worsen 0279's already-UNSTABLE ids — do
-  not reach for it. **The resolution is architectural and free: let `/track`
+  not reach for it. **Prompting is measured dead too** (0283): of eight
+  phrasings on frame 50 only `desk` and `sit-stand desk` ground at all, and
+  they return the SAME masks (IoU 0.9954 short, 0.9889 long); `desk with
+  legs`, `desk leg` and four others return NOTHING. A compositional phrase
+  does not extend a silhouette, and `desk leg` failing also closes the
+  prompt-the-part-and-union route. **The resolution is architectural and free: let `/track`
   choose the FRAME and the image path produce the MASK**, which is what
   production already does. **Two traps:** the capture is rotated 90°, so a mask profile taken by
   image ROW measures a horizontal world axis and wrongly reports no
