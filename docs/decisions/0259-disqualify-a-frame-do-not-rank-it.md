@@ -103,6 +103,23 @@ destroys an object, and then MULTIPLIED by an area term that rewards the
 proximity causing it. Border contact is binary, exact, and matches the eye on
 every case checked.
 
+**AMENDED 2026-08-27 — the paragraph below overstated this, and 0270 supersedes
+the proposal.** Two corrections. First, these three disqualifications ARE
+substantially the visibility veto rediscovered: 0234's veto 1 is whole-frame
+usability including variance of the Laplacian, which is disqualifications 2 and
+3; its veto 2 is per-(object, frame) lower-band visibility, motivated by
+*"the desk whose legs run off the frame"*, which is disqualification 1 by a
+different test. Second, 0236's objection was NOT answered here. It is not about
+pool depth — it is that removing a candidate re-rolls a greedy selection, and
+that the cost lands in alternatives only the chooser can see. Every number in
+this note was taken with the chooser out of the loop, which is the exact
+methodological error 0236 names.
+Measured afterwards: making border contact a coverage gate moved 20 of 24
+frames and orphaned a box outright, and as a scoring preference it never
+reached the frames that mattered. **0270 keeps this note's measurements and
+replaces its proposal** with a pass that RESERVES rather than rejects.
+The paragraph as originally written follows.
+
 **0236's objection does not apply here.** It refused `PERCEPTION_VISIBILITY_VETO`
 because a veto shrank the candidate set arm selection exists to search — 16 of
 48 frames changed and a box that had two arms was left with one. The candidate
