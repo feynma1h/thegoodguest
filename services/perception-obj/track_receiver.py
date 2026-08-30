@@ -168,7 +168,20 @@ async def handle_track(
                 content={"error": exc.code, "detail": exc.detail},
             )
 
+    from privacy import is_suppressed_label
+
     asked = list(dict.fromkeys(c.strip() for c in req.concepts if c.strip()))
+    # `person` is a suppression-only concept (0089): segmented so the shell can
+    # exclude it, never shipped. This route WRITES a mask per instance per
+    # frame, so tracking one would put person rasters in a bucket — which is
+    # the thing 0089 exists to prevent, arriving through a probe rather than
+    # through the pipeline. /segment has to partition after the fact because
+    # one prompt returns every class at once; here the concepts are explicit
+    # and one per pass, so refusal is exact and happens before any GPU work.
+    refused = [c for c in asked if is_suppressed_label(c)]
+    if refused:
+        logger.warning("track probe: refused suppressed concepts %s", refused)
+    asked = [c for c in asked if not is_suppressed_label(c)]
     concepts = asked[:MAX_CONCEPTS_PER_CALL]
     # A cap that truncates without saying so reads downstream as "this capture
     # contains no sofa" rather than "nobody looked for one".
@@ -176,7 +189,10 @@ async def handle_track(
     if dropped:
         logger.warning("track probe: dropped %d concepts over the cap: %s", len(dropped), dropped)
     if not concepts:
-        return JSONResponse(status_code=422, content={"error": "no usable concepts"})
+        return JSONResponse(
+            status_code=422,
+            content={"error": "no usable concepts", "refused_suppressed": refused},
+        )
 
     bundle = CaptureBundle()
     bundle.ParseFromString(_download_gcs_uri(req.bundle_uri))
@@ -328,6 +344,7 @@ async def handle_track(
         "seconds_open_video": round(t_open, 1),
         "frame_failures": failures,
         "concepts_dropped_over_cap": dropped,
+        "concepts_refused_suppressed": refused,
         "concepts": concepts_out,
     }
     _gcs_upload_for_scene(
