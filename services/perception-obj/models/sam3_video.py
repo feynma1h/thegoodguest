@@ -181,6 +181,15 @@ class SAM3VideoModel:
         `sam3_video_base.py`), which is how instances that only appear later
         enter the map.
 
+        `output_prob_thresh` REACHES `add_prompt` AND NOT PROPAGATION, which is
+        upstream's shape rather than ours:
+        `Sam3MultiplexTrackingWithInteractivity.propagate_in_video` takes the
+        argument and then, on the full-text-prompt path, calls
+        `super().propagate_in_video(...)` without forwarding it — so the parent
+        uses its own 0.5 default for every frame after the prompted one. Passing
+        a different value here is therefore not a way to tune the tracker, and
+        the parameter is kept only because `add_prompt` does honour it.
+
         Returns {frame_position: [ {obj_id, prob, bbox_px, area_px, mask_small},
         ... ]}, keyed by POSITION IN THE FRAME LIST, not by capture frame index
         — the caller owns that mapping.

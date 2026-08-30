@@ -440,3 +440,13 @@ class TestSuppressedConcepts:
         model = FakeVideoModel({})
         body = _body(_run(_req(concepts=list(SUPPRESSED_CONCEPTS) + ["monitor"]), model))
         assert body["concepts_refused_suppressed"] == list(SUPPRESSED_CONCEPTS)
+
+
+class TestTheFrameListIsAVideo:
+    def test_out_of_order_indices_are_sorted_into_capture_order(self, wired):
+        """The tracker's memory carries forward frame to frame, so the list IS
+        the video. An unsorted list asks it to follow a scene that jumps around
+        in time."""
+        model = FakeVideoModel({"monitor": {}})
+        body = _body(_run(_req(frame_indices=[108, 7, 42]), model))
+        assert body["frame_indices"] == [7, 42, 108]
