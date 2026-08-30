@@ -812,7 +812,17 @@ gains.
   measured dead — a stride-4 round trip costs ≤0.4% of area and a 4 px bar
   survives intact. **This names a candidate mechanism for class 6** via 0198
   (alpha IS the mask), and 0283 carries the ~25 s GPU test that would settle
-  it. **Two traps:** the capture is rotated 90°, so a mask profile taken by
+  it. **The tracker cannot be fixed into carrying both readings** — read from
+  SAM 3.1's source, the multiplex VIDEO builder sets `det_nms_thresh=0.1`
+  with `det_nms_use_iom=True` and gates new objects on
+  `mask_iom >= assoc_iou_thresh=0.1`, while `build_sam3_image_model`
+  configures neither. The desk pair sits at containment **0.995**, ~10x both
+  gates, so exactly one reading survives and score decides which. **This is
+  the video path, not the version.** The knob (raising both thresholds above
+  0.995) also disables NMS and would worsen 0279's already-UNSTABLE ids — do
+  not reach for it. **The resolution is architectural and free: let `/track`
+  choose the FRAME and the image path produce the MASK**, which is what
+  production already does. **Two traps:** the capture is rotated 90°, so a mask profile taken by
   image ROW measures a horizontal world axis and wrongly reports no
   difference — project gravity first; and do NOT fix this by preferring the
   larger mask, since the door pair jumps 7.62% → 23.15% and that rule takes a

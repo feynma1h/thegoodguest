@@ -101,6 +101,56 @@ is thin, the three attacks on class-6's cause are measured dead (0162, 0181,
 half 0197/0198 found alive. It fits the strategy already written down: **change
 the input, judge on the OUTPUT.**
 
+## AMENDED 2026-08-31 — the video path cannot carry both readings, by construction
+
+The operator asked the sharp version: **would using SAM 3.1 deprive me of the
+leg?** Read from SAM 3.1's own source rather than inferred, the answer is yes
+while the mask comes from the tracker, and **it is not a 3.1-versus-3.0
+difference — it is the video path versus the image path.**
+
+Two gates, both keyed on **intersection-over-minimum**, which is containment:
+
+1. **Detector NMS.** `build_sam3_multiplex_video_model` sets
+   `det_nms_thresh=0.1` and `det_nms_use_iom=True` (`model_builder.py:1171-1172`).
+   `chk_sam3_multiplex_base.py:699-702` forwards them into the detector, and the
+   source comments the result: *"detections in `sam3_image_out` has already gone
+   through NMS"*. Of two nested masks, one is removed before anything downstream
+   exists.
+2. **The new-object test.** Survivors reach `_associate_det_trk_compilable`
+   (`sam3_video_base.py:163`), where
+   `is_new_det = (score >= 0.65) & keep & ~any(intersection_metric >= 0.1)`, and
+   `intersection_metric` is `mask_iom` because `use_iom_recondition=True`
+   (`model_builder.py:1183`). A detection overlapping an existing track above
+   0.1 **cannot be given its own id**.
+
+The desk pair measures containment **0.995** — roughly ten times either gate. So
+the legged and legless readings can never coexist on the video path, and which
+one survives is decided by detector SCORE, not by completeness.
+
+**`build_sam3_image_model` (`model_builder.py:573-676`) configures no NMS and no
+association at all.** That is precisely why SAM 3's image path hands back both
+instances and the tracker hands back one. The multiplex tracker's whole job is
+to maintain one identity per object; suppressing a second, nested reading of an
+object it already holds is that job working, not failing.
+
+**The knob exists and is unusable.** Raising `det_nms_thresh` and
+`assoc_iou_thresh` above 0.995 would let both survive, and would also disable
+NMS almost entirely and let nearly every re-detection spawn a fresh id — on a
+capture whose id stability is already UNSTABLE at 0.6404 purity (0279). Do not
+reach for it.
+
+**So the resolution is architectural, and it costs nothing.** `/track` exists to
+answer *where is the object* for the nine kinds with no box (0271). Nothing
+requires the mask handed to SAM 3D to come from the same model. Let `/track` and
+the selector choose the FRAME, and let the image path produce the MASK on that
+frame — which is what production already does today. The legged candidate stays
+on the table, and 0261's sibling-gated fix stays available to pick it.
+
+**One thing this does NOT mean:** the tracker is not taking the leg away
+relative to today. Today's shortlist already discards it (0261). What the video
+path removes is the possibility of ever fixing it, because the better candidate
+never reaches the sort.
+
 ## What would change this decision
 
 **One reconstruction, and 0259 already priced it.** Build the desk from frame
