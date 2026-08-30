@@ -56,11 +56,16 @@ tools/                            local scripts (run from repo root)
   build_test_bundle.py              synthesize a bundle from test_data/photos
   inspect_bundle.py                 verify a bundle parses + smoke-checks
   punchlist_check.py                re-derive docs/punchlist.md against the live system
+  track_frames.py                   dispatch /track via Cloud Tasks (mirrors segment_frames.py)
+  track_map.py                      the object->frame map, and the id-stability measurement
+  track_views.py                    per-instance contact sheets (candidate_views.py for tracked ids)
 
 services/
   api-public/                     client-facing API (--allow-unauthenticated, Firebase JWT verify)
   api-internal/                   internal API (--no-allow-unauthenticated, Cloud Run IAM)
   perception-obj/                 SAM 3 + SAM 3D Objects + placement/fusion (deployed pre-placement)
+                                    plus SAM 3.1's video tracker behind /track — models/sam3_video.py
+                                    and track_receiver.py (0274; BUILT, candidate-only, NOT flipped)
   perception-geom/                VGGT for the photo-upload path (source only — the service and its image were retired 2026-08-20, decision 0192)
 
 web/                              Next.js static-export web app (decision 0050); Spark splat viewer
@@ -350,6 +355,18 @@ Three stages, all Cloud Tasks driven:
   and the plane ships a clean matte in its measured albedo.
 - **`/compress`** — transcodes each PLY to SPZ beside it plus a
   `compressed.json` index. ~5.8× smaller, Gaussian counts preserved exactly.
+- **`/track`** — SAM 3.1's multiplex VIDEO tracker across a capture's frames,
+  producing an object→frame map: per frame, per instance, an `obj_id`, a box, an
+  area and a stride-4 mask. **BUILT and exercised on a 0%-traffic candidate;
+  NOT flipped, and production has not moved.** It is a different model from
+  `/segment`'s, not a newer one — SAM 3.1 publishes only the tracker's
+  checkpoint (0274). It carries `/segment`'s two containment invariants for the
+  same reasons (writes only under `scenes/{id}/track_probe/`, never touches
+  Firestore) and adds two of its own: a suppressed concept is refused before any
+  GPU work (0089), and it writes numbers and binary masks, **never imagery** —
+  which matters because this capture has a person asleep on the bed in frame 0.
+  Ids restart per concept because the session holds one text prompt, so the
+  map's key is **(concept, obj_id)** and never `obj_id` alone.
 
 Placement, in the order it runs: box association and box placement from
 RoomPlan (the box is the skeleton), single-view contact priors against measured
@@ -709,6 +726,34 @@ gains.
   pick. Also measured and general: **adding a frame can replace a good arm
   with a worse one on association overlap alone**, which is a property of
   association rather than of this flag.
+- **The object→frame map is BUILT and its ids are measurably unstable — the
+  tracker survives a visit, not a revisit** (0279). Mean box purity **0.6464**
+  over all six RoomPlan boxes, against bands fixed in `tools/track_map.py`
+  BEFORE the first GPU run (0.90 stable, 0.70 marginal), so 0271's instruction
+  applies: report the number, do not build on the raw ids. **Coverage is not
+  the problem** — 0.73-0.97 of the frames where a box is on screen have
+  something claiming it. The failure is re-acquisition: four of six boxes have
+  their object arrive as THREE ids in disjoint frame windows
+  (`nightstand#1/#2/#3` at frames 15-27, 79-100, 131-142), and 25 of 42
+  competing claimant pairs share no frame at all, which rules out the reading
+  that two neighbours are arguing over one hull. It is not a clean rule: `bed#0`
+  and `cabinet#0` hold one id across 28- and 124-frame absences. **The sting is
+  for 0271's plan** — the box is what you would need to REPAIR the tracked
+  instances, and the nine unboxed kinds have no such repair. **The obvious
+  box-free merge is already measured and insufficient** (0280): pooled
+  mask-centroid ray triangulation separates known-same (median 0.182 m) from
+  known-different (0.327 m) by only 1.8x with heavy overlap, because a chair
+  tucked under a desk is 0.088 m away by that instrument.
+- **`/track` is bounded by frames × objects on the L4, and the bound is not
+  ours to remove** (0278). Every OOM lands in one allocation — the detector
+  grounding a batch of frames, 1.27 GiB, with 1.0-1.2 GiB free — and the
+  headroom is eaten by per-object tracker state that has nowhere to go: the
+  multiplex `init_state` sets no `storage_device` and takes no
+  `offload_state_to_cpu`, while `Sam3BasePredictor.start_session` passes exactly
+  that argument. `PERCEPTION_TRACK_GROUNDING_BATCH` (default 4; 1 disables
+  batching) is the lever, and it is an env var so the next turn costs a revision
+  rather than a build. At upstream's 16 the capture OOM'd at 189 frames AND at
+  63; at 4 it completes 189 in ~78 s a concept.
 - **Class-6 splat truncation is untouched and has no live route.** Reconstructions
   are missing legs, bases, and backs. Every placement fix to date positions or
   orients an incomplete reconstruction better rather than completing it, and all
@@ -1027,6 +1072,10 @@ ever done or ruled, delete it — do not annotate it.
   `public/`**, and `next build` copies `public/` into `out/`. Hosting ignores it
   on deploy — one config line between real rooms and a public origin. Moving it
   outside `public/` would remove the hazard rather than guard it.
+- **`/track` logs 64 "Missing keys" for `freqs_cis_real`/`freqs_cis_imag` at
+  model load, and that is correct.** Those are RoPE frequency buffers computed
+  at init from a table the checkpoint DOES carry (`vitdet.py:552-555`), not lost
+  weights; `use_rope_real=True` is the entry point's own default.
 - **Cold-start coverage is thin by design.** The first `/process` request spends
   its budget on boot and model load; warm re-drives are the coverage recipe.
 
@@ -1175,6 +1224,12 @@ old one is orphaned. Auto-cleanup would fire that for every user on a schedule.
 It is a single checkbox in the console.
 
 **Cloud Run revision numbers are NOT chronological on `perception-obj`.** The service has produced two revisions numbered 00036 (`-xer`, RP-8; `-l9l`, the 0089/0090 security+privacy deploy), one numbered 00038 (`-ses`, the 0081/0082 wave), and `perception-obj-00037-sd9` (image `20260808-200124`, the 0104 walk-classes deploy), which served 100% for two days despite a LOWER number than 00038. Do NOT read a lower revision number as a rollback — check the image tag and the traffic split (`gcloud run services describe perception-obj --region asia-southeast1`), which are the authorities. Serving now: **`perception-obj-00074-var`**, digest `sha256:c538f699…` (the refine + arm-select flip, 2026-08-25), re-verified from `gcloud` 2026-08-25 — and note it still carries the `candidate` tag it was deployed under, which is what a post-flip candidate looks like rather than a parked revision. Its predecessor **`00062-hum`** ran `sha256:faa005c8…` (the colour deploy, 2026-08-20) and is the rollback target, held in the registry by a `serving-rollback-00062-hum` tag; it no longer carries its `20260821-010928` tag, so identify it by digest.
+
+**SAM 3.1 is a TRACKER release, and the image path has nowhere to move to (0274).** Its only published checkpoint is `sam3.1_multiplex.pt`; `build_sam3_image_model` hardcodes the 3.0 weights and takes no version argument, so "bump SAM 3 to 3.1" is not an available action for the path `/process` and `/segment` use. `facebook/sam3.1` is a SEPARATE gated HuggingFace repo — access to `facebook/sam3` does not imply it, and the build now downloads both. **Bypassing SAM 3.1's session layer means replicating what it ENTERS, not only what it calls (0276):** `reset_state` carries no decorator and requires its caller to be inside `torch.inference_mode()`, which `handle_request` supplies; `start_session` cannot start a multiplex session at all; and the recommended entry point defaults `use_fa3=True`, a path that imports `flash_attn_interface` and casts to float8 — Hopper only, where this service is an L4. **And torch cannot move to meet it (0277):** the image is torch 2.5.1+cu121 because SAM 3D Objects pins it, so one dtype shim in `models/sam3_video.py` covers the tracker's bool CUDA sort. **A second incompatibility is the signal to split the tracker into its own service, not to add a second patch** — it needs no SAM 3D, pytorch3d, kaolin or gsplat.
+
+**The SAM 3D clone must stay PINNED, and the reason is the layer cache as much as reproducibility.** The shared `:buildcache` is written from the pinned form, so an unpinned `git clone --depth 1` misses at layer 4 and rebuilds the mamba env and both sam3d pip installs — a ~50 minute build instead of ~10. Observed and cancelled on 2026-08-30.
+
+**Give every concurrent lane its own Cloud Run tag (0275).** `deploy_perception.sh --candidate` uses `--tag=candidate`, which is ONE mutable pointer: a second lane's deploy moves it off the first lane's revision silently, and probes still authenticate because `segment_frames.py` and `track_frames.py` pin the OIDC audience to the STABLE url. Pass your own tag and point `CANDIDATE_URL` at it. `/track` now records `K_REVISION` in its output so a mis-addressed probe is detectable after the fact.
 
 **Old registry images are deleted by policy, and the live one is kept BY NAME
 (decision 0190).** `infra/artifact-cleanup-policy.json` is the source of truth
@@ -1352,7 +1407,7 @@ evidence for a human deleting an entry, not authority to.
 
 **ALL THREE PARALLEL LANES MERGED 2026-08-09** (`stage2` → 0135–0137, `perception-emit`, `ios-residue`; worktrees removed, branches deleted). Merged-tree verification: root **724 passed + 10 skipped**, perception **704**, web **204**, iOS **523**, tsc clean, zero conflict markers. **What the lanes left owed, now written:** lane B's two notes are 0142 (`/compress` as a third `/process` stage rather than a sidecar) and 0143 (`extent_axes_m` declared per box, horizontals deliberately unnamed). The `dims` correction is lane C's **0137**, reached independently — there is no third note on it.
 
-**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2, capture-dark, guest-closure and perception-deploy merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNWRITTEN: 0244 to perception-deploy** — deliberately NOT freed even though that lane has now landed; it may still write it. **0239 is SPENT by upload-flake** (the last decrement fires the gate in its own turn) — **nothing is unmerged now.** **0242 is SPENT by privacy-labels** (a privacy disclosure is measured, not described). **0243 is SPENT by perception-deploy** (the flip is three assertions); **0186, 0215, 0219–0220 by guest-closure**; **0225–0236 by selection-supply**; **0237–0238 by ios-surfaces-2**; **0240–0241 by capture-dark**; **0245 by the name swap**. Everything else through 0245 is used.
+**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2, capture-dark, guest-closure and perception-deploy merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNWRITTEN: 0244 to perception-deploy** — deliberately NOT freed even though that lane has now landed; it may still write it. **0239 is SPENT by upload-flake** (the last decrement fires the gate in its own turn) — **nothing is unmerged now.** **0242 is SPENT by privacy-labels** (a privacy disclosure is measured, not described). **0243 is SPENT by perception-deploy** (the flip is three assertions); **0186, 0215, 0219–0220 by guest-closure**; **0225–0236 by selection-supply**; **0237–0238 by ios-surfaces-2**; **0240–0241 by capture-dark**; **0273-0280 by sam31-object-map** (the SAM 3.1 tracker and the object→frame map); **0245 by the name swap**. Everything else through 0245 is used.
 
 Two durable lessons, both learned by collision. **Put a session's number block INSIDE the prompt body**: a block written in a chat heading once reached nobody and two lanes claimed the same numbers, and the room-quality session was handed one stale block in its prompt and a different one in its handoff. When a prompt and this file disagree, **this file and the handoff win** — a prompt is written once, these are maintained. And **two sessions sharing one tree is how a note gets dropped**: decision 0179 was lost by the sam3d-pointmap merge and restored by `546281e`, which is why the Tooling conventions now insist every session gets its own worktree.
 
