@@ -85,6 +85,11 @@ MIN_CLAIMED_FRAMES = 5
 # same thing.
 HANDOFF_MAX_GAP_STEPS = 3
 HANDOFF_MIN_IOU = 0.30
+# `out_probs` carries -10000.0 for an object upstream considers missing (its own
+# comment: "we rely on large negative values as scores for missing objects"), so
+# a mean over it is not a probability. Excluded from the mean and counted
+# instead — 3 of 1241 detections on the preserved capture.
+PROB_SENTINEL_BELOW = 0.0
 
 # ── the acceptance criterion, fixed BEFORE the measurement ───────────────────
 # 0271 makes id stability the acceptance test, and this repo's own discipline
@@ -175,7 +180,14 @@ def build_map(tracks: dict[str, dict]) -> dict[str, Any]:
                 "frames": frames,
                 "median_area_px": int(np.median(areas)),
                 "max_area_px": int(max(areas)),
-                "mean_prob": round(float(np.mean([d["prob"] for d in dets])), 4),
+                "mean_prob": (
+                    round(float(np.mean(real)), 4)
+                    if (real := [d["prob"] for d in dets if d["prob"] >= PROB_SENTINEL_BELOW])
+                    else None
+                ),
+                "n_missing_sentinel": sum(
+                    1 for d in dets if d["prob"] < PROB_SENTINEL_BELOW
+                ),
                 "where": {
                     str(d["frame_index"]): [round(v, 1) for v in d["bbox_px"]]
                     for d in dets
@@ -382,7 +394,8 @@ def main(argv: list[str] | None = None) -> int:
     for inst in instances[:60]:
         box = ", ".join(inst.get("roomplan_boxes") or []) or "-"
         print(f"  {inst['instance']:<26} {inst['n_frames']:>5}  {inst['first_frame']:>5}"
-              f"  {inst['last_frame']:>4}  {inst['median_area_px']:>8}  {inst['mean_prob']:.3f}"
+              f"  {inst['last_frame']:>4}  {inst['median_area_px']:>8}"
+              f"  {'  --  ' if inst['mean_prob'] is None else format(inst['mean_prob'], '.3f')}"
               f"  {box}")
     if purity:
         nb = sum(1 for i in instances if i["boxed"])
