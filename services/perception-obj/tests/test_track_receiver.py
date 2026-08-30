@@ -450,3 +450,18 @@ class TestTheFrameListIsAVideo:
         model = FakeVideoModel({"monitor": {}})
         body = _body(_run(_req(frame_indices=[108, 7, 42]), model))
         assert body["frame_indices"] == [7, 42, 108]
+
+
+class TestProvenance:
+    def test_the_answering_revision_is_named_in_the_output(self, wired, monkeypatch):
+        """0275: the `candidate` tag is one pointer shared by every concurrent
+        lane, so a probe can run against a revision another lane deployed with
+        nothing in the artifacts to say so."""
+        monkeypatch.setenv("K_REVISION", "perception-obj-00090-wey")
+        model = FakeVideoModel({"monitor": {0: [_det(1)]}})
+        assert _body(_run(_req(), model))["revision"] == "perception-obj-00090-wey"
+
+    def test_it_says_unknown_rather_than_omitting_the_field(self, wired, monkeypatch):
+        monkeypatch.delenv("K_REVISION", raising=False)
+        model = FakeVideoModel({"monitor": {0: [_det(1)]}})
+        assert _body(_run(_req(), model))["revision"] == "unknown"
