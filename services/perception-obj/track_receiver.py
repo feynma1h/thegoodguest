@@ -41,6 +41,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -341,6 +342,11 @@ async def handle_track(
 
     summary = {
         "scene_id": req.scene_id,
+        # Which revision answered. The `candidate` tag is one mutable pointer
+        # shared by every concurrent lane (0275), so a probe can authenticate
+        # correctly and run against a revision another lane deployed — and
+        # nothing in the output would say so. K_REVISION is set by Cloud Run.
+        "revision": os.environ.get("K_REVISION", "unknown"),
         "prefix": f"gs://{outputs_bucket}/{base}/",
         "n_frames": len(images),
         "frame_indices": indices,
