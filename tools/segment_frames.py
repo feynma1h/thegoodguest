@@ -2,6 +2,7 @@
 """Ask perception to segment named frames — SAM 3 only, no reconstruction.
 
     python3 tools/segment_frames.py <scene_id> --frames 41,42,45 [--candidate]
+                                     [--prompt "desk,desk with legs"]
 
 WHY A CLOUD TASK AND NOT CURL. perception-obj is platform-gated (0106): only
 `tasks-invoker@` holds run.invoker, and /segment verifies an OIDC token whose
@@ -19,8 +20,18 @@ verifier expects RECEIVER_URL's. Probing a candidate is the normal case here,
 so the audience is always pinned to RECEIVER_URL + "/segment" while the POST
 goes wherever --candidate says.
 
+ONE CALL TESTS MANY PHRASINGS. `--prompt` is SAM 3's comma-separated concept
+list and the model returns each term verbatim as the detection's label, so
+asking for "desk,desk with legs,desk leg" costs one inference on one frame and
+yields three separately-labelled answers to compare. That matters because the
+alternative -- one dispatch per phrasing -- pays the scale-to-zero model load
+every time. Suppressed concepts are appended by the receiver (privacy.
+segmentation_prompt), so a custom prompt does not weaken 0089.
+
 The route writes only under scenes/{id}/segment_probe/ and never touches
 Firestore, so this cannot regress a ready room (see segment_receiver.py).
+BUT IT OVERWRITES that scene+frame's previous probe output in GCS, so if the
+earlier result matters, keep the local copy before re-running one.
 """
 
 from __future__ import annotations
@@ -53,7 +64,11 @@ def _bundle_uri_for(scene_id: str) -> str:
 
     snap = firestore.Client(project=PROJECT).collection("scenes").document(scene_id).get()
     if not snap.exists:
-        raise SystemExit(f"scene {scene_id} not found")
+        raise SystemExit(
+            f"scene {scene_id} not found — pass --bundle-uri if the capture "
+            "outlived its Firestore record (the captures bucket and the scene "
+            "collection expire on different clocks)"
+        )
     uri = (snap.to_dict() or {}).get("bundle_uri")
     if not uri:
         raise SystemExit(f"scene {scene_id} has no bundle_uri")
@@ -68,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="POST to the candidate revision instead of the serving one")
     ap.add_argument("--no-png", action="store_true", help="masks.npz only")
     ap.add_argument("--bundle-uri", help="override; otherwise read from Firestore")
+    ap.add_argument("--prompt", help="SAM 3 concept list; default is the "
+                                     "service's DEFAULT_OBJECT_PROMPT")
     args = ap.parse_args(argv)
 
     frames = [int(x) for x in args.frames.replace(" ", "").split(",") if x]
@@ -89,6 +106,10 @@ def main(argv: list[str] | None = None) -> int:
         "frame_indices": frames,
         "write_png": not args.no_png,
     }
+    if args.prompt:
+        # Omitted entirely when unset, so the default path sends the same body
+        # it always did rather than an explicit null.
+        body["object_prompt"] = args.prompt
     task = {
         "name": f"{queue_path}/tasks/segment-{args.scene_id}-{int(time.time())}",
         "http_request": {
@@ -107,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"scene    {args.scene_id}")
     print(f"frames   {frames}")
+    if args.prompt:
+        print(f"prompt   {args.prompt}")
     print(f"POST to  {post_to}")
     print(f"audience {audience}")
     print(f"task     {task['name']}")
