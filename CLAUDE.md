@@ -727,8 +727,9 @@ gains.
   with a worse one on association overlap alone**, which is a property of
   association rather than of this flag.
 - **The object→frame map is BUILT and its ids are measurably unstable — the
-  tracker survives a visit, not a revisit** (0279). Mean box purity **0.6464**
-  over all six RoomPlan boxes, against bands fixed in `tools/track_map.py`
+  tracker survives a visit, not a revisit** (0279). Mean box purity **0.6404**
+  over all six RoomPlan boxes — 30 concepts, all 189 frames, 48 instances of
+  which 6 are boxed and 42 are not — against bands fixed in `tools/track_map.py`
   BEFORE the first GPU run (0.90 stable, 0.70 marginal), so 0271's instruction
   applies: report the number, do not build on the raw ids. **Coverage is not
   the problem** — 0.73-0.97 of the frames where a box is on screen have
