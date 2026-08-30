@@ -92,6 +92,25 @@ logger = logging.getLogger(__name__)
 # channels of the memory encoder, so the checkpoint's weights depend on it.
 TRACK_MAX_OBJECTS = int(os.environ.get("PERCEPTION_TRACK_MAX_OBJECTS", "16"))
 
+# How many frames the DETECTOR grounds in one batch during propagation. This is
+# the single biggest transient allocation in the whole route and the measured
+# cause of every OOM on this capture: `_process_grounding_chunk_batched` ->
+# `maskformer_segmentation._embed_pixels` asks for **1.27 GiB** at upstream's
+# default of 16, and the failures all report 1.0-1.2 GiB free. A smaller batch
+# is slower and proportionally smaller: 4 asks for roughly a third of a GiB.
+#
+# `use_batched_grounding` and `batched_grounding_batch_size` are read from the
+# model on EVERY frame (`sam3_multiplex_base.py:516-517`), not captured at
+# construction, so setting them after the builder returns is supported rather
+# than a trick — upstream's own `add_prompt` toggles the first one the same way.
+# Setting this to 1 turns batching off entirely, which is the path `add_prompt`
+# already uses and which is known to work: every OOM so far happened during
+# propagation, never during the single-frame prompt.
+#
+# An env var because it is the lever most likely to need another turn, and a
+# revision costs seconds where a rebuild costs ten minutes.
+TRACK_GROUNDING_BATCH = int(os.environ.get("PERCEPTION_TRACK_GROUNDING_BATCH", "4"))
+
 
 # ── torch 2.5.1 has no bool sort kernel on CUDA; SAM 3.1's tracker needs one ──
 # `sam3_multiplex_base._det_track_one_frame_impl` does
@@ -198,6 +217,17 @@ class SAM3VideoModel:
         self.predictor = predictor
         # See workaround 1: the model, not the session layer, is our API.
         self.model = predictor.model
+
+        # See TRACK_GROUNDING_BATCH. The builder hardcodes 16; this is the only
+        # way to change it without editing Meta's source.
+        self.model.batched_grounding_batch_size = max(1, TRACK_GROUNDING_BATCH)
+        self.model.use_batched_grounding = TRACK_GROUNDING_BATCH > 1
+        logger.info(
+            "[sam3v] grounding batch=%d (batched=%s), max_num_objects=%d",
+            self.model.batched_grounding_batch_size,
+            self.model.use_batched_grounding,
+            max_num_objects,
+        )
         self._use_bf16_autocast = torch.cuda.is_available()
 
     def _session(self):
@@ -273,32 +303,48 @@ class SAM3VideoModel:
         ... ]}, keyed by POSITION IN THE FRAME LIST, not by capture frame index
         — the caller owns that mapping.
         """
-        with self._session():
-            self.model.reset_state(state)
-            self.model.add_prompt(
-                state,
-                prompt_frame,
-                text_str=concept,
-                output_prob_thresh=output_prob_thresh,
-            )
-
-            out: dict[int, list[dict[str, Any]]] = {}
-            for pos, raw in self.model.propagate_in_video(
-                state,
-                start_frame_idx=prompt_frame,
-                reverse=False,
-                output_prob_thresh=output_prob_thresh,
-            ):
-                out[int(pos)] = _compact(raw)
-        return out
-
-    def close_video(self, state) -> None:
-        """Drop the decoded frames and tracker memory."""
         try:
             with self._session():
                 self.model.reset_state(state)
-        except Exception:  # pragma: no cover - best effort
-            logger.warning("[sam3v] reset_state failed while closing video")
+                self.model.add_prompt(
+                    state,
+                    prompt_frame,
+                    text_str=concept,
+                    output_prob_thresh=output_prob_thresh,
+                )
+
+                out: dict[int, list[dict[str, Any]]] = {}
+                for pos, raw in self.model.propagate_in_video(
+                    state,
+                    start_frame_idx=prompt_frame,
+                    reverse=False,
+                    output_prob_thresh=output_prob_thresh,
+                ):
+                    out[int(pos)] = _compact(raw)
+        except Exception:
+            # ONE FAILED CONCEPT MUST NOT COST THE REST OF THE CALL. Measured
+            # 2026-08-30: a CUDA OOM on the first of three concepts was followed
+            # by the same OOM on the other two, because nothing released the
+            # partial state between them — memory was only freed by close_video
+            # at the END of the request. The caller already reports a failed
+            # concept and moves on; this is what makes moving on worth doing.
+            self._release(state)
+            raise
+        return out
+
+    def _release(self, state) -> None:
+        """Drop whatever a partial pass left on the card."""
+        try:
+            with self._session():
+                self.model.reset_state(state)
+        except Exception:
+            logger.warning("[sam3v] reset_state failed while releasing a partial pass")
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def close_video(self, state) -> None:
+        """Drop the decoded frames and tracker memory."""
+        self._release(state)
         state.clear()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
