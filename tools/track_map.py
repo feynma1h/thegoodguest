@@ -325,9 +325,32 @@ def main(argv: list[str] | None = None) -> int:
         else []
     )
 
+    # Which instances correspond to something RoomPlan measured. This is the
+    # six/nine split 0271 is about, and it is derived from the purity table
+    # rather than from labels: an instance is "boxed" when it is the dominant
+    # claimant of a box whose purity was measurable at all. Everything else is
+    # an object the pipeline's instruments cannot currently see.
+    # A LIST, not a single box: one instance dominating several boxes is not a
+    # tidier answer, it is a conflation signal — one mask covering two measured
+    # objects — and keeping only the last one would hide exactly that.
+    boxed_of: dict[str, list[str]] = defaultdict(list)
+    for r in purity:
+        if r["dominant_instance"] and r["purity"] is not None:
+            boxed_of[r["dominant_instance"]].append(
+                f"{r['category']}/{str(r['box_id'])[:8]}"
+            )
+    for inst in instances:
+        inst["roomplan_boxes"] = boxed_of.get(inst["instance"], [])
+        inst["boxed"] = bool(inst["roomplan_boxes"])
+
     payload = {
         "concepts": sorted(tracks),
         "n_instances": len(instances),
+        "n_boxed": sum(1 for i in instances if i["boxed"]),
+        "n_unboxed": sum(1 for i in instances if not i["boxed"]),
+        "instances_dominating_multiple_boxes": [
+            i["instance"] for i in instances if len(i["roomplan_boxes"]) > 1
+        ],
         "instances": instances,
         "box_purity": purity,
         "handoffs": handoffs,
@@ -338,10 +361,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"concepts tracked : {len(tracks)}")
     print(f"instances found  : {len(instances)}")
     print()
-    print("instance                     frames  first  last   med.area  prob")
-    for inst in instances[:40]:
+    print("instance                     frames  first  last   med.area   prob  RoomPlan box")
+    for inst in instances[:60]:
+        box = ", ".join(inst.get("roomplan_boxes") or []) or "-"
         print(f"  {inst['instance']:<26} {inst['n_frames']:>5}  {inst['first_frame']:>5}"
-              f"  {inst['last_frame']:>4}  {inst['median_area_px']:>8}  {inst['mean_prob']:.3f}")
+              f"  {inst['last_frame']:>4}  {inst['median_area_px']:>8}  {inst['mean_prob']:.3f}"
+              f"  {box}")
+    if purity:
+        nb = sum(1 for i in instances if i["boxed"])
+        print()
+        print(f"  {nb} instances correspond to a RoomPlan box; "
+              f"{len(instances) - nb} do not — the split 0271 is about.")
     if purity:
         print()
         print("box purity (RoomPlan-grounded)")
