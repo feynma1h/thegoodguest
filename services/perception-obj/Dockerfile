@@ -244,6 +244,7 @@ COPY services/perception-obj/fusion.py /app/fusion.py
 COPY services/perception-obj/reproject.py /app/reproject.py
 COPY services/perception-obj/sampling.py /app/sampling.py
 COPY services/perception-obj/census_sampling.py /app/census_sampling.py
+COPY services/perception-obj/track_selection.py /app/track_selection.py
 COPY services/perception-obj/budget.py /app/budget.py
 COPY services/perception-obj/room_planes.py /app/room_planes.py
 COPY services/perception-obj/roomplan_room.py /app/roomplan_room.py
@@ -282,6 +283,7 @@ COPY services/perception-obj/track_receiver.py /app/track_receiver.py
 # the 0069 fallback rule would silently null every family forever, which
 # the build must catch instead.
 RUN python -c "import placement, fusion, reproject, sampling, census_sampling, \
+track_selection, \
 budget, room_planes, roomplan_room, contact_priors, box_placement, privacy, \
 mask_refine, object_color, oidc, receiver_repo, fcm, process_receiver, \
 shell_geometry, shell_envelope, shell_observation, shell_material, \
