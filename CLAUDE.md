@@ -59,6 +59,7 @@ tools/                            local scripts (run from repo root)
   track_frames.py                   dispatch /track via Cloud Tasks (mirrors segment_frames.py)
   track_map.py                      the object->frame map, and the id-stability measurement
   track_views.py                    per-instance contact sheets (candidate_views.py for tracked ids)
+  track_select.py                   each tracked object's best frame, over a real capture
 
 services/
   api-public/                     client-facing API (--allow-unauthenticated, Firebase JWT verify)
@@ -66,6 +67,8 @@ services/
   perception-obj/                 SAM 3 + SAM 3D Objects + placement/fusion (deployed pre-placement)
                                     plus SAM 3.1's video tracker behind /track — models/sam3_video.py
                                     and track_receiver.py (0274; BUILT, candidate-only, NOT flipped)
+                                    and track_selection.py, per-object best-frame choice over the
+                                    tracked segments (BUILT, no call site in the service yet)
   perception-geom/                VGGT for the photo-upload path (source only — the service and its image were retired 2026-08-20, decision 0192)
 
 web/                              Next.js static-export web app (decision 0050); Spark splat viewer
@@ -367,6 +370,21 @@ Three stages, all Cloud Tasks driven:
   which matters because this capture has a person asleep on the bed in frame 0.
   Ids restart per concept because the session holds one text prompt, so the
   map's key is **(concept, obj_id)** and never `obj_id` alone.
+
+`track_selection.py` is the per-object selector built on that map: given the
+frames a tracked object appears in, which single frame is the best photograph
+of it. Two stages — three hard filters (the mask reaches the image border, the
+mask is under 0.5% of the frame, more than 10% of it is covered by other
+objects) and then a weighted score over sharpness, size, solidity,
+centeredness and temporal stability, each min-max normalised within that
+object's own surviving frames. It needs no box, so it reaches the unboxed nine
+(0271), and no GPU, so it runs offline over the whole capture in 27 s.
+**BUILT with no call site in the service yet** — `tools/track_select.py` is the
+driver, and the module is COPY'd and smoke-imported so 0211 cannot recur.
+**It never decides what an object IS**: every detection carries an opaque
+`object_key` the caller assigns, because 0279 measured the tracker's ids as
+unstable and a selector that hardcoded `obj_id` would silently return three
+best frames for one nightstand.
 
 Placement, in the order it runs: box association and box placement from
 RoomPlan (the box is the skeleton), single-view contact priors against measured
@@ -745,6 +763,33 @@ gains.
   mask-centroid ray triangulation separates known-same (median 0.182 m) from
   known-different (0.327 m) by only 1.8x with heavy overlap, because a chair
   tucked under a desk is 0.088 m away by that instrument.
+- **The SAME-FRAME half of that identity problem IS exactly answerable, and it
+  is a different duplication from 0279's** (0281). `/track` runs one concept
+  per pass, so one object is claimed by every prompt that fits it in the SAME
+  frames — `artwork#0 ≡ painting#1` over 54 shared frames, `monitor#1 ≡ tv#0`
+  over 38, a wardrobe's `door` nested inside its `cabinet`. Measured over all
+  48 overlapping pairs the split is bimodal with **nothing in the middle**: 14
+  pairs at containment 0.996-1.000, then 0.511 (a speaker on a desk), then
+  ≤ 0.047. Merging them takes the capture **48 instances → 34 objects** in 11
+  groups that all read correctly. **This is why an occlusion rule cannot use a
+  bare union of the other masks** — applied literally it reports eight
+  instances as ~99% occluded by duplicates of themselves. It does NOT touch
+  0279: `nightstand#1/#2/#3` share no frame, so 34 still over-counts what is
+  perhaps 15 objects.
+- **Nine objects have no uncut view at all, and the border margin is the one
+  number that decides it** (0282). Of `track_selection.py`'s three hard
+  filters, border rejects **768 of 1,241 detections (61.9%)** against
+  too_small's 79 and occluded's 55 — they are not peers, and an argument about
+  stage 1 is an argument about one threshold. Even mask-touches-edge with no
+  band refuses 57.7%, because 0273's rotation-paced capture runs large
+  furniture off the frame. **Two of the three objects 0259 recorded the
+  operator naming come back exactly** — `desk#0` → 50 and `chair#0` → 42, from
+  tracked masks rather than projected hulls. The bed is the disagreement and
+  it is the margin: at 2.5% all 87 of its frames are refused, at 0.5-1.0% it
+  keeps four and picks **f0**, the operator's own choice. **The threshold
+  ships as specified and was deliberately not tuned to the bed** — tuning to
+  the one case that can be checked would stop it being evidence. What is owed
+  is the operator's eye on the nine fallback objects.
 - **`/track` is bounded by frames × objects on the L4, and the bound is not
   ours to remove** (0278). Every OOM lands in one allocation — the detector
   grounding a batch of frames, 1.27 GiB, with 1.0-1.2 GiB free — and the
@@ -1408,7 +1453,7 @@ evidence for a human deleting an entry, not authority to.
 
 **ALL THREE PARALLEL LANES MERGED 2026-08-09** (`stage2` → 0135–0137, `perception-emit`, `ios-residue`; worktrees removed, branches deleted). Merged-tree verification: root **724 passed + 10 skipped**, perception **704**, web **204**, iOS **523**, tsc clean, zero conflict markers. **What the lanes left owed, now written:** lane B's two notes are 0142 (`/compress` as a third `/process` stage rather than a sidecar) and 0143 (`extent_axes_m` declared per box, horizontals deliberately unnamed). The `dims` correction is lane C's **0137**, reached independently — there is no third note on it.
 
-**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2, capture-dark, guest-closure and perception-deploy merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNWRITTEN: 0244 to perception-deploy** — deliberately NOT freed even though that lane has now landed; it may still write it. **0239 is SPENT by upload-flake** (the last decrement fires the gate in its own turn) — **nothing is unmerged now.** **0242 is SPENT by privacy-labels** (a privacy disclosure is measured, not described). **0243 is SPENT by perception-deploy** (the flip is three assertions); **0186, 0215, 0219–0220 by guest-closure**; **0225–0236 by selection-supply**; **0237–0238 by ios-surfaces-2**; **0240–0241 by capture-dark**; **0273-0280 by sam31-object-map** (the SAM 3.1 tracker and the object→frame map); **0245 by the name swap**. Everything else through 0245 is used.
+**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2, capture-dark, guest-closure and perception-deploy merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNWRITTEN: 0244 to perception-deploy** — deliberately NOT freed even though that lane has now landed; it may still write it. **0239 is SPENT by upload-flake** (the last decrement fires the gate in its own turn) — **nothing is unmerged now.** **0242 is SPENT by privacy-labels** (a privacy disclosure is measured, not described). **0243 is SPENT by perception-deploy** (the flip is three assertions); **0186, 0215, 0219–0220 by guest-closure**; **0225–0236 by selection-supply**; **0237–0238 by ios-surfaces-2**; **0240–0241 by capture-dark**; **0273-0280 by sam31-object-map** (the SAM 3.1 tracker and the object→frame map); **0281-0282 by track-selection** (same-frame duplication is exactly answerable; the border rule is the whole filter); **0245 by the name swap**. Everything else through 0245 is used.
 
 Two durable lessons, both learned by collision. **Put a session's number block INSIDE the prompt body**: a block written in a chat heading once reached nobody and two lanes claimed the same numbers, and the room-quality session was handed one stale block in its prompt and a different one in its handoff. When a prompt and this file disagree, **this file and the handoff win** — a prompt is written once, these are maintained. And **two sessions sharing one tree is how a note gets dropped**: decision 0179 was lost by the sam3d-pointmap merge and restored by `546281e`, which is why the Tooling conventions now insist every session gets its own worktree.
 
