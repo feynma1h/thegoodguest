@@ -199,7 +199,12 @@ async def handle_track(
     prefix = _bundle_prefix(req.bundle_uri)
 
     if req.frame_indices:
-        wanted = list(dict.fromkeys(req.frame_indices))
+        # SORTED, always. The frame list IS the video: the tracker's memory
+        # carries forward from one entry to the next, so an out-of-order list
+        # asks it to follow a scene that jumps around in time. Capture order is
+        # the only order that means anything here, and a caller who passes
+        # indices in some other order almost certainly did not intend to.
+        wanted = sorted(dict.fromkeys(req.frame_indices))
         by_index = {f.frame_index: f for f in bundle.frames}
         frames = [by_index[i] for i in wanted if i in by_index]
     else:
