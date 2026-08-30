@@ -1,6 +1,6 @@
 ---
 name: sam3-upstream
-description: Look up how SAM 3 / SAM 3.1 actually behaves — API shapes, tensor conventions, thresholds, prompt handling, instance IDs, version differences — from the vendored source and official sources rather than inferring it. Use whenever a question about SAM 3, SAM 3.1, or SAM 3D's behaviour arises, before writing code against it, and before explaining why it did something.
+description: Look up how SAM 3 / SAM 3.1 actually behaves — API shapes, tensor conventions, thresholds, prompt handling, instance IDs, version differences — from the vendored source and official sources rather than inferring it. Use whenever a question about SAM 3, SAM 3.1, or SAM 3D's behaviour arises, before writing code against it, and before explaining why it did something. Covers version migrations, where the vendored source describes the version being replaced and only official sources describe the new one.
 ---
 
 # SAM 3 / SAM 3.1 — read it, do not infer it
@@ -53,6 +53,29 @@ outputs. Never as evidence of what the model does.
 summaries**, which routinely describe an older release or a different variant.
 When sources disagree, the vendored source in this repo wins for "what runs
 here", and the official repo wins for "what the model is capable of".
+
+## During a version migration, that order INVERTS
+
+**The vendored source is the version you are moving FROM.** While the repo
+carries 3.0 and the work is 3.1, `upstream/sam3/` cannot answer a single
+question about 3.1 — and it will answer confidently and wrongly, because the
+class and function names are the same. Reading it and reasoning about the new
+version from it is the precise mistake this skill exists to prevent, wearing a
+disguise.
+
+So, mid-migration:
+
+- **What 3.1 does** → the official repo, release notes, model card, and the
+  3.0→3.1 diff. There is no offline substitute and you must not invent one.
+- **What we run today** → the vendored source, which is still the old version
+  until the bump lands.
+- **What changes for us** → the difference between those two, stated
+  explicitly, per call site we depend on.
+
+**Say which version every claim is about.** A sentence about "SAM 3" that is
+silently about 3.0 while the reader is building 3.1 is worse than no sentence.
+Once 3.1 is vendored, this section stops applying and the ordinary order above
+resumes.
 
 ## Questions this exists to answer without guessing
 
