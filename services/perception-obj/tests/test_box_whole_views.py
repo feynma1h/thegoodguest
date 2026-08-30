@@ -10,7 +10,6 @@ these tests are what keep it that way.
 from __future__ import annotations
 
 import importlib
-import os
 
 import numpy as np
 import pytest
