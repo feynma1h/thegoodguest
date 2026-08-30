@@ -25,8 +25,22 @@ Read from `facebookresearch/sam3` @ main, 2026-08-30:
   - `io_utils.load_resource_as_video_frames` — accepts a LIST OF PIL IMAGES as
     `resource_path`, which is why this wrapper takes frames rather than a path.
 
-TWO UPSTREAM SHAPES THIS WRAPPER DELIBERATELY WORKS AROUND, both read from
-source rather than discovered on a GPU:
+THREE UPSTREAM SHAPES THIS WRAPPER WORKS AROUND. Two were read from source
+before building; the first was not, and cost a candidate — it is the one that
+does not show up as a signature or a default, only as a decorator on somebody
+else's method:
+
+  0. **Calling the model directly means supplying inference mode ourselves.**
+     `init_state`, `add_prompt` and `propagate_in_video` each carry
+     `@torch.inference_mode()`, but `reset_state` does NOT — it relies on its
+     CALLER being inside it, which upstream guarantees because
+     `Sam3BasePredictor.handle_request` is itself decorated. Since the state's
+     tensors are created inside `init_state`'s inference mode, they are
+     inference tensors, and `reset_state`'s in-place
+     `text_ids[...] = 0` raises "Inplace update to inference tensor outside
+     InferenceMode is not allowed" when called from ordinary code. Measured on
+     a 0%-traffic candidate, 2026-08-30. So every model call here is wrapped;
+     the decorators upstream carries are a floor, not the whole contract.
 
   1. **`Sam3BasePredictor.start_session` cannot start a multiplex session.** It
      builds `init_kwargs` containing `offload_state_to_cpu` unconditionally and
@@ -52,7 +66,7 @@ from __future__ import annotations
 
 import logging
 import os
-from contextlib import nullcontext
+from contextlib import ExitStack
 from typing import Any
 
 import numpy as np
@@ -131,10 +145,20 @@ class SAM3VideoModel:
         self.model = predictor.model
         self._use_bf16_autocast = torch.cuda.is_available()
 
-    def _autocast(self):
+    def _session(self):
+        """Inference mode plus bf16 autocast — the environment upstream's own
+        request layer supplies, and which calling the model directly does not.
+
+        Inference mode is NOT optional: see workaround 0. Autocast mirrors what
+        `models/sam3.py` does, scoped per call rather than entered globally.
+        """
+        stack = ExitStack()
+        stack.enter_context(torch.inference_mode())
         if self._use_bf16_autocast:
-            return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-        return nullcontext()
+            stack.enter_context(
+                torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            )
+        return stack
 
     # -- video lifecycle -----------------------------------------------------
 
@@ -151,7 +175,7 @@ class SAM3VideoModel:
         This is the expensive call, so it is separated from tracking: one video
         is opened once and every concept is tracked against it.
         """
-        with self._autocast():
+        with self._session():
             return self.model.init_state(
                 resource_path=frames,
                 offload_video_to_cpu=offload_video_to_cpu,
@@ -194,7 +218,7 @@ class SAM3VideoModel:
         ... ]}, keyed by POSITION IN THE FRAME LIST, not by capture frame index
         — the caller owns that mapping.
         """
-        with self._autocast():
+        with self._session():
             self.model.reset_state(state)
             self.model.add_prompt(
                 state,
@@ -216,7 +240,8 @@ class SAM3VideoModel:
     def close_video(self, state) -> None:
         """Drop the decoded frames and tracker memory."""
         try:
-            self.model.reset_state(state)
+            with self._session():
+                self.model.reset_state(state)
         except Exception:  # pragma: no cover - best effort
             logger.warning("[sam3v] reset_state failed while closing video")
         state.clear()
