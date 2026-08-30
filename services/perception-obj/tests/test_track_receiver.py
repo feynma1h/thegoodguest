@@ -465,3 +465,20 @@ class TestProvenance:
         monkeypatch.delenv("K_REVISION", raising=False)
         model = FakeVideoModel({"monitor": {0: [_det(1)]}})
         assert _body(_run(_req(), model))["revision"] == "unknown"
+
+
+class TestItWritesNoImagery:
+    def test_only_json_and_npz_leave_the_container(self, wired):
+        """The preserved capture has a person asleep on the bed in frame 0. A
+        `bed` mask there may include them, so what this route WRITES matters:
+        numbers and a packed bool raster, never frame pixels. /segment renders
+        PNGs because its artifact is something a person looks at; this one's is
+        a map."""
+        model = FakeVideoModel({"monitor": {0: [_det(1)]}, "bed": {0: [_det(2)]}})
+        _run(_req(concepts=["monitor", "bed"]), model)
+        assert wired, "expected writes"
+        for path, (_data, content_type) in wired.items():
+            assert not path.endswith((".png", ".jpg", ".jpeg", ".webp")), path
+            assert content_type in ("application/json", "application/octet-stream"), (
+                f"{path} -> {content_type}"
+            )

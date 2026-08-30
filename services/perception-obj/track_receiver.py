@@ -27,6 +27,15 @@ THE SAME TWO CONTAINMENT INVARIANTS AS /segment, for the same reasons:
      answers a question about a room must not be able to take that room away
      from the person while it does so.
 
+IT WRITES NUMBERS AND BINARY MASKS, NEVER IMAGERY. `/segment` renders a PNG per
+detection because the artifact it exists to produce is something a person looks
+at. This route's artifact is a map, so it writes `tracks.json` and a packed
+mask raster and nothing else. That matters more than it sounds: the preserved
+capture has a person asleep on the bed in frame 0, and while a suppressed
+concept can never be TRACKED here (below), a `bed` mask in such a frame may
+well include the person lying on it. A bool raster at stride 4 is not a
+photograph, and no frame pixels leave the container.
+
 ONE CONCEPT PER PASS, AND IDS ARE SCOPED TO THE PASS. The session holds a
 single text prompt — upstream's notebook resets the session before switching
 prompts and says the results are otherwise wrong — so a capture is tracked once
