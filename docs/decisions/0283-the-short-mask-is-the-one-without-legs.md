@@ -151,6 +151,48 @@ relative to today. Today's shortlist already discards it (0261). What the video
 path removes is the possibility of ever fixing it, because the better candidate
 never reaches the sort.
 
+## AMENDED 2026-08-31 — the prompt is not the lever, because nothing is missing
+
+The operator asked whether prompting SAM 3 with something like "desk with legs"
+recovers the leg. Measured on frame 50, one `/segment` call on the 0%-traffic
+candidate, eight phrasings in one prompt (SAM 3 returns each term verbatim, so
+one inference answers all of them):
+
+| phrasing | returned |
+|---|---|
+| `desk` | 10.30% @ 0.711 **and** 12.38% @ 0.988 |
+| `sit-stand desk` | 10.33% @ 0.711 **and** 12.36% @ 0.988 |
+| `desk with legs`, `desk with its legs`, `standing desk`, `desk frame`, `desk leg`, `table with legs` | **nothing at all** |
+
+**The two phrasings that ground return the same segmentation** — IoU 0.9954 on
+the short mask and 0.9889 on the long one. Phrasing decides whether a concept
+grounds; it does not move the mask's extent.
+
+**Compositional phrasings ground to nothing rather than to more.** "desk with
+legs" is not read as a modifier that extends a silhouette; it either resolves as
+a whole noun phrase or it does not resolve. **There is no way to ask SAM 3 for
+more of an object in language.**
+
+**`desk leg` alone also returned nothing, which closes a route this note's own
+author proposed.** Prompting a part as its own concept and unioning it with the
+whole was offered as the untested SAM 3.1 option; on the image path the part
+does not ground, and the tracker's detector is the same architecture family.
+Do not spend a tracker pass on it without first checking the concept grounds at
+all — which is one cheap `/segment` call.
+
+**And the legged mask was there in every working case.** Under both phrasings
+the larger instance reaches 0.988. Retrieval was never the problem.
+
+**The chair corroborates it in the same frame:** three instances at 0.883,
+0.883 and 0.999 reach, the largest pair nested at containment **1.000**. So the
+legged/legless split is live on two different objects in the one frame studied
+here, which is the cross-label claim above, measured again on the frame that
+matters.
+
+**So the fix is 0261's selection change and nothing else.** Not a prompt, not a
+model, not a threshold. The mask you want is already in SAM 3's output; the
+sort discards it.
+
 ## What would change this decision
 
 **One reconstruction, and 0259 already priced it.** Build the desk from frame
