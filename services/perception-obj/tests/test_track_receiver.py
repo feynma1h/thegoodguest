@@ -404,3 +404,39 @@ class TestOIDC:
         )
         assert resp.status_code == 401
         assert model.opens == 0
+
+
+class TestSuppressedConcepts:
+    """0089: `person` is segmented so the shell can exclude it and is NEVER
+    shipped. This route writes a mask per instance per frame, so tracking one
+    would put person rasters in a bucket — 0089's exact failure arriving through
+    a probe. /segment partitions after the fact because one prompt returns every
+    class at once; here concepts are explicit, so refusal is exact.
+    """
+
+    def test_a_suppressed_concept_is_refused_before_any_gpu_work(self, wired):
+        model = FakeVideoModel({"person": {0: [_det(1)]}})
+        resp = _run(_req(concepts=["person"]), model)
+        assert resp.status_code == 422
+        assert _body(resp)["refused_suppressed"] == ["person"]
+        assert model.opens == 0, "the capture must not even be decoded"
+
+    def test_it_is_refused_alongside_usable_concepts_and_named(self, wired):
+        model = FakeVideoModel({"monitor": {0: [_det(1)]}})
+        body = _body(_run(_req(concepts=["monitor", "person"]), model))
+        assert model.tracked == ["monitor"]
+        assert body["concepts_refused_suppressed"] == ["person"]
+
+    def test_no_person_raster_is_ever_written(self, wired):
+        model = FakeVideoModel({"monitor": {0: [_det(1)]}, "person": {0: [_det(1)]}})
+        _run(_req(concepts=["monitor", "person"]), model)
+        assert not any("person" in p for p in wired)
+
+    def test_the_refusal_tracks_the_configured_list_not_a_hardcoded_word(self, wired):
+        """It reads privacy.SUPPRESSED_CONCEPTS, so widening that list widens
+        this refusal without touching the route."""
+        from privacy import SUPPRESSED_CONCEPTS
+
+        model = FakeVideoModel({})
+        body = _body(_run(_req(concepts=list(SUPPRESSED_CONCEPTS) + ["monitor"]), model))
+        assert body["concepts_refused_suppressed"] == list(SUPPRESSED_CONCEPTS)
