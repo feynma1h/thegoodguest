@@ -355,12 +355,21 @@ def _compact(raw: dict[str, Any]) -> list[dict[str, Any]]:
 
     Upstream's per-frame dict (`sam3_multiplex_tracking.py`) is:
         out_obj_ids       int64   (N,)
-        out_probs         float32 (N,)
+        out_probs         float32 (N,)  -- NOT bounded to [0, 1]
         out_boxes_xywh    float32 (N, 4)  -- NORMALISED; divided by W and H
         out_binary_masks  bool    (N, H, W) at ORIGINAL video resolution
 
     Area and bbox are taken at full resolution, so they are exact. Only the
     stored raster is decimated (see MASK_STRIDE).
+
+    `out_probs` IS NOT ALWAYS A PROBABILITY. `sam3_video_base.py` says so in its
+    own words — "we rely on large negative values as scores for missing
+    objects" — and it vends **-10000.0** for one. Measured on this capture: 3
+    detections in 1241 (0.24%), each of which still carried a non-empty mask, so
+    the upstream `keep` filter does not remove them. It is passed through
+    verbatim rather than clamped, because mangling a sentinel into 0.0 would
+    make it indistinguishable from a genuinely hopeless detection; consumers
+    must exclude it rather than average it.
     """
     obj_ids = np.asarray(raw.get("out_obj_ids", []), dtype=np.int64).reshape(-1)
     masks = raw.get("out_binary_masks")
