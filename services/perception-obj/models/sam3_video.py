@@ -93,6 +93,60 @@ logger = logging.getLogger(__name__)
 TRACK_MAX_OBJECTS = int(os.environ.get("PERCEPTION_TRACK_MAX_OBJECTS", "16"))
 
 
+# ── torch 2.5.1 has no bool sort kernel on CUDA; SAM 3.1's tracker needs one ──
+# `sam3_multiplex_base._det_track_one_frame_impl` does
+# `pos_pred_mask.argsort(descending=True)` on a BOOL tensor to move the
+# detections it is keeping to the front. Newer torch supports that; ours raises
+# `Sort currently does not support bool dtype on CUDA`, measured on candidate
+# perception-obj-00091-wer.
+#
+# Torch cannot move. This image is torch 2.5.1+cu121 because SAM 3D Objects
+# pins it, and pytorch3d (a wheel we build ourselves), kaolin and gsplat are all
+# compiled against that exact pair. Upstream declares no torch version at all.
+#
+# So the shim goes here rather than into the image's copy of Meta's source. Two
+# reasons: a patched `/opt/sam3-repo` would disagree with the vendored copy that
+# documents what we run, which is the "plausible lie" 0264 exists to prevent;
+# and a change in our own code is reviewable and testable where a `sed` in a
+# Dockerfile is neither.
+#
+# IT CANNOT CHANGE ANY WORKING CALL. The branch fires only for a bool CUDA
+# tensor — precisely the case that raises today — so every call that works now
+# takes the original path untouched. uint8 preserves the ordering exactly
+# (False -> 0, True -> 1), and argsort is not stable in either dtype, so the
+# arbitrary order within each group is arbitrary the same way.
+_ARGSORT_SHIM_INSTALLED = False
+
+
+def _install_bool_argsort_shim() -> None:
+    global _ARGSORT_SHIM_INSTALLED
+    if _ARGSORT_SHIM_INSTALLED:
+        return
+    original = torch.Tensor.argsort
+
+    def argsort(self, *args, **kwargs):
+        if self.dtype == torch.bool and self.is_cuda:
+            return original(self.to(torch.uint8), *args, **kwargs)
+        return original(self, *args, **kwargs)
+
+    torch.Tensor.argsort = argsort
+    _ARGSORT_SHIM_INSTALLED = True
+
+    # PROVE it on the real device before a single frame is processed. A shim
+    # that silently failed to install would surface 120 seconds later as the
+    # same RuntimeError, on a GPU request that had already been paid for.
+    if torch.cuda.is_available():
+        probe = torch.tensor([False, True, False], device="cuda")
+        order = probe.argsort(descending=True).tolist()
+        if order[0] != 1:
+            raise RuntimeError(
+                f"bool argsort shim installed but returned {order}; expected the "
+                f"True element (index 1) first"
+            )
+        logger.info("[sam3v] bool-argsort shim verified on CUDA")
+
+
+
 class SAM3VideoModel:
     """SAM 3.1 multiplex video tracker. One instance per container."""
 
@@ -110,6 +164,7 @@ class SAM3VideoModel:
             build_sam3_multiplex_video_predictor,
         )
 
+        _install_bool_argsort_shim()
         self.max_num_objects = max_num_objects
         predictor = build_sam3_multiplex_video_predictor(
             max_num_objects=max_num_objects,
