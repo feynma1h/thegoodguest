@@ -1,4 +1,4 @@
-"""roomstudio capture-bundle schemas.
+"""thegoodguest capture-bundle schemas.
 
 The capture bundle is the contract between the iOS capture app and the
 perception backend. The proto source of truth is

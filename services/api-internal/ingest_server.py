@@ -1,4 +1,4 @@
-"""roomstudio internal API — IAM-gated Eventarc ingest handler.
+"""thegoodguest internal API — IAM-gated Eventarc ingest handler.
 
 This service runs --no-allow-unauthenticated. Cloud Run IAM validates the
 caller's OIDC token at the platform boundary before any request reaches
@@ -121,7 +121,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 
 app = FastAPI(
-    title="roomstudio-api-internal",
+    title="thegoodguest-api-internal",
     description="Internal IAM-gated API. Hosts /ingest/eventarc (Eventarc trigger).",
     version="0.1.0",
     lifespan=lifespan,

@@ -1,7 +1,7 @@
 [project]
 name = "thegoodguest-api-core"
 version = "0.1.0"
-description = "Shared logic for roomstudio API services — upload session repository and GCS resumable URI minting"
+description = "Shared logic for thegoodguest API services — upload session repository and GCS resumable URI minting"
 requires-python = ">=3.11"
 dependencies = [
     "google-cloud-firestore>=2.14,<3.0",

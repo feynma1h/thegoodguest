@@ -47,7 +47,7 @@ print(f"[startup] VGGT loaded in {time.time() - _t:.1f}s", flush=True)
 # -----------------------------------------------------------------------------
 # FastAPI app
 # -----------------------------------------------------------------------------
-app = FastAPI(title="roomstudio-perception-geom")
+app = FastAPI(title="thegoodguest-perception-geom")
 
 
 @app.get("/")

@@ -1,12 +1,12 @@
-# Dockerfile for the roomstudio internal API (services/api-internal/).
+# Dockerfile for the thegoodguest internal API (services/api-internal/).
 #
 # Build context is the REPO ROOT so that packages/schemas/ and
 # packages/api-core/ are reachable. Cloud Build stages this correctly;
 # see infra/cloudbuild/api-internal.yaml.
 #
 # Usage (from repo root):
-#   docker build -f services/api-internal/Dockerfile -t roomstudio-api-internal .
-#   docker run -p 8080:8080 -e PORT=8080 roomstudio-api-internal
+#   docker build -f services/api-internal/Dockerfile -t thegoodguest-api-internal .
+#   docker run -p 8080:8080 -e PORT=8080 thegoodguest-api-internal
 #
 # DEPENDENCY NOTE — protobuf version conflict:
 #   thegoodguest-schemas requires protobuf>=7.35.0 (enforced by

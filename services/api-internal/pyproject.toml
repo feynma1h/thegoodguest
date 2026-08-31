@@ -1,7 +1,7 @@
 [project]
-name = "roomstudio-api-internal"
+name = "thegoodguest-api-internal"
 version = "0.1.0"
-description = "roomstudio internal API — IAM-gated Eventarc handler and legacy ingest endpoint"
+description = "thegoodguest internal API — IAM-gated Eventarc handler and legacy ingest endpoint"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110,<1.0",

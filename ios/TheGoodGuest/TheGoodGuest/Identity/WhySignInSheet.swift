@@ -167,7 +167,7 @@ nonisolated enum WhySignInInvitation {
 /// sheet on every launch for anyone who declined.
 @MainActor
 enum WhySignInOffer {
-    static let defaultsKey = "roomstudio.whySignIn.offered"
+    static let defaultsKey = "thegoodguest.whySignIn.offered"
 
     static func hasOffered(_ defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: defaultsKey)

@@ -1,4 +1,4 @@
-# roomstudio web
+# thegoodguest web
 
 The web app: browse and view the rooms captured with the iOS app, and talk to
 them. Next.js static export (decision 0050) deployed to Firebase Hosting; the

@@ -169,9 +169,9 @@ def main() -> None:
     run_id = run_start["run_id"]
     wall_dt = _dt.datetime.fromisoformat(run_start["wall"].replace("Z", "+00:00"))
 
-    bundle_id = (args.bundle_id or _stable_v4_uuid(f"roomstudio-spike:{run_id}")).lower()
+    bundle_id = (args.bundle_id or _stable_v4_uuid(f"thegoodguest-spike:{run_id}")).lower()
     user_id = args.user_id or f"spike:{run_id}"
-    device_id = _stable_v4_uuid(f"roomstudio-spike-device:{run_id}").lower()
+    device_id = _stable_v4_uuid(f"thegoodguest-spike-device:{run_id}").lower()
 
     keyframes = [json.loads(line) for line in (run / "keyframes.ndjson").open()]
     if not keyframes:

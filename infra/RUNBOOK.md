@@ -241,7 +241,7 @@ grep "INGESTER_SERVICE\|INGESTER_SA" infra/eventarc_setup.sh
 #   INGESTER_SA="api-internal-runtime@thegoodguest.iam.gserviceaccount.com"
 ```
 
-**If the output shows `roomstudio-api`:** the stale-reference patch has not landed.
+**If the output names a service other than `api-internal`:** the trigger is misconfigured.
 Do not run eventarc_setup.sh until it does.
 
 ```bash
@@ -664,7 +664,7 @@ gcloud eventarc triggers describe captures-bundle-pb-finalized \
 - **No trigger exists:** proceed directly to step 2.
 - **Trigger exists, destination is `api-internal`:** the trigger is already correct.
   Run step 2 anyway (the `|| update` path in the script handles this idempotently).
-- **Trigger exists, destination is `roomstudio-api` (the pre-split service):**
+- **Trigger exists but points at the wrong service:**
   this trigger is stale. Delete and recreate:
   ```bash
   gcloud eventarc triggers delete captures-bundle-pb-finalized \
@@ -852,40 +852,6 @@ TTL check returns EXISTS.
 ---
 
 ## Phase 8 — Post-deploy cleanup
-
-### 8a. Pre-split `roomstudio-api` Cloud Run service
-
-The pre-split single-service revision (`services/api/`) may still be live in the project
-with some or all traffic. Check:
-
-```bash
-gcloud run services describe roomstudio-api \
-  --region=asia-southeast1 --project=thegoodguest 2>/dev/null \
-  | grep -E "traffic|url" || echo "roomstudio-api not found — nothing to do"
-```
-
-- **Not found:** nothing to do.
-- **Found with no traffic:** leave it running as a rollback option for a 2-day window.
-  After 2 days of smoke tool runs going green, delete:
-  ```bash
-  gcloud run services delete roomstudio-api \
-    --region=asia-southeast1 --project=thegoodguest --quiet
-  ```
-- **Found with traffic:** the Eventarc trigger may still be pointing at it (pre-Phase 6
-  state). Confirm Phase 6 is complete (trigger points at `api-internal`), then move
-  all traffic off `roomstudio-api` by updating traffic to 0:
-  ```bash
-  # Traffic should already be on api-internal/api-public from Phase 5.
-  # If roomstudio-api still has traffic, it means the old trigger was delivering to it.
-  # After Phase 6 is confirmed green, the old service gets no new events.
-  # Leave it for the 2-day rollback window, then delete.
-  ```
-
-### 8b. Eventarc trigger cleanup
-
-If Phase 6 required deleting a stale `roomstudio-api` trigger, that deletion is already
-complete. If the trigger was updated in-place (destination was already `api-internal`),
-no further cleanup is needed.
 
 ### 8c. Smoke tool confirmation run
 

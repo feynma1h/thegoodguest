@@ -18,7 +18,7 @@ helps people discover the best version of their own home** — through AI room
 analysis, a cinematic 3D reveal of *their actual space*, and an ongoing conversation
 that reasons about it and, eventually, redesigns it with them.
 
-The product has no chosen name yet. "roomstudio" is a working placeholder and the
+The product has no chosen name yet. "thegoodguest" is a working placeholder and the
 wordmark is deliberately quiet (the room is the hero, not the brand). **You are free
 to propose a name, a wordmark, and a whole identity** — treat this as an opportunity,
 not a fixed asset.

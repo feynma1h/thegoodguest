@@ -1,4 +1,4 @@
-# The Good Guest (GCP project id still `roomstudio` — immutable)
+# The Good Guest (GCP project id still `thegoodguest` — immutable)
 
 **PARKED 2026-08-31 — read `docs/PARKED.md` first, then `docs/NOT-FINAL.md`,
 which lists everything in this tree that is not finished and says which parts
@@ -17,7 +17,7 @@ This file is the always-current state of the project. Both Claude Code (reads it
 
 This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction is the *medium*; the product is helping people make AI-based decisions about improving their room. Three product layers frame everything: the **AI layer** (understands space structurally — object relationships, traffic flow, light, proportion — with algorithmic spatial analysis before any LLM is invoked, and reasoning traces on every design decision), the **emotional layer** (feels personal, not algorithmic — the experience bar is Linear/Vercel/Figma-tier premium consumer software; conversation is the primary post-reveal interface; the cinematic reveal is the defining moment; design language is Apple-grade restraint — the chrome stays quiet so the room carries the colour — in the warm Good Guest palette of 0057, which SUPERSEDES 0056's neutral-chrome-and-one-sans reading: the app ships parchment and ink with three type roles, the guest's serif for prose and mono for machine data only, and the **social layer** (rooms are identity — sharing, comparison, evolution over time). Direction, not yet commitments: room health scoring, taste graph, lighting simulation, budget-aware shopping, DAG version history. Deliberately out (per the founding draft, still sound): AR overlay, social feed, photorealistic image generation, floor plans, voice input; desktop-first.
 
-**Naming: SETTLED 2026-08-23 as "The Good Guest" (0245)**, forced by the App Store listing when enrollment cleared. It is the register the whole product was built in (0072/0057) and the metaphor the calling card is already named from. Set as a STRING in three places — `web/src/components/Wordmark.tsx`'s `BRAND_NAME`, iOS `RSBrand.name`, and `INFOPLIST_KEY_CFBundleDisplayName` in `project.pbxproj`, which is what the Home Screen shows and which cannot read either constant (`tools/test_gen_mark.py` fails if they drift). **Until 2026-08-26 the Home Screen read "TheGoodGuest"** — the main target had no display name and fell through to `TARGET_NAME`, outside every "the name lives in N places" claim this file ever made. The card no longer prints the name at all: it carries the wordmark, which is a drawing. **The repo, GCP project, buckets and `roomstudio:` localStorage keys deliberately keep the stand-in** — infrastructure, invisible, expensive to rename for no user-visible gain. **The card still prints `roomstudio.web.app`, which is the TRUE hosting URL**: changing that string without moving hosting would print a falsehood on an artifact that leaves the browser. Re-open trigger is commerce, and renaming stays cheap until App Store submission — TestFlight needs only an app record.
+**Naming: SETTLED 2026-08-23 as "The Good Guest" (0245)**, forced by the App Store listing when enrollment cleared. It is the register the whole product was built in (0072/0057) and the metaphor the calling card is already named from. Set as a STRING in three places — `web/src/components/Wordmark.tsx`'s `BRAND_NAME`, iOS `RSBrand.name`, and `INFOPLIST_KEY_CFBundleDisplayName` in `project.pbxproj`, which is what the Home Screen shows and which cannot read either constant (`tools/test_gen_mark.py` fails if they drift). **Until 2026-08-26 the Home Screen read "TheGoodGuest"** — the main target had no display name and fell through to `TARGET_NAME`, outside every "the name lives in N places" claim this file ever made. The card no longer prints the name at all: it carries the wordmark, which is a drawing. **The repo, GCP project, buckets and `thegoodguest:` localStorage keys deliberately keep the stand-in** — infrastructure, invisible, expensive to rename for no user-visible gain. **The card still prints `thegoodguest.web.app`, which is the TRUE hosting URL**: changing that string without moving hosting would print a falsehood on an artifact that leaves the browser. Re-open trigger is commerce, and renaming stays cheap until App Store submission — TestFlight needs only an app record.
 
 Three technical surfaces today:
 
@@ -530,7 +530,7 @@ moved rather than to this work. The last with-fixtures figure is **1060 + 2**
 (2026-08-25); the with-fixtures figure for this branch is owed a measurement
 rather than an arithmetic guess, and the spread has been seven tests.
 
-### Web app — `web/`, live at https://roomstudio.web.app
+### Web app — `web/`, live at https://thegoodguest.web.app
 
 Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
 `/room?bundle=`, `/new`, `/viewer` (dev workbench, hidden in live mode),
@@ -1565,7 +1565,7 @@ It is a single checkbox in the console.
 
 **Old registry images are deleted by policy, and the live one is kept BY NAME
 (decision 0190).** `infra/artifact-cleanup-policy.json` is the source of truth
-and is applied to the `roomstudio` repository: keep anything tagged `serving`
+and is applied to the `thegoodguest` repository: keep anything tagged `serving`
 or `buildcache`, keep the 3 newest `perception-obj` and the 10 newest `api-*`
 versions, delete everything else under those prefixes at any age.
 `perception-geom` is outside every prefix and cannot be touched by it — which
@@ -1784,7 +1784,7 @@ suppression (cached frames keep pre-0089 masks) and the complementary
 capture-time guidance, whose capture-side copy shipped with the Live Activity
 pass.
 
-**5 — DONE 2026-08-08: the purge ran and the repo has a remote.** `git filter-repo` removed the nine HEIC blobs (verified: zero HEIC objects in history, no commits touching them), `tools/remap_doc_shas.py` remapped the doc SHA citations, and `origin` is `github.com/feynma1h/roomstudio` (private). The slot is kept numbered because it is cross-referenced elsewhere in this file; nothing remains on it.
+**5 — DONE 2026-08-08: the purge ran and the repo has a remote.** `git filter-repo` removed the nine HEIC blobs (verified: zero HEIC objects in history, no commits touching them), `tools/remap_doc_shas.py` remapped the doc SHA citations, and `origin` is `github.com/feynma1h/thegoodguest` (private). The slot is kept numbered because it is cross-referenced elsewhere in this file; nothing remains on it.
 
 **6 — Web app: next increment** (decisions 0050, 0052–0057; Good Guest rehaul
 live on branch `web-app`, verified against fixtures)

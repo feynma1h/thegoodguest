@@ -1,5 +1,5 @@
 [project]
-name = "roomstudio-perception-obj"
+name = "thegoodguest-perception-obj"
 version = "0.0.1"
 description = "Per-object segmentation (SAM 3) + Gaussian splat reconstruction (SAM 3D Objects)"
 requires-python = ">=3.11"

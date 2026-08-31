@@ -1,7 +1,7 @@
 """Account deletion — the complete erasure of one user (decision 0095).
 
 App Store guideline 5.1.1(v) requires an in-app path to account deletion for
-any app offering account creation, and Sign in with Apple makes roomstudio one
+any app offering account creation, and Sign in with Apple makes thegoodguest one
 of those. There is deliberately no iOS sign-out (0064: launch-time
 `signInIfNeeded` would re-mint a fresh anonymous UID), so deletion — not
 sign-out — is the account operation the user gets.

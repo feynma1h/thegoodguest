@@ -7,7 +7,7 @@ this file** — the *vision* below is current; large parts of the *tech plan* ar
 superseded (the iOS-first ARKit pivot of decision 0001 replaced the photo-upload
 perception stack; GCP/Firebase replaced the Supabase/Vercel/Modal plan; SAM 3 + SAM 3D
 replaced SAM2 + Depth Anything; naming: "RoomMind" was discarded — no name has been
-chosen; "roomstudio" is a working placeholder).
+chosen; "thegoodguest" is a working placeholder).
 
 What remains binding is the thesis, the product framing (AI-guided room *improvement* —
 the 3D representation is the medium, not the product), the experience bar, and the

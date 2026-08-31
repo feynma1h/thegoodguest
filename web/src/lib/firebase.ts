@@ -28,8 +28,8 @@
  *
  * Config comes from NEXT_PUBLIC_FIREBASE_* (see .env.example; the committed
  * .env.production carries the deploy build's values). The registered app is
- * roomstudio-web (2026-07-22) — the proper registration that replaced the
- * roomstudio-smoke-test appId.
+ * thegoodguest-web (2026-07-22) — the proper registration that replaced the
+ * thegoodguest-smoke-test appId.
  */
 
 import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
@@ -46,7 +46,7 @@ import {
 } from "firebase/auth";
 
 /**
- * This identity has no roomstudio account yet, and the web refuses to make
+ * This identity has no thegoodguest account yet, and the web refuses to make
  * one. `message` is display-ready product copy; `providerId` is the raw
  * Firebase id for logs and tests.
  */

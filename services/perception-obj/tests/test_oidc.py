@@ -22,7 +22,7 @@ import pytest
 from oidc import OIDCError, OIDCVerifier
 
 _AUDIENCE      = "https://perception-obj-xxx.run.app/process"
-_ALLOWED_EMAIL = "cloud-tasks-invoker@roomstudio-prod.iam.gserviceaccount.com"
+_ALLOWED_EMAIL = "cloud-tasks-invoker@thegoodguest-prod.iam.gserviceaccount.com"
 _VALID_HEADER  = "Bearer eyJfake.token.here"
 
 

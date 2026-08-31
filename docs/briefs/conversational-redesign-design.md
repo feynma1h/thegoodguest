@@ -27,7 +27,7 @@ owns decisions **0129–0134**.
 
 **This is not a new feature request.** It is the product's own definition,
 recovered from a record that had let it drift. CLAUDE.md line 3 defines
-roomstudio as "AI-powered room analysis, **conversational redesign**, and an
+thegoodguest as "AI-powered room analysis, **conversational redesign**, and an
 immersive 3D representation." Decision 0055 lists as *durable* the
 intelligence-stack shape ending in "a specification contract driving all
 rendering." The founding draft's Conversational Refinement Loop says "every
