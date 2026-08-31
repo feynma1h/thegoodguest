@@ -54,7 +54,7 @@ def _make_scene(
         scene_id=str(uuid.uuid4()),
         device_id="device-1",
         status=status,
-        bundle_uri=f"gs://roomstudio-captures/captures/{bundle_id}/bundle.pb",
+        bundle_uri=f"gs://thegoodguest-captures/captures/{bundle_id}/bundle.pb",
         created_at=_NOW,
         updated_at=_NOW,
         bundle_id=bundle_id,
@@ -115,7 +115,7 @@ class TestScenesByBundleHappyPath:
 
     def test_status_ready_with_result_uri(self, client: TestClient) -> None:
         bundle_id = _make_bundle_id()
-        result = f"gs://roomstudio-perception-outputs/scenes/{bundle_id}/splat.ply"
+        result = f"gs://thegoodguest-perception-outputs/scenes/{bundle_id}/splat.ply"
         scene = _make_scene(bundle_id, status=SceneStatus.READY, result_uri=result)
         repo = InMemorySceneReadRepository({scene.scene_id: scene})
 

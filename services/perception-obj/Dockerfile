@@ -88,7 +88,7 @@ ENV CONDA_PREFIX=/opt/conda/envs/sam3d-objects \
 
 # --- Install pre-built pytorch3d wheel (deviation from Meta's flow) ---
 # Compiled once by infra/build_pytorch3d_wheel.sh, cached in
-# gs://roomstudio-build-cache/wheels/. The wheel is downloaded into wheels/
+# gs://thegoodguest-build-cache/wheels/. The wheel is downloaded into wheels/
 # at the repo root by the Cloud Build gsutil step before docker build runs.
 # The cached wheel matches SAM 3D's pinned pytorch3d commit exactly.
 COPY wheels/pytorch3d-*.whl /tmp/

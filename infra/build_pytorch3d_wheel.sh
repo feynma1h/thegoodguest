@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-PROJECT_ID="roomstudio"
+PROJECT_ID="thegoodguest"
 REGION="asia-southeast1"
 CONFIG="infra/cloudbuild/pytorch3d-wheel.yaml"
 
@@ -17,7 +17,7 @@ cd "${REPO_ROOT}"
 
 echo "=== Building pytorch3d wheel (one-time, ~45-75 min) ==="
 echo "Source repo: facebookresearch/pytorch3d @ 75ebeeae"
-echo "Target:      gs://roomstudio-build-cache/wheels/"
+echo "Target:      gs://thegoodguest-build-cache/wheels/"
 echo ""
 
 gcloud builds submit \
@@ -29,4 +29,4 @@ gcloud builds submit \
 echo ""
 echo "=== Done ==="
 echo "Verify the wheel made it to GCS:"
-echo "  gsutil ls gs://roomstudio-build-cache/wheels/"
+echo "  gsutil ls gs://thegoodguest-build-cache/wheels/"

@@ -56,7 +56,7 @@ def _scene(user_id: str | None = _UID, status=SceneStatus.READY) -> Scene:
     bundle_id = str(uuid.uuid4())
     return Scene(
         scene_id=str(uuid.uuid4()), device_id="d1", status=status,
-        bundle_uri=f"gs://roomstudio-captures/captures/{bundle_id}/bundle.pb",
+        bundle_uri=f"gs://thegoodguest-captures/captures/{bundle_id}/bundle.pb",
         created_at=_NOW, updated_at=_NOW, bundle_id=bundle_id, user_id=user_id,
         result_uri=_MANIFEST_URI if status == SceneStatus.READY else None,
     )

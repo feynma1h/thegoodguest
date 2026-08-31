@@ -432,4 +432,4 @@ def test_no_user_visible_string_carries_the_old_stand_in():
     dialog, Settings, the Home Screen, the Lock Screen -- so none may carry it.
     """
     for key, value in re.findall(r"(INFOPLIST_KEY_\w+) = \"([^\"]+)\"", _pbxproj()):
-        assert "roomstudio" not in value.lower(), f"{key} = {value}"
+        assert "thegoodguest" not in value.lower(), f"{key} = {value}"

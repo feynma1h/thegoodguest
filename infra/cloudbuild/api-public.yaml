@@ -1,4 +1,4 @@
-# Cloud Build configuration for the roomstudio public API (services/api-public/).
+# Cloud Build configuration for the thegoodguest public API (services/api-public/).
 #
 # Invoked by infra/deploy_api_public.sh. Builds from repo root so that
 # packages/schemas/ and packages/api-core/ are reachable by the Dockerfile.

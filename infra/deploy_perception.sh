@@ -44,9 +44,9 @@ SERVICE="perception-${WHICH}"
 CONTEXT_DIR="services/perception-${WHICH}"
 CLOUDBUILD_CONFIG="infra/cloudbuild/perception-${WHICH}.yaml"
 
-PROJECT_ID="roomstudio"
+PROJECT_ID="thegoodguest"
 REGION="asia-southeast1"
-REPO="roomstudio"
+REPO="thegoodguest"
 
 # Dedicated least-privilege runtime SA for perception-obj (decision 0090,
 # remediating 0088 finding 1: the service parses UNTRUSTED user bundles and
@@ -85,7 +85,7 @@ ensure_obj_runtime_iam() {
             --description="Least-privilege runtime SA for perception-obj (decision 0090)"
 
     # Capture bundles: READ ONLY. The service never writes to captures.
-    gcloud storage buckets add-iam-policy-binding "gs://roomstudio-captures" \
+    gcloud storage buckets add-iam-policy-binding "gs://thegoodguest-captures" \
         --member="serviceAccount:${OBJ_RUNTIME_SA}" \
         --role="roles/storage.objectViewer" \
         --project="${PROJECT_ID}" >/dev/null
@@ -93,7 +93,7 @@ ensure_obj_runtime_iam() {
     # Perception outputs: read + write (splats, manifests, masks, shell.json).
     # objectAdmin is the minimal managed role covering create+get+list — the
     # same rationale recorded for api-public's mint grant.
-    gcloud storage buckets add-iam-policy-binding "gs://roomstudio-perception-outputs" \
+    gcloud storage buckets add-iam-policy-binding "gs://thegoodguest-perception-outputs" \
         --member="serviceAccount:${OBJ_RUNTIME_SA}" \
         --role="roles/storage.objectAdmin" \
         --project="${PROJECT_ID}" >/dev/null
@@ -175,7 +175,7 @@ gcloud artifacts repositories describe "${REPO}" \
         --repository-format=docker \
         --location="${REGION}" \
         --project="${PROJECT_ID}" \
-        --description="roomstudio container images"
+        --description="thegoodguest container images"
 
 echo "=== 2/3: Build container via Cloud Build ==="
 echo "Image:   ${IMAGE_URI}"
@@ -248,7 +248,7 @@ gcloud run deploy "${SERVICE}" \
     --no-cpu-throttling \
     --cpu-boost \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
-    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=roomstudio-perception-outputs,FIRESTORE_PROJECT=roomstudio,CLOUD_TASKS_INVOKER_SA=tasks-invoker@roomstudio.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app,CLOUD_TASKS_PROJECT=roomstudio,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15,SHELL_MATERIAL_MODEL=claude-sonnet-5,PERCEPTION_MASK_REFINE=1,PERCEPTION_ARM_SELECT=1 \
+    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=thegoodguest-perception-outputs,FIRESTORE_PROJECT=thegoodguest,CLOUD_TASKS_INVOKER_SA=tasks-invoker@thegoodguest.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app,CLOUD_TASKS_PROJECT=thegoodguest,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15,SHELL_MATERIAL_MODEL=claude-sonnet-5,PERCEPTION_MASK_REFINE=1,PERCEPTION_ARM_SELECT=1 \
     --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
     # PERCEPTION_MASK_REFINE and PERCEPTION_ARM_SELECT are ON by operator
     # ruling (2026-08-23). They flip TOGETHER and refine goes first —

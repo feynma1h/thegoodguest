@@ -139,7 +139,7 @@ _LABEL_SLUG = {"bed": "bed", "curtain": "curtain", "door": "door", "table lamp":
 def _splat_uri(frame_index, mask_index, label):
     slug = _LABEL_SLUG[label]
     return (
-        f"gs://roomstudio-perception-outputs/scenes/25a14caf-db19-487d-9a60-3bd4034cd4c4/"
+        f"gs://thegoodguest-perception-outputs/scenes/25a14caf-db19-487d-9a60-3bd4034cd4c4/"
         f"frames/{frame_index:04d}/splats/{mask_index:02d}_{slug}.ply"
     )
 

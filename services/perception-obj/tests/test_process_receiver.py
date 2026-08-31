@@ -64,7 +64,7 @@ _SCENE_ID   = "scene-test-001"
 _BUNDLE_URI = "gs://bucket/captures/test/bundle.pb"
 _DEVICE_ID  = "device-abc"
 _RESULT_URI = "gs://out/scenes/scene-test-001/manifest.json"
-_OUTPUTS_BUCKET = "roomstudio-perception-outputs"
+_OUTPUTS_BUCKET = "thegoodguest-perception-outputs"
 
 _VALID_AUTH = "Bearer eyJvalid.token"
 

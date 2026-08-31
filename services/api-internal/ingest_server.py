@@ -674,7 +674,7 @@ def health() -> JSONResponse:
 async def ingest_eventarc(request: Request) -> JSONResponse:
     """Handle a GCS finalize event from Eventarc.
 
-    The Eventarc trigger is bucket-wide on roomstudio-captures (GCS Eventarc does
+    The Eventarc trigger is bucket-wide on thegoodguest-captures (GCS Eventarc does
     not support object-path suffix filters on object.v1.finalized events — see
     decision 0023). Every finalize event arrives here, including pixel-blob uploads.
 

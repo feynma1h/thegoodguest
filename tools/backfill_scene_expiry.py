@@ -41,7 +41,7 @@ def should_stamp(status: str, existing_expire_at) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--project", default="roomstudio")
+    parser.add_argument("--project", default="thegoodguest")
     parser.add_argument("--ttl-days", type=int, default=90,
                         help="days until expiry (default 90, = SCENES_FAILED_TTL_DAYS)")
     parser.add_argument("--apply", action="store_true",

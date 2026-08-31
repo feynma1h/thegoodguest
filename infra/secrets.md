@@ -21,7 +21,7 @@ Hugging Face access token, used by Cloud Build to download gated model weights
 
 ```bash
 # Create the empty secret first
-gcloud secrets create hf-token --replication-policy=automatic --project=roomstudio
+gcloud secrets create hf-token --replication-policy=automatic --project=thegoodguest
 
 # Read the token without echoing it to the screen
 read -s HF_TOKEN
@@ -29,7 +29,7 @@ read -s HF_TOKEN
 
 # Pipe it in
 printf '%s' "$HF_TOKEN" | gcloud secrets versions add hf-token \
-    --project=roomstudio --data-file=-
+    --project=thegoodguest --data-file=-
 
 # Wipe the variable from the shell
 unset HF_TOKEN
@@ -43,9 +43,9 @@ unset HF_TOKEN
    cloudbuild.gserviceaccount.com`. Bind the Compute SA:
 
 ```bash
-PROJECT_NUMBER=$(gcloud projects describe roomstudio --format='value(projectNumber)')
+PROJECT_NUMBER=$(gcloud projects describe thegoodguest --format='value(projectNumber)')
 gcloud secrets add-iam-policy-binding hf-token \
-    --project=roomstudio \
+    --project=thegoodguest \
     --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
     --role=roles/secretmanager.secretAccessor
 ```
@@ -64,11 +64,11 @@ gcloud builds describe BUILD_ID --region=asia-southeast1 \
 ### Verify
 
 ```bash
-gcloud secrets list --project=roomstudio
-gcloud secrets versions access latest --secret=hf-token --project=roomstudio | head -c 10 && echo
+gcloud secrets list --project=thegoodguest
+gcloud secrets versions access latest --secret=hf-token --project=thegoodguest | head -c 10 && echo
 # Should print 'hf_' + 7 more characters.
 
-gcloud secrets get-iam-policy hf-token --project=roomstudio
+gcloud secrets get-iam-policy hf-token --project=thegoodguest
 # Should show exactly one accessor binding for the Compute SA.
 ```
 
@@ -79,7 +79,7 @@ To replace the token (revoke old, issue new on HF, then):
 ```bash
 read -s HF_TOKEN
 printf '%s' "$HF_TOKEN" | gcloud secrets versions add hf-token \
-    --project=roomstudio --data-file=-
+    --project=thegoodguest --data-file=-
 unset HF_TOKEN
 ```
 
@@ -119,7 +119,7 @@ revoking under decision 0090's least-privilege pass — check for a live consume
 first.
 
 ```bash
-gcloud secrets get-iam-policy anthropic-api-key --project=roomstudio
+gcloud secrets get-iam-policy anthropic-api-key --project=thegoodguest
 ```
 
 ### Rotation
@@ -131,7 +131,7 @@ left running keeps whatever its live instances resolved at startup.
 ```bash
 read -s ANTHROPIC_KEY
 printf '%s' "$ANTHROPIC_KEY" | gcloud secrets versions add anthropic-api-key \
-    --project=roomstudio --data-file=-
+    --project=thegoodguest --data-file=-
 unset ANTHROPIC_KEY
 ```
 

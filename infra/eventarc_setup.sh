@@ -2,7 +2,7 @@
 # infra/eventarc_setup.sh — Eventarc trigger + lifecycle/TTL config for iOS upload path
 #
 # Run once per environment to wire up:
-#   (1) Eventarc trigger: GCS finalize on roomstudio-captures → api-internal /ingest/eventarc
+#   (1) Eventarc trigger: GCS finalize on thegoodguest-captures → api-internal /ingest/eventarc
 #       The trigger is bucket-wide (GCS Eventarc does not support object-path suffix filters
 #       on object.v1.finalized events). The /ingest/eventarc handler discriminates bundle.pb
 #       from pixel-blob events; see decision 0023.
@@ -34,7 +34,7 @@
 # Prerequisites:
 #   - gcloud authenticated with an account that has roles/eventarc.admin,
 #     roles/storage.admin, roles/datastore.owner, roles/resourcemanager.projectIamAdmin
-#     on the roomstudio project
+#     on the thegoodguest project
 #   - api-internal Cloud Run service is already deployed (deploy_api_internal.sh)
 #   - GCS bucket GCS_CAPTURES_BUCKET already exists
 #
@@ -52,11 +52,11 @@
 
 set -euo pipefail
 
-PROJECT="roomstudio"
+PROJECT="thegoodguest"
 REGION="asia-southeast1"
 INGESTER_SERVICE="api-internal"
-GCS_CAPTURES_BUCKET="roomstudio-captures"
-GCS_OUTPUTS_BUCKET="roomstudio-perception-outputs"
+GCS_CAPTURES_BUCKET="thegoodguest-captures"
+GCS_OUTPUTS_BUCKET="thegoodguest-perception-outputs"
 TRIGGER_NAME="captures-bundle-pb-finalized"
 INGESTER_SA="api-internal-runtime@${PROJECT}.iam.gserviceaccount.com"
 
@@ -362,9 +362,9 @@ cat > /tmp/outputs_cors.json <<'EOF'
   {
     "origin": [
       "http://localhost:3000",
-      "https://roomstudio.web.app",
-      "https://roomstudio.firebaseapp.com",
-      "https://roomstudio--preview-cydkerk6.web.app"
+      "https://thegoodguest.web.app",
+      "https://thegoodguest.firebaseapp.com",
+      "https://thegoodguest--preview-cydkerk6.web.app"
     ],
     "method": ["GET", "HEAD"],
     "responseHeader": [

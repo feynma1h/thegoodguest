@@ -41,13 +41,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-BUCKET = "roomstudio-perception-outputs"
+BUCKET = "thegoodguest-perception-outputs"
 
 
 def _storage():
     from google.cloud import storage  # imported late: inventory-only runs still need it
 
-    return storage.Client(project="roomstudio")
+    return storage.Client(project="thegoodguest")
 
 
 def find_scene(client, prefix: str) -> str:

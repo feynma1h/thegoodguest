@@ -49,7 +49,7 @@ import { join } from "node:path";
 
 import { encodePly, loadSpark } from "./spz_encode.mjs";
 
-const BUCKET = "roomstudio-perception-outputs";
+const BUCKET = "thegoodguest-perception-outputs";
 const INDEX_VERSION = 1;
 
 // --- GCS via the gcloud CLI: no new npm dependency, and the tool inherits the

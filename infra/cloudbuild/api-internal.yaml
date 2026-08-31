@@ -1,4 +1,4 @@
-# Cloud Build configuration for the roomstudio internal API (services/api-internal/).
+# Cloud Build configuration for the thegoodguest internal API (services/api-internal/).
 #
 # Invoked by infra/deploy_api_internal.sh. Builds from repo root so that
 # packages/schemas/ and packages/api-core/ are reachable by the Dockerfile.

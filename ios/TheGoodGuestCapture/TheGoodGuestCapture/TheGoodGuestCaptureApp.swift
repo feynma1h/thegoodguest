@@ -6,7 +6,7 @@
 /// acknowledged-flight reap (decision 0084). The splash plays over the top of
 /// all four rather than in front of them.
 /// GoogleService-Info.plist must be present in the app bundle — obtain it
-/// from the Firebase console for project "roomstudio", iOS app bundle ID
+/// from the Firebase console for project "thegoodguest", iOS app bundle ID
 /// com.thegoodguest.TheGoodGuestCapture.
 ///
 /// In DEBUG the `-rs.gallery.screen <id>` launch argument diverts the window to

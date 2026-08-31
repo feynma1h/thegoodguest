@@ -24,7 +24,7 @@ steps:
       - |
         set -euo pipefail
         mkdir -p /workspace/wheels
-        gsutil cp "gs://roomstudio-build-cache/wheels/pytorch3d-*.whl" /workspace/wheels/
+        gsutil cp "gs://thegoodguest-build-cache/wheels/pytorch3d-*.whl" /workspace/wheels/
         ls -la /workspace/wheels/
 
   # ── Step 2: build image and push it (repo root is the build context) ─────
@@ -100,4 +100,4 @@ substitutions:
   # derived from the deploy script's variables) so a bare
   # `gcloud builds submit --config` without extra substitutions still
   # caches; override alongside _IMAGE_URI if the repo/region ever moves.
-  _CACHE_URI: 'asia-southeast1-docker.pkg.dev/roomstudio/roomstudio/perception-obj:buildcache'
+  _CACHE_URI: 'asia-southeast1-docker.pkg.dev/thegoodguest/thegoodguest/perception-obj:buildcache'

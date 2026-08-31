@@ -37,7 +37,7 @@ import os
 import sys
 import time
 
-PROJECT = os.environ.get("CLOUD_TASKS_PROJECT", "roomstudio")
+PROJECT = os.environ.get("CLOUD_TASKS_PROJECT", "thegoodguest")
 LOCATION = os.environ.get("CLOUD_TASKS_LOCATION", "asia-southeast1")
 QUEUE = os.environ.get("CLOUD_TASKS_QUEUE", "perception-dispatch")
 RECEIVER_URL = os.environ.get(
@@ -47,7 +47,7 @@ CANDIDATE_URL = os.environ.get(
     "CANDIDATE_URL", "https://candidate---perception-obj-q62kcditqa-as.a.run.app"
 )
 INVOKER_SA = os.environ.get(
-    "CLOUD_TASKS_INVOKER_SA", "tasks-invoker@roomstudio.iam.gserviceaccount.com"
+    "CLOUD_TASKS_INVOKER_SA", "tasks-invoker@thegoodguest.iam.gserviceaccount.com"
 )
 DISPATCH_DEADLINE_SECONDS = 930
 
@@ -145,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     print('  gcloud logging read \'resource.type="cloud_run_revision" AND '
           'resource.labels.service_name="perception-obj" AND '
           'textPayload:"track probe"\' --limit 20 --freshness=30m')
-    print(f"Outputs land under gs://roomstudio-perception-outputs/scenes/"
+    print(f"Outputs land under gs://thegoodguest-perception-outputs/scenes/"
           f"{args.scene_id}/track_probe/")
     return 0
 

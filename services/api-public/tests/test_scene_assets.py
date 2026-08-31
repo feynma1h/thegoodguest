@@ -61,7 +61,7 @@ def _scene(
         scene_id=str(uuid.uuid4()),
         device_id="device-1",
         status=status,
-        bundle_uri=f"gs://roomstudio-captures/captures/{bundle_id}/bundle.pb",
+        bundle_uri=f"gs://thegoodguest-captures/captures/{bundle_id}/bundle.pb",
         created_at=_NOW,
         updated_at=_NOW,
         bundle_id=bundle_id,

@@ -384,7 +384,7 @@ class TestOIDC:
 
         verifier = OIDCVerifier(
             audience="https://example.invalid/track",
-            allowed_email="tasks-invoker@roomstudio.iam.gserviceaccount.com",
+            allowed_email="tasks-invoker@thegoodguest.iam.gserviceaccount.com",
         )
         model = FakeVideoModel({"monitor": {0: [_det(1)]}})
         resp = _run(_req(), model, verifier=verifier, request=FakeRequest())
@@ -396,7 +396,7 @@ class TestOIDC:
 
         verifier = OIDCVerifier(
             audience="https://example.invalid/track",
-            allowed_email="tasks-invoker@roomstudio.iam.gserviceaccount.com",
+            allowed_email="tasks-invoker@thegoodguest.iam.gserviceaccount.com",
         )
         model = FakeVideoModel({"monitor": {0: [_det(1)]}})
         resp = _run(

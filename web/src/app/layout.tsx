@@ -34,7 +34,7 @@ export const metadata: Metadata = {
   // Share card. The PNG is re-exported from docs/product/og-card.html
   // whenever the identity moves. og/twitter title + description inherit
   // the fields above.
-  metadataBase: new URL("https://roomstudio.web.app"),
+  metadataBase: new URL("https://thegoodguest.web.app"),
   openGraph: {
     type: "website",
     url: "/",
