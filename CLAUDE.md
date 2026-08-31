@@ -1140,19 +1140,18 @@ gains.
   capture is home's gesture, and `FailureView`'s two buttons moved into a
   `safeAreaInset` and are pinned on arrival at AX5 (photographed 2026-08-28).
   What the finding leaves is the rule, not the two screens.
-- **Three things the state-space pass surfaced that are the operator's call,
-  not a defect** (0270; every one photographed, none decided here). **The
-  guidance sheet's denied CTA carries a gear glyph** — `Label("Open Settings",
-  systemImage: "gear")` — while the two buttons that START a capture ship
-  deliberately WITHOUT one, because at button size the product's own mark
-  collapsed into a smudge and the stock viewfinder was worse than nothing. At
-  AX5 the label wraps and the glyph comes to rest beside "Open" alone, so it
-  reads as attached to one word of two. **The desk's reset stamp falls below
-  the fold at AX5** — `RESETS 29 Aug, 04:20` is that screen's one exact fact and
-  the only thing on it set in mono, and at accessibility sizes the guest's line
-  above it fills the screen. It is reachable by scrolling and nothing is
-  clipped; the question is whether the exact fact should outrank the prose that
-  approximates it. **`WhySignInSheet` is presented by no call site** outside the
+- **One filled button in the app carries a glyph, and two deliberately do
+  not** (0270; photographed, not decided). The guidance sheet's denied CTA is
+  `Label("Open Settings", systemImage: "gear")`, while the two buttons that
+  START a capture — home's "Scan a room" and guidance's own "Start scanning" —
+  ship bare, because at button size the product's own mark collapsed into a
+  smudge and Apple's stock viewfinder was worse than nothing. Nobody applied
+  that reasoning to the third button. **This is a consistency question, not a
+  layout one, and it is ALL that is left of it**: the recorded complaint used
+  to be that the label wrapped at AX5 and the gear came to rest beside "Open"
+  alone — 0258's control-label clamp fixed that, and the label is one line at
+  every size the app renders. Re-photograph before re-reporting the wrap.
+- **`WhySignInSheet` is presented by no call site** outside the screenshot
   gallery, so the invitation the rooms count exists to make is never made; its
   checklist also reads "Your 1 rooms stay exactly as they are" while the
   sentence above it correctly reads "one room", the two count words being
@@ -1233,6 +1232,45 @@ gains.
 
 **Infra / release**
 
+- **The scene lease expires mid-job on 70% of runs, and what actually prevents
+  double-processing is not the lease (0286).** `SCENE_LEASE_TTL_SECONDS`
+  defaults to 300 and is unset in the deploy script, while the claim is taken
+  after model load and the request may run to 900 s. Measured over 66
+  production runs (logs 2026-08-05 → 2026-08-25): lease held **median 613.5 s,
+  max 899.8 s, 46 of 66 over the TTL**. Two unrelated guards have been doing
+  the work — api-internal's `DISPATCH_DEADLINE_SECONDS = 930` exceeding the
+  900 s Cloud Run timeout, and `--max-instances=1 --concurrency=1` — so the
+  lease has been wrong throughout with nothing consulting it. **One thing does
+  consult it:** `tools/reenqueue_scene.py` uses the lease as its "is a worker
+  active?" test, so on an actively-processing scene it says PROCEED without
+  `--force` and dispatches a second task. **The fix is one number — TTL 960 s,
+  above the request ceiling — and it is not applied.** Nothing would detect a
+  violation: `lease_expires_at` is never passed to `_log_lease_action` so it
+  logs `none` everywhere, `RECLAIMED` reads identically for an expired and a
+  cleared lease, and the holder guard's rejection is a bare `return` after
+  which the worker reports 200 "ready" having written nothing.
+- **The lease-expiration branch has never run in production, and the reference
+  scene for it is gone (0286).** Three `reclaim_stale` events in a month of
+  logs, every one preceded by a `release_error` from the same worker — all
+  eager release. The load-bearing branch is unit-tested only.
+  `f077e9ed-d339-4be8-8dbf-37b952abfec2` was the canonical stuck-scene
+  reference and was deleted with everything else at parking; its bundle had
+  survived the captures sweep (the lifecycle rule carries
+  `matchesPrefix: ["captures/"]` and the bundle sat under `smoke-test/`) and is
+  gone too. **`reenqueue_scene.py` could not have run the test anyway** — it
+  resets to `queued` before dispatching, which erases the expired lease that is
+  the subject. Re-testing now means constructing the state deliberately on a
+  fresh capture and dispatching without the reset.
+- **The SIGTERM lease-release path has never fired, and may be unable to
+  (0286).** 0 of 65 scenes ever carried a `shutdown_release_count`, and nothing
+  outside tests reads that field. `run_perception` is a synchronous call from
+  the async handler with no `to_thread`, so it blocks the main thread for the
+  whole run; Python delivers SIGTERM there at a bytecode boundary, so a signal
+  arriving inside a long CUDA or GCS call is lost to the 10 s drain. **A
+  cycle-limit gate on `shutdown_release_count` is REFUSED rather than
+  deferred** — Cloud Tasks already caps the loop at `maxAttempts=3`. The
+  residual failure is a scene left in `queued` forever with no terminal state
+  and no FCM, which wants a stale-scene sweep, not a counter.
 - **Alerting and monitoring do not exist and the deferral is unrecorded.** An
   unrecorded accepted deferral is indistinguishable from an oversight. Record
   the acceptance or schedule the work.
@@ -1354,8 +1392,6 @@ ever done or ruled, delete it — do not annotate it.
 - **happy-path and duplicate-event smoke modes terminate at `failed_invalid`,
   not `ready`.** The ingest gate correctly fast-fails the synthetic fixture's
   placeholder images pre-GPU. Reaching `ready` requires real capture data.
-- **Scene `f077e9ed-d339-4be8-8dbf-37b952abfec2` is deliberately left in
-  `processing`** with an expired lease, as the canonical stuck-scene reference.
 - **The numpy/Accelerate `IndexError` in `test_shell_observation.py` is not our
   bug** — macOS/arm64 reproduces it, Linux CI passes on the same numpy, and the
   bounds guard is provably correct. **Do not clamp the indices**; that trades a
