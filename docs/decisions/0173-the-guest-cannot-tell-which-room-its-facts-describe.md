@@ -1,8 +1,9 @@
 # 0173 — the guest reads its own re-derived facts as stale, and says so
 
 **Date:** 2026-08-14
-**Status:** FIXED by 0174, serving as `api-public-00040-loj` at
-PROMPT_VERSION 5. The xfail below did exactly what it was built to do: run
+**Status:** Amended by 0174 — the fix serves as `api-public-00040-loj`; 0174 also records that the defect was worse than measured here, at `PROMPT_VERSION 5`.
+
+The xfail below did exactly what it was built to do: run
 against the fix it reported `[XPASS(strict)]`, and the marker is gone.
 
 Two things here read differently with the fix in hand. The defect was WORSE

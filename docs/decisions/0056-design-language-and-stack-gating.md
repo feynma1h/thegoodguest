@@ -1,7 +1,7 @@
 # 0056 — Design language: Apple-grade restraint; 3D-stack and conversation sequencing
 
 **Date:** 2026-07-20
-**Status:** Decided (amends parts of 0055's "durable" list)
+**Status:** Superseded by 0057, which replaced the visual reading. The stack gating and the amendments to 0055's "durable" list still stand.
 
 ## Context
 

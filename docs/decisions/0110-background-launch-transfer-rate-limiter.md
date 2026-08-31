@@ -1,7 +1,7 @@
 # 0110 — The bundle.pb stall is iOS's background-launch rate limiter, not our defect
 
 **Date:** 2026-08-08
-**Status:** accepted
+**Status:** Decided
 **Relates to:** 0040 (bundle.pb goes last), 0044/0045 (background assertion,
 relaunch recovery), 0085 (the walk that observed it), 0111 (the Lock Screen
 honesty that answers it)

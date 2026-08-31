@@ -1,7 +1,7 @@
 # 0114 — Force-quit is not OS-kill: the background-relaunch race cannot occur on the path we kept testing
 
 **Date:** 2026-08-13
-**Status:** Measured on hardware (iPhone 16 Pro, iOS 26.5.2)
+**Status:** Decided — measured on hardware (iPhone 16 Pro, iOS 26.5.2)
 
 ## Context
 

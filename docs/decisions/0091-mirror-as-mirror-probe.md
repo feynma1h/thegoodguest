@@ -1,7 +1,7 @@
 # 0091 — Mirror-as-mirror: the depth-trust gate is not a mirror detector
 
 **Date:** 2026-08-08
-**Status:** probe run, BUILD CUT — the identification premise is refuted and
+**Status:** Refuted — probe run, BUILD CUT — the identification premise is refuted and
 what remains is a design question, not an implementation one
 
 ## Context

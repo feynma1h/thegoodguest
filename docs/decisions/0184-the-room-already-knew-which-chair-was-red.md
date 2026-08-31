@@ -1,7 +1,7 @@
 # 0184 — the room already knew which chair was red
 
 **Date:** 2026-08-19
-**Status:** Built; perception half not yet deployed (see Rollout)
+**Status:** Decided — built; perception half not yet deployed (see Rollout)
 
 ## Context
 

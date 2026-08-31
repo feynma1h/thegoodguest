@@ -1,7 +1,7 @@
 # 0181 — How wrong the guessed depth is, measured on rooms we already argue about
 
 **Date:** 2026-08-16
-**Status:** Measured offline on three preserved LiDAR captures; no GPU run
+**Status:** Refuted — measured offline on three preserved LiDAR captures; no GPU run
 
 ## Context
 

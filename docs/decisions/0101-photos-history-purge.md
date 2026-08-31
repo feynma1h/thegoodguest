@@ -1,7 +1,7 @@
 # 0101 — Purging the real room photos from git history
 
 **Date:** 2026-08-08
-**Status:** DONE — working tree and history both purged, before the first push
+**Status:** Spent — working tree and history both purged, before the first push
 
 > **CLOSED.** The operator ran the commands below on 2026-08-08 and the repo
 > gained its remote afterwards. Verified at the time and again on 2026-08-09:

@@ -1,7 +1,7 @@
 # 0086 — Retention design for scenes + perception outputs (gaps F5/F6)
 
 **Date:** 2026-08-07
-**Status:** accepted (shipped: TTL policy + lifecycle rule live, backfill applied)
+**Status:** Decided — shipped: TTL policy + lifecycle rule live, backfill applied
 
 ## Context
 

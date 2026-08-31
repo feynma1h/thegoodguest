@@ -1,7 +1,7 @@
 # 0017 — Smoke tool: manifest derivation and upload contract (pass 3)
 
 **Date:** 2026-05-26
-**Status:** Accepted
+**Status:** Decided
 
 ## Context
 

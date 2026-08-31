@@ -1,7 +1,7 @@
 # 0137 — `roomplan_box.dims` is (width, height, depth), and 0096's premise does not hold
 
 **Date:** 2026-08-09
-**Status:** Measured. The solver uses it; the guest's size rule is NOT changed
+**Status:** Decided — measured. The solver uses it; the guest's size rule is NOT changed
 — that is 0096's call and board item 10(a)'s work.
 
 ## Context

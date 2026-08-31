@@ -1,7 +1,7 @@
 # 0006 — sys.path hack removal in process_receiver.py
 
 **Date:** 2026-05-23
-**Status:** Decided
+**Status:** Spent
 
 ## Context
 

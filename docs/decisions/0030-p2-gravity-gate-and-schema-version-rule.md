@@ -1,7 +1,7 @@
 # 0030 — P1→P2 gravity gate and schema_version enforcement rule
 
 **Date:** 2026-05-30
-**Status:** Decided
+**Status:** Spent
 
 ## Context
 

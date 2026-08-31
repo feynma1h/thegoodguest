@@ -1,8 +1,9 @@
 # 0071 — room-boundary source: raw plane anchors vs. RoomPlan vs. reconstructed geometry
 
 **Date:** 2026-07-24
-**Status:** RESOLVED — **Option A (Pro-only / LiDAR-first, RoomPlan as the
-boundary source)**. The operator settled the fork after the co-run spike
+**Status:** Superseded by 0077 — Option A (Pro-only / LiDAR-first, RoomPlan as the room source) was taken, and 0077 is its design. The measured facts below stand.
+
+The operator settled the fork after the co-run spike
 (decision 0076); the design is decision 0077 and the implementation ships as
 shell.json v3 method `roomplan` in `services/perception-obj/shell_receiver.py`.
 The measured facts below are kept because they are what the choice rests on.

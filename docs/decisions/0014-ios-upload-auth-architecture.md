@@ -1,7 +1,7 @@
 # 0014 — iOS upload + auth architecture
 
 **Date:** 2026-05-26
-**Status:** accepted
+**Status:** Decided
 
 ## Context
 

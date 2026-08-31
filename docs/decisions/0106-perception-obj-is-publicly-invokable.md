@@ -1,7 +1,7 @@
 # 0106 — perception-obj is publicly invokable, and stays that way for now
 
 **Date:** 2026-08-09
-**Status:** Superseded by the flip below — the platform is the gate as of 2026-08-10 (see Outcome)
+**Status:** Spent — the platform is the gate as of 2026-08-10 (see Outcome)
 
 ## Context
 

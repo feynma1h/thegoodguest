@@ -1,7 +1,7 @@
 # 0182 — perception-obj cannot currently be rebuilt
 
 **Date:** 2026-08-16
-**Status:** Measured; the blocking cause is fixed by one line nobody has changed yet
+**Status:** Spent — the dead NGC index was dropped from the Dockerfile 2026-08-16 and builds resolve from PyPI proper.
 
 ## Context
 

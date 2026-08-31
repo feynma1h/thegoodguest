@@ -1,7 +1,7 @@
 # 0085 — Release-residue sitting: Gate 2b closed, Fork A answered, and three defects the runs surfaced
 
 **Date:** 2026-08-08
-**Status:** accepted
+**Status:** Decided
 **Supersedes / relates to:** 0044, 0045 (relaunch recovery), 0084 (terminal-state
 reaper), 0036/0051/0074 (identity), 0072 (Good Guest failure surfaces)
 

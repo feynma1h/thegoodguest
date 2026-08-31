@@ -1,7 +1,7 @@
 # 0088 — Launch-hardening IAM audit: perception-obj SA + storage findings
 
 **Date:** 2026-08-07
-**Status:** recorded (read-only audit; two recommendations pending operator decision)
+**Status:** Spent — both recommendations executed and recorded inline; finding 4 revoked, remediation 1 shipped as 0090.
 
 ## Context
 

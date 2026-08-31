@@ -1,7 +1,7 @@
 # 0263 — precision against the box is a gate, not a ranking
 
 **Date:** 2026-08-27
-**Status:** SUPERSEDED by 0266 on the operator's rulings of 2026-08-28. The gate below scores 8 of 9, not 10 of 10, and a rule needing no gate scores 9 of 9.
+**Status:** Superseded by 0266 — on the operator's rulings of 2026-08-28. The gate below scores 8 of 9, not 10 of 10, and a rule needing no gate scores 9 of 9.
 
 ## Context
 

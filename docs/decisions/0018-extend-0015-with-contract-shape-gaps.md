@@ -1,7 +1,7 @@
 # 0018 — Extend decision 0015 with contract-shape and production-hygiene gaps
 
 **Date:** 2026-05-26
-**Status:** Accepted
+**Status:** Spent
 **Amended:** 2026-05-27 to add F5/F6 and the perception-obj SA audit item.
 
 ## Context

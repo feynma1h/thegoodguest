@@ -1,7 +1,7 @@
 # 0015 — rate-limiting and concurrency guards deferred until v1 launch
 
 **Date:** 2026-05-26
-**Status:** accepted
+**Status:** Spent
 
 ## Context
 

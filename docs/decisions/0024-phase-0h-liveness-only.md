@@ -1,7 +1,7 @@
 # 0024 — Phase 0h gates liveness, not readiness
 
 **Date:** 2026-05-29
-**Status:** Accepted
+**Status:** Decided
 
 ## Context
 

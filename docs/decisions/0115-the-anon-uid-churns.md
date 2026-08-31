@@ -1,7 +1,7 @@
 # 0115 — The anonymous UID churns, and the stand-down drains one room per launch
 
 **Date:** 2026-08-13
-**Status:** Measured on hardware; the churn's CAUSE is open
+**Status:** Decided — measured on hardware; the churn's CAUSE is open
 
 ## Context
 
