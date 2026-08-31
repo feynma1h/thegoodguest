@@ -71,12 +71,30 @@ nonisolated enum RoomHistory {
 
     // MARK: Reachability
 
+    /// Whether the web handoff would actually land somewhere the person can
+    /// see their room.
+    ///
+    /// TWO CONDITIONS, AND THE SECOND IS THE ONE THAT IS EASY TO MISS. A
+    /// configured origin only says the page exists. Rooms are scoped to the
+    /// caller's token; an anonymous UID does not carry off the phone, and
+    /// Safari holds no session from this app — so an unlinked user following
+    /// the link reaches a page correctly telling them to sign in with the
+    /// account from their iPhone, which for them does not exist. That is a
+    /// worse outcome than the disabled row it replaced, because it spends the
+    /// person's attention before failing.
+    ///
+    /// So the link is offered only to a linked identity. For everyone else the
+    /// surfaces point at signing in, which is both true and the actual next
+    /// step.
+    static func webHandoffLands(hasWebOrigin: Bool, isLinked: Bool) -> Bool {
+        hasWebOrigin && isLinked
+    }
+
     /// Whether tapping this row can honestly go anywhere.
     ///
-    /// Mirrors DoorwayView's `canOpenWeb` exactly, and for the same reason: the
-    /// only destination a room has is the web desk, `NetworkConfig.webBaseURL`
-    /// is deliberately nil until a durable origin exists, and a row that
-    /// depresses and does nothing is worse than a row that never offered. A
+    /// Mirrors DoorwayView's `canOpenWeb` exactly, and for the same reason: a
+    /// row that depresses and does nothing is worse than a row that never
+    /// offered. Callers pass `webHandoffLands`, never the bare origin check. A
     /// room still being rebuilt is not openable either — it has no desk to open
     /// on yet, and the home re-entry row is what re-enters the wait for the
     /// room actually in flight.

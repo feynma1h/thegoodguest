@@ -320,19 +320,15 @@ enum ScreenGallery {
               note: "BUILT AND UNREACHABLE: thinCoverage is never set true. Photographed so the designed treatment can be judged, not as something the screen can say today.",
               delay: 2),
 
-        // Arrival: canOpenWeb x signedIntoWeb is four screens, and the pair
-        // changes both the control and the caption under it.
-        .init(id: "doorway", group: "The doorway", title: "Openable, signed in",
-              note: "The peak. Gold CTA, and the caption adds that you are already signed in over there.",
+        // TWO screens, not four. This was canOpenWeb x signedIntoWeb until the
+        // web origin was configured; the offer now turns on one question — will
+        // the desk recognise this person — and the two corners where the old
+        // flags disagreed are not states the app has (see DoorwayView).
+        .init(id: "doorway", group: "The doorway", title: "Linked — the handoff lands",
+              note: "The peak. Gold CTA, and the caption can say you are already signed in over there because the CTA only appears when that is true.",
               delay: 2.8),
-        .init(id: "doorway-unsigned", group: "The doorway", title: "Openable, not signed in",
-              note: "Same CTA, shorter caption. The claim about being signed in is dropped rather than softened — an anonymous UID does not carry across devices.",
-              delay: 2.8),
-        .init(id: "doorway-noweb-signed", group: "The doorway", title: "No web origin, signed in",
-              note: "The CTA is gone entirely rather than shown as a control that does nothing. The caption points at the computer instead.",
-              delay: 2.8),
-        .init(id: "doorway-noweb", group: "The doorway", title: "No web origin, not signed in",
-              note: "The one corner with nothing to promise: it points at signing in, because for an unlinked user there is no computer where this room exists.",
+        .init(id: "doorway-noweb", group: "The doorway", title: "Unlinked — nothing to promise",
+              note: "The CTA is gone rather than shown as a control leading somewhere this person cannot be seen. It points at signing in, which is both true and the next step.",
               delay: 2.8),
 
         // Recovery: FailureCopy.Resend is four states, and each changes both
@@ -696,13 +692,9 @@ struct ScreenGalleryView: View {
 
         // Arrival
         case "doorway":
-            DoorwayView(signedIntoWeb: true, canOpenWeb: true)
-        case "doorway-unsigned":
-            DoorwayView(signedIntoWeb: false, canOpenWeb: true)
-        case "doorway-noweb-signed":
-            DoorwayView(signedIntoWeb: true, canOpenWeb: false)
+            DoorwayView(canOpenWeb: true)
         case "doorway-noweb":
-            DoorwayView(signedIntoWeb: false, canOpenWeb: false)
+            DoorwayView(canOpenWeb: false)
 
         // Recovery. onBack, because that is how the flow reaches it: without it
         // the gallery photographed a screen with no header, which is not the

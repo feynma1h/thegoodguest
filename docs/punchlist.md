@@ -54,14 +54,15 @@ support URL is expensive to change once filed. The icon and privacy labels are
 already done.
 **Check:** manual — operator.
 
-### G1-05 · The iOS app has no route to the web
-**State:** open · **Blocks:** the product loop, and G1-01 in spirit
-`NetworkConfig.webBaseURL` is `nil`, so every room row and CTA that would open a
-room is correctly disabled. A person who captures a room **cannot reach it from
-the app**. Needs associated domains plus universal links; the QR bridge encodes
-nothing for the same reason. This is the largest hole in the loop and the only
-Gate 1 item that is real engineering rather than a decision.
-**Check:** automated — `webBaseURL` must stop being `nil`.
+### G1-08 · The bridge QR encodes nothing, and now it could
+**State:** open · **Blocks:** nothing; it is a newly available convenience
+The QR was blocked on there being no room URL to encode. There is one now
+(`NetworkConfig.webRoomURL`), so the caption saying it leads nowhere is the only
+thing still true about it. Scanning it on a computer lands on the same page the
+doorway's CTA opens, and carries the same constraint: it is worth offering only
+to a linked identity, which `RoomHistory.webHandoffLands` already answers.
+**Check:** manual — the QR must encode the room URL, and the caption must stop
+saying it does not.
 
 ### G1-06 · Gate A — Apple sign-in link on device, UID unchanged
 **State:** open · **Blocks:** trusting that a phone capture and a browser session

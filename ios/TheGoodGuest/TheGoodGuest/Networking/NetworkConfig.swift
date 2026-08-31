@@ -17,18 +17,27 @@ nonisolated enum NetworkConfig {
 
     /// Base URL of the web app ("the desk"), used by the doorway handoff.
     ///
-    /// nil ON PURPOSE today: the production hosting channel is deliberately
-    /// undeployed until launch hardening, and the preview channel's URL is
-    /// temporary — baking either in would ship a link that 404s or expires. While
-    /// this is nil the doorway hides its "step through" CTA rather than presenting
-    /// a button that does nothing. Set it when a durable web origin exists.
+    /// A PLAIN `open(_:)` TARGET, NOT an app-claimed universal link: it needs no
+    /// associated-domains entitlement, and never did. The entitlement matters
+    /// only for links this app CLAIMS — a separate concern this handoff does not
+    /// touch, and the reason "needs associated domains" was the wrong reading of
+    /// why the link was missing.
     ///
-    /// Note this is a plain `open(_:)` target, NOT an app-claimed universal link:
-    /// it needs no associated-domains entitlement. The entitlement only matters
-    /// for links this app CLAIMS, which is a separate, still-gated concern.
-    static let webBaseURL: URL? = nil
+    /// It stayed nil while no durable origin existed and the preview channel's
+    /// URL would have expired. `thegoodguest.web.app` is that durable origin.
+    ///
+    /// A LIVE ORIGIN IS NOT ENOUGH TO OFFER THE LINK, and nothing here can tell:
+    /// rooms are scoped to the caller's token, an anonymous UID does not carry
+    /// off the phone, and Safari holds no session from this app. So an unlinked
+    /// user following this URL reaches a page that asks them to sign in with an
+    /// account they do not have. `RoomHistory.webHandoffLands` is the predicate
+    /// that decides whether to offer it; do not gate a surface on this constant
+    /// alone.
+    static let webBaseURL: URL? = URL(string: "https://thegoodguest.web.app")
 
-    /// The web URL for one captured room, or nil when no web origin is configured.
+    /// The web URL for one captured room, or nil when no web origin is
+    /// configured. Non-nil does NOT mean the room will be visible there — see
+    /// the note on `webBaseURL`.
     static func webRoomURL(bundleId: String) -> URL? {
         guard let webBaseURL else { return nil }
         return URL(string: "room?bundle=\(bundleId)", relativeTo: webBaseURL)
