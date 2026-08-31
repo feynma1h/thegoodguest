@@ -2,9 +2,10 @@
 
 **PARKED 2026-08-31 — read `docs/PARKED.md` first, then `docs/NOT-FINAL.md`,
 which lists everything in this tree that is not finished and says which parts
-of it go live on the next deploy.** It records where each
-lane stopped and the two things at risk only while parked: 24 branches exist
-on one disk, and `outputs/` is 9.4 GB with no copy anywhere.
+of it go live on the next deploy.** The tree is one branch (`main`), one
+worktree, and carries no room data: every capture, fixture and cloud scene was
+deleted at parking. The one standing risk is that `main` is the single copy of
+everything and is ahead of `origin`.
 
 A spatial intelligence product that helps people discover the best version of their home: AI-powered room analysis, conversational redesign, and an immersive 3D representation of *their own* space.
 
@@ -142,12 +143,12 @@ state machine, the scene read/write repositories, `UploadSessionRepository` +
 `gcs_mint_resumable_uri`, semantic manifest validation, and the capture-bundle
 test fixtures.
 
-Suites, re-measured on `segment-quality` WITHOUT `web/public/dev-fixtures`
-(re-measured on `main` 2026-08-31, after the iOS/brand, perception and
-segment-quality lane merges, with `web/public/dev-fixtures` STAGED — perception
-**1214 + 25** (1237 + 2 before the capture wipe; 23 real-data tests now skip),
-web **276**): schemas **126** (`pytest packages/schemas/tests`);
-root **919 + 27** by bare `pytest` (which uses `testpaths` in `pyproject.toml`);
+Suites, measured on `main` 2026-08-31 after the three lane merges and after
+`web/public/dev-fixtures` and every preserved capture were DELETED at parking —
+so these are the fixtures-ABSENT figures, and they are the only ones that
+describe this tree: perception **1198 + 41**, web **276**, schemas **126**
+(`pytest packages/schemas/tests`);
+root **844 + 102** by bare `pytest` (which uses `testpaths` in `pyproject.toml`);
 root **849 + 102** by `pytest packages services tools
 --ignore=services/perception-obj`, which collects 18 tests `testpaths` does
 not. **Those two commands are both called "root" in this repo and differ by
@@ -441,8 +442,10 @@ Three pipeline stages plus a probe, all Cloud Tasks driven:
   that hands the box to whoever was photographed first (0274). It does NOT fix
   0262's flat metric and a reading that says so is wrong.
 - **`/segment`** — a segmentation-only probe, built on `segment-quality` and
-  deployed only to a 0%-traffic candidate (`perception-obj-00088-vot`, carrying
-  `PERCEPTION_SAM3_INTERACTIVE=1`). **The serving revision does not carry this
+  deployed only to 0%-traffic candidates. **The candidate live on 2026-08-31 is
+  `perception-obj-00093-pav`** (image `b21408a5`, the SAM 3.1 / `/track` build);
+  the earlier `00088-vot` carried `PERCEPTION_SAM3_INTERACTIVE=1` and is
+  superseded — read the traffic split from `gcloud`, never this line. **The serving revision does not carry this
   route.** It takes an EXPLICIT frame list, runs pass 1 only and never loads
   SAM 3D — "what does SAM 3 actually see there?" costs ~4 s a frame against
   ~25 s an object, and `/process` cannot answer it, because its request carries
@@ -1396,10 +1399,11 @@ ever done or ruled, delete it — do not annotate it.
   bug** — macOS/arm64 reproduces it, Linux CI passes on the same numpy, and the
   bounds guard is provably correct. **Do not clamp the indices**; that trades a
   loud crash for silently corrupt pixels.
-- **`web/public/dev-fixtures` is 3.9 GB of real captured homes inside
-  `public/`**, and `next build` copies `public/` into `out/`. Hosting ignores it
-  on deploy — one config line between real rooms and a public origin. Moving it
-  outside `public/` would remove the hazard rather than guard it.
+- **`web/public/dev-fixtures` no longer exists** — 4.0 GB of real captured homes
+  deleted at parking 2026-08-31. While it existed, `next build` copied `public/`
+  into `out/` and only `web/firebase.json`'s `dev-fixtures/**` ignore stood
+  between real rooms and a public origin. **If fixtures are ever re-staged, put
+  them OUTSIDE `public/`** — that removes the hazard rather than guarding it.
 - **`/track` logs 64 "Missing keys" for `freqs_cis_real`/`freqs_cis_imag` at
   model load, and that is correct.** Those are RoPE frequency buffers computed
   at init from a table the checkpoint DOES carry (`vitdet.py:552-555`), not lost
@@ -1631,7 +1635,7 @@ the Dockerfile, the README's table and the vendored files agree, and that the
 vendored copy stays unimportable. The `upstream-models` skill and a `PreToolUse`
 hook on the wrappers carry the rule to the next session.
 
-**A lane that walks the room page will 404 on `dev-fixtures`** — it is deliberately absent from worktrees (3.9 GB). The cheap fix is `tools/make_synthetic_splat.py` (~14 MB of synthetic rooms, no real capture), and the rule is DELETE THEM AFTERWARDS so nothing real or bulky can reach a build. **Cheaper still, and free, for any lane that draws GEOMETRY rather than splats: `/room?bundle=!hero` serves `web/public/hero/room.json` — the one genuinely captured room this repo ships (0122's fixture, 3.5 KB, already a tracked static file) — and `!v3`, `!old` and the six list rooms need no fixtures at all.** Nothing to generate and nothing to delete; the splat viewer 404s and everything shell-shaped renders. The calling-card lane built its whole surface this way and never staged a fixture.
+**A lane that walks the room page will 404 on `dev-fixtures`** — the directory was deleted at parking and exists nowhere. The cheap fix is `tools/make_synthetic_splat.py` (~14 MB of synthetic rooms, no real capture), and the rule is DELETE THEM AFTERWARDS so nothing real or bulky can reach a build. **Cheaper still, and free, for any lane that draws GEOMETRY rather than splats: `/room?bundle=!hero` serves `web/public/hero/room.json` — the one genuinely captured room this repo ships (0122's fixture, 3.5 KB, already a tracked static file) — and `!v3`, `!old` and the six list rooms need no fixtures at all.** Nothing to generate and nothing to delete; the splat viewer 404s and everything shell-shaped renders. The calling-card lane built its whole surface this way and never staged a fixture.
 
 **The coordinator rotates itself before it degrades, and does not wait to be
 told.** A coordinator accumulates every lane's context and is the one session
@@ -1658,19 +1662,18 @@ this hour.
 **Starting a session is the orchestrator's job to make one paste long.** Whenever
 new work should run in its own session, the coordinator delivers a
 copy-pasteable prompt AND does the pre-session setup first — provision the
-worktree, symlink `web/public/dev-fixtures` from the main tree, run
-`npm install` in `web/`, copy the gitignored `GoogleService-Info.plist` for iOS
+worktree, run `npm install` in `web/`, copy the gitignored `GoogleService-Info.plist` for iOS
 lanes — so the session's first act is work, not environment repair. Setup traps
 that are already known: `outputs/room-quality/stage_fixed_fixtures.py` writes to
 an ABSOLUTE main-tree path, so a worktree lane stages fixtures outside itself;
 a worktree has no `.venv`, so Python runs via the main tree's absolute
 interpreter path (verified to still import the worktree's own modules, not
-main's); and **only symlink `dev-fixtures` into a lane that actually views
-rooms.** That directory is **3.9 GB of real captured homes**, `next build`
-copies `public/` into `out/`, and any lane whose acceptance includes a green
-static-export build should not have it present — the deploy is protected by
-`firebase.json`'s `dev-fixtures/**` ignore, but the build is not, and 0122
-already caught a real room's splat one deploy from a public origin.
+main's). **`dev-fixtures` no longer exists to symlink** — it was deleted at
+parking, so a lane that views rooms must generate synthetic fixtures with
+`tools/make_synthetic_splat.py` and delete them afterwards. Never place real
+captures under `public/`: `next build` copies it into `out/`, and only
+`web/firebase.json`'s `dev-fixtures/**` ignore protects the deploy — 0122 caught
+a real room's splat one deploy from a public origin.
 
 **A session's ready report goes to `outputs/reports/<lane>.md`** — gitignored,
 like every other artifact under `outputs/` (walk verdicts, operator-queue logs,
