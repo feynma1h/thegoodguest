@@ -397,7 +397,8 @@ struct RootFlowView: View {
             .task(id: missingPaths.count) { await refreshResendOffer() }
 
         case .you:
-            ProfileView(uid: auth.currentUID, isLinked: auth.isLinked, onClose: back)
+            ProfileView(uid: auth.currentUID, isLinked: auth.isLinked,
+                                  isAppleLinked: auth.isAppleLinked, onClose: back)
         }
     }
 

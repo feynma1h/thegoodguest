@@ -1,12 +1,13 @@
 /// Pins what the deletion screen says in each state it can be in.
 ///
 /// WHY THIS IS A TEST AND NOT A READING. Deletion is the one screen where a
-/// wrong sentence costs something irreversible, and the three ways to word it
+/// wrong sentence costs something irreversible, and the four ways to word it
 /// wrongly are all plausible-looking:
 ///
 ///   - reporting a resumed pass's zero counts as "you had nothing",
 ///   - using the word "deleted" in the state where nothing has been,
-///   - implying a failure got partway.
+///   - implying a failure got partway,
+///   - saying "gone" when the Apple token outlived the account.
 ///
 /// Each is a sentence a careful person would write by accident, and none is
 /// visible by reading one state in isolation — which is exactly what reading a
@@ -26,8 +27,9 @@ final class DeleteAccountCopyTests: XCTestCase {
         [
             .confirm,
             .working,
-            .done(AccountDeletionCounts()),
-            .done(AccountDeletionCounts(rooms: 6, conversations: 3, files: 200)),
+            .done(AccountDeletionCounts(), .notLinked),
+            .done(AccountDeletionCounts(rooms: 6, conversations: 3, files: 200), .revoked),
+            .done(AccountDeletionCounts(rooms: 6, conversations: 3, files: 200), .notRevoked),
             .partial(AccountDeletionCounts(files: 40)),
             .failed(.serverError(500)),
             .failed(.unauthorized),
@@ -41,7 +43,7 @@ final class DeleteAccountCopyTests: XCTestCase {
     // MARK: - Rule 1: a count describes the pass, never the account
 
     func test_done_withNothingRemoved_doesNotClaimTheAccountWasEmpty() {
-        let body = copy(.done(AccountDeletionCounts())).body
+        let body = copy(.done(AccountDeletionCounts(), .notLinked)).body
         // The failure this guards: "there was nothing to delete" told to
         // someone whose six rooms were removed by the call before this one.
         XCTAssertTrue(
@@ -52,7 +54,7 @@ final class DeleteAccountCopyTests: XCTestCase {
     }
 
     func test_done_withCounts_statesThemAsRemovedByThisPass() {
-        let body = copy(.done(AccountDeletionCounts(rooms: 6, conversations: 3, files: 200))).body
+        let body = copy(.done(AccountDeletionCounts(rooms: 6, conversations: 3, files: 200), .revoked)).body
         XCTAssertTrue(body.contains("this pass found"))
         XCTAssertTrue(body.contains("6 rooms"))
     }
@@ -84,6 +86,59 @@ final class DeleteAccountCopyTests: XCTestCase {
             AccountDeletionCounts(rooms: 1, uploadSessions: 99)
         )
         XCTAssertEqual(text, "1 room")
+    }
+
+    // MARK: - Rule 4: "gone" must not overstate when Apple was not told
+
+    func test_onlyTheUnrevokedDoneStateAsksForAnythingMore() {
+        let counts = AccountDeletionCounts(rooms: 6)
+        for revocation in [AppleRevocation.notLinked, .revoked] {
+            let body = copy(.done(counts, revocation)).body
+            XCTAssertFalse(
+                body.contains("Settings"),
+                "\(revocation) must not hand the user a chore that is already done"
+            )
+        }
+        let unrevoked = copy(.done(counts, .notRevoked)).body
+        XCTAssertTrue(unrevoked.contains("Settings"))
+        XCTAssertTrue(unrevoked.contains("Sign in with Apple"))
+    }
+
+    func test_theUnrevokedStateStillSaysTheDataIsGone() {
+        // TN3194's fallback deletes the data regardless. The remaining step is
+        // Apple's list, and the copy must not blur that into "not deleted".
+        let body = copy(.done(AccountDeletionCounts(rooms: 6), .notRevoked)).body
+        XCTAssertTrue(body.contains("Your account is gone"))
+        XCTAssertTrue(body.contains("not archived or held anywhere"))
+    }
+
+    func test_theAppleInstructionPrecedesTheReassurance() {
+        // Found by screenshot: trailing the instruction put the only actionable
+        // sentence below the fold at AX5, under a fully-visible "Start again".
+        // It scrolled, so neither the layout audit nor reading the table could
+        // see it. Pinned here so a later tidy-up cannot quietly restore it.
+        let body = copy(.done(AccountDeletionCounts(rooms: 6), .notRevoked)).body
+        guard
+            let instruction = body.range(of: "still appears under"),
+            let reassurance = body.range(of: "not archived or held anywhere")
+        else { return XCTFail("both sentences must be present") }
+        XCTAssertTrue(
+            instruction.lowerBound < reassurance.lowerBound,
+            "the step the user must take has to come before the closing reassurance"
+        )
+    }
+
+    func test_theInventoryIsUnchangedByRevocation() {
+        // The Apple tail is additive. A revocation outcome must not alter what
+        // the pass reports having removed.
+        let counts = AccountDeletionCounts(rooms: 6, conversations: 3)
+        let expected = DeleteAccountWording.inventory(counts)
+        for revocation in [AppleRevocation.notLinked, .revoked, .notRevoked] {
+            XCTAssertTrue(
+                copy(.done(counts, revocation)).body.contains(expected),
+                "\(revocation) lost the inventory \(expected.debugDescription)"
+            )
+        }
     }
 
     // MARK: - Rule 2: partial has deleted nothing the user owns
@@ -146,7 +201,7 @@ final class DeleteAccountCopyTests: XCTestCase {
         // Running: the request is on the wire and closing would not stop it.
         XCTAssertFalse(copy(.working).dismissable)
         // Done: there is nothing to go back to.
-        XCTAssertFalse(copy(.done(AccountDeletionCounts())).dismissable)
+        XCTAssertFalse(copy(.done(AccountDeletionCounts(), .notLinked)).dismissable)
         XCTAssertTrue(copy(.confirm).dismissable)
         XCTAssertTrue(copy(.partial(AccountDeletionCounts())).dismissable)
         XCTAssertTrue(copy(.failed(.unavailable)).dismissable)

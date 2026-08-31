@@ -382,6 +382,9 @@ enum ScreenGallery {
         .init(id: "delete-done-empty", group: "Delete everything", title: "Gone, nothing left to take",
               note: "A resumed deletion: the first call did the work and this one found zero. Must not read as \"you had nothing\" — the sentence allows for an earlier attempt.",
               delay: 2),
+        .init(id: "delete-done-notrevoked", group: "Delete everything", title: "Gone, but Apple was not told",
+              note: "The Sign in with Apple token could not be revoked. TN3194 says delete anyway and tell the person to finish it in Settings, so this is the ONE done state that asks for something.",
+              delay: 2),
         .init(id: "delete-partial", group: "Delete everything", title: "Stopped part-way",
               note: "Nothing the user owns has gone, so the words deleted/gone/removed cannot appear. The count it DID reach is deliberately not stated.",
               delay: 2),
@@ -731,9 +734,12 @@ struct ScreenGalleryView: View {
         case "delete-done":
             GalleryDelete(state: .done(AccountDeletionCounts(
                 rooms: 6, conversations: 3, conversationMessages: 41,
-                designSpecs: 2, uploadSessions: 9, files: 214)))
+                designSpecs: 2, uploadSessions: 9, files: 214), .revoked))
         case "delete-done-empty":
-            GalleryDelete(state: .done(AccountDeletionCounts()))
+            GalleryDelete(state: .done(AccountDeletionCounts(), .notLinked))
+        case "delete-done-notrevoked":
+            GalleryDelete(state: .done(AccountDeletionCounts(
+                rooms: 6, conversations: 3, files: 214), .notRevoked))
         case "delete-partial":
             GalleryDelete(state: .partial(AccountDeletionCounts(files: 40)))
         case "delete-failed":

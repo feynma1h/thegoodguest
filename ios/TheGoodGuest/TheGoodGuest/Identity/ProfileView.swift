@@ -20,6 +20,11 @@ struct ProfileView: View {
     /// copyable to the pasteboard).
     var uid: String?
     var isLinked: Bool = false
+    /// Whether the Apple provider specifically is linked. Separate from
+    /// `isLinked`, which is Apple OR Google: only an Apple identity has a token
+    /// to revoke at deletion, and showing Apple's sheet to a Google-only user
+    /// would be inexplicable.
+    var isAppleLinked: Bool = false
     var onClose: () -> Void = {}
 
     @State private var copied = false
@@ -72,7 +77,8 @@ struct ProfileView: View {
                 // The identity is gone, so there is nothing for this screen to
                 // show. Close the sheet AND the profile behind it: the caller
                 // returns to a first run, which is what the app now is.
-                onFinished: { showDelete = false; onClose() }
+                onFinished: { showDelete = false; onClose() },
+                isAppleLinked: isAppleLinked
             )
         }
     }
