@@ -24,6 +24,7 @@ struct ProfileView: View {
 
     @State private var copied = false
     @State private var showSignIn = false
+    @State private var showDelete = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,6 +53,9 @@ struct ProfileView: View {
                     idCard
                         .padding(.top, 22)
 
+                    deleteRow
+                        .padding(.top, 28)
+
                 }
                 .rsBelowHeader()
             }
@@ -61,6 +65,53 @@ struct ProfileView: View {
         .rsParchmentScreen()
         .safeAreaInset(edge: .bottom) { signInAction }
         .sheet(isPresented: $showSignIn) { SignInSheet() }
+        .sheet(isPresented: $showDelete) {
+            DeleteAccountView(
+                uid: uid,
+                onClose: { showDelete = false },
+                // The identity is gone, so there is nothing for this screen to
+                // show. Close the sheet AND the profile behind it: the caller
+                // returns to a first run, which is what the app now is.
+                onFinished: { showDelete = false; onClose() }
+            )
+        }
+    }
+
+    /// The way to delete everything.
+    ///
+    /// QUIET ON PURPOSE, AND STILL PLAINLY THERE. App Review looks for this
+    /// control, so it cannot be buried behind a gesture or a submenu — but it
+    /// is also the one action on this screen nobody should reach for by
+    /// accident, and giving it a filled button would set it against "Sign in to
+    /// keep your rooms" as though the two were comparable choices. A hairline
+    /// and muted ink separate it from the identity above without hiding it.
+    private var deleteRow: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.rsHairline)
+                .frame(height: 1)
+
+            Button { showDelete = true } label: {
+                HStack {
+                    Text("Delete everything")
+                        .font(RSFont.ui(.callout, weight: .medium))
+                        .rsControlLabel()
+                        .foregroundStyle(Color.rsInkMuted)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.rsInkFaint)
+                }
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+
+            Text("Your account and every room in it. There is no undo.")
+                .font(RSFont.ui(.footnote))
+                .foregroundStyle(Color.rsInkFaint)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     /// Pinned, like every other screen's action. It sat at the end of the

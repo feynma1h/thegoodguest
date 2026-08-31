@@ -366,6 +366,31 @@ enum ScreenGallery {
         .init(id: "profile-noid", group: "You", title: "No ID yet",
               note: "Offline first launch. The card says so rather than showing a placeholder that would be copyable as an identity, and the copy button is gone with it.",
               delay: 2),
+        // Deletion. Seven states, and the reason each is here rather than one
+        // "delete screen" entry is 0270: the state space is where the defects
+        // are. Three of these are wordings that read correctly in isolation and
+        // wrongly beside each other — see DeleteAccountCopy's honesty rules.
+        .init(id: "delete-confirm", group: "Delete everything", title: "The ask",
+              note: "The only state that confirms again before sending. Says plainly that there is no copy and no undo.",
+              delay: 2),
+        .init(id: "delete-working", group: "Delete everything", title: "Running",
+              note: "The one state with NO primary and no way out — the request is on the wire and a chevron would promise a cancellation that does not exist.",
+              delay: 2),
+        .init(id: "delete-done", group: "Delete everything", title: "Gone, with an inventory",
+              note: "States what THIS pass removed, never what the account held. The distinction is invisible here and load-bearing in the next entry.",
+              delay: 2),
+        .init(id: "delete-done-empty", group: "Delete everything", title: "Gone, nothing left to take",
+              note: "A resumed deletion: the first call did the work and this one found zero. Must not read as \"you had nothing\" — the sentence allows for an earlier attempt.",
+              delay: 2),
+        .init(id: "delete-partial", group: "Delete everything", title: "Stopped part-way",
+              note: "Nothing the user owns has gone, so the words deleted/gone/removed cannot appear. The count it DID reach is deliberately not stated.",
+              delay: 2),
+        .init(id: "delete-failed", group: "Delete everything", title: "Failed",
+              note: "Says nothing was left half-deleted, which the route guarantees. The frightening reading is the wrong one and is also the easy one to write.",
+              delay: 2),
+        .init(id: "delete-noid", group: "Delete everything", title: "No ID yet",
+              note: "Offline first launch. The primary is disabled rather than hidden — a vanished button reads as an app that offers no deletion at all.",
+              delay: 2),
         .init(id: "whysignin", group: "Why sign in", title: "Several rooms",
               note: "Auto-presented once. Its whole argument is a count, asserted twice — in the sentence and in the checklist.",
               delay: 2),
@@ -445,6 +470,28 @@ private enum GalleryFixture {
 /// Home, from a HomeDay. The screen composes its own sentence through the real
 /// resolver, so a photograph here is a photograph of the shipping routing and
 /// not of a hand-written string.
+/// The deletion screen at one state.
+///
+/// `perform` never returns and `signOut` does nothing, so a photographed state
+/// stays the state it was asked for — a gallery entry that could advance would
+/// photograph whatever it reached rather than what it names.
+private struct GalleryDelete: View {
+    let state: DeleteAccountState
+    var uid: String? = GalleryFixture.uid
+
+    var body: some View {
+        DeleteAccountView(
+            uid: uid,
+            perform: { _ in
+                try? await Task.sleep(nanoseconds: .max)
+                return .failure(.unavailable)
+            },
+            signOut: {},
+            initialState: state
+        )
+    }
+}
+
 private struct GalleryHome: View {
     var day: HomeDay
 
@@ -677,6 +724,22 @@ struct ScreenGalleryView: View {
             ProfileView(uid: GalleryFixture.uid, isLinked: true)
         case "profile-noid":
             ProfileView(uid: nil)
+        case "delete-confirm":
+            GalleryDelete(state: .confirm)
+        case "delete-working":
+            GalleryDelete(state: .working)
+        case "delete-done":
+            GalleryDelete(state: .done(AccountDeletionCounts(
+                rooms: 6, conversations: 3, conversationMessages: 41,
+                designSpecs: 2, uploadSessions: 9, files: 214)))
+        case "delete-done-empty":
+            GalleryDelete(state: .done(AccountDeletionCounts()))
+        case "delete-partial":
+            GalleryDelete(state: .partial(AccountDeletionCounts(files: 40)))
+        case "delete-failed":
+            GalleryDelete(state: .failed(.serverError(500)))
+        case "delete-noid":
+            GalleryDelete(state: .confirm, uid: nil)
         case "whysignin":
             WhySignInSheet(roomCount: 3)
         case "whysignin-one":
