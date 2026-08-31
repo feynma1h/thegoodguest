@@ -1,12 +1,12 @@
-# 0272 — the unclaimed signal cannot be tested here, and without depth it is not a pointer
+# 0290 — the unclaimed signal cannot be tested here, and without depth it is not a pointer
 
 **Date:** 2026-08-30
 **Status:** Decided (measured; nothing built)
 
 ## Context
 
-0271 recovered the desk's second leg with a click at (1192, 967) — best coverage
-0.1% → 75.0% — and the pointer was a human eye. 0270 recorded that four
+0289 recovered the desk's second leg with a click at (1192, 967) — best coverage
+0.1% → 75.0% — and the pointer was a human eye. 0288 recorded that four
 automated searches had run past the region. The open question is whether
 anything can point at it automatically, and the target now has coordinates, so
 for the first time it can be scored.
@@ -43,7 +43,7 @@ and no amount of re-running reaches it.
 **The depth-free skeleton was then measured against the located target.** Strip
 the depth and what remains of `unclaimed_in_box` is: pixels inside the object's
 projected measured box that no mask claims. That is check34's search with the
-two changes 0270's findings imply — the `luma > 120` filter out (the leg reads
+two changes 0288's findings imply — the `luma > 120` filter out (the leg reads
 111, which is exactly why that search missed it) and the box no longer grown
 25 cm (the leg is 100% inside the measured box).
 
@@ -98,5 +98,5 @@ cleaner route and it is owed anyway.
 Do NOT re-open the depth-free version on a better connectivity rule, a
 brightness rule, or a component-ranking rule. The signal at 4.47% precision is
 not one good filter away; the filter that works is the one depth pays for. See
-[0273](0273-the-vision-model-points-and-the-frame-is-sideways.md) for the
+[0291](0291-the-vision-model-points-and-the-frame-is-sideways.md) for the
 candidate that does not need depth at all.

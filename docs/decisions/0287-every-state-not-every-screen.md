@@ -1,4 +1,4 @@
-# 0270 — the gallery photographs every state, not every screen
+# 0287 — the gallery photographs every state, not every screen
 
 **Date:** 2026-08-28
 **Status:** Decided

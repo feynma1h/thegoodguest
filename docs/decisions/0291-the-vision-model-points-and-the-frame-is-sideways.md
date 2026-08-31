@@ -1,12 +1,12 @@
-# 0273 — a vision model points at the missing part, and the frame is stored sideways
+# 0291 — a vision model points at the missing part, and the frame is stored sideways
 
 **Date:** 2026-08-30
 **Status:** Decided (measured; nothing built — one GPU check outstanding)
 
 ## Context
 
-0271 recovered the desk's second leg with a click at (1192, 967) and recorded
-that the pointer was a human eye. [0272](0272-the-unclaimed-signal-cannot-be-tested-here.md)
+0289 recovered the desk's second leg with a click at (1192, 967) and recorded
+that the pointer was a human eye. [0290](0290-the-unclaimed-signal-cannot-be-tested-here.md)
 closes the geometric candidate on this capture. The remaining one is a vision
 model asked where an object is incomplete — the only candidate that needs no
 depth, which matters because 0267 found a whole room arriving without any.
@@ -54,7 +54,7 @@ model — as stored, Opus names "table leg at far right" and a left-hand piece i
 
 **1. The pointer works, and the ranked list is load-bearing.** Rank 1 is the
 right leg in 8 of 8. A pointer returning only its top answer misses this target
-every single time. 0271 already established the consuming policy — merge every
+every single time. 0289 already established the consuming policy — merge every
 candidate that kept what it was given — so several points per object is the
 shape that fits.
 
@@ -82,9 +82,9 @@ to hold, and that has never been measured before.
 ## Why
 
 **The reason it works is the reason geometry could not.** Every instrument in
-0261-0272 asks a question about pixels or points. "One leg is showing and a desk
+0261-0269 and 0288-0290 ask a question about pixels or points. "One leg is showing and a desk
 needs two" is a question about structure, and structure is what survives shadow.
-0270 measured the leg at luma 111 against a lit desk at 195-204 and named that as
+0288 measured the leg at luma 111 against a lit desk at 195-204 and named that as
 the reason four colour-based searches ran past it. The model that finds it is not
 looking at brightness.
 
@@ -92,14 +92,14 @@ looking at brightness.
 the piece may be in shadow moved it 0/8 → 1/8 inside and 5/8 → 7/8 within 30 px.
 The identical sentence took Opus 5/8 → 3/8, sending it to the right leg in 3
 trials. **A hint written from an observed failure encodes that failure**, which
-is the same shape as the four guards 0269/0270 had to delete. It is not carried.
+is the same shape as the four guards 0269/0288 had to delete. It is not carried.
 
 ## What would change this decision
 
 **One GPU round settles it, and the prediction is registered here.** Drive the
 `/segment` probe's `--refine-click` at **(1149, 926)** against frame 50, seeded
 from mask index 6 — the longer desk mask, 342,215 px — which is the identical
-call 0271 made with the operator's (1192, 967), one argument changed. That is the centroid of all eight
+call 0289 made with the operator's (1192, 967), one argument changed. That is the centroid of all eight
 rank-2 answers, not of the five that hit — averaging only the hits selects on
 the outcome, and the eight are tight enough that it costs nothing: x 1130-1180,
 y 919-939, every one of them within 20 px of that point, and the point itself
@@ -108,7 +108,7 @@ on 2026-08-30: production is 100% on `perception-obj-00074-var`, and
 `perception-obj-00088-vot` sits at 0% traffic carrying
 `PERCEPTION_SAM3_INTERACTIVE=1` beside the two ruled-on flags.
 
-**Predicted: best second-leg coverage above 50%.** 0271's click reached 75.0%
+**Predicted: best second-leg coverage above 50%.** 0289's click reached 75.0%
 from 43-64 px away, and 0269 measured this loop's sensitivity to click placement
 as the thing that made it delete the near foot, so the two are not
 interchangeable on principle. Below 20% would mean the model finds the right
@@ -119,4 +119,4 @@ structure and not a usable click, and the finding degrades from "a pointer" to
 part that is not a leg. One target, one frame, one capture. The controls rule out
 recitation on this image; they say nothing about whether the model invents parts
 on an object it cannot see well. A second located target is what generalises
-this, and it is the same thing 0272 needs.
+this, and it is the same thing 0290 needs.
