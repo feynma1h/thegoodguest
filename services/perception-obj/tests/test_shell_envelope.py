@@ -37,8 +37,8 @@ from shell_geometry import ShellGeometry, assemble_shell
 _UP = np.array([0.0, 1.0, 0.0])
 
 _CAPTURES = {
-    "247003de": Path("/Users/aubrey/projects/roomstudio/outputs/real-capture-247003de/bundle.pb"),
-    "13bae607": Path("/Users/aubrey/projects/roomstudio/outputs/real-capture-13bae607/bundle.pb"),
+    "247003de": Path("/Users/aubrey/projects/thegoodguest/outputs/real-capture-247003de/bundle.pb"),
+    "13bae607": Path("/Users/aubrey/projects/thegoodguest/outputs/real-capture-13bae607/bundle.pb"),
 }
 
 _needs_real_bundles = pytest.mark.skipif(

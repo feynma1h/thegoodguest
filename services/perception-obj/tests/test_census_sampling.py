@@ -24,7 +24,7 @@ SPIKE_ROOM_JSON = (
     / "captured_room_built.json"
 )
 SPIKE_BUNDLE = Path(
-    "/Users/aubrey/projects/roomstudio/outputs/roomplan-spike-bundle/bundle.pb"
+    "/Users/aubrey/projects/thegoodguest/outputs/roomplan-spike-bundle/bundle.pb"
 )
 
 _needs_spike_bundle = pytest.mark.skipif(

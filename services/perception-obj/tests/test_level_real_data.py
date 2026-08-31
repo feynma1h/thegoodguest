@@ -27,7 +27,7 @@ import numpy as np
 import placement
 import pytest
 
-FIXTURES = Path("/Users/aubrey/projects/roomstudio/web/public/dev-fixtures")
+FIXTURES = Path("/Users/aubrey/projects/thegoodguest/web/public/dev-fixtures")
 
 # label, splat, rotation_xyzw, scale, position — verbatim from the walked
 # manifests; then the tilt the walk saw and the correction expected.

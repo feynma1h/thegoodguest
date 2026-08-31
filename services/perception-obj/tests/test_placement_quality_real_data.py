@@ -45,10 +45,10 @@ import pytest
 import reproject
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "scene_25a14caf" / "frames"
-DEV_FIXTURES_DIR = Path("/Users/aubrey/projects/roomstudio/web/public/dev-fixtures")
+DEV_FIXTURES_DIR = Path("/Users/aubrey/projects/thegoodguest/web/public/dev-fixtures")
 CURTAIN_PLY = DEV_FIXTURES_DIR / "real_obj_009_curtain.ply"
 BED_PLY = DEV_FIXTURES_DIR / "real_obj_003_bed.ply"
-REAL_FRAMES_DIR = Path("/Users/aubrey/projects/roomstudio/outputs/real-capture-25a14caf/frames")
+REAL_FRAMES_DIR = Path("/Users/aubrey/projects/thegoodguest/outputs/real-capture-25a14caf/frames")
 
 _needs_real_splats = pytest.mark.skipif(
     not (CURTAIN_PLY.exists() and BED_PLY.exists()),

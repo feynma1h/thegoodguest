@@ -1452,7 +1452,7 @@ DECLARED constraints (which is why CI splits the jobs), not about what actually
 runs — they do share one here. This also explains why the numpy-1.26
 Accelerate failure below does not reproduce locally: nothing local is on 1.26.
 A worktree has no `.venv` of its own; lanes use the main tree's interpreter by
-absolute path (`/Users/aubrey/projects/roomstudio/.venv/bin/python`), which
+absolute path (`/Users/aubrey/projects/thegoodguest/.venv/bin/python`), which
 still imports the worktree's own modules. Use it rather than the system
 `python3`, which has no PIL: four perception test modules import it at
 collection time, so a system-python run reports 4 collection ERRORS that look
@@ -1460,7 +1460,7 @@ like a broken branch and are not.
 
 **A worktree's `packages/` edits are INVISIBLE to the shared `.venv`**, which
 carries the MAIN tree installed editable — so `import thegoodguest_schemas` in a
-worktree resolves to `/Users/aubrey/projects/roomstudio/packages/schemas/...`,
+worktree resolves to `/Users/aubrey/projects/thegoodguest/packages/schemas/...`,
 and a lane that adds a function there gets `ImportError` from its own service
 code while its own `packages/schemas` tests pass (that suite's conftest inserts
 the local path). Prefix the run with
@@ -1478,7 +1478,7 @@ bites `services/*` and root runs rather than `packages/*` ones.
   branch and were the shared `.venv` resolving to MAIN.
 
 **`outputs/room-quality/roomlib.py` hardcodes the MAIN tree at `sys.path[0]`**
-(`REPO = Path("/Users/aubrey/projects/roomstudio")`). A worktree session that
+(`REPO = Path("/Users/aubrey/projects/thegoodguest")`). A worktree session that
 imports it loads MAIN's perception modules, not its own — so a trust gate can
 silently certify shipped code against itself, and test collection in a worktree
 depends on the main tree's state. Measured by lane E, 2026-08-14. Repoint REPO

@@ -68,7 +68,7 @@ built around it. Use the Cloud Resource Manager REST API directly via curl inste
 # roles/eventarc.admin, roles/datastore.indexAdmin).
 # Uses the Cloud Resource Manager v1 REST API — gcloud has no equivalent subcommand.
 MISSING=$(curl -s -X POST \
-  "https://cloudresourcemanager.googleapis.com/v1/projects/roomstudio:testIamPermissions" \
+  "https://cloudresourcemanager.googleapis.com/v1/projects/thegoodguest:testIamPermissions" \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   -H "Content-Type: application/json" \
   -d '{
@@ -393,7 +393,7 @@ an error body, re-run; the TTL REST call is idempotent.
 Verify the TTL (30–60 seconds after setting):
 ```bash
 curl -s \
-  "https://firestore.googleapis.com/v1/projects/roomstudio/databases/(default)/collectionGroups/upload_sessions/fields/created_at" \
+  "https://firestore.googleapis.com/v1/projects/thegoodguest/databases/(default)/collectionGroups/upload_sessions/fields/created_at" \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ttlConfig','MISSING'))"
 # Expect: {} (an empty dict means TTL is enabled on this field)
@@ -790,7 +790,7 @@ Wait 60 seconds. Query Firestore:
 ```bash
 BUNDLE_ID="<bundle_id from happy-path run>"
 curl -s \
-  "https://firestore.googleapis.com/v1/projects/roomstudio/databases/(default)/documents/upload_sessions/${BUNDLE_ID}" \
+  "https://firestore.googleapis.com/v1/projects/thegoodguest/databases/(default)/documents/upload_sessions/${BUNDLE_ID}" \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print('EXISTS' if 'fields' in d else 'MISSING')"
 # Expect: EXISTS
