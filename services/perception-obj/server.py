@@ -44,7 +44,7 @@ from fastapi.responses import JSONResponse
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
 
-# ProcessRequest must be imported before any @app.post("/process") registration.
+# Request models must be imported before the @app.post registrations that use them.
 # FastAPI resolves type annotations at decoration time; if ProcessRequest is not
 # in the module namespace then, FastAPI silently treats `req` as a query param
 # instead of a body model, producing 422 on every Cloud Tasks delivery.
@@ -54,7 +54,9 @@ from process_receiver import (  # noqa: E402
     DEFAULT_OBJECT_PROMPT,
     ProcessRequest,
 )
+from segment_receiver import SegmentRequest  # noqa: E402  (same 0010 rule for /segment)
 from shell_receiver import ShellRequest  # noqa: E402  (same 0010 rule for /shell)
+from track_receiver import TrackRequest  # noqa: E402  (same 0010 rule for /track)
 
 # Model classes are NOT imported at module level. Importing models.sam3 or
 # models.sam3d would immediately run the SAM 3 / SAM 3D CUDA initialisation
@@ -109,12 +111,16 @@ COMPRESS_REQUEST_BUDGET_SECONDS = float(
 
 _sam3 = None  # SAM3Model instance or None
 _sam3d = None  # SAM3DModel instance or None
+_sam3_video = None  # SAM3VideoModel instance or None (SAM 3.1 tracker, /track only)
 _sam3_error: str | None = None
 _sam3d_error: str | None = None
+_sam3_video_error: str | None = None
 _sam3_loading: bool = False
 _sam3d_loading: bool = False
+_sam3_video_loading: bool = False
 _sam3_lock = threading.Lock()
 _sam3d_lock = threading.Lock()
+_sam3_video_lock = threading.Lock()
 
 
 def get_sam3():
@@ -190,6 +196,52 @@ def get_sam3d():
     return _sam3d
 
 
+def get_sam3_video():
+    """Return the SAM3VideoModel singleton (SAM 3.1 tracker), loading on first call.
+
+    Only /track uses this. It is a SEPARATE model from get_sam3(): SAM 3.1's
+    single checkpoint is `sam3.1_multiplex.pt` and carries the tracker plus its
+    own detector, while `build_sam3_image_model` still loads `facebook/sam3`
+    weights. Nothing else in the service should reach for it, and /process must
+    not — the two would sit on the L4 together, and 0228 measured the headroom
+    that leaves.
+
+    Same double-checked locking and cached-failure contract as get_sam3().
+    """
+    global _sam3_video, _sam3_video_error, _sam3_video_loading
+    if _sam3_video_error is not None:
+        raise HTTPException(
+            status_code=500, detail=f"SAM 3.1 video failed to load: {_sam3_video_error}"
+        )
+    if _sam3_video is not None:
+        return _sam3_video
+    with _sam3_video_lock:
+        if _sam3_video is not None:
+            return _sam3_video
+        if _sam3_video_error is not None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"SAM 3.1 video failed to load: {_sam3_video_error}",
+            )
+        _sam3_video_loading = True
+        try:
+            from models.sam3_video import SAM3VideoModel  # noqa: PLC0415
+            logger.info("[model] Loading SAM 3.1 video tracker on %s...", DEVICE)
+            t = time.time()
+            _sam3_video = SAM3VideoModel()
+            logger.info("[model] SAM 3.1 video loaded in %.1fs", time.time() - t)
+        except Exception as e:
+            _sam3_video_error = f"{type(e).__name__}: {e}"
+            logger.error("[model] SAM 3.1 video FAILED: %s", _sam3_video_error)
+            raise HTTPException(
+                status_code=500,
+                detail=f"SAM 3.1 video failed to load: {_sam3_video_error}",
+            ) from e
+        finally:
+            _sam3_video_loading = False
+    return _sam3_video
+
+
 # -----------------------------------------------------------------------------
 # FastAPI app
 # -----------------------------------------------------------------------------
@@ -202,6 +254,8 @@ _fcm_notifier = None
 _oidc_verifier = None
 _shell_oidc_verifier = None
 _compress_oidc_verifier = None
+_segment_oidc_verifier = None
+_track_oidc_verifier = None
 
 
 def _get_receiver_repo():
@@ -240,6 +294,39 @@ def _get_oidc_verifier():
         # If CLOUD_TASKS_INVOKER_SA is unset (local dev), verifier stays None
         # and the endpoint skips auth (see handle_process oidc_verifier=None path).
     return _oidc_verifier
+
+
+def _get_segment_oidc_verifier():
+    """Separate verifier for /segment: same invoker SA, audience
+    RECEIVER_URL + "/segment". Reusing /process's verifier would let a
+    /process token replay here, which is exactly what per-route audiences
+    exist to prevent."""
+    global _segment_oidc_verifier
+    if _segment_oidc_verifier is None:
+        from oidc import OIDCVerifier
+        from process_receiver import CLOUD_TASKS_INVOKER_SA, RECEIVER_URL
+        if CLOUD_TASKS_INVOKER_SA:
+            _segment_oidc_verifier = OIDCVerifier(
+                audience=RECEIVER_URL + "/segment",
+                allowed_email=CLOUD_TASKS_INVOKER_SA,
+            )
+    return _segment_oidc_verifier
+
+
+def _get_track_oidc_verifier():
+    """Separate verifier for /track: same invoker SA, audience
+    RECEIVER_URL + "/track". Per-route audiences are the whole point of
+    oidc.py — a /segment or /process token must not replay here (0260)."""
+    global _track_oidc_verifier
+    if _track_oidc_verifier is None:
+        from oidc import OIDCVerifier
+        from process_receiver import CLOUD_TASKS_INVOKER_SA, RECEIVER_URL
+        if CLOUD_TASKS_INVOKER_SA:
+            _track_oidc_verifier = OIDCVerifier(
+                audience=RECEIVER_URL + "/track",
+                allowed_email=CLOUD_TASKS_INVOKER_SA,
+            )
+    return _track_oidc_verifier
 
 
 def _get_shell_oidc_verifier():
@@ -313,15 +400,26 @@ def ready() -> JSONResponse:
 
     sam3_status = _model_status(_sam3, _sam3_error, _sam3_loading)
     sam3d_status = _model_status(_sam3d, _sam3d_error, _sam3d_loading)
+    # Reported but NOT part of the 200/503 decision. The SAM 3.1 tracker is
+    # loaded only by /track, so a container that has served the pipeline should
+    # read not_loaded here, and a /track container should read not_loaded for
+    # sam3d. Folding it into readiness would make one route's cold start look
+    # like the service being unhealthy.
+    sam3_video_status = _model_status(
+        _sam3_video, _sam3_video_error, _sam3_video_loading
+    )
 
     body: dict[str, Any] = {
         "sam3": sam3_status,
         "sam3d": sam3d_status,
+        "sam3_video": sam3_video_status,
     }
     if _sam3_error:
         body["sam3_error"] = _sam3_error
     if _sam3d_error:
         body["sam3d_error"] = _sam3d_error
+    if _sam3_video_error:
+        body["sam3_video_error"] = _sam3_video_error
 
     if sam3_status == "failed" or sam3d_status == "failed":
         return JSONResponse(body, status_code=500)
@@ -423,6 +521,87 @@ async def shell(
     )
 
 
+
+
+@app.post(
+    "/segment",
+    summary="Segmentation-only probe: SAM 3 on named frames, no reconstruction",
+    responses={
+        200: {"description": "Segmented (per-frame errors reported in the body)"},
+        401: {"description": "OIDC token missing or invalid"},
+        422: {"description": "Malformed payload"},
+        503: {"description": "SAM 3 not yet loaded; retry"},
+    },
+)
+async def segment(
+    request: Request,
+    req: SegmentRequest,
+) -> JSONResponse:
+    """Run pass 1 only on an explicit frame list and return what SAM 3 saw.
+
+    Exists because the cheap half of "would another frame reconstruct better"
+    is answerable without reconstructing: the mask IS SAM 3D's input, so a
+    truncated mask settles it for ~4s of GPU instead of ~25s an object.
+    /process cannot answer it — its payload names no frames and it always
+    reconstructs.
+
+    Loads SAM 3 ONLY. SAM 3D is never touched here, which also skips its
+    ~124s cold load. Writes exclusively under scenes/{id}/segment_probe/ and
+    never to Firestore, so a probe cannot become pipeline state or regress a
+    ready room (see segment_receiver's module docstring).
+    """
+    from segment_receiver import handle_segment
+
+    sam3_model = await asyncio.to_thread(get_sam3)
+
+    return await handle_segment(
+        request,
+        req,
+        oidc_verifier=_get_segment_oidc_verifier(),
+        outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
+        sam3_model=sam3_model,
+        object_prompt=DEFAULT_OBJECT_PROMPT,
+    )
+
+
+@app.post(
+    "/track",
+    summary="Tracking probe: SAM 3.1 across a capture, producing an object->frame map",
+    responses={
+        200: {"description": "Tracked (per-concept errors reported in the body)"},
+        401: {"description": "OIDC token missing or invalid"},
+        422: {"description": "Malformed payload, or nothing to track"},
+        503: {"description": "SAM 3.1 not yet loaded; retry"},
+    },
+)
+async def track(
+    request: Request,
+    req: TrackRequest,
+) -> JSONResponse:
+    """Track each named concept across the capture and write the object->frame map.
+
+    /segment answers "what is in THIS frame" and cannot be made to answer "which
+    frames contain this object": the image detector returns instances as rows of
+    a tensor with no identity between calls. The identity lives in SAM 3.1's
+    video tracker, which is a different model with a different checkpoint
+    (`sam3.1_multiplex.pt`), so this route loads its own.
+
+    Loads the SAM 3.1 tracker ONLY. SAM 3 and SAM 3D are never touched here.
+    Writes exclusively under scenes/{id}/track_probe/ and never to Firestore, so
+    a probe cannot become pipeline state or regress a ready room — the same two
+    invariants /segment carries, for the reasons in 0260.
+    """
+    from track_receiver import handle_track
+
+    sam3_video_model = await asyncio.to_thread(get_sam3_video)
+
+    return await handle_track(
+        request,
+        req,
+        oidc_verifier=_get_track_oidc_verifier(),
+        outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
+        sam3_video_model=sam3_video_model,
+    )
 
 
 @app.post(

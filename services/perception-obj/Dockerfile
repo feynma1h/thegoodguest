@@ -51,7 +51,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # --- Clone SAM 3D Objects so we have the env file ---
-RUN git clone --depth 1 https://github.com/facebookresearch/sam-3d-objects.git /opt/sam3d
+# PINNED. An unpinned --depth 1 clone means two builds of identical source can
+# install different model code, with nothing recording which. Fetch-by-SHA keeps
+# the clone shallow. This is also the form the shared :buildcache is written
+# from — an unpinned line here misses at layer 4 and rebuilds the mamba env and
+# every sam3d pip layer below it, which is a ~50 minute build instead of ~8.
+RUN git init /opt/sam3d \
+    && cd /opt/sam3d \
+    && git remote add origin https://github.com/facebookresearch/sam-3d-objects.git \
+    && git fetch --depth 1 origin f91db411c50efee93d8db7aeb323885650f6f722 \
+    && git checkout FETCH_HEAD
 
 # --- Create the conda env from Meta's environments/default.yml ---
 # This installs the CUDA toolkit (12.1), gcc 12.4, Python 3.11.0, and all the
@@ -161,8 +170,40 @@ RUN sam3d_dir="$(cat /tmp/sam3d_snapshot_path.txt)" \
 
 # --- SAM 3 (segmentation) ---
 # Installed last so it picks up the same torch/cuda environment.
-RUN git clone --depth 1 https://github.com/facebookresearch/sam3.git /opt/sam3-repo \
-    && cd /opt/sam3-repo && pip install -e .
+# PINNED — see upstream/README.md. SAM 3.1 lives on this same `main` and needs
+# DIFFERENT checkpoints from the `facebook/sam3` weights downloaded above, so an
+# unpinned clone could pair 3.1 code with 3.0 weights.
+RUN git init /opt/sam3-repo \
+    && cd /opt/sam3-repo \
+    && git remote add origin https://github.com/facebookresearch/sam3.git \
+    && git fetch --depth 1 origin 8f0b7f4d4e7eda2ed606ebde6702c93359ad01da \
+    && git checkout FETCH_HEAD \
+    && pip install -e .
+
+# --- SAM 3.1 weights (the video tracker) ---
+# SAM 3.1 is a release OF THE TRACKER, not a newer detector: its only checkpoint
+# is `sam3.1_multiplex.pt` and `build_sam3_image_model` still hardcodes
+# `download_ckpt_from_hf(version="sam3")`. So the two checkpoint sets coexist —
+# /process and /segment keep loading `facebook/sam3`, and /track loads this one.
+# Read at 8f0b7f4d in `sam3/model_builder.py`; `facebook/sam3.1` is a separate
+# gated repo, so the token needs access to BOTH.
+#
+# Its own layer, below the expensive ones and below the pinned clone, so that
+# adding it does not re-download the ~7 GB of SAM 3 and SAM 3D weights above.
+# Downloaded at build time deliberately: this service scales to zero, and
+# pulling 3.5 GB on a cold start would spend the request budget before the
+# first frame is read.
+RUN --mount=type=secret,id=hf_token \
+    HF_TOKEN="$(cat /run/secrets/hf_token)" \
+    python -c "\
+import os; \
+from huggingface_hub import login, snapshot_download; \
+login(token=os.environ['HF_TOKEN']); \
+print('Downloading SAM 3.1 multiplex weights...', flush=True); \
+d = snapshot_download('facebook/sam3.1', cache_dir='/models'); \
+print('SAM 3.1 snapshot at:', d, flush=True)" \
+    && test -n "$(find /models -name 'sam3.1_multiplex.pt' -print -quit)" \
+    && echo "sam3.1_multiplex.pt verified"
 
 # ── App-level deps: Layer A — google-cloud-* (brings in proto-plus → protobuf 6.x) ──
 # Install all Google Cloud and Firebase packages together so pip resolves them
@@ -203,6 +244,7 @@ COPY services/perception-obj/fusion.py /app/fusion.py
 COPY services/perception-obj/reproject.py /app/reproject.py
 COPY services/perception-obj/sampling.py /app/sampling.py
 COPY services/perception-obj/census_sampling.py /app/census_sampling.py
+COPY services/perception-obj/track_selection.py /app/track_selection.py
 COPY services/perception-obj/budget.py /app/budget.py
 COPY services/perception-obj/room_planes.py /app/room_planes.py
 COPY services/perception-obj/roomplan_room.py /app/roomplan_room.py
@@ -218,6 +260,8 @@ COPY services/perception-obj/shell_receiver.py /app/shell_receiver.py
 COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 COPY services/perception-obj/compress_receiver.py /app/compress_receiver.py
 COPY services/perception-obj/compress_enqueue.py /app/compress_enqueue.py
+COPY services/perception-obj/segment_receiver.py /app/segment_receiver.py
+COPY services/perception-obj/track_receiver.py /app/track_receiver.py
 
 # Deferred-import smoke: every module below is imported lazily inside
 # /process, /shell or /compress, so a missing COPY above passes /health and
@@ -239,10 +283,12 @@ COPY services/perception-obj/compress_enqueue.py /app/compress_enqueue.py
 # the 0069 fallback rule would silently null every family forever, which
 # the build must catch instead.
 RUN python -c "import placement, fusion, reproject, sampling, census_sampling, \
+track_selection, \
 budget, room_planes, roomplan_room, contact_priors, box_placement, privacy, \
 mask_refine, object_color, oidc, receiver_repo, fcm, process_receiver, \
 shell_geometry, shell_envelope, shell_observation, shell_material, \
-shell_receiver, shell_enqueue, compress_receiver, compress_enqueue, anthropic"
+shell_receiver, shell_enqueue, compress_receiver, compress_enqueue, \
+segment_receiver, track_receiver, anthropic"
 
 # ── The SPZ encoder: Node + Spark, for the /compress stage ───────────────────
 # The compressed splat tier (decisions 0125/0126) must be written by Spark's

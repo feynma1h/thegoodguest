@@ -16,8 +16,11 @@
 # Prerequisites (see infra/secrets.md for details):
 #   1. HF token saved as a GCP secret named 'hf-token'
 #   2. Cloud Build's runtime SA (compute default) granted Secret Manager Accessor
-#   3. Gated access granted on huggingface.co for facebook/sam3 and
-#      facebook/sam-3d-objects (only matters for the obj service)
+#   3. Gated access granted on huggingface.co for facebook/sam3,
+#      facebook/sam3.1 and facebook/sam-3d-objects (only matters for the obj
+#      service). facebook/sam3.1 is a SEPARATE gated repo holding the video
+#      tracker's checkpoint, which /track loads; access to facebook/sam3 does
+#      not imply access to it.
 #   4. Cloud Run Admin API, Artifact Registry API, Cloud Build API enabled
 
 set -euo pipefail
