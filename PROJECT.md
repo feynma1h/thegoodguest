@@ -179,8 +179,10 @@ state machine, the scene read/write repositories, `UploadSessionRepository` +
 test fixtures.
 
 Suites, re-measured on `segment-quality` WITHOUT `web/public/dev-fixtures`
-(worktree, 2026-08-30): schemas **126** (`pytest packages/schemas/tests`); root
-**831 + 102** by bare `pytest` (which uses `testpaths` in `pyproject.toml`);
+(re-measured on `main` 2026-08-31, after the iOS/brand, perception and
+segment-quality lane merges, with `web/public/dev-fixtures` STAGED — perception
+**1237 + 2**, web **276**): schemas **126** (`pytest packages/schemas/tests`);
+root **919 + 27** by bare `pytest` (which uses `testpaths` in `pyproject.toml`);
 root **849 + 102** by `pytest packages services tools
 --ignore=services/perception-obj`, which collects 18 tests `testpaths` does
 not. **Those two commands are both called "root" in this repo and differ by
