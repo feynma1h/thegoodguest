@@ -66,14 +66,6 @@ def _fetch(url: str, timeout: int = 30) -> str:
 
 # ── Gate 1 ───────────────────────────────────────────────────────────────────
 
-def check_privacy_manifest():
-    """G1-02 — PrivacyInfo.xcprivacy must exist somewhere under ios/."""
-    hits = list((REPO / "ios").rglob("PrivacyInfo.xcprivacy"))
-    if hits:
-        return True, f"present: {hits[0].relative_to(REPO)}"
-    return False, "absent — App Store submission requires it (draft in labels §9)"
-
-
 def check_web_base_url():
     """G1-05 — NetworkConfig.webBaseURL must stop being nil."""
     src = _read("ios/TheGoodGuest/TheGoodGuest/Networking/NetworkConfig.swift")
@@ -224,7 +216,6 @@ check_unrestricted_api_key.tag = NET
 # ── registry ─────────────────────────────────────────────────────────────────
 
 CHECKS = {
-    "G1-02": check_privacy_manifest,
     "G1-05": check_web_base_url,
     "G2-01": check_live_site_name,
     "G2-05": check_ios_fcm_registration,

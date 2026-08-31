@@ -156,7 +156,7 @@ Suites, measured on `main` 2026-08-31 after the three lane merges and after
 so these are the fixtures-ABSENT figures, and they are the only ones that
 describe this tree: perception **1205 + 34**, web **287**, schemas **126**
 (`pytest packages/schemas/tests`);
-root **849 + 102** by bare `pytest` (which uses `testpaths` in `pyproject.toml`);
+root **862 + 102** by bare `pytest` (which uses `testpaths` in `pyproject.toml`) — measured 2026-09-01 in TWO parts, because a `.venv`-less tree runs system python and `tools/test_gen_mark.py` needs Pillow at collection: **836 + 102** for everything else and **26** for that module under an interpreter that has PIL;
 root **867 + 102** by `pytest packages services tools
 --ignore=services/perception-obj`, which collects 18 tests `testpaths` does
 not. **Those two commands are both called "root" in this repo and differ by
@@ -1051,12 +1051,17 @@ re-argued here.
   the support URL are simply unstarted, and the support URL is expensive to change
   once filed. The privacy nutrition labels are FILLED IN and TRACED at
   `docs/product/privacy-nutrition-labels.md` against the live system, with eight
-  policy/label disagreements flagged. Four things block the FILING, all in its
-  §10 — including a **`PrivacyInfo.xcprivacy` landed in the app**, which does not
-  exist and is required for submission. (0242) **Those four are the labels'
-  blockers, not the submission's**: read them beside punchlist Gate 1, which is
-  the authority for the whole set and carries at least one more that no §10
-  covers — the missing account-deletion route above.
+  policy/label disagreements flagged. **The `PrivacyInfo.xcprivacy` now ships**
+  and is verified in the built bundle rather than the repo; its reason codes are
+  NOT the ones §9 originally drafted — `54BD.1` and `DDA9.1` replace `CA92.1`
+  and `C617.1`, both of which lint and parse and are refused at upload, and
+  SystemBootTime carries two codes because both its uses are real.
+  `tools/test_privacy_manifest.py` cross-checks the manifest against the source
+  so an added API call cannot silently make it incomplete. (0242) **Three
+  blockers remain on the FILING, all in §10 and all rulings** — vendor terms,
+  the two judgment calls, the server-log question — and they are the labels'
+  blockers rather than the submission's: punchlist Gate 1 is the authority for
+  the whole set.
 
 ### Deliberately not doing
 

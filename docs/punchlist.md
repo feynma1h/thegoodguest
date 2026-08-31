@@ -38,22 +38,14 @@ verified 2026-08-25, so most of this is newly unblocked rather than newly found.
 TestFlight needs only an app record. Submission needs the rest of Gate 1.
 **Check:** manual — operator, in App Store Connect.
 
-### G1-02 · `PrivacyInfo.xcprivacy` does not exist
-**State:** open · **Blocks:** App Store submission
-It ships inside the bundle and submission requires it; the nutrition labels alone
-are not sufficient. A complete draft plist is in
-`docs/product/privacy-nutrition-labels.md` §9, so this is transcription and an
-Xcode project reference, not design.
-**Check:** automated — file must exist under `ios/`.
-
 ### G1-03 · The privacy nutrition labels cannot be filed
 **State:** open · **Blocks:** App Store submission
-Four blockers, listed in `privacy-nutrition-labels.md` §10: confirm both model
+Three blockers, listed in `privacy-nutrition-labels.md` §10: confirm both model
 vendors' retention/training terms (open since 2026-08-08, and the one claim the
 Privacy Policy makes on someone else's behalf), rule the two judgment calls
-(conversation-surface scope, profile photo URL), rule the server-log question,
-and land G1-02.
-**Check:** manual — operator; three of the four are rulings.
+(conversation-surface scope, profile photo URL), and rule the server-log
+question. The fourth — landing the privacy manifest — is done and shipping.
+**Check:** manual — operator; all three are rulings.
 
 ### G1-04 · App Store collateral: screenshots, support URL, age rating
 **State:** open · **Blocks:** App Store submission
