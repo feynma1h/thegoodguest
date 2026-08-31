@@ -982,11 +982,14 @@ re-argued here.
 - **The hero A/B is open** — the operator's taste call. Variant (b) cannot be seen
   on any deployed origin by design: a real object splat is a possession, so its
   files are gitignored and hosting-ignored. (0122)
-- **The bridge QR encodes nothing, and its blocker is now gone.** It was waiting
-  on there being a room URL to encode; `NetworkConfig.webRoomURL` is one, so the
-  caption saying it leads nowhere is the only thing still true about it. It was
-  never blocked on the rooms fetch — the desk names the room in the link it hands
-  over. (0218, punchlist G1-08)
+- **The bridge QR encodes nothing, and its blocker is the append path.** The
+  direction is WEB → PHONE (0218): the desk shows a code and the phone opens
+  into a targeted rescan of the room the desk named, so `webRoomURL` — which
+  goes the other way — does not help. It needs the associated-domains
+  entitlement, which the doorway handoff never did, an AASA that claims this app
+  (hosting serves an empty default today), and above all **an append path, which
+  does not exist**. It was never blocked on the rooms fetch. (0218, punchlist
+  G1-08)
 - **`RSSound` is wired at three call sites with no cue files** — the app is
   silent, and the web has no sound at all. **Branded fonts are per platform**: the
   web loads real Google faces via `next/font/google`; **iOS bundles no font files
@@ -1146,8 +1149,15 @@ ever done or ruled, delete it — do not annotate it.
   an app CLAIMS, which this is not. "Pending associated-domains" was the wrong
   reading of why the link was missing; what was actually missing was a durable
   web origin, and `thegoodguest.web.app` is one.
-- **The `.recoverable` re-upload and add-more resume-with-progress** are built;
-  the remaining iOS activation follow-up is the real web-handoff link.
+- **The `.recoverable` re-upload is built. "Add more" is NOT** — this line
+  claimed both and the code refuses the second: `CaptureManager.startCapture()`
+  mints a fresh `bundleId` and clears frames, anchors and the output dir, the
+  proto has no append concept, and api-public refuses a second claim on a
+  bundle_id. `ReviewView`'s docstring says so directly and names its own
+  secondary action `rescan` rather than "add more" to avoid implying otherwise.
+  **The web-handoff link this line called the remaining follow-up is done**; the
+  append path is what is actually outstanding, and the QR bridge is behind it
+  (punchlist G1-08).
 
 ### Standing facts that look like bugs
 
