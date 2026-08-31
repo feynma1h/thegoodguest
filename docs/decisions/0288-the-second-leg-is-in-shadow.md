@@ -1,4 +1,4 @@
-# 0270 — the second leg is in the frame, in shadow, five pixels away
+# 0288 — the second leg is in the frame, in shadow, five pixels away
 
 **Date:** 2026-08-29
 **Status:** Decided (measured; the operator located it)

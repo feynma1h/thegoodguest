@@ -1,4 +1,4 @@
-# 0274 — collapsing a nested pair must not re-rank it against everything else
+# 0292 — collapsing a nested pair must not re-rank it against everything else
 
 **Date:** 2026-08-30
 **Status:** Decided and built, behind `PERCEPTION_KEEP_LONGER_MASK` (default off)

@@ -1,11 +1,11 @@
-# 0271 — a click on the missing part, and the luma guard that refuses it
+# 0289 — a click on the missing part, and the luma guard that refuses it
 
 **Date:** 2026-08-29
 **Status:** Decided (measured; nothing ships)
 
 ## Context
 
-0269 recorded the click loop deleting the near foot. 0270 located the object of
+0269 recorded the click loop deleting the near foot. 0288 located the object of
 the original question — the desk's SECOND leg, in shadow, five pixels from the
 shipped mask, covered by 0.1% of the twelve candidates that run produced.
 

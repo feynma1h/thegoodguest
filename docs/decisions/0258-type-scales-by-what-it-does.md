@@ -5,7 +5,7 @@
 
 ## Context
 
-Photographing every state at accessibility XXXL (0270) made a complaint
+Photographing every state at accessibility XXXL (0287) made a complaint
 possible that had not been checkable before: the accessibility screens lose
 the app's character and read as bulky.
 
