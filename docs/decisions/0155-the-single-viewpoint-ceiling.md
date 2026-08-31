@@ -1,7 +1,7 @@
 # 0155 — the single-viewpoint ceiling, and why guidance cannot pass it
 
 **Date:** 2026-08-13
-**Status:** Decided — settles the capture-guidance question 0150 opened
+**Status:** Refuted — settles the capture-guidance question 0150 opened
 
 ## Context
 

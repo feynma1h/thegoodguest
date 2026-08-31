@@ -1,7 +1,7 @@
 # 0197 — the uncropped photograph is not a better photograph
 
 **Date:** 2026-08-20
-**Status:** Decided
+**Status:** Refuted
 
 ## Context
 

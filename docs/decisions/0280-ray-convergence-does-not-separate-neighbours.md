@@ -1,7 +1,7 @@
 # 0280 — ray convergence does not separate a fragment from its neighbour
 
 **Date:** 2026-08-30
-**Status:** Decided (measured; the obvious merge was tried and is insufficient)
+**Status:** Refuted — measured; the obvious merge was tried and is insufficient
 
 ## Context
 

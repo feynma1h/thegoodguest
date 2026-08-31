@@ -1,7 +1,7 @@
 # 0160 — the per-box view budget is not the constraint
 
 **Date:** 2026-08-14
-**Status:** Decided — `PERCEPTION_PLAN_VIEWS_PER_BOX` stays at 2
+**Status:** Refuted — `PERCEPTION_PLAN_VIEWS_PER_BOX` stays at 2
 
 ## Context
 

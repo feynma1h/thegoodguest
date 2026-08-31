@@ -1,8 +1,8 @@
 # Decision notes
 
-276 notes. **249 of them are `Decided`** -- those govern code that
+276 notes. **233 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
-other 27 record decisions that were carried out, replaced, or
+other 43 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
 because they constrain you.
 
@@ -17,21 +17,34 @@ The status vocabulary and the numbering rule live in
 
 | status | count | means |
 |---|---|---|
-| `Refuted` | 3 | a measured negative -- read before proposing it again |
+| `Refuted` | 16 | a measured negative -- read before proposing it again |
 | `Superseded` | 7 | replaced by a later note |
-| `Amended` | 2 | partly corrected by a later note |
+| `Amended` | 5 | partly corrected by a later note |
 | `Spent` | 15 | carried out; nothing left to comply with |
-| `Decided` | 249 | governs code that ships today |
+| `Decided` | 233 | governs code that ships today |
 
-## Refuted (3)
+## Refuted (16)
 
 *A measured negative -- read before proposing it again.*
 
 | # | title | status |
 |---|---|---|
+| [0075](0075-lidar-adjudication-knobs-not-the-defect.md) | LiDAR adjudication: merge knobs measured correct; the defects are admission, closure, and instrument variance | Refuted |
 | [0091](0091-mirror-as-mirror-probe.md) | Mirror-as-mirror: the depth-trust gate is not a mirror detector | Refuted |
+| [0150](0150-capture-coverage-feedback-is-not-the-fix.md) | capture-coverage feedback is not the fix for truncation | Refuted |
 | [0151](0151-splat-to-splat-registration-is-ajar-not-open.md) | splat-to-splat registration is ajar, not open | Refuted |
+| [0155](0155-the-single-viewpoint-ceiling.md) | the single-viewpoint ceiling, and why guidance cannot pass it | Refuted |
+| [0156](0156-the-vision-model-cannot-settle-the-facing-either.md) | the vision model cannot settle the facing either | Refuted |
+| [0160](0160-the-per-box-view-budget-is-not-the-constraint.md) | the per-box view budget is not the constraint | Refuted |
+| [0162](0162-the-better-frame-did-not-reconstruct-better.md) | the better frame did not reconstruct better | Refuted |
+| [0165](0165-what-the-missing-surface-is-missing-to.md) | what the missing surface is missing to | Refuted |
+| [0166](0166-two-reconstructions-are-two-different-objects.md) | two reconstructions of one object are two different objects | Refuted |
 | [0181](0181-how-wrong-the-guessed-depth-is.md) | How wrong the guessed depth is, measured on rooms we already argue about | Refuted |
+| [0197](0197-the-uncropped-photograph-is-not-a-better-photograph.md) | the uncropped photograph is not a better photograph | Refuted |
+| [0232](0232-the-floor-tolerance-is-sized-for-the-floor.md) | the floor tolerance is sized for the floor | Refuted |
+| [0268](0268-the-leg-is-not-under-the-threshold.md) | the leg is not hiding under the 0.5 threshold | Refuted |
+| [0280](0280-ray-convergence-does-not-separate-neighbours.md) | ray convergence does not separate a fragment from its neighbour | Refuted |
+| [0284](0284-appearance-calibrates-well-and-fails-in-the-room.md) | appearance separates the objects that have boxes, and merges the ones that do not | Refuted |
 
 ## Superseded (7)
 
@@ -47,14 +60,17 @@ The status vocabulary and the numbering rule live in
 | [0263](0263-precision-is-a-gate-not-a-ranking.md) | precision against the box is a gate, not a ranking | Superseded by 0266 |
 | [0265](0265-five-instruments-one-unrun-experiment.md) | five instruments for one choice, and the experiment none of them needs | Superseded by 0266 |
 
-## Amended (2)
+## Amended (5)
 
 *Partly corrected by a later note.*
 
 | # | title | status |
 |---|---|---|
 | [0099](0099-ci-scope-and-ios-posture.md) | CI scope, and why iOS CI is manual-only | Amended by measurement |
+| [0146](0146-view-selection-does-not-predict-reconstruction-quality.md) | view selection does not predict reconstruction quality | Amended by 0153 |
+| [0152](0152-every-view-is-a-partial-view.md) | every view is a partial view, and that is the regime | Amended by 0153 |
 | [0173](0173-the-guest-cannot-tell-which-room-its-facts-describe.md) | the guest reads its own re-derived facts as stale, and says so | Amended by 0174 |
+| [0259](0259-disqualify-a-frame-do-not-rank-it.md) | disqualify a frame, do not rank it | Amended by 0270 |
 
 ## Spent (15)
 
@@ -78,7 +94,7 @@ The status vocabulary and the numbering rule live in
 | [0182](0182-perception-obj-cannot-currently-be-rebuilt.md) | perception-obj cannot currently be rebuilt | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (249)
+## Decided (233)
 
 | # | title | status |
 |---|---|---|
@@ -146,7 +162,6 @@ The status vocabulary and the numbering rule live in
 | [0072](0072-ios-design-lidar-only-pivot.md) | iOS app design locked; LiDAR-only client pivot | Decided |
 | [0073](0073-launch-restore-scope.md) | Relaunch recovery is launch-scoped and acknowledgement-aware | Decided |
 | [0074](0074-icloud-backup-migration-phantom-room.md) | iCloud-backup migration: what carries over, and the phantom-room row | Decided |
-| [0075](0075-lidar-adjudication-knobs-not-the-defect.md) | LiDAR adjudication: merge knobs measured correct; the defects are admission, closure, and instrument variance | Decided |
 | [0076](0076-roomplan-corun-spike.md) | RoomPlan co-run spike: verdicts (board 3 → board 7) | Decided |
 | [0077](0077-roomplan-integration-design.md) | RoomPlan integration: CapturedRoom as room + object skeleton, JSON verbatim on the wire, boxes carry placement | Decided |
 | [0078](0078-envelope-selection-height-reach.md) | Envelope-wall selection: height-reach, not classification (a measured amendment to 0077's brief) | Decided |
@@ -199,26 +214,17 @@ The status vocabulary and the numbering rule live in
 | [0141](0141-a-lost-identity-is-not-a-first-run.md) | a lost identity is not a first run | Decided |
 | [0142](0142-compress-is-a-process-stage.md) | /compress is a stage on perception-obj, not a sidecar service | Decided |
 | [0143](0143-extent-axes-are-declared-not-inferred.md) | the up extent is declared per box, and the horizontals stay unnamed | Decided |
-| [0146](0146-view-selection-does-not-predict-reconstruction-quality.md) | view selection does not predict reconstruction quality | Decided |
 | [0147](0147-levelling-is-a-different-degree-of-freedom.md) | levelling is a different degree of freedom from the dead one | Decided |
 | [0148](0148-a-surface-needs-a-top-and-a-short-splat-needs-a-face.md) | a surface needs a top, and a short splat needs a face to sit on | Decided |
 | [0149](0149-one-object-one-cluster-whatever-sam-calls-it.md) | one object, one cluster, whatever SAM calls it | Decided |
-| [0150](0150-capture-coverage-feedback-is-not-the-fix.md) | capture-coverage feedback is not the fix for truncation | Decided |
-| [0152](0152-every-view-is-a-partial-view.md) | every view is a partial view, and that is the regime | Decided |
 | [0153](0153-nobody-ever-looked-at-the-picture.md) | nobody ever looked at the picture | Decided |
 | [0154](0154-how-much-of-the-object-a-frame-sees.md) | how much of the object a frame sees, measured properly | Decided |
-| [0155](0155-the-single-viewpoint-ceiling.md) | the single-viewpoint ceiling, and why guidance cannot pass it | Decided |
-| [0156](0156-the-vision-model-cannot-settle-the-facing-either.md) | the vision model cannot settle the facing either | Decided |
 | [0157](0157-a-correction-departs-from-a-default.md) | a correction departs from a default, not from a measurement | Decided |
 | [0158](0158-the-turn-is-a-selection.md) | the turn is a selection between two candidates, not a rotation | Decided |
 | [0159](0159-turning-it-did-not-give-you-eyes.md) | the guest changes a facing it cannot see, on the person's authority | Decided |
-| [0160](0160-the-per-box-view-budget-is-not-the-constraint.md) | the per-box view budget is not the constraint | Decided |
 | [0161](0161-the-reconstruction-carries-what-it-is-shown.md) | the reconstruction carries what it is shown | Decided |
-| [0162](0162-the-better-frame-did-not-reconstruct-better.md) | the better frame did not reconstruct better | Decided |
 | [0163](0163-a-trust-gate-only-certifies-what-it-covers.md) | a trust gate only certifies the population it covers | Decided |
 | [0164](0164-restoring-a-swept-capture-is-not-an-upload.md) | restoring a swept capture is not an upload | Decided |
-| [0165](0165-what-the-missing-surface-is-missing-to.md) | what the missing surface is missing to | Decided |
-| [0166](0166-two-reconstructions-are-two-different-objects.md) | two reconstructions of one object are two different objects | Decided |
 | [0169](0169-the-room-knows-which-way-the-cupboard-faces.md) | the room supplies the ground truth the facing sign never had | Decided |
 | [0170](0170-the-box-carries-the-facing-the-room-cannot-label-it.md) | the box carries the facing; the room still cannot label a row | Decided |
 | [0171](0171-the-layout-knows-the-sign-two-times-in-three.md) | the layout knows the sign, two times in three | Decided |
@@ -239,7 +245,6 @@ The status vocabulary and the numbering rule live in
 | [0191](0191-the-image-carries-the-checkpoints-twice.md) | the perception image carries the SAM 3D checkpoints twice | Decided |
 | [0192](0192-perception-geom-is-retired.md) | perception-geom is retired, and it was a door, not a line item | Decided |
 | [0193](0193-the-mark-is-generated-not-copied.md) | the mark is generated, not copied | Decided |
-| [0197](0197-the-uncropped-photograph-is-not-a-better-photograph.md) | the uncropped photograph is not a better photograph | Decided |
 | [0198](0198-the-mask-is-the-photograph-sam3d-sees.md) | the mask is the photograph SAM 3D sees | Decided |
 | [0199](0199-the-inline-cache-destroys-itself-by-being-used.md) | the inline cache destroys itself by being used | Decided |
 | [0200](0200-the-tag-must-name-what-cloud-run-pins.md) | the tag must name what Cloud Run pins | Decided |
@@ -274,7 +279,6 @@ The status vocabulary and the numbering rule live in
 | [0229](0229-the-second-arm-is-also-the-oom-fallback.md) | the second arm is also the OOM fallback | Decided |
 | [0230](0230-the-skip-is-a-plan-time-statement.md) | the skip is a plan-time statement | Decided |
 | [0231](0231-a-band-the-camera-never-saw.md) | a band the camera never saw | Decided |
-| [0232](0232-the-floor-tolerance-is-sized-for-the-floor.md) | the floor tolerance is sized for the floor | Decided |
 | [0233](0233-the-third-axis-can-only-veto.md) | the third axis can only veto | Decided |
 | [0234](0234-the-selector-can-reject-but-not-rank.md) | the selector can reject, but not rank | Decided |
 | [0235](0235-a-quarter-of-rp6g2-is-dark.md) | a quarter of rp6g2 is dark | Decided |
@@ -299,14 +303,12 @@ The status vocabulary and the numbering rule live in
 | [0255](0255-the-splash-hands-the-mark-over.md) | the splash hands the mark over, to a measured slot | Decided |
 | [0257](0257-one-grid-and-an-instrument-to-check-it.md) | one grid for every screen, and an instrument to check it | Decided |
 | [0258](0258-type-scales-by-what-it-does.md) | type scales by what it does, and control labels are clamped rather than capped | Decided |
-| [0259](0259-disqualify-a-frame-do-not-rank-it.md) | disqualify a frame, do not rank it | Decided |
 | [0260](0260-a-probe-must-not-be-able-to-become-pipeline-state.md) | a probe must not be able to become pipeline state | Decided |
 | [0261](0261-the-overlap-sort-rewards-a-mask-that-stops-early.md) | the overlap sort rewards a mask that stops early | Decided |
 | [0262](0262-the-overlap-sort-is-flat.md) | the overlap sort is flat, and its tie-break is capture order | Decided |
 | [0264](0264-read-the-model-not-the-wrapper.md) | the upstream source is vendored, pinned, and enforced | Decided |
 | [0266](0266-keep-the-longer-mask.md) | keep the longer mask, and do not merge objects to hide a bad one | Decided |
 | [0267](0267-the-newest-capture-has-no-depth.md) | the newest capture carries no LiDAR depth, and that disables mask repair | Decided |
-| [0268](0268-the-leg-is-not-under-the-threshold.md) | the leg is not hiding under the 0.5 threshold | Decided |
 | [0269](0269-the-click-loop-deleted-the-leg.md) | the click loop deleted the leg, and the guard called it progress | Decided |
 | [0270](0270-reserve-a-whole-view-per-box.md) | reserve a whole view per box, rather than reject the cut ones | Decided |
 | [0271](0271-nine-of-fourteen-objects-have-no-box.md) | nine of fourteen object kinds have no box, and every instrument needs one | Decided |
@@ -318,11 +320,9 @@ The status vocabulary and the numbering rule live in
 | [0277](0277-sam31s-tracker-outruns-the-pinned-torch.md) | SAM 3.1's tracker needs a newer torch than SAM 3D lets us have | Decided |
 | [0278](0278-the-tracker-has-nowhere-to-put-its-memory.md) | the tracker has nowhere to put its memory, and the detector wants 1.27 GiB | Decided |
 | [0279](0279-the-ids-survive-a-visit-not-a-revisit.md) | the IDs survive a visit, not a revisit | Decided |
-| [0280](0280-ray-convergence-does-not-separate-neighbours.md) | ray convergence does not separate a fragment from its neighbour | Decided |
 | [0281](0281-one-object-many-prompts.md) | one object, many prompts: the duplication 0279 does not measure | Decided |
 | [0282](0282-the-border-rule-is-the-whole-filter.md) | the border rule is the whole filter, and its margin is an operator call | Decided |
 | [0283](0283-the-short-mask-is-the-one-without-legs.md) | the shorter of two nested masks is the one without the legs | Decided |
-| [0284](0284-appearance-calibrates-well-and-fails-in-the-room.md) | appearance separates the objects that have boxes, and merges the ones that do not | Decided |
 | [0285](0285-volume-merges-what-colour-and-position-could-not.md) | the volume merges what a point and a colour could not | Decided |
 | [0286](0286-what-protects-the-scene-is-not-the-lease.md) | what protects the scene is not the lease | Decided |
 | [0287](0287-every-state-not-every-screen.md) | the gallery photographs every state, not every screen | Decided |
