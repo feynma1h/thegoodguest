@@ -206,7 +206,12 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   `docs/PARKED.md` said it never had been — read that file's Apple paragraph,
   not its history. **Configured is not verified**: neither link has been
   exercised on a device (punchlist G1-06). There is deliberately no iOS
-  sign-out, and **no account deletion either**, which is its own defect below.
+  sign-out. **Deletion is the account operation the phone offers instead**, and
+  it is the one guideline 5.1.1(v) requires: `DeleteAccountView` reached from
+  the profile, `AccountDeletionClient` against `DELETE /account`, and an
+  explicit local sign-out afterwards so the next launch is an honest first run
+  rather than a token rejection discovering it. Its words are a pure table
+  (`DeleteAccountWording`) for the same reason home's sentence is.
   `IdentityContinuity` classifies each launch (`continuous` / `firstRun` /
   `credentialLost` / `keychainUnavailable`) and logs it at fault level without
   changing behaviour (0141).
@@ -332,7 +337,7 @@ fades in behind it. Home's mark shows the way in by playing a dotted leader and
 the word MENU out from behind itself, once per launch — no caption, and the
 plate-and-chevron treatment that preceded it is gone.
 
-Suite **610**: 604 asserting offline tests + 2 boilerplate stubs + 4 live
+Suite **657**: 651 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
@@ -892,15 +897,17 @@ re-argued here.
 
 **iOS**
 
-- **The app cannot delete the account it creates, and that is an automatic App
-  Store rejection.** Guideline 5.1.1(v) requires an app supporting account
-  creation to let the user INITIATE deletion from within it, and this app
-  creates an account the moment an anonymous UID is linked to Apple or Google.
-  `DELETE /account` is live and complete on api-public; **no Swift file calls
-  it**, so the only deletion route a person has is one they cannot reach from
-  the app that made their rooms. **Not the same work as per-room deletion** —
-  that is a different gap, does not satisfy this, and is not needed by it. What
-  is missing is a call site and a screen to put it on. (punchlist G1-08)
+- **Deleting the account does not revoke the Apple token, and 5.1.1(v) wants
+  both.** The screen and the call site now exist, but an app offering Sign in
+  with Apple must ALSO revoke through Apple's REST API, checked at review
+  (TN3194). `DELETE /account` calls Firebase Admin's `delete_user`, which
+  revokes nothing at Apple. **The blocker is upstream**: `SignInSheet.swift:244`
+  keeps only `identityToken` and discards the `authorizationCode` that
+  `revokeToken(withAuthorizationCode:)` consumes — so Firebase, which is
+  configured to do this and has the `codeFlowConfig` for it, has never been
+  given a code. TN3194's documented fallback (delete anyway, tell the user to
+  revoke manually) is a copy change and is the cheap first move.
+  (punchlist G1-09)
 - **The mark's fill rule is guarded on the Python side only.** `gen_mark.py`
   warns that even-odd across both rings punches holes where the bands cross and
   `test_gen_mark.py` pins it, but nothing pins the Swift or TypeScript
@@ -1235,7 +1242,7 @@ re-enqueue (18) and ruff (non-gating) passed.
 
 ## iOS test policy
 
-The iOS suite is **624 tests total** (was 590; the capture-dark pass added 20 — and 590 was itself 600 before ios-surfaces-2 REMOVED 10 by deleting the 0072 rollback path, so neither lane's own figure is main's — `FrameLuminanceTests`, the mean-luma statistic and its session census, including the preserved rp6g2 capture's own 124 readings as a fixture. Before that, 553 → 600; the scenes-client pass added 47 — `ScenesListClientTests` 17, `RoomHistoryTests` 12, `RoomsStoreTests` 11, `RoomsSurfaceTests` 7, for the `GET /scenes` client and the three surfaces it feeds. Before that, 544 → 553; the ios-surfaces pass added 9 — the flight stand-down and the launch-adoption table, both in `ScenePollExpectationTests`. Before that, 535 → 544 from the uid-churn investigation — `IdentityContinuityTests`, the launch continuity table. Before that, 523 → 535 from the Google-linking pass and 482 → 523 from the ios-residue pass. Before that, 463 → 482; the walk-findings pass added 19 — Live Activity narration, failure copy, and the recoverable count. Before that, 391 → 463 from the Live Activity / 429 / guidance pass, which added 76 and relocated 4. Before that, 352 → 391 from the release-residue pass; the release-residue pass added 39 — `CaptureReclaimTests` 15, `CaptureReaperTests` 12, `StagingHooksTests` 7, `ScenePollExpectationTests` 5. Before that, 302 → 352 from RP-6/RP-7; RP-6 added 11 — 9 co-run/wire pins + 2 envelope-edge pins — and RP-7 added 39 — `FloorPlanMathTests` 18, `FloorPlanVoiceTests` 13, `FloorPlanFixtureTests` 8. Before that, 288 → 302 from the 0074 phantom-room pass), run manually via `xcodebuild … -scheme TheGoodGuest-Integration` — the only scheme in this project (no separate default scheme, no CI gate). That scheme bakes `RUN_INTEGRATION_TESTS=1`, so the 4 `UploadSessionClientTests` **execute live on every run**; they are NOT skipped in practice. They last ran live 2026-08-24 (the capture-dark pass, 620/620) against `api-public-00042-ruq`, the whole suite in ~16 s of test execution.
+The iOS suite is **657 tests total** (was 624; the account-deletion pass added 33 — `AccountDeletionClientTests` 19 for `DELETE /account`, and `DeleteAccountCopyTests` 14 for the deletion screen's wording table. Before that, 590 → 624; the capture-dark pass added 20 — and 590 was itself 600 before ios-surfaces-2 REMOVED 10 by deleting the 0072 rollback path, so neither lane's own figure is main's — `FrameLuminanceTests`, the mean-luma statistic and its session census, including the preserved rp6g2 capture's own 124 readings as a fixture. Before that, 553 → 600; the scenes-client pass added 47 — `ScenesListClientTests` 17, `RoomHistoryTests` 12, `RoomsStoreTests` 11, `RoomsSurfaceTests` 7, for the `GET /scenes` client and the three surfaces it feeds. Before that, 544 → 553; the ios-surfaces pass added 9 — the flight stand-down and the launch-adoption table, both in `ScenePollExpectationTests`. Before that, 535 → 544 from the uid-churn investigation — `IdentityContinuityTests`, the launch continuity table. Before that, 523 → 535 from the Google-linking pass and 482 → 523 from the ios-residue pass. Before that, 463 → 482; the walk-findings pass added 19 — Live Activity narration, failure copy, and the recoverable count. Before that, 391 → 463 from the Live Activity / 429 / guidance pass, which added 76 and relocated 4. Before that, 352 → 391 from the release-residue pass; the release-residue pass added 39 — `CaptureReclaimTests` 15, `CaptureReaperTests` 12, `StagingHooksTests` 7, `ScenePollExpectationTests` 5. Before that, 302 → 352 from RP-6/RP-7; RP-6 added 11 — 9 co-run/wire pins + 2 envelope-edge pins — and RP-7 added 39 — `FloorPlanMathTests` 18, `FloorPlanVoiceTests` 13, `FloorPlanFixtureTests` 8. Before that, 288 → 302 from the 0074 phantom-room pass), run manually via `xcodebuild … -scheme TheGoodGuest-Integration` — the only scheme in this project (no separate default scheme, no CI gate). That scheme bakes `RUN_INTEGRATION_TESTS=1`, so the 4 `UploadSessionClientTests` **execute live on every run**; they are NOT skipped in practice. They last ran live 2026-08-24 (the capture-dark pass, 620/620) against `api-public-00042-ruq`, the whole suite in ~16 s of test execution.
 
 **A full-suite run does NOT spend the operator's capture quota — that claim was wrong and is corrected here.** `UploadSessionClientTests` does mint a fresh `bundleId = UUID()` per test, and the daily CAPTURE ceiling (12, `UPLOAD_SESSION_DAILY_CAPTURES`, confirmed on the serving revision) is charged on first claim. **But the ceiling is per-UID, and every one of those tests calls `Auth.auth().signInAnonymously()` and signs out in teardown** — so each test runs as a brand-new anonymous user with its own untouched allowance and spends one of ITS twelve. The operator's own quota is never touched. **The evidence is `upload-flake`'s 22 consecutive full-suite runs at 600 tests each**, which could not have happened under a shared 12/day ceiling and is what forced this re-check. The original claim came from live tests failing in a way that reads like quota exhaustion; the likelier cause is the first of the two measurement traps recorded below under **"Two measurement traps"** — `CODE_SIGNING_ALLOWED=NO` leaves Firebase unable to reach the keychain, surfacing as `SecItemAdd (-34018)` underneath and `FIRAuthErrorDomain 17995` at the Firebase layer. Same cause, two codes, and either reads like a backend outage. **What IS true:** each full run creates ~4 orphaned anonymous users, and anonymous-user auto-cleanup must stay OFF (it would fire the UID-churn mechanism), so they accumulate forever. `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` is still worth using for repeat runs — it is faster and it stops the accumulation — but it is not protecting anyone's ability to scan.
 
@@ -1243,7 +1250,7 @@ The iOS suite is **624 tests total** (was 590; the capture-dark pass added 20 �
 
 **Posture: fail-closed-live, not fail-open.** Each integration test calls `XCTSkipIf(!RUN_INTEGRATION_TESTS)` — the fail-open default — but because the sole scheme always sets the flag, that skip path is never taken here. With the flag set they hit the live `/upload_session` contract and go **red if the backend is unreachable**. Running the suite therefore requires a reachable backend; an offline run will fail those 4 (expected, not a regression).
 
-**Honest count:** report as "618 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 624 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-08-31, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **620**, and that suite holds exactly 4 tests, so the total is 624 and the offline set is 618 once the two stubs come out. The figures this replaced were 610 in one sentence and 620 in the next, and the second did not add up — 604 + 2 + 4 is 610, not 620 — so both were wrong and the arithmetic said so without anyone running anything.
+**Honest count:** report as "651 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 657 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-09-01, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **653**, and that suite holds exactly 4 tests, so the total is 657 and the offline set is 651 once the two stubs come out. **One of the 653 is skipped at runtime** — `AuthLinkingTests.test_appBundle_registersRedirectSchemeForLiveClientID`, which gates on the live Google client id — so 650 actually assert; it was skipping before this pass too and is not counted out above, to keep the arithmetic the same shape it has always had. The figures this replaced were 610 in one sentence and 620 in the next, and the second did not add up — 604 + 2 + 4 is 610, not 620 — so both were wrong and the arithmetic said so without anyone running anything.
 
 **No known flakes.** The one that was recorded here — `BlobUploadManagerTests.test_gate_lastDecrement_afterDrain_firesHandler` at roughly 1 run in 15 — was a production defect rather than a test defect, and is fixed (0239): the drain gate's last-decrement trigger hopped onto the actor through an unstructured `Task` that nothing held a handle on, so the test's `await Task.yield()` was a guess at how long the hop takes. The decrement is actor-isolated now and fires the gate inside `handleTaskCompletion`'s own defer, so awaiting that call IS the signal. Measured 2026-08-24 by holding the yield-less tests fixed and swapping only `BlobUploadManager.swift`: **2 failures in 16** with the hop, **0 in 22** without it. **A red suite is now a finding, not a re-run.**
 

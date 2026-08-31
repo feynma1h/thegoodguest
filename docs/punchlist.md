@@ -89,20 +89,27 @@ needs `sudo log collect`; the cheaper readout is the reaper's own per-bundle
 status codes now that api-public is fixed.
 **Check:** manual — operator, next launch.
 
-### G1-08 · The app cannot delete the account it creates
+### G1-09 · Sign in with Apple tokens are never revoked on deletion
 **State:** open · **Blocks:** App Store submission
-The app supports account creation — anonymous auth upgraded in place by linking
-Apple or Google (`Auth/SignInSheet.swift`, reached from `ProfileView`) — and App
-Review guideline 5.1.1(v) requires that an app which does so let the user
-*initiate* deletion from within it. `DELETE /account` is live and complete on
-api-public, deleting every per-user collection and prefix by hand; no Swift file
-calls it. So the only deletion route a person has is one they cannot reach from
-the app that made their rooms. The reviewer looks for this control specifically,
-which makes it a rejection rather than a risk.
-Not the same work as G3-03: that is per-room deletion, which this does not need
-and which would not satisfy it. What is missing here is a call site and a place
-to put it, not a route.
-**Check:** automated — a Swift file must issue DELETE against `/account`.
+Guideline 5.1.1(v) does not stop at deleting the account. An app offering Sign
+in with Apple must also revoke the user's Apple token via the Sign in with
+Apple REST API (`https://appleid.apple.com/auth/revoke`), and Apple checks it
+at review — see [TN3194](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple).
+`DELETE /account` calls Firebase Admin's `delete_user`, which does **not** revoke
+anything at Apple.
+
+The blocker is upstream of the deletion screen: `SignInSheet.swift:244` keeps
+only `identityToken` from the Apple credential and discards
+`authorizationCode`, which is what `Auth.auth().revokeToken(withAuthorizationCode:)`
+needs. Firebase can perform the revocation — the project's `appleSignInConfig`
+carries a complete `codeFlowConfig` (verified 2026-09-01) — but it has never
+been given a code to do it with.
+
+TN3194 also documents the fallback when no code is held: delete the data anyway
+and direct the user to revoke access manually. That is the cheaper first move
+and is a copy change on the done screen; capturing the code is the real fix.
+**Check:** automated — iOS must capture `authorizationCode` and call `revokeToken`.
+
 
 ---
 
