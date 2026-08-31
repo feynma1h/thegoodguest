@@ -42,7 +42,7 @@ starting point.
 | # | Precondition | Verified state |
 |---|---|---|
 | 1 | api-public CORS allows the production origin | `https://thegoodguest.web.app` echoes ACAO on a real preflight; a disallowed origin gets 400. Both production domains are in `CORS_ALLOWED_ORIGINS` in `infra/api-public.env.yaml` AND on the serving revision — no drift. |
-| 2 | Outputs-bucket CORS allows it | `gs://thegoodguest-perception-outputs` CORS lists `thegoodguest.web.app` (with `thegoodguest.firebaseapp.com`, the preview channel, and localhost) for GET/HEAD. This is the gate that made splats fail to render in decision 0102 — it is already correct for production. |
+| 2 | Outputs-bucket CORS allows it | `gs://thegoodguest-perception-outputs` CORS lists `thegoodguest.web.app` (and nothing else) for GET/HEAD. This is the gate that made splats fail to render in decision 0102 — it is already correct for production. |
 | 3 | Firebase API key referrer allowlist | The restricted browser key permits `https://thegoodguest.web.app/*`. Note the shape trap from decision 0101: Google's referrer wildcards replace a whole subdomain label, so this had to be an exact entry. |
 | 4 | Firebase Auth authorized domains | `thegoodguest.web.app` is authorized, so the sign-in popup handler resolves. |
 | 5 | CSP | `web/firebase.json` serves one headers block to every channel, and it is byte-for-byte the block decision 0102 proved a real 34 MB splat through (`wasm-unsafe-eval`, `worker-src blob:`, `connect-src` with the api + storage + `data:`). Enforcement re-confirmed on the deployed origin: off-origin `connect-src`/`img-src` attempts fire real violations. |

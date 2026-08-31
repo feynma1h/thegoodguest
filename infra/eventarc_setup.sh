@@ -363,8 +363,6 @@ cat > /tmp/outputs_cors.json <<'EOF'
     "origin": [
       "http://localhost:3000",
       "https://thegoodguest.web.app",
-      "https://thegoodguest.firebaseapp.com",
-      "https://thegoodguest--preview-cydkerk6.web.app"
     ],
     "method": ["GET", "HEAD"],
     "responseHeader": [
