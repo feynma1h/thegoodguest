@@ -52,10 +52,12 @@ WORKDIR /app
 
 # --- Clone SAM 3D Objects so we have the env file ---
 # PINNED. An unpinned --depth 1 clone means two builds of identical source can
-# install different model code, with nothing recording which. Fetch-by-SHA keeps
-# the clone shallow. This is also the form the shared :buildcache is written
-# from — an unpinned line here misses at layer 4 and rebuilds the mamba env and
-# every sam3d pip layer below it, which is a ~50 minute build instead of ~8.
+# install different model code, with nothing recording which. The SHA and the
+# vendored copy of what we call are in upstream/README.md; a test asserts they
+# agree. Fetch-by-SHA keeps the clone shallow. This is also the form the shared
+# :buildcache is written from — an unpinned line here misses at layer 4 and
+# rebuilds the mamba env and every sam3d pip layer below it, which is a
+# ~50 minute build instead of ~8.
 RUN git init /opt/sam3d \
     && cd /opt/sam3d \
     && git remote add origin https://github.com/facebookresearch/sam-3d-objects.git \

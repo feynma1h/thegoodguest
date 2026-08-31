@@ -48,6 +48,155 @@ PROBE_PREFIX = "segment_probe"
 MAX_FRAMES_PER_CALL = 24
 
 
+def click_refine(sam3_model, pil, detections, seed_index: int, rounds: int,
+                 extra_click: list[int] | None = None) -> dict | None:
+    """Seed SAM 3's visual path with one mask, click in its own leftover, repeat.
+
+    The loop the operator specified, with one change: the candidate taken each
+    round is the HIGHEST-SCORING, not the largest. Upstream says to select on
+    the model's predicted quality, and the largest candidate is the "object plus
+    surroundings" reading — the merge that 0198 measured at 113,465 px with a
+    chair base and a stool absorbed.
+
+    The mask prompt is 288x288, not the 256 every upstream docstring names.
+    SAM's prompt encoder sets `mask_input_size = 4 * image_embedding_size` and
+    this tracker runs at 1008/14, so the grid is 72 and the mask must be 288.
+    The 256 in those docstrings is SAM 2's number (1024/16 -> 64 -> 256),
+    inherited verbatim and stale. Passing 256 dies in the decoder with "The size
+    of tensor a (72) must match the size of tensor b (64) at non-singleton
+    dimension 3" — measured on a live GPU before the sizes were read.
+
+    After round 0 the mask prompt is the model's OWN low-res logits from the
+    previous round, which upstream says need no transformation. Points
+    accumulate alongside, which is SAM's canonical interactive form.
+
+    Records every round and decides nothing. Whether growth is acceptable is a
+    guard, the guard has been the weak link three times in this investigation,
+    and it belongs where it can be changed without a GPU rebuild.
+    """
+    import numpy as np
+
+    if seed_index >= len(detections):
+        return None
+    seed = np.asarray(detections[seed_index]["mask"], dtype=bool)
+    accepted = seed.copy()
+    others = [
+        np.asarray(d["mask"], dtype=bool)
+        for i, d in enumerate(detections) if i != seed_index
+    ]
+    rounds_out, stack = [], []
+    # Every candidate, not only the winner. Keeping just the chosen mask made
+    # "would the runner-up have been better" unanswerable without another GPU
+    # run — which is exactly the question the first run raised.
+    all_cands, all_scores = [], []
+    # The first click is the seed mask's own interior — the pixel nearest its
+    # centroid that is actually IN the mask, because a centroid can fall in the
+    # hole of a concave shape and this desk's mask is concave.
+    ys0, xs0 = np.nonzero(seed)
+    cy, cx = float(ys0.mean()), float(xs0.mean())
+    k = int(np.argmin((xs0 - cx) ** 2 + (ys0 - cy) ** 2))
+    points = [(float(xs0[k]), float(ys0[k]))]
+    labels = [1]
+    if extra_click is not None and len(extra_click) == 2:
+        points.append((float(extra_click[0]), float(extra_click[1])))
+        labels.append(1)
+    carry = None      # the chosen candidate's low-res logits, round to round
+
+    for r in range(max(1, rounds)):
+        got = sam3_model.refine_with_points(
+            pil, list(points), list(labels),
+            seed_mask=seed if carry is None else None,
+            mask_logits=carry,
+            multimask_output=True,
+        )
+        if got is None:
+            break
+        masks, scores, low_res = got
+        best = masks[0]                       # highest-scoring, not largest
+        grew = best & ~accepted
+        rec = {
+            "round": r,
+            "scores": [round(float(s), 4) for s in scores],
+            "candidate_px": [int(m.sum()) for m in masks],
+            "chosen_px": int(best.sum()),
+            "accepted_px": int(accepted.sum()),
+            "growth_px": int(grew.sum()),
+            "points": [[int(x), int(y)] for x, y in points],
+            "mask_prompt": "seed" if carry is None else "previous round",
+        }
+        # how much of any OTHER detection the growth covers — the guard's input
+        worst, who = 0.0, None
+        for j, o in enumerate(others):
+            n = int(o.sum())
+            if n and grew.any():
+                sh = int((grew & o).sum()) / n
+                if sh > worst:
+                    worst, who = sh, j
+        rec["worst_other_covered"] = round(worst, 4)
+        rec["worst_other_index"] = who
+        rounds_out.append(rec)
+        stack.append(best)
+        all_cands.append(np.stack([np.asarray(c, dtype=bool) for c in masks]))
+        all_scores.append([float(x) for x in scores])
+
+        # the next click goes in the leftover, and ACCUMULATES — SAM's
+        # interactive form is a growing point set, not one click at a time
+        leftover = best & ~accepted
+        if not leftover.any():
+            break
+        ys, xs = np.nonzero(leftover)
+        my, mx = float(ys.mean()), float(xs.mean())
+        j = int(np.argmin((xs - mx) ** 2 + (ys - my) ** 2))
+        points.append((float(xs[j]), float(ys[j])))
+        labels.append(1)
+        carry = low_res[0]          # the chosen candidate's own logits
+        accepted = best
+
+    if not stack:
+        return None
+    buf = io.BytesIO()
+    np.savez_compressed(
+        buf, masks=np.stack(stack), seed=seed,
+        seed_index=np.asarray([seed_index], dtype=np.int32),
+        # (rounds, candidates, H, W) and (rounds, candidates). `masks` above is
+        # candidate 0 of each round — the chosen one — kept for compatibility.
+        candidates=np.stack(all_cands),
+        candidate_scores=np.asarray(all_scores, dtype=np.float32),
+    )
+    return {"rounds": rounds_out, "npz": buf.getvalue()}
+
+
+def probs_npz_bytes(detections: list) -> bytes | None:
+    """One frame's mask PROBABILITY maps, quantised to uint8, in detection
+    order — or None when no detection carries one.
+
+    Quantised because the question these answer is "where would the boundary be
+    at a different cut", and 1/255 is finer than any threshold anyone would
+    choose. Full float32 at 1920x1440 is 11 MB per detection; this is 2.7 MB
+    before compression and reconstructs the cut exactly at every multiple of
+    1/255.
+
+    Deliberately a SEPARATE file from masks.npz: that writer's bytes are
+    load-bearing (decision 0089 keeps them identical to the pre-suppression
+    writer) and production reads it on every warm re-drive.
+    """
+    import numpy as np
+
+    # Indexed by enumeration, never by list.index(): these dicts hold numpy
+    # arrays, and `==` on them raises rather than comparing.
+    keep = [(i, d) for i, d in enumerate(detections) if d.get("mask_prob") is not None]
+    if not keep:
+        return None
+    stack = np.stack([
+        np.clip(np.asarray(d["mask_prob"], dtype=np.float32) * 255.0, 0, 255).astype(np.uint8)
+        for _, d in keep
+    ])
+    idx = np.asarray([i for i, _ in keep], dtype=np.int32)
+    buf = io.BytesIO()
+    np.savez_compressed(buf, probs=stack, mask_index=idx)
+    return buf.getvalue()
+
+
 class SegmentRequest(BaseModel):
     """Explicit frames, because the whole point is reaching ones the sampler
     did not choose."""
@@ -57,6 +206,21 @@ class SegmentRequest(BaseModel):
     frame_indices: list[int] = Field(..., min_length=1)
     object_prompt: str | None = None
     write_png: bool = True
+    # Also write the per-pixel probability map each binary mask was thresholded
+    # from, so the 0.5 cut can be re-examined offline without another GPU run.
+    write_prob: bool = False
+    # Click-refinement loop: seed SAM 3's VISUAL path with one detection's mask,
+    # click in its own leftover, repeat. Every round is recorded; nothing is
+    # decided here — the guard belongs offline where it can change without a
+    # rebuild.
+    refine_seed_mask: int | None = None
+    refine_rounds: int = 3
+    # An extra opening click, in ORIGINAL image pixels (x, y). The loop's own
+    # first click lands in the seed's interior, which asks "what object is
+    # here" and can only return the object it already has. A click placed on
+    # the part that is MISSING is a different question, and it is the one this
+    # investigation could not ask until the part had been located.
+    refine_click: list[int] | None = None
 
 
 def _mask_panels(pil, mask: np.ndarray, suppressed: np.ndarray | None):
@@ -178,7 +342,9 @@ async def handle_segment(
             continue
 
         try:
-            detections = sam3_model.segment(pil, segmentation_prompt(prompt))
+            detections = sam3_model.segment(
+                pil, segmentation_prompt(prompt), want_prob=req.write_prob
+            )
         except Exception as exc:
             frames_out.append({"frame_index": fi, "ok": False, "error": f"sam3: {exc}"})
             continue
@@ -196,6 +362,30 @@ async def handle_segment(
             f"gs://{outputs_bucket}/", f"{base}/masks.npz",
             masks_npz_bytes(detections, suppressed), "application/octet-stream",
         )
+
+        probs_uri = None
+        if req.write_prob:
+            raw = probs_npz_bytes(detections)
+            if raw is not None:
+                probs_uri = _gcs_upload_for_scene(
+                    f"gs://{outputs_bucket}/", f"{base}/probs.npz",
+                    raw, "application/octet-stream",
+                )
+
+        refine_out = None
+        if req.refine_seed_mask is not None:
+            got = click_refine(
+                sam3_model, pil, detections, req.refine_seed_mask, req.refine_rounds,
+                extra_click=req.refine_click,
+            )
+            if got is not None:
+                _gcs_upload_for_scene(
+                    f"gs://{outputs_bucket}/",
+                    f"{base}/refine_{req.refine_seed_mask:02d}.npz",
+                    got["npz"], "application/octet-stream",
+                )
+                refine_out = got["rounds"]
+                logger.info("click refine: frame %d rounds=%s", fi, refine_out)
 
         objs = []
         for i, det in enumerate(detections):
@@ -225,6 +415,8 @@ async def handle_segment(
             "ok": True,
             "image_size": [pil.width, pil.height],
             "masks_gcs_uri": masks_uri,
+            **({"probs_gcs_uri": probs_uri} if probs_uri else {}),
+            **({"refine": refine_out} if refine_out else {}),
             "suppressed_count": len(suppressed),
             "suppressed_px": int(union.sum()) if union is not None else 0,
             "objects": objs,

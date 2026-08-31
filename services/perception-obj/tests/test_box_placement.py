@@ -963,3 +963,300 @@ class TestTheBoxCloudDegrades:
 
     def test_a_thin_cloud_is_none(self):
         assert box_placement._ARM_S2C_MIN_CLOUD > 0
+
+
+class TestNestedMaskCollapse:
+    """`collapse_nested_masks` — one object at two extents becomes the longer
+    (decision 0266), and the three cases it must NOT touch.
+
+    The rule replaces every gate 0263 built for this job. What makes it safe is
+    not the tie-break but the mutual-singleton guard: it fires only where two
+    masks in one frame are two readings of one thing, and a coarse region over
+    several separate same-label objects is deliberately outside that.
+    """
+
+    @staticmethod
+    def _rect(x0, x1, y0, y1, shape=(64, 64)):
+        m = np.zeros(shape, dtype=bool)
+        m[y0:y1, x0:x1] = True
+        return m
+
+    def _ctx(self, masks):
+        return StubCtx(masks={(0, i): m for i, m in enumerate(masks)})
+
+    def _obs(self, n, label="desk", frame_index=0):
+        return [
+            {"frame_index": frame_index, "label": label, "mask_index": i,
+             "score": 0.9, "splat_gcs_uri": f"gs://o/{i}.ply"}
+            for i in range(n)
+        ]
+
+    def test_off_is_a_no_op(self, monkeypatch):
+        """The default must not move a single observation — the flip is the
+        operator's, and an unset flag that quietly changed the shortlist would
+        make the A/B it exists for unreadable."""
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", False)
+        short = self._rect(10, 30, 10, 30)
+        long = self._rect(10, 30, 10, 40)          # strictly contains `short`
+        obs = self._obs(2)
+        kept, records, _absorbed = box_placement.collapse_nested_masks(
+            obs, self._ctx([short, long]))
+        assert kept == obs and kept is obs
+        assert records == []
+
+    def test_nested_pair_keeps_the_longer(self, monkeypatch):
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        short = self._rect(10, 30, 10, 30)
+        long = self._rect(10, 30, 10, 40)
+        kept, records, _absorbed = box_placement.collapse_nested_masks(
+            self._obs(2), self._ctx([short, long]))
+        assert [o["mask_index"] for o in kept] == [1]
+        assert len(records) == 1
+        r = records[0]
+        assert (r["kept_mask_index"], r["dropped_mask_index"]) == (1, 0)
+        assert r["kept_px"] > r["dropped_px"]
+        assert r["containment"] == pytest.approx(1.0)
+
+    def test_order_does_not_decide_it(self, monkeypatch):
+        """Area decides, not position in the list. The bug being fixed is a
+        sort that let capture order pick between two readings of one object
+        (0262), so a rule that inherited any ordering would be the same bug."""
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        short = self._rect(10, 30, 10, 30)
+        long = self._rect(10, 30, 10, 40)
+        for masks, survivor in (([short, long], 1), ([long, short], 0)):
+            kept, _r, _a = box_placement.collapse_nested_masks(
+                self._obs(2), self._ctx(masks))
+            assert [o["mask_index"] for o in kept] == [survivor]
+
+    def test_disjoint_same_label_masks_both_survive(self, monkeypatch):
+        """Two chairs are two chairs."""
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        a = self._rect(2, 20, 2, 20)
+        b = self._rect(40, 60, 40, 60)
+        kept, records, _absorbed = box_placement.collapse_nested_masks(
+            self._obs(2), self._ctx([a, b]))
+        assert [o["mask_index"] for o in kept] == [0, 1]
+        assert records == []
+
+    def test_a_parent_over_two_children_collapses_nothing(self, monkeypatch):
+        """The mutual-singleton guard, and the reason it is not optional: a
+        coarse region containing two genuinely separate same-label objects
+        contains each of them at 1.000, so an unguarded rule would delete both
+        and ship the region as one object."""
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        child_a = self._rect(4, 18, 4, 18)
+        child_b = self._rect(30, 44, 4, 18)
+        parent = self._rect(2, 46, 2, 20)
+        kept, records, _absorbed = box_placement.collapse_nested_masks(
+            self._obs(3), self._ctx([child_a, child_b, parent]))
+        assert [o["mask_index"] for o in kept] == [0, 1, 2]
+        assert records == []
+
+    def test_different_labels_are_left_alone(self, monkeypatch):
+        """Grouping is by RAW label. A lamp inside a desk's mask is not the
+        desk read twice, however completely it is contained."""
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        small = self._rect(12, 20, 12, 20)
+        big = self._rect(10, 30, 10, 40)
+        obs = [
+            {"frame_index": 0, "label": "table lamp", "mask_index": 0, "score": 0.9},
+            {"frame_index": 0, "label": "desk", "mask_index": 1, "score": 0.9},
+        ]
+        kept, records, _absorbed = box_placement.collapse_nested_masks(
+            obs, self._ctx([small, big]))
+        assert kept == obs
+        assert records == []
+
+    def test_different_frames_are_left_alone(self, monkeypatch):
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        short = self._rect(10, 30, 10, 30)
+        long = self._rect(10, 30, 10, 40)
+        obs = [
+            {"frame_index": 0, "label": "desk", "mask_index": 0, "score": 0.9},
+            {"frame_index": 1, "label": "desk", "mask_index": 0, "score": 0.9},
+        ]
+        ctx = StubCtx(masks={(0, 0): short, (1, 0): long})
+        kept, records, _absorbed = box_placement.collapse_nested_masks(obs, ctx)
+        assert kept == obs
+        assert records == []
+
+    def test_a_missing_mask_collapses_nothing(self, monkeypatch):
+        """No mask is no evidence. Returning None must leave the frame intact
+        rather than collapse the pair it can still see."""
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        short = self._rect(10, 30, 10, 30)
+        obs = self._obs(2)
+        ctx = StubCtx(masks={(0, 0): short})
+        kept, records, _absorbed = box_placement.collapse_nested_masks(obs, ctx)
+        assert kept == obs
+        assert records == []
+
+
+class TestNestedCollapseChangesTheShortlist:
+    """The defect 0266 exists to fix, end to end.
+
+    `mask_overlap_with_hull` is the fraction of a mask INSIDE the box hull —
+    precision with no recall term — so a mask that stops short of the object
+    scores at or near 1.000 while a complete one is marked down for every pixel
+    past the box's edge. The box is a BOUND, not a silhouette. These two build
+    exactly that: a short mask wholly inside the hull, and a longer one that
+    contains it and spills past the hull's bottom edge. Off, the sort takes the
+    short one. On, it never sees it.
+    """
+
+    def _pair(self, box):
+        ctx = StubCtx()
+        ctx.cameras[0] = (FakePose(), FakeIntrinsics())
+        hull, _ = box_placement.project_box_footprint(
+            box, FakeIntrinsics(), FakePose())
+        full = _mask_from_hull(hull)
+        ys, xs = np.nonzero(full)
+        y0, y1 = int(ys.min()), int(ys.max())
+        cut = y0 + (y1 - y0) // 2
+
+        short = full.copy()
+        short[cut:, :] = False                       # stops inside the hull
+        long = full.copy()
+        long[y1 + 1:min(y1 + 6, full.shape[0]), xs.min():xs.max() + 1] = True
+
+        ctx.masks[(0, 0)] = short
+        ctx.masks[(0, 1)] = long
+        obs = [
+            _obs(label="bed", frame_index=0, mask_index=0),
+            _obs(label="bed", frame_index=0, mask_index=1),
+        ]
+        return ctx, obs, short, long
+
+    def test_the_short_mask_outscores_the_long_one(self, monkeypatch):
+        """The premise. If this ever stops holding, the rule below is solving
+        a problem that no longer exists and should be re-measured, not kept."""
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", False)
+        box = _box()
+        ctx, _obs_list, short, long = self._pair(box)
+        hull, _ = box_placement.project_box_footprint(
+            box, FakeIntrinsics(), FakePose())
+        assert box_placement.mask_overlap_with_hull(short, hull) > \
+            box_placement.mask_overlap_with_hull(long, hull)
+        assert int(long.sum()) > int(short.sum())
+
+    def test_off_the_shortlist_takes_the_shorter_mask(self, monkeypatch):
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", False)
+        box = _box()
+        ctx, obs, _s, _l = self._pair(box)
+        out = box_placement.associate_observations([box], obs, ctx)
+        assert out[0][0].mask_index == 0
+
+    def test_on_the_shortlist_takes_the_longer_mask(self, monkeypatch):
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        box = _box()
+        ctx, obs, _s, _l = self._pair(box)
+        out = box_placement.associate_observations([box], obs, ctx)
+        assert [a.mask_index for a in out[0]] == [1]
+
+
+class TestSurvivorInheritsThePairsScore:
+    """The survivor competes at its PAIR's best overlap, not its own.
+
+    Found by measurement, not by design. Dropping the shorter member outright
+    changes its rank against EVERY observation rather than against its partner,
+    and the sort underneath is 0262's flat metric with capture order as the
+    tie-break. Measured on spike box 0: the collapse cost the box a 415,585 px
+    mask scoring 1.0000 and handed it a 111,070 px mask from an earlier frame,
+    while the 824,005 px mask the rule existed to promote sat at rank 2. Scoring
+    the survivor at the pair's best overlap took all four affected boxes across
+    the corpus to a longer mask IN THE SAME FRAME, with nothing else moving.
+    """
+
+    def _scene(self):
+        """A box, a short mask that fits inside its hull, a longer mask that
+        contains the short one and spills past the hull, and an unrelated
+        third observation that also scores 1.0000 in an EARLIER frame — the
+        thing that gets wrongly promoted when the short mask is deleted."""
+        box = _box()
+        ctx = StubCtx()
+        for fi in (0, 5):
+            ctx.cameras[fi] = (FakePose(), FakeIntrinsics())
+        hull, _ = box_placement.project_box_footprint(
+            box, FakeIntrinsics(), FakePose())
+        full = _mask_from_hull(hull)
+        ys, xs = np.nonzero(full)
+        y0, y1 = int(ys.min()), int(ys.max())
+
+        short = full.copy()
+        short[y0 + (y1 - y0) // 2:, :] = False
+        long = full.copy()
+        long[y1 + 1:min(y1 + 6, full.shape[0]), xs.min():xs.max() + 1] = True
+        # The rival must score STRICTLY between the survivor's own precision
+        # and 1.0. At exactly 1.0 it ties the inherited score and capture order
+        # decides — that is 0262's flat metric, which this change does not fix
+        # and is pinned separately below.
+        # Sized by arithmetic, not by eye: to land at overlap ~0.9 the rival
+        # needs outside pixels equal to about a ninth of its inside area.
+        rival = short.copy()
+        inside = int(rival.sum())
+        w = xs.max() - xs.min() + 1
+        rows = max(1, (inside // 9) // w)
+        rival[max(0, y0 - rows):y0, xs.min():xs.max() + 1] = True
+
+        ctx.masks[(5, 0)] = short
+        ctx.masks[(5, 1)] = long
+        ctx.masks[(0, 0)] = rival
+        obs = [
+            _obs(label="bed", frame_index=0, mask_index=0),
+            _obs(label="bed", frame_index=5, mask_index=0),
+            _obs(label="bed", frame_index=5, mask_index=1),
+        ]
+        return box, ctx, obs
+
+    def test_the_rival_wins_if_the_survivor_is_scored_alone(self, monkeypatch):
+        """The premise: the earlier frame's smaller mask scores at least as well
+        as the survivor on precision alone, so it would take rank 0."""
+        box, ctx, _o = self._scene()
+        hull, _ = box_placement.project_box_footprint(
+            box, FakeIntrinsics(), FakePose())
+        rival = box_placement.mask_overlap_with_hull(ctx.masks[(0, 0)], hull)
+        survivor = box_placement.mask_overlap_with_hull(ctx.masks[(5, 1)], hull)
+        inherited = box_placement.mask_overlap_with_hull(ctx.masks[(5, 0)], hull)
+        assert survivor < rival < inherited
+
+    def test_the_survivor_takes_rank_0_not_the_rival(self, monkeypatch):
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        box, ctx, obs = self._scene()
+        out = box_placement.associate_observations([box], obs, ctx)
+        assert out[0][0].frame_index == 5
+        assert out[0][0].mask_index == 1
+        assert out[0][0].overlap == pytest.approx(
+            box_placement.mask_overlap_with_hull(
+                ctx.masks[(5, 0)],
+                box_placement.project_box_footprint(
+                    box, FakeIntrinsics(), FakePose())[0]))
+
+    def test_nothing_outside_the_pair_moves(self, monkeypatch):
+        """The rival keeps its own association and its own score — the collapse
+        is not allowed to reorder observations it has nothing to do with."""
+        box, ctx, obs = self._scene()
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", False)
+        off = box_placement.associate_observations([box], obs, ctx)
+        rival_off = [a for a in off[0] if (a.frame_index, a.mask_index) == (0, 0)]
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        on = box_placement.associate_observations([box], obs, ctx)
+        rival_on = [a for a in on[0] if (a.frame_index, a.mask_index) == (0, 0)]
+        assert len(rival_off) == len(rival_on) == 1
+        assert rival_off[0].overlap == pytest.approx(rival_on[0].overlap)
+
+    def test_a_tie_at_the_top_still_goes_to_capture_order(self, monkeypatch):
+        """The limit of this change, stated so nobody reads it as a fix for
+        0262. Inheriting the pair's best overlap decides the pair; it does not
+        flatten the metric. Where an unrelated observation ALSO scores 1.0000 —
+        which 0262 measured on 31 of 52 candidates in one room — the tie-break
+        is still `frame_index`, and the earliest frame wins."""
+        monkeypatch.setattr(box_placement, "_KEEP_LONGER", True)
+        box, ctx, obs = self._scene()
+        hull, _ = box_placement.project_box_footprint(
+            box, FakeIntrinsics(), FakePose())
+        ctx.masks[(0, 0)] = ctx.masks[(5, 0)].copy()      # rival ties at 1.0000
+        assert box_placement.mask_overlap_with_hull(
+            ctx.masks[(0, 0)], hull) == pytest.approx(1.0)
+        out = box_placement.associate_observations([box], obs, ctx)
+        assert (out[0][0].frame_index, out[0][0].mask_index) == (0, 0)

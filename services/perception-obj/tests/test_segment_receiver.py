@@ -25,10 +25,27 @@ class FakeSam3:
         self._dets = dets
         self.calls = 0
 
-    def segment(self, pil, prompt):
+    def segment(self, pil, prompt, *, want_prob=False):
+        # Mirrors models.sam3.SAM3Model.segment. A stub that drops a keyword
+        # the real model takes turns a signature change into eleven unrelated
+        # failures, which is what happened when want_prob landed.
         self.calls += 1
         self.prompt = prompt
-        return [dict(d) for d in self._dets]
+        self.want_prob = want_prob
+        out = [dict(d) for d in self._dets]
+        if want_prob:
+            import numpy as np
+            for d in out:
+                m = np.asarray(d["mask"], dtype=bool)
+                # 0.9 where the mask is, 0.4 in a one-pixel skirt around it —
+                # the band the upstream 0.5 cut discards.
+                pr = np.where(m, 0.9, 0.0).astype(np.float32)
+                skirt = np.zeros_like(m)
+                skirt[1:] |= m[:-1]
+                skirt[:-1] |= m[1:]
+                pr[skirt & ~m] = 0.4
+                d["mask_prob"] = pr
+        return out
 
 
 def _mask(h, w, y0, y1, x0, x1):
@@ -258,3 +275,313 @@ class TestOIDC:
         )
         assert resp.status_code == 401
         assert sam3.calls == 0, "a rejected request must not reach the model"
+
+
+class TestProbabilityMaps:
+    """The probability map each binary mask is thresholded from.
+
+    Upstream computes `masks = masks_logits > 0.5` with a bare literal, and
+    `masks_logits` is post-sigmoid despite its name — so 0.5 is a probability
+    with no parameter behind it, and anything the model scored just under it is
+    deleted with no record. `write_prob` is how that record is kept.
+    """
+
+    def _dets(self, n=2, with_prob=True, shape=(4, 5)):
+        out = []
+        for i in range(n):
+            m = np.zeros(shape, dtype=bool)
+            m[0, i] = True
+            d = {"label": f"o{i}", "mask": m}
+            if with_prob:
+                p = np.zeros(shape, dtype=np.float32)
+                p[0, i] = 0.9
+                p[1, i] = 0.4          # just under the cut — the part that is lost
+                d["mask_prob"] = p
+            out.append(d)
+        return out
+
+    def test_none_when_no_detection_carries_one(self):
+        assert sr.probs_npz_bytes(self._dets(with_prob=False)) is None
+        assert sr.probs_npz_bytes([]) is None
+
+    def test_round_trips_the_cut_at_any_threshold(self):
+        dets = self._dets()
+        raw = sr.probs_npz_bytes(dets)
+        z = np.load(io.BytesIO(raw))
+        assert list(z["mask_index"]) == [0, 1]
+        for k, d in enumerate(dets):
+            recovered = z["probs"][k] / 255.0
+            # the shipped cut is reproduced exactly
+            assert (recovered > 0.5).tolist() == (d["mask_prob"] > 0.5).tolist()
+            # and a lower one recovers the pixel 0.5 threw away
+            assert (recovered > 0.3).sum() > (recovered > 0.5).sum()
+
+    def test_it_indexes_by_position_not_by_equality(self):
+        """These dicts hold numpy arrays, so list.index() raises rather than
+        comparing. Two detections with identical content must still map to 0
+        and 1."""
+        dets = self._dets()
+        dets[1] = {k: (v.copy() if hasattr(v, "copy") else v) for k, v in dets[0].items()}
+        z = np.load(io.BytesIO(sr.probs_npz_bytes(dets)))
+        assert list(z["mask_index"]) == [0, 1]
+
+    def test_partial_coverage_keeps_the_mapping_honest(self):
+        """A detection without a probability map must not shift the indices of
+        the ones that have it."""
+        dets = self._dets(n=3)
+        del dets[1]["mask_prob"]
+        z = np.load(io.BytesIO(sr.probs_npz_bytes(dets)))
+        assert list(z["mask_index"]) == [0, 2]
+
+    def test_the_request_defaults_to_off(self):
+        req = sr.SegmentRequest(
+            scene_id="s", bundle_uri="gs://b/x/bundle.pb", frame_indices=[1]
+        )
+        assert req.write_prob is False
+
+
+class TestClickRefinement:
+    """The loop that seeds SAM 3's visual path with a mask and clicks in its own
+    leftover. It records every round and decides nothing — the guard lives
+    offline, because the guard has been the weak link three times."""
+
+    class _Model:
+        """Grows the mask by a fixed band per call, and reports a quality score
+        that is deliberately NOT ordered by size — the whole point of taking the
+        highest-scoring candidate rather than the largest."""
+
+        def __init__(self, shape=(20, 20)):
+            self.shape = shape
+            self.calls = []
+
+        def refine_with_points(self, pil, points, labels, *, seed_mask=None,
+                               mask_logits=None, multimask_output=True):
+            self.calls.append({"points": list(points), "labels": list(labels),
+                               "seeded": seed_mask is not None,
+                               "carried": mask_logits is not None})
+            n = len(self.calls)
+            big = np.zeros(self.shape, dtype=bool)
+            big[:, : 6 + 6 * n] = True            # LARGEST every round, LOW score
+            mid = np.zeros(self.shape, dtype=bool)
+            # Smaller than `big` every round — so taking the highest score and
+            # taking the largest give different answers — but growing fast
+            # enough that by round 3 it reaches the neighbouring detection at
+            # column 15, which is what the guard has to notice.
+            mid[:, : 3 + 6 * n] = True            # HIGHEST score
+            small = np.zeros(self.shape, dtype=bool)
+            small[:, :2] = True
+            # low-res logits ride along, one per candidate, as the real
+            # predictor returns them
+            lr = [np.zeros((288, 288), dtype=np.float32) for _ in range(3)]
+            return [mid, big, small], [0.9, 0.4, 0.1], lr
+
+    def _dets(self, shape=(20, 20)):
+        seed = np.zeros(shape, dtype=bool)
+        seed[:, :3] = True
+        other = np.zeros(shape, dtype=bool)
+        other[:, 15:] = True
+        return [{"label": "desk", "mask": seed}, {"label": "chair", "mask": other}]
+
+    def test_the_mask_prompt_size_matches_the_tracker_grid(self):
+        """4 * (1008 // 14) = 288, not the 256 every upstream docstring names."""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "models" / "sam3.py").read_text()
+        assert "MASK_PROMPT_SIZE = 288" in src
+
+    def test_it_takes_the_highest_scoring_not_the_largest(self):
+        m = self._Model()
+        out = sr.click_refine(m, None, self._dets(), 0, rounds=1)
+        r = out["rounds"][0]
+        assert r["scores"] == [0.9, 0.4, 0.1]
+        # round 1: the 0.9 candidate is 9 columns, the 0.4 one is 12. The
+        # larger one must lose.
+        assert r["chosen_px"] == 20 * 9
+        assert max(r["candidate_px"]) == 20 * 12
+        assert r["chosen_px"] < max(r["candidate_px"])
+
+    def test_round_zero_seeds_from_the_detector_mask(self):
+        m = self._Model()
+        sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        assert m.calls[0]["seeded"] and not m.calls[0]["carried"]
+
+    def test_later_rounds_carry_the_models_own_logits(self):
+        """Upstream: masks returned by a previous iteration need no further
+        transformation. Re-deriving from the binary mask would throw away the
+        model's confidence and re-introduce the sizing question."""
+        m = self._Model()
+        sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        assert len(m.calls) >= 2
+        for c in m.calls[1:]:
+            assert c["carried"] and not c["seeded"]
+
+    def test_the_first_click_is_inside_the_seed_mask(self):
+        m = self._Model()
+        sr.click_refine(m, None, self._dets(), 0, rounds=1)
+        (x, y) = m.calls[0]["points"][0]
+        assert self._dets()[0]["mask"][int(y), int(x)], (
+            "the opening click must land in the seed, not merely near it — a "
+            "centroid can fall in the hole of a concave mask"
+        )
+
+    def test_points_accumulate(self):
+        m = self._Model()
+        sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        counts = [len(c["points"]) for c in m.calls]
+        assert counts == sorted(counts) and counts[0] == 1 and counts[-1] > 1, counts
+        assert all(set(c["labels"]) == {1} for c in m.calls), "all clicks positive"
+
+    def test_each_new_click_lands_inside_that_round_s_leftover(self):
+        m = self._Model()
+        out = sr.click_refine(m, None, self._dets(), 0, rounds=2)
+        pts = out["rounds"][1]["points"]
+        assert len(pts) == 2, "round 1 must carry the opening click plus one more"
+        x, _y = pts[-1]
+        # round 0 took columns 0..8 over a seed of 0..2, so the new click must
+        # sit in columns 3..8
+        assert 3 <= x <= 8, f"new click at x={x} is not in the leftover"
+
+    def test_it_measures_what_the_growth_covers_of_others(self):
+        """The guard's input. Round 2's growth reaches column 15+, which is the
+        other detection."""
+        m = self._Model()
+        out = sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        assert out["rounds"][0]["worst_other_covered"] == 0.0
+        assert any(r["worst_other_covered"] > 0 for r in out["rounds"]), (
+            "growth onto the neighbour was never reported"
+        )
+        hit = next(r for r in out["rounds"] if r["worst_other_covered"] > 0)
+        assert hit["worst_other_index"] == 0, "reports which other mask, by index"
+
+    def test_it_decides_nothing(self):
+        """Every round is recorded even when growth swallows the neighbour."""
+        m = self._Model()
+        out = sr.click_refine(m, None, self._dets(), 0, rounds=3)
+        assert len(out["rounds"]) == 3
+
+    def test_a_model_that_returns_nothing_is_not_an_error(self):
+        class Dead:
+            def refine_with_points(self, *a, **k):
+                return None
+        assert sr.click_refine(Dead(), None, self._dets(), 0, rounds=2) is None
+
+    def test_an_out_of_range_seed_is_refused(self):
+        assert sr.click_refine(self._Model(), None, self._dets(), 9, rounds=1) is None
+
+    def test_the_request_defaults_to_off(self):
+        req = sr.SegmentRequest(
+            scene_id="s", bundle_uri="gs://b/x/bundle.pb", frame_indices=[1]
+        )
+        assert req.refine_seed_mask is None
+
+
+class TestInteractivePredictorIsOptional:
+    """SAM 3's visual path needs a component `build_sam3_image_model` leaves OFF.
+
+    With it off, `model.inst_interactive_predictor` is None and `predict_inst`
+    raises `AttributeError: 'NoneType' object has no attribute 'model'` deep
+    inside upstream — a failure that reached a live GPU before it was
+    understood.
+
+    Read from the SOURCE, not by importing: models/sam3.py imports torch at
+    module level, so no GPU-free test can load it. Same technique as
+    test_dockerfile_manifest.py, and the same reason.
+    """
+
+    @pytest.fixture(scope="class")
+    def src(self):
+        from pathlib import Path
+        return (Path(__file__).resolve().parents[1] / "models" / "sam3.py").read_text()
+
+    def test_the_builder_is_told_explicitly(self, src):
+        """Calling build_sam3_image_model() bare is what produced the failure:
+        the parameter defaults to False upstream."""
+        assert "enable_inst_interactivity=INTERACTIVE_ENABLED" in src
+        assert "build_sam3_image_model()" not in src
+
+    def test_the_flag_defaults_off(self, src):
+        """Enabling the tracker by default would add its weights to a card 0228
+        measured as having ~5.26 GiB of headroom."""
+        assert 'os.environ.get("PERCEPTION_SAM3_INTERACTIVE", "0") == "1"' in src
+
+    def test_the_absence_is_reported_rather_than_raised(self, src):
+        """The wrapper checks before calling, so the message names the env var
+        instead of surfacing an AttributeError from inside upstream."""
+        assert 'getattr(self.model, "inst_interactive_predictor", None) is None' in src
+        i = src.index("inst_interactive_predictor\", None) is None")
+        assert "PERCEPTION_SAM3_INTERACTIVE=1" in src[i:i + 600]
+
+
+class TestEveryCandidateIsKept:
+    """Keeping only the winner made "would the runner-up have been better"
+    unanswerable without another GPU run — which is the question the first run
+    raised, about a runner-up that lost by 0.0039 of score."""
+
+    def test_all_candidates_and_scores_are_written(self):
+        import io
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        out = sr.click_refine(m, None, t._dets(), 0, rounds=3)
+        z = np.load(io.BytesIO(out["npz"]))
+        assert z["candidates"].shape[:2] == (3, 3), z["candidates"].shape
+        assert z["candidate_scores"].shape == (3, 3)
+        assert np.allclose(z["candidate_scores"][0], [0.9, 0.4, 0.1]), (
+            "stored as float32, so compare with a tolerance"
+        )
+
+    def test_candidate_zero_is_the_chosen_one(self):
+        """`masks` stays the chosen stack; candidate 0 must agree with it, or
+        an analysis reading one and comparing to the other is silently wrong."""
+        import io
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        out = sr.click_refine(m, None, t._dets(), 0, rounds=2)
+        z = np.load(io.BytesIO(out["npz"]))
+        for r in range(z["masks"].shape[0]):
+            assert (z["candidates"][r][0] == z["masks"][r]).all()
+
+    def test_the_loser_is_recoverable(self):
+        """The point of the change: the larger, lower-scoring candidate must be
+        on disk."""
+        import io
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        out = sr.click_refine(m, None, t._dets(), 0, rounds=1)
+        z = np.load(io.BytesIO(out["npz"]))
+        sizes = [int(c.sum()) for c in z["candidates"][0]]
+        assert max(sizes) > sizes[0], "the largest candidate did not survive to disk"
+
+
+class TestAnExplicitClick:
+    """The loop's own opening click lands in the seed's interior, which asks
+    "what object is here" and can only return the object it already has. A click
+    on the MISSING part asks a different question."""
+
+    def test_the_extra_click_is_added_and_positive(self):
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        sr.click_refine(m, None, t._dets(), 0, rounds=1, extra_click=[7, 3])
+        pts = m.calls[0]["points"]
+        assert len(pts) == 2, "the derived click plus the given one"
+        assert (7.0, 3.0) in [tuple(p) for p in pts]
+        assert m.calls[0]["labels"] == [1, 1]
+
+    def test_it_is_recorded_in_the_round(self):
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        out = sr.click_refine(m, None, t._dets(), 0, rounds=1, extra_click=[7, 3])
+        assert [7, 3] in out["rounds"][0]["points"]
+
+    def test_omitting_it_reproduces_the_previous_behaviour(self):
+        """So a run with and without is a single-variable comparison."""
+        t = TestClickRefinement()
+        a, b = TestClickRefinement._Model(), TestClickRefinement._Model()
+        sr.click_refine(a, None, t._dets(), 0, rounds=1)
+        sr.click_refine(b, None, t._dets(), 0, rounds=1, extra_click=None)
+        assert a.calls[0]["points"] == b.calls[0]["points"]
+        assert len(a.calls[0]["points"]) == 1
+
+    def test_a_malformed_click_is_ignored_rather_than_raising(self):
+        t = TestClickRefinement()
+        m = TestClickRefinement._Model()
+        assert sr.click_refine(m, None, t._dets(), 0, rounds=1, extra_click=[9]) is not None
+        assert len(m.calls[0]["points"]) == 1

@@ -306,9 +306,21 @@ precision with no recall term — so a mask that stops short scores near 1.0 whi
 a complete one is penalised for every pixel past the box's edge. The RoomPlan box
 is a BOUND, not a silhouette, so a mask correctly covering an object bigger than
 its box is marked down for being right (0261).
-Three offline checks decide whether this is systemic or a desk curiosity; they
-are named in 0261's last section and need no GPU.
-**Check:** manual — 0261's three checks, then a decision.
+0261's three checks RAN, and the answer is systemic (0262/0263). The score is
+FLAT before it is wrong: **31 of 52 candidates in `90eebfc4` score exactly
+1.0000**, 27% across the four older captures, after which `frame_index` —
+capture order — decides. Across the ten nested pairs that associate to a box the
+sort takes the shorter in **9 of 10**.
+**The ruling is 0266: when SAM 3 returns one object at two nested extents, keep
+the longer.** Right **9 of 9** against the operator's verdicts, and it needs no
+gate, no score and no box — which is why it supersedes 0263's grown-box
+precision gate at 8 of 9. Detection needs no tuning: across 121 same-label pairs
+in five captures containment is bimodal, 21 at >= 0.989 and 99 at <= 0.003, with
+exactly one in between.
+**Decided and NOT built** — `box_placement` is untouched, so the shipped sort is
+still the flat one.
+**Check:** manual — implement 0266, then re-run the offline association replica
+over the five captures and confirm the nine verdicts still hold.
 
 ### G6-01 · Class-6 splat truncation
 **State:** open, no live route
