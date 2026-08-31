@@ -160,20 +160,24 @@ no real capture) and **delete them afterwards** — `next build` copies
 present and intact (verified) — the guard CLAUDE.md describes is real, the
 path it implies is not.
 
-## 11. Registry residue
+## 11. Registry — cleaned, and the rollback path is gone
 
-Six `perception-obj` versions, against a documented steady state of 3 + holds:
+Three `perception-obj` versions remain, which is the documented steady state:
 
-- `c538f699` — `serving`, the live image
-- `b21408a5` — the parked candidate's image
+- `c538f699` — `serving`, the live image `00074-var` boots from
+- `b21408a5` — the parked candidate `00093-pav`'s image
 - `c45098c5` — `buildcache`
-- `faa005c8` — held by `serving-rollback-00062-hum`; **owed back** once
-  `00074-var` is trusted, per 0243
-- `13ef11bb`, `5729d84d` — untagged, awaiting eviction
 
-Untagging frees nothing; deleting the version is what reclaims storage.
+**There is no rollback image any more.** `faa005c8` and its
+`serving-rollback-00062-hum` hold were deleted 2026-08-31, along with two
+untagged builds. That was sanctioned by 0243 once `00074-var` was trusted, and
+it means revisions `00062-hum`, `00064-taz`, `00065-fab` and `00066-hic` can no
+longer boot — they pin an image that is gone. They hold 0% traffic, so nothing
+serving is affected, but **if `00074-var` ever fails there is nothing to fall
+back to.** The cure would be a rebuild, not a rollback.
 
----
+The `serving` tag on `c538f699` is what stops the cleanup policy from
+reclaiming the image a scale-to-zero GPU service needs. Never delete it.
 
 ## How to re-derive all of this
 
