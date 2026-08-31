@@ -2,29 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "web-dev",
-      "runtimeExecutable": "/opt/homebrew/opt/node@22/bin/npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "web"],
-      "port": 3000,
-      "autoPort": true
-    },
-    {
-      "name": "web-dev-livelocal",
-      "runtimeExecutable": "/usr/bin/env",
-      "runtimeArgs": [
-        "NEXT_PUBLIC_API_MODE=live-local",
-        "NEXT_PUBLIC_API_BASE_URL=http://localhost:8080",
-        "/opt/homebrew/opt/node@22/bin/npm",
-        "run",
-        "dev",
-        "--prefix",
-        "web",
-        "--",
-        "--port",
-        "3001"
-      ],
-      "port": 3001,
-      "autoPort": true
+      "name": "walk",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8731", "--directory", "outputs/sam31/selection/walk"],
+      "port": 8731
     }
   ]
 }

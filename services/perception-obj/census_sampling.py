@@ -124,6 +124,33 @@ def _frame_dims(intrinsics) -> tuple[float, float]:
     return w, h
 
 
+# ── Per-box whole-view pass (decision 0270) ──────────────────────────────────
+# For each measured box, reserve the best frame in which that box is not cut
+# off by the image edge. NOT a veto: nothing is removed from any candidate
+# pool, so the cover pass and the residue are unchanged in kind and no box can
+# be starved. 0236 refused a veto because rejecting re-rolls a greedy
+# selection; adding a reserved pick does not.
+BOX_WHOLE_VIEWS = os.environ.get("PERCEPTION_BOX_WHOLE_VIEWS", "0") == "1"
+
+# A box is "cut" when its projected footprint reaches the image boundary. The
+# margin is in pixels and deliberately tiny — this is a contact test, not a
+# clearance one.
+WHOLE_VIEW_EDGE_MARGIN_PX = float(
+    os.environ.get("PERCEPTION_WHOLE_VIEW_EDGE_MARGIN_PX", "2")
+)
+
+# Sharpness is judged RELATIVE to the capture's own distribution, never against
+# an absolute number: variance of the Laplacian tracks scene texture as much as
+# focus, so a bar that suits one room rejects everything in a plainer one. The
+# default keeps the sharper half. Measured on a real capture, the operator's
+# two chosen frames sit at the 88th and 93rd percentile and the two they
+# rejected as blurry at the 32nd and 38th, so the median separates them with
+# room to spare.
+WHOLE_VIEW_SHARPNESS_PCT = float(
+    os.environ.get("PERCEPTION_WHOLE_VIEW_SHARPNESS_PCT", "50")
+)
+
+
 def box_visibility(frames: Sequence, boxes: list) -> tuple[np.ndarray, np.ndarray]:
     """(V, Q): V[f, b] = on-frame projected box area × in-frame fraction;
     Q[f, b] = the boolean cover-quality bar."""
@@ -148,6 +175,108 @@ def box_visibility(frames: Sequence, boxes: list) -> tuple[np.ndarray, np.ndarra
                 and on_frame_area >= PERCEPTION_BOX_COVER_MIN_AREA_FRAC * frame_area
             )
     return V, Q
+
+
+def box_is_whole(box, frame) -> bool:
+    """True when the box's projected footprint clears the image boundary.
+
+    The eye reads whether the OBJECT is cut; this reads whether its measured
+    box is. They agreed 11 of 11 on the frames a segmentation probe checked,
+    which is why the cheap geometric test stands in for the mask.
+
+    Deliberately not `in_frame_fraction >= threshold`: that is an area ratio
+    over a convex hull, and clipping a hull's corner removes very little area
+    while removing a whole edge of the object. One measured case read 0.958 —
+    apparently 96% present — for a desk with its top and right end outside the
+    picture.
+    """
+    hull, _frac = box_placement.project_box_footprint(
+        box, frame.intrinsics, frame.camera_pose
+    )
+    if hull is None:
+        return False
+    w, h = _frame_dims(frame.intrinsics)
+    m = WHOLE_VIEW_EDGE_MARGIN_PX
+    hull = np.asarray(hull, dtype=float)
+    return not (
+        hull[:, 0].min() < m or hull[:, 0].max() > w - m
+        or hull[:, 1].min() < m or hull[:, 1].max() > h - m
+    )
+
+
+def frame_sharpness(rgb) -> float:
+    """Variance of the Laplacian. Comparable only WITHIN one capture — see
+    WHOLE_VIEW_SHARPNESS_PCT."""
+    if rgb is None:
+        return float("nan")
+    a = np.asarray(rgb)
+    if a.size == 0:
+        return float("nan")
+    g = a.mean(axis=2) if a.ndim == 3 else a.astype(float)
+    g = g[::2, ::2]                      # halved; ordering is unaffected
+    if g.shape[0] < 3 or g.shape[1] < 3:
+        return float("nan")
+    lap = (
+        -4.0 * g[1:-1, 1:-1]
+        + g[:-2, 1:-1] + g[2:, 1:-1] + g[1:-1, :-2] + g[1:-1, 2:]
+    )
+    return float(lap.var()) if lap.size else float("nan")
+
+
+def select_box_whole_views(frames, boxes, V, *, get_rgb=None) -> tuple[list[int], dict]:
+    """One frame per box: its highest-V view in which the box is not cut off,
+    preferring the sharper half of the capture.
+
+    Returns (frame positions, info). Degrades in a fixed order and never
+    returns nothing for a box that has any view at all: whole AND sharp, then
+    whole, then best available. A pass that can starve a box is a veto wearing
+    a different name, and 0236 refused those for good reasons.
+    """
+    if not boxes:
+        return [], {}
+
+    sharp: dict[int, float] = {}
+    bar = 0.0
+    if get_rgb is not None and WHOLE_VIEW_SHARPNESS_PCT > 0:
+        for fi, fr in enumerate(frames):
+            v = frame_sharpness(get_rgb(fr))
+            if v == v:                    # not NaN
+                sharp[fi] = v
+        if sharp:
+            bar = float(np.percentile(list(sharp.values()), WHOLE_VIEW_SHARPNESS_PCT))
+
+    chosen: list[int] = []
+    detail: dict[str, dict] = {}
+    for bi, box in enumerate(boxes):
+        cand = sorted(
+            (fi for fi in range(len(frames)) if V[fi, bi] > 0),
+            key=lambda fi: (-V[fi, bi], fi),
+        )
+        if not cand:
+            continue
+        whole = [fi for fi in cand if box_is_whole(box, frames[fi])]
+        # "whole_and_sharp" is claimed ONLY when sharpness was actually
+        # measured. Saying it after skipping the check reports an inspection
+        # that never happened.
+        tier = "whole_and_sharp" if sharp else "whole"
+        pick_pool = [fi for fi in whole if sharp.get(fi, float("inf")) >= bar]
+        if not pick_pool:
+            pick_pool, tier = whole, "whole"
+        if not pick_pool:
+            pick_pool, tier = cand, "best_available"
+        pick = pick_pool[0]
+        chosen.append(pick)
+        detail[f"box_{bi:02d}"] = {
+            "frame_index": frames[pick].frame_index,
+            "tier": tier,
+            "whole_candidates": len(whole),
+            "candidates": len(cand),
+        }
+    return chosen, {
+        "box_whole_views": detail,
+        "sharpness_bar": round(bar, 2),
+        "sharpness_pct": WHOLE_VIEW_SHARPNESS_PCT,
+    }
 
 
 def frame_is_usable(rgb) -> bool:
@@ -289,6 +418,19 @@ def select_frames_census(
 
     V, Q = box_visibility(frames, boxes)
 
+    # Per-box whole views (0270). Reserved BEFORE cover and residue, so the
+    # frames a box needs cannot be crowded out by pose spread — which is what
+    # they were: on a measured room the cover pass took 3 frames and the other
+    # 9 were pose-diverse residue that never asks where anything is, so five of
+    # six boxes shipped a view ranked #25 or worse of their own candidates.
+    whole_positions: list[int] = []
+    whole_info: dict = {}
+    if BOX_WHOLE_VIEWS:
+        whole_positions, whole_info = select_box_whole_views(
+            frames, boxes, V, get_rgb=get_rgb
+        )
+        whole_positions = whole_positions[:max_frames]
+
     vetoes = (
         _Vetoes(frames, boxes, room, get_depth, get_rgb)
         if VISIBILITY_VETO else None
@@ -328,7 +470,12 @@ def select_frames_census(
         return kept
 
     uncovered = set(range(len(boxes)))
-    cover_positions: list[int] = []
+    # Seed cover with the reserved whole views. Without this the cover pass
+    # re-solves a problem they have already partly solved, and the union
+    # overspends the budget — measured at 7 frames for a budget of 6.
+    cover_positions: list[int] = list(dict.fromkeys(whole_positions))
+    for _fi in cover_positions:
+        uncovered -= {bi for bi in set(uncovered) if _covers(_fi, bi)}
     while uncovered and len(cover_positions) < max_frames:
         best_pos, best_gain = None, 0.0
         for fi in range(len(frames)):
@@ -380,6 +527,9 @@ def select_frames_census(
     # Residue: farthest-point over the pose-diversity metric, seeded with
     # the cover picks (the 0062 metric, continued from a non-empty seed).
     residue_positions: list[int] = []
+    # cover_positions already contains the reserved whole views, so this is
+    # the whole spend. A selector that quietly returns more frames than it was
+    # asked for spends GPU nobody authorised.
     n_residue = max_frames - len(cover_positions)
     if n_residue > 0:
         positions, view_dirs = _frame_features(frames)
@@ -420,7 +570,9 @@ def select_frames_census(
             residue_positions.append(nxt)
             taken += 1
 
-    selected_positions = sorted(cover_positions + residue_positions)
+    selected_positions = sorted(
+        set(whole_positions) | set(cover_positions) | set(residue_positions)
+    )
 
     # A veto that empties the selection is overruled. Every frame failing
     # veto 1 is a capture problem — a dark room, a covered lens — and the
@@ -456,6 +608,13 @@ def select_frames_census(
         "box_coverage": _coverage_map(frames, selected_positions, V, Q, boxes),
         "uncovered_box_ids": [f"box_{bi:02d}" for bi in sorted(uncovered)],
     }
+    if BOX_WHOLE_VIEWS:
+        # Present only when the pass ran, so every manifest written under the
+        # default stays byte-identical to what shipped.
+        info["whole_view_frame_indices"] = sorted(
+            frames[i].frame_index for i in whole_positions
+        )
+        info.update(whole_info)
     if OBJECT_AWARE_RESIDUE:
         # Emitted only when the residue is object-aware, so every manifest
         # written under the default is byte-identical to what shipped.
