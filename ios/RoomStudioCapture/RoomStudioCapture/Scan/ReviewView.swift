@@ -74,13 +74,16 @@ struct ReviewView: View {
     var body: some View {
         // Scrollable: at accessibility text sizes the sketch card + verdict + three
         // actions exceed the screen, and without this nothing is reachable.
+        VStack(spacing: 0) {
         ScrollView {
             VStack(spacing: 0) {
-                Eyebrow("Your capture")
-                    .padding(.top, 8)
+                // In the shared header band, so this screen's first line sits
+                // level with every other screen's — it has no back chevron, but
+                // it has the same top strip.
+                ScreenHeaderFrame { Eyebrow("Your capture") }
 
                 sketchCard
-                    .padding(.top, 16)
+                    .rsBelowHeader()
 
                 RSCard {
                     Text(Self.cardText(verdict: verdict,
@@ -94,13 +97,16 @@ struct ReviewView: View {
                 }
                 .padding(.top, 16)
 
-                actions
-                    .padding(.top, 24)
-                    .padding(.bottom, 8)
             }
-            .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, minHeight: 0)
         }
+
+        // Outside the scroll region: the send is the decision this screen
+        // exists for, and it used to sit at the end of the content where a
+        // long capture pushed it off the bottom.
+        actions
+        }
+        .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rsParchmentScreen()
     }
@@ -147,14 +153,14 @@ struct ReviewView: View {
                 // over the sketch ("126 frames · LiDAR + RoomPlan" at AX sizes).
                 if let census {
                     Text(census)
-                        .rsFont(.mono, size: 10, weight: .medium, maxSize: 14)
+                        .rsFont(.mono, size: 10, weight: .medium, maxSize: 14, cap: .mono)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .tracking(0.6)
                         .foregroundStyle(Color.rsOnDark.opacity(0.75))
                 }
                 Text(metrics)
-                    .rsFont(.mono, size: 10, weight: .medium, maxSize: 14)
+                    .rsFont(.mono, size: 10, weight: .medium, maxSize: 14, cap: .mono)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .tracking(0.6)
@@ -167,45 +173,57 @@ struct ReviewView: View {
         .shadow(color: Color.rsInk.opacity(0.2), radius: 10, y: 6)
     }
 
+    /// The action block. Every branch has the same shape — anything extra
+    /// above, the one filled button, then a single closing line — so "Send it
+    /// home" sits at the same height off the bottom as home's "Scan a room",
+    /// whichever branch is showing.
+    ///
+    /// The rescan moved ABOVE the send to make that true. It reads before the
+    /// primary rather than after it, which is not the usual iOS order; that is
+    /// the trade for the buttons lining up across screens.
+    ///
+    /// Precedence still mirrors `cardText` exactly, which is what stopped the
+    /// copy and the actions drifting apart before.
+    @ViewBuilder
     private var actions: some View {
-        VStack(spacing: 10) {
-            if isPreparing {
-                // TRANSIENT: the send is moments away, so keep it in the primary slot
-                // (disabled) rather than promoting the destructive rescan into it and
-                // swapping the button under the user's finger when bundle.pb lands.
-                Button {} label: {
-                    Label("Send it home", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(RSPrimaryButtonStyle())
-                .disabled(true)
-                .opacity(0.55)
-            } else if !canSend {
-                // Nothing to send — the rescan leads.
+        let leave = Button { onLeave() } label: { Text("Not now") }
+            .buttonStyle(RSActionFootnoteStyle())
+
+        if isPreparing {
+            // TRANSIENT: the send is moments away, so keep it in the primary
+            // slot (disabled) rather than promoting the destructive rescan into
+            // it and swapping the button under the user's finger when the
+            // bundle lands.
+            RSActions {
+                sendButton.disabled(true).opacity(0.55)
+            } closing: { leave }
+        } else if !canSend {
+            // Nothing to send — the rescan leads, and there is nothing extra.
+            RSActions {
                 Button { onRescan() } label: { Text(rescanLabel) }
                     .buttonStyle(RSPrimaryButtonStyle())
-            } else if thinCoverage {
-                Button { onRescan() } label: { Text(rescanLabel) }
-                    .buttonStyle(RSPrimaryButtonStyle())
+            } closing: { leave }
+        } else if thinCoverage {
+            RSActions {
                 Button { onSend() } label: { Text("Send it as is") }
                     .buttonStyle(RSQuietButtonStyle())
-            } else {
-                Button { onSend() } label: {
-                    Label("Send it home", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(RSPrimaryButtonStyle())
+            } primary: {
+                Button { onRescan() } label: { Text(rescanLabel) }
+                    .buttonStyle(RSPrimaryButtonStyle())
+            } closing: { leave }
+        } else {
+            RSActions {
                 Button { onRescan() } label: { Text(rescanLabel) }
                     .buttonStyle(RSQuietButtonStyle())
-            }
-
-            // ALWAYS present. Without it the empty-capture branch renders a single
-            // rescan button and the flow has no NavigationStack — capture → review →
-            // capture forever, with force-quit as the only exit. The other branches
-            // only escape by sending, which is not a choice the user has to make now.
-            Button { onLeave() } label: { Text("Not now") }
-                .buttonStyle(RSQuietButtonStyle())
+            } primary: {
+                sendButton
+            } closing: { leave }
         }
-        .lineLimit(1)
-        .minimumScaleFactor(0.6)
+    }
+
+    private var sendButton: some View {
+        Button { onSend() } label: { Text("Send it home") }
+            .buttonStyle(RSPrimaryButtonStyle())
     }
 }
 

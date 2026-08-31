@@ -39,7 +39,7 @@ struct WhySignInSheet: View {
                 .background(Color.rsGold.opacity(0.22), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
             Text("Keep your rooms, wherever you are.")
-                .rsFont(.display, size: 23)
+                .rsFont(.display, size: 23, cap: .display)
                 .foregroundStyle(Color.rsInk)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 16)
@@ -58,31 +58,34 @@ struct WhySignInSheet: View {
             .background(Color.rsInk.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.top, 16)
 
-            // Deliberately NOT a SignInWithAppleButton here. A local one would need
-            // its own nonce/scopes and Result handling; the earlier stub set no
-            // nonce, discarded the Result, and called onSignIn() on cancel and
-            // failure alike. Identity has ONE real implementation — SignInSheet,
-            // which links via AuthManager and handles the account conflict — so this
-            // invitation hands off to it rather than growing a second, weaker path.
-            Button(action: onSignIn) {
-                Text("Sign in to keep your rooms")
-                    .font(RSFont.ui(.headline, weight: .semibold))
-                    .foregroundStyle(Color.rsSurface)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 15)
-                    .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            }
-            .padding(.top, 16)
-
-            Button(action: onNotNow) { Text("Not now") }
-                .buttonStyle(RSQuietButtonStyle())
-                .padding(.top, 4)
         }
-        .padding(.horizontal, 26)
-        .padding(.top, 26)
-        .padding(.bottom, 10)
+        .padding(.horizontal, RSScreen.horizontal)
+        .padding(.top, RSScreen.contentGap)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .modifier(RSScrollableScreen(background: Color.rsSurface))
+        .safeAreaInset(edge: .bottom) {
+            // Deliberately NOT a SignInWithAppleButton here. A local one would
+            // need its own nonce/scopes and Result handling; the earlier stub
+            // set no nonce, discarded the Result, and called onSignIn() on
+            // cancel and failure alike. Identity has ONE real implementation —
+            // SignInSheet — so this invitation hands off to it rather than
+            // growing a second, weaker path.
+            RSActions {
+                Button(action: onSignIn) {
+                    Text("Sign in to keep your rooms")
+                        .font(RSFont.ui(.headline, weight: .semibold))
+                        .rsControlLabel()
+                        .foregroundStyle(Color.rsSurface)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 17)
+                        .background(Color.rsInk, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            } closing: {
+                Button(action: onNotNow) { Text("Not now") }
+                    .buttonStyle(RSActionFootnoteStyle())
+            }
+            .rsPinnedActions(surface: .rsSurface)
+        }
     }
 
     private var roomWord: String {

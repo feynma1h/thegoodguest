@@ -2,24 +2,43 @@
 //
 // The product mark's geometry, in a 1024x1024 design space. Consumed by
 // DesignSystem/Wordmark.swift. See tools/gen_mark.py for the construction and
-// for why the mark is a fill rather than a stroke.
+// for why the mark is never set beside the wordmark.
+//
+// Emitted as ellipse PARAMETERS rather than as path data, because the splash
+// screen animates the wordmark's "oo" into this mark by interpolating these
+// five numbers. Path data would have to be re-derived to do that.
 
 import CoreGraphics
 
+/// One ellipse of the mark, in the generated design space.
+struct MarkEllipse {
+    let cx: CGFloat
+    let cy: CGFloat
+    let a: CGFloat
+    let b: CGFloat
+}
+
+/// One ring: the band between two concentric ellipses. Fill it EVEN-ODD.
+struct MarkRing {
+    let outer: MarkEllipse
+    let inner: MarkEllipse
+}
+
 enum MarkGeometry {
-    /// The design space the points below are expressed in.
+    /// The design space the values below are expressed in.
     static let canvas: CGFloat = 1024
 
-    /// Ink plate for a mark on a LIGHT field -- the rim band shows.
-    static let plateFramed: [CGPoint] = [CGPoint(x: 512.00, y: 132.00), CGPoint(x: 841.09, y: 322.00), CGPoint(x: 841.09, y: 702.00), CGPoint(x: 512.00, y: 892.00), CGPoint(x: 182.91, y: 702.00), CGPoint(x: 182.91, y: 322.00)]
+    /// How far both rings lean back, in degrees.
+    static let tiltDegrees: CGFloat = -35.0
 
-    /// Ink plate for a mark on a DARK field -- only the seams show.
-    static let plateFrameless: [CGPoint] = [CGPoint(x: 512.00, y: 210.52), CGPoint(x: 773.09, y: 361.26), CGPoint(x: 773.09, y: 662.74), CGPoint(x: 512.00, y: 813.48), CGPoint(x: 250.91, y: 662.74), CGPoint(x: 250.91, y: 361.26)]
-
-    /// Right wall, left wall, floor. Identical under either plate.
-    static let faces: [[CGPoint]] = [
-        [CGPoint(x: 537.20, y: 497.45), CGPoint(x: 537.20, y: 225.07), CGPoint(x: 773.09, y: 361.26), CGPoint(x: 773.09, y: 633.64)],
-        [CGPoint(x: 486.80, y: 497.45), CGPoint(x: 250.91, y: 633.64), CGPoint(x: 250.91, y: 361.26), CGPoint(x: 486.80, y: 225.07)],
-        [CGPoint(x: 512.00, y: 541.10), CGPoint(x: 747.89, y: 677.29), CGPoint(x: 512.00, y: 813.48), CGPoint(x: 276.11, y: 677.29)],
+    /// The two interlocking rings, left then right.
+    static let rings: [MarkRing] = [
+        MarkRing(outer: MarkEllipse(cx: 349.29, cy: 512.00, a: 323.01, b: 235.90), inner: MarkEllipse(cx: 349.29, cy: 512.00, a: 281.78, b: 194.66)),
+        MarkRing(outer: MarkEllipse(cx: 674.71, cy: 512.00, a: 323.01, b: 235.90), inner: MarkEllipse(cx: 674.71, cy: 512.00, a: 281.78, b: 194.66)),
     ]
+
+    /// The mark's own ink bounds in the design space -- what clear space
+    /// (0.5 H on every side) and the minimum sizes are measured from.
+    static let inkWidth: CGFloat = 919.79
+    static let inkHeight: CGFloat = 535.41
 }

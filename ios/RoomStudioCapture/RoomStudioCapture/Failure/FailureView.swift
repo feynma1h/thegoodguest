@@ -19,8 +19,8 @@
 ///     No specific cause is named — the pipeline surfaces no honest per-object
 ///     reason, so the copy stays general rather than inventing one.
 ///
-/// The upload-failed relaunch banner is `UploadFailedBanner` (separate file), so
-/// a failure is never silently lost.
+/// The other two failures — nothing survived, and the send broke — are NOTES
+/// now rather than screens (0254). This file is the one that kept a screen.
 
 import SwiftUI
 
@@ -168,30 +168,34 @@ nonisolated enum FailureCopy {
 }
 
 struct FailureView: View {
+    /// One kind now. The terminal and upload-failed screens became NOTES when
+    /// the surfaces were split by what a state IS (0254): a room that has
+    /// finished failing is something to acknowledge, not a screen to be held
+    /// on. Only the incomplete upload kept a screen, because it is the one
+    /// failure with a real recovery path and that path is a question about
+    /// this phone's disk.
     enum Kind: Equatable {
         /// `missingCount` — how many blob paths the server reported absent. See
         /// FailureCopy.incompleteBody for the honesty constraint on stating it.
         /// `resend` — whether those files can actually be sent again, decided by
         /// CaptureRecovery from the disk, never from the view.
         case recoverable(missingCount: Int, resend: FailureCopy.Resend)
-        case terminal
-        /// The upload itself failed terminally (http_4xx, 308_persistent,
-        /// empty_bundle_pb, blob_unreadable_at_remint_manifest…). NOT a capture
-        /// fault: "scan slower" fixes none of these, so it gets its own copy and
-        /// carries the persisted reason, which is the only diagnostic the user has.
-        case uploadFailed(reason: String?)
     }
 
     var kind: Kind = .recoverable(missingCount: 0, resend: .unavailable)
     var onPrimary: () -> Void = {}
     var onSecondary: () -> Void = {}
+    /// Non-nil when this is pushed onto home's stack, which is the only way the
+    /// recoverable variant is reached now. It then carries the same header band
+    /// every other pushed screen does, rather than starting with a 200pt art
+    /// block and no way out — an inconsistency measured across six screens
+    /// before RSScreen existed.
+    var onBack: (() -> Void)?
 
     var body: some View {
         switch kind {
         case .recoverable(let missingCount, let resend):
             recoverable(missingCount: missingCount, resend: resend)
-        case .terminal:    terminal
-        case .uploadFailed(let reason): uploadFailed(reason: reason)
         }
     }
 
@@ -199,7 +203,15 @@ struct FailureView: View {
 
     private func recoverable(missingCount: Int, resend: FailureCopy.Resend) -> some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 12)
+            if let onBack {
+                ScreenHeader(title: "What's missing", onClose: onBack)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                // Only without a header: the spacer centred a headerless
+                // screen, and under a header it pushed the first element 76pt
+                // below where every other screen's starts.
+                Spacer(minLength: 12)
+            }
 
             // The drawn sketch as ambient brand art — NOT a claim that a partial
             // room was captured; failed_incomplete is an upload gap, not a coverage
@@ -211,6 +223,8 @@ struct FailureView: View {
             }
             .frame(height: 200)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.top, onBack == nil ? 0 : RSScreen.contentGap)
+            .frame(maxWidth: .infinity)
 
             RSCard {
                 VStack(alignment: .leading, spacing: 7) {
@@ -226,12 +240,16 @@ struct FailureView: View {
             }
             .padding(.top, 16)
 
-            Spacer()
-
+            Spacer(minLength: 20)
+        }
+        .padding(.horizontal, RSScreen.horizontal)
+        .frame(maxWidth: .infinity)
+        .modifier(RSScrollableScreen(background: nil))
+        .safeAreaInset(edge: .bottom) {
             // Labels come from the same table the flow binds its actions from,
             // so the button can never say one thing and do another.
             let actions = FailureCopy.recoverableActions(resend)
-            VStack(spacing: 10) {
+            RSActions {
                 Button(action: onPrimary) { Text(actions.primaryLabel) }
                     .buttonStyle(RSPrimaryButtonStyle())
                     .disabled(!actions.primaryEnabled)
@@ -242,124 +260,13 @@ struct FailureView: View {
                     // established treatment for the same problem; changing the
                     // shared style would touch every primary in the app.
                     .opacity(actions.primaryEnabled ? 1 : 0.55)
+            } closing: {
                 Button(action: onSecondary) { Text(actions.secondaryLabel) }
-                    .buttonStyle(RSQuietButtonStyle())
+                    .buttonStyle(RSActionFootnoteStyle())
             }
-            .padding(.bottom, 8)
+            .rsPinnedActions()
         }
-        .padding(.horizontal, 24)
-        .frame(maxWidth: .infinity)
-        .modifier(RSScrollableScreen(background: nil))
         .onAppear { RSHaptics.fire(.failure) }
     }
 
-    // MARK: Upload failed (the send broke, not the scan)
-
-    private func uploadFailed(reason: String?) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Spacer()
-
-            Image(systemName: "arrow.up.circle")
-                .font(.system(size: 34, weight: .regular))
-                .foregroundStyle(Color.rsGoldLight)
-
-            Text("I couldn't get it up to the desk.")
-                .rsFont(.display, size: 24)
-                .foregroundStyle(Color.rsOnDark)
-                .padding(.top, 24)
-
-            GuestLine("The scan itself was fine — it's the sending that broke, and it won't recover on its own. Nothing about how you scanned caused this.",
-                      size: 15.5, onDark: true)
-                .padding(.top, 14)
-
-            if let reason {
-                Text(reason)
-                    .rsFont(.mono, size: 11, maxSize: 15)
-                    .foregroundStyle(Color.rsOnDark.opacity(0.45))
-                    .textSelection(.enabled)
-                    .padding(.top, 12)
-            }
-
-            Spacer()
-
-            VStack(spacing: 11) {
-                Button(action: onPrimary) { Text("Scan the room again") }
-                    .buttonStyle(RSLightButtonStyle())
-                Button(action: onSecondary) { Text("Later") }
-                    .buttonStyle(RSQuietButtonStyle(onDark: true))
-            }
-        }
-        .padding(.horizontal, 32)
-        .padding(.bottom, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(RSScrollableScreen(background: Color.rsInk))
-        .onAppear { RSHaptics.fire(.failure) }
-    }
-
-    // MARK: Terminal
-
-    private var terminal: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Spacer()
-
-            Image(systemName: "exclamationmark.square")
-                .font(.system(size: 34, weight: .regular))
-                .foregroundStyle(Color.rsGoldLight)
-
-            Text("The scan didn't survive the trip.")
-                .rsFont(.display, size: 24)
-                .foregroundStyle(Color.rsOnDark)
-                .padding(.top, 24)
-
-            GuestLine("There's nothing here I could honestly show you — and it's not something you did. When you're near the room again, let's try one more pass. Slower is better this time.",
-                      size: 15.5, onDark: true)
-                .padding(.top, 14)
-
-            Spacer()
-
-            VStack(spacing: 11) {
-                Button(action: onPrimary) { Text("Scan the room again") }
-                    .buttonStyle(RSLightButtonStyle())
-                Button(action: onSecondary) { Text("Later") }
-                    .buttonStyle(RSQuietButtonStyle(onDark: true))
-            }
-        }
-        .padding(.horizontal, 32)
-        .padding(.bottom, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(RSScrollableScreen(background: Color.rsInk))
-        .onAppear { RSHaptics.fire(.failure) }
-    }
-}
-
-#Preview("Recoverable — can send (one file)") {
-    FailureView(kind: .recoverable(missingCount: 1, resend: .available))
-}
-
-#Preview("Recoverable — can send (several)") {
-    FailureView(kind: .recoverable(missingCount: 14, resend: .available))
-}
-
-#Preview("Recoverable — sending") {
-    FailureView(kind: .recoverable(missingCount: 14, resend: .inFlight))
-}
-
-#Preview("Recoverable — send failed") {
-    FailureView(kind: .recoverable(missingCount: 3, resend: .failed))
-}
-
-#Preview("Recoverable — rescan only") {
-    FailureView(kind: .recoverable(missingCount: 14, resend: .unavailable))
-}
-
-#Preview("Recoverable — count unknown") {
-    FailureView(kind: .recoverable(missingCount: 0, resend: .unavailable))
-}
-
-#Preview("Terminal") {
-    FailureView(kind: .terminal)
-}
-
-#Preview("Upload failed") {
-    FailureView(kind: .uploadFailed(reason: "http_403"))
 }

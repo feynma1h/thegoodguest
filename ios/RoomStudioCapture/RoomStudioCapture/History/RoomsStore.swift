@@ -1,7 +1,7 @@
 /// The one place the app holds "what rooms has this identity sent?".
 ///
 /// Owns a single GET /scenes fetch and publishes it to every surface that needs
-/// it — the home strip, RoomsListView, and WhySignInSheet's count. One store
+/// it — the house, home's sentence, and the contents sheet's count. One store
 /// rather than a fetch per surface, because the count the sign-in invitation
 /// asserts and the rows the list draws must not be able to disagree.
 ///
@@ -53,8 +53,9 @@ nonisolated enum RoomsLoadState: Equatable {
         return nil
     }
 
-    /// The count, or nil when it is not known. This is what WhySignInSheet's
-    /// argument is made of, and why the sheet has no caller until it is non-nil.
+    /// The count, or nil when it is not known. This is what the contents
+    /// sheet's status column is made of, and why it goes blank rather than
+    /// stating a zero when the fetch fails.
     var knownCount: Int? { knownRooms?.count }
 }
 

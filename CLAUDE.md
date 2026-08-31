@@ -12,9 +12,9 @@ This file is the always-current state of the project. Both Claude Code (reads it
 
 **The thesis: every home contains a version of itself that its owner has never seen. This product makes that version visible, understandable, and achievable — one conversation at a time.** Every feature decision filters through this. The full founding vision lives at `docs/product/initial-idea-draft.md` (verbatim, with what's superseded vs durable mapped in decision 0055) — read it before making product-surface decisions.
 
-This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction is the *medium*; the product is helping people make AI-based decisions about improving their room. Three product layers frame everything: the **AI layer** (understands space structurally — object relationships, traffic flow, light, proportion — with algorithmic spatial analysis before any LLM is invoked, and reasoning traces on every design decision), the **emotional layer** (feels personal, not algorithmic — the experience bar is Linear/Vercel/Figma-tier premium consumer software; conversation is the primary post-reveal interface; the cinematic reveal is the defining moment; design language is Apple-grade restraint per decision 0056 — neutral chrome, content carries the color, one sans, mono only for machine data), and the **social layer** (rooms are identity — sharing, comparison, evolution over time). Direction, not yet commitments: room health scoring, taste graph, lighting simulation, budget-aware shopping, DAG version history. Deliberately out (per the founding draft, still sound): AR overlay, social feed, photorealistic image generation, floor plans, voice input; desktop-first.
+This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction is the *medium*; the product is helping people make AI-based decisions about improving their room. Three product layers frame everything: the **AI layer** (understands space structurally — object relationships, traffic flow, light, proportion — with algorithmic spatial analysis before any LLM is invoked, and reasoning traces on every design decision), the **emotional layer** (feels personal, not algorithmic — the experience bar is Linear/Vercel/Figma-tier premium consumer software; conversation is the primary post-reveal interface; the cinematic reveal is the defining moment; design language is Apple-grade restraint — the chrome stays quiet so the room carries the colour — in the warm Good Guest palette of 0057, which SUPERSEDES 0056's neutral-chrome-and-one-sans reading: the app ships parchment and ink with three type roles, the guest's serif for prose and mono for machine data only, and the **social layer** (rooms are identity — sharing, comparison, evolution over time). Direction, not yet commitments: room health scoring, taste graph, lighting simulation, budget-aware shopping, DAG version history. Deliberately out (per the founding draft, still sound): AR overlay, social feed, photorealistic image generation, floor plans, voice input; desktop-first.
 
-**Naming: SETTLED 2026-08-23 as "The Good Guest" (0245)**, forced by the App Store listing when enrollment cleared. It is the register the whole product was built in (0072/0057) and the metaphor the calling card is already named from. Set in exactly two places — `web/src/components/Wordmark.tsx` and iOS `RSBrand.name` — plus the card's own `WORDMARK` in `lib/card/layout.ts`, which the card's privacy guard now imports rather than retypes. **The repo, GCP project, buckets and `roomstudio:` localStorage keys deliberately keep the stand-in** — infrastructure, invisible, expensive to rename for no user-visible gain. **The card still prints `roomstudio.web.app`, which is the TRUE hosting URL**: changing that string without moving hosting would print a falsehood on an artifact that leaves the browser. Re-open trigger is commerce, and renaming stays cheap until App Store submission — TestFlight needs only an app record.
+**Naming: SETTLED 2026-08-23 as "The Good Guest" (0245)**, forced by the App Store listing when enrollment cleared. It is the register the whole product was built in (0072/0057) and the metaphor the calling card is already named from. Set as a STRING in three places — `web/src/components/Wordmark.tsx`'s `BRAND_NAME`, iOS `RSBrand.name`, and `INFOPLIST_KEY_CFBundleDisplayName` in `project.pbxproj`, which is what the Home Screen shows and which cannot read either constant (`tools/test_gen_mark.py` fails if they drift). **Until 2026-08-26 the Home Screen read "RoomStudioCapture"** — the main target had no display name and fell through to `TARGET_NAME`, outside every "the name lives in N places" claim this file ever made. The card no longer prints the name at all: it carries the wordmark, which is a drawing. **The repo, GCP project, buckets and `roomstudio:` localStorage keys deliberately keep the stand-in** — infrastructure, invisible, expensive to rename for no user-visible gain. **The card still prints `roomstudio.web.app`, which is the TRUE hosting URL**: changing that string without moving hosting would print a falsehood on an artifact that leaves the browser. Re-open trigger is commerce, and renaming stays cheap until App Store submission — TestFlight needs only an app record.
 
 Three technical surfaces today:
 
@@ -54,9 +54,12 @@ packages/api-core/                shared logic consumed by both API services
 
 tools/                            local scripts (run from repo root)
   gen_proto.sh                      regenerate Python and Swift (ios/RoomStudioCapture/RoomStudioCapture/Generated/)
-  gen_mark.py                       the product mark's ONE source — regenerates the three app
-                                      icons, favicon.ico, icon.svg, and the geometry both
-                                      wordmarks consume
+  gen_mark.py                       the identity's ONE source — regenerates the three app
+                                      icons, favicon.ico, icon.svg, the mark geometry both
+                                      platforms consume, and the wordmark (whose traced
+                                      lettering is the input at tools/brand/)
+  brand/wordmark-traced.json        the lettering, traced. SOURCE, not an output — artwork,
+                                      so unlike the mark it cannot be regenerated from numbers
   build_test_bundle.py              synthesize a bundle from test_data/photos
   inspect_bundle.py                 verify a bundle parses + smoke-checks
   punchlist_check.py                re-derive docs/punchlist.md against the live system
@@ -165,7 +168,9 @@ not. **Those two commands are both called "root" in this repo and differ by
 18 tests** — "always say which" was never enough on its own, because the
 figures were recorded without the command that produced them. Write the
 command. Without fixtures the second form is **811 + 102** (review worktree,
-2026-08-24). re-enqueue **18**.
+2026-08-24). On `brand-identity` with fixtures ABSENT, bare `pytest` reads
+**822 + 102** — the eleven added are `tools/test_gen_mark.py` growing from 15 to
+26 as the mark, the wordmark and the app's own name all gained pins (0248-0251). re-enqueue **18**.
 
 ### iOS capture app — `ios/RoomStudioCapture/`
 
@@ -221,11 +226,105 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   a failed fetch never renders as zero. Rows offer a tap only where one can
   land — gated on `NetworkConfig.webBaseURL`, which is nil, exactly as the
   doorway's CTA is.
-- **The mark.** `DesignSystem/Wordmark.swift` draws the same room corner as the
-  app icon, from the generated `MarkGeometry.swift` (0193). `RSBrand.name` stays
-  the one-file swap for the name; there is no separate mark glyph.
+- **The mark.** `DesignSystem/Wordmark.swift` draws the same two interlocking
+  rings as the app icon, from the generated `MarkGeometry.swift` (0193/0248).
+  `RSBrand.name` stays the one-file swap for the name. **The mark and the name
+  are never set side by side** — the mark IS the "oo" of "the good guest", so a
+  lockup prints those two letters twice; chrome takes the mark alone.
+- **The splash.** `SplashView` is the launch, wrapped around `RootFlowView` by
+  the app entry point rather than routed to: the name arrives, the word closes
+  on its own middle, and the mark is what is left. The only place both appear,
+  and they appear in SEQUENCE. Each letter is carried as a rigid body along cuts
+  the generator finds by counting how many strokes a column crosses (0251), and
+  the morph is exact because the wordmark's rings ARE the mark's (0250).
 - **Reclaim.** `CaptureReaper` frees a capture's record and files once the user
   has *seen* the outcome — never on mere upload success.
+
+**The screens were rebuilt to one shape (0254, 0257).** Home holds the claim,
+ONE sentence that reports, and the pinned action — nothing else. The sentence
+routes by priority (needs-you → Notes, arrival → the doorway, in flight → the
+desk, otherwise a standing fact → the house) and cannot stack, which is what
+stopped the claim being pushed down the page and what let it stop vanishing
+after the first scan. Everything home used to report moved to a screen of its
+own, reached from a **contents** screen behind the mark — a table of contents
+rather than a tab bar, so the four destinations are stated only when asked.
+`HomeLine`, `Contents` and `SurfacePlacement` are the three routing tables, all
+pure and table-tested; a test pins that the sentence and the contents sheet
+cannot disagree.
+
+**One grid, enforced and checkable.** `RSScreen` holds every shared
+measurement, `ScreenHeaderFrame` gives every header the same 44pt band, and
+`RSActions` fixes the action block's SHAPE — extras above, one filled button,
+then exactly one closing line — so a button's height off the bottom cannot
+depend on how many controls a screen has. A block pinned over a scroll region
+uses `rsPinnedActions`, which is opaque and full-bleed: `safeAreaInset` lets
+content scroll BEHIND what sits there, so a transparent bar is one the body
+copy renders through (0270).
+
+`tools/ios_screenshot_gallery.py` photographs **83 states across 17 screens** —
+one frame per distinct state rather than one per screen — at both the default
+text size and AX5, 166 frames, and `tools/ios_layout_audit.py` measures them and
+exits non-zero when an enforced screen deviates. `tools/ios_contact_sheet.py`
+turns a pass into one self-contained page for review. Last run 2026-08-28:
+**0 of 62 at both sizes**; default margin 25–29pt, header ink 81–89, first
+content 140–152, filled button 77–87pt off the bottom at left 26–28 and 346–350
+wide. **Two of the audit's five bounds are default-size only and are not
+enforced at AX5** — the first content line and the button's offset off the
+bottom both move legitimately when the header glyph above one and the closing
+line below the other grow (0252).
+
+**Type stops at a CEILING, and tiers stop some of it earlier** (0258). The app
+holds Dynamic Type at `RSTypeSize.ceiling` — `.accessibility2`, body 17 → 33pt
+— applied ONCE at the app root by `rsTypeCeiling()`. Uniform, so every ratio
+between every pair of styles stays exactly where the default size has it: the
+accessibility layout is the same layout, larger. Within that, serif titles stop
+at **1.4×** (`RSTypeCap.display`), machine data at **1.6×** (`.mono`), and a
+control's label is clamped at `xxxLarge` by `rsControlLabel()` so a button keeps
+the shape its fixed padding gives it. Reading text scales freely to the ceiling
+and is capped by nothing else.
+
+**Machine truth is set in mono, uncontained — and the tracker now is too.**
+The capture screen's tracking indicator was a bordered capsule with a coloured
+status dot, the only element in the app in that shape; it is a mono readout in
+the same idiom as the coverage ticks below it and the desk's status line. Three
+things went with it: **the ordinary state is now the quiet one** (`.good` had
+carried the component's only glow, so nothing-is-wrong was the loudest thing on
+screen, and it is now set in the coverage labels' muted ink), the dot is gone
+and nothing replaces it (`.slowDown` and `.finding` share a colour, so it
+carried three values where the words carry four), and **the readout reports
+STATE while the guest's line keeps the instruction** — "Go a little slower"
+became `MOVING TOO FAST`, because an instruction in a status readout duplicates
+the channel the app already has for advice. All four strings sit in one switch
+in `LiveCaptureView.trackingReadout`.
+
+**Nothing is dropped, reordered or restacked to fit.** The three
+`isAccessibilitySize` re-compositions are GONE — home's claim/sentence swap,
+the contents row stacking, the house's stamp dropping to its own line. Each was
+the right fix for unbounded type and each is dead weight under a ceiling: a
+second layout to verify, for no gain. `ContentsRowView` instead gives the title
+and the status `layoutPriority(1)` and lets the dot leaders yield, because a
+leader is filler — without that, "The house" wrapped to two lines at the ceiling
+while "The desk" did not.
+
+**Measured across all 83 states, 2026-08-29:** mean density 10.2% → 14.5%
+(**1.42×**), layout audit **0 of 62** at both sizes.
+`tools/ios_density_guard.py` bounds it by the arithmetic rather than by taste —
+ink area scales with the SQUARE of type size, so the same content at 1.94× is
+3.77× denser with nothing wrong, and **0 of 67** screens exceed that. A 2×
+target was arithmetically unreachable while showing everything: meeting it
+needed type below 1.41× or content removed, and both were ruled out. Read a
+ratio well BELOW the square as the interesting signal — it means content is
+falling off the bottom of the frame.
+
+**What it costs, plainly:** someone who sets the top step asks for 53pt body
+text and gets 33. That is a real reduction for the people the setting exists
+for, and it is why the ceiling is ONE constant.
+
+**The splash hands the mark over** rather than cutting to home (0255): the mark
+walks to the exact rectangle home publishes as an anchor preference, while home
+fades in behind it. Home's mark shows the way in by playing a dotted leader and
+the word MENU out from behind itself, once per launch — no caption, and the
+plate-and-chevron treatment that preceded it is gone.
 
 Suite **610**: 604 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
@@ -397,7 +496,7 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
 - `lib/designSpec.ts` overlays the arrangement onto the assembled scene as a
   pure pass, so the renderer never learns a proposal exists. The measurement
   survives on screen as its footprint in the contour's paper tone.
-- `Wordmark.tsx` draws the room corner from generated geometry and remains the
+- `Wordmark.tsx` draws the two interlocking rings from generated geometry and remains the
   one-file swap for the product name, now "The Good Guest" (0245). It authors
   no paths and no colours: `tools/gen_mark.py` is the mark's one source across
   the app icons, the tab icon, both wordmarks and the share card (0193), and
@@ -416,12 +515,24 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
   prints only DETECTED extents (0222), and rotates the plan flat because an
   ARKit yaw is the phone's start heading rather than a measurement (0223).
   Canvas and not SVG: an SVG rasterized through an `<img>` cannot see the
-  document's fonts and would silently set the card in system faces.
+  document's fonts and would silently set the card in system faces. Since 0248
+  the card carries the **wordmark** rather than the mark — it reaches a stranger,
+  where a small abstract mark says nothing — which also removed the product name
+  from the set of strings its privacy guard has to allow, because the wordmark
+  is a drawing rather than text.
   Eligibility is a conservative `created_at` gate against the first
   suppression-armed revision (0221) — a card ships the shell and a person
   contaminates a measured albedo, so this is the rung where 0089 binds hardest.
 
-Suite **276** vitest; lint, tsc, and the static-export build are green.
+Suite **276** vitest; lint, tsc, and the static-export build are green
+(re-measured on `brand-identity`, 2026-08-26, fixtures absent).
+
+The design tokens are the new identity's (0248): cream `--paper: #f9f2ec`, warm
+near-black `--ink: #282723`, terracotta `--accent: #c04d3e`. **There are two
+terracottas and the split is load-bearing** — `--accent` is the exact value the
+mark is drawn in and reaches only 4.33:1 on the cream, so anything text-sized
+uses `--accent-deep` at 5.52:1 instead (0249). Do not set body-sized text in
+`--accent`.
 
 ### Infra and operations
 
@@ -827,6 +938,68 @@ gains.
 
 **iOS**
 
+- **The mark's fill rule is guarded on the Python side only.**
+  `tools/gen_mark.py` warns that even-odd across both rings punches holes where
+  the bands cross, and `tools/test_gen_mark.py` pins it by building the wrong
+  version and asserting ours differs — but nothing pins the Swift or TypeScript
+  CONSUMERS. The generator warned, the test passed, and iOS's splash re-made the
+  mistake anyway (0255). All six other surfaces that draw the ring pair were
+  audited and are correct, so this is a latent gap rather than a live defect:
+  the fix is a consumer-side pin, not a better docstring.
+- **Notes has no past.** The design gives news an "EARLIER" list of observed
+  facts; that needs the phone to remember what it previously saw and diff
+  successive fetches, which nothing does today. Deferred by operator ruling; the
+  section does not render rather than showing an empty shell. The arrival card
+  is deferred with it, since detecting an arrival is the same change detection.
+- **The menu peek's two greys are literal hexes**, given by the design brief and
+  named in one place in `MenuPeek.swift`. They are the only colours in the app
+  outside the token system and will not follow a brand repaint.
+- **The pinned-action rule reached ONE screen out of eleven when measured**
+  (0253, 2026-08-26) and is now applied everywhere by `RSActions` (0257). Kept
+  for the finding, not as an open defect: 0224's
+  rule — content scrolls, only the action is pinned — is implemented on
+  `HomeView` (action outside the `ScrollView`) and `GuidanceSheet`
+  (`safeAreaInset`). Every other screen puts its primary action inside the
+  scroll region. **Home itself PASSES**: "Scan a room" wraps rather than
+  truncating, so 0224's fix holds — but with all three notices present the
+  scroll region above it collapses to roughly one visible notice, and nothing
+  says the other two are below. **`RoomsListView` loses its action entirely** —
+  the screen ends mid-sentence in its footer and "Scan another room" is off the
+  bottom, on the one screen where a scan action and room history already share
+  space. **`FailureView` shows no action on arrival** — a fixed 200pt art block
+  takes the top third and both buttons are pushed off, on a screen whose copy
+  promises "exactly one concrete path". Both are reachable by scrolling, which
+  is why the suite is green and why reading did not catch them. **Both named
+  screens are now CLOSED and neither by a layout change to itself**: the rooms
+  list was replaced by `HouseView`, which carries no scan action at all because
+  capture is home's gesture, and `FailureView`'s two buttons moved into a
+  `safeAreaInset` and are pinned on arrival at AX5 (photographed 2026-08-28).
+  What the finding leaves is the rule, not the two screens.
+- **Three things the state-space pass surfaced that are the operator's call,
+  not a defect** (0270; every one photographed, none decided here). **The
+  guidance sheet's denied CTA carries a gear glyph** — `Label("Open Settings",
+  systemImage: "gear")` — while the two buttons that START a capture ship
+  deliberately WITHOUT one, because at button size the product's own mark
+  collapsed into a smudge and the stock viewfinder was worse than nothing. At
+  AX5 the label wraps and the glyph comes to rest beside "Open" alone, so it
+  reads as attached to one word of two. **The desk's reset stamp falls below
+  the fold at AX5** — `RESETS 29 Aug, 04:20` is that screen's one exact fact and
+  the only thing on it set in mono, and at accessibility sizes the guest's line
+  above it fills the screen. It is reachable by scrolling and nothing is
+  clipped; the question is whether the exact fact should outrank the prose that
+  approximates it. **`WhySignInSheet` is presented by no call site** outside the
+  gallery, so the invitation the rooms count exists to make is never made; its
+  checklist also reads "Your 1 rooms stay exactly as they are" while the
+  sentence above it correctly reads "one room", the two count words being
+  written in different places. **Deliberately NOT fixed**: 0237's rule is that
+  dead code accruing unverified fixes rusts shut rather than staying ready, and
+  a copy fix to a screen with no route is exactly that. Give it a route or
+  delete it; do not tidy it.
+- **`RoomRow` centres its thumbnail against wrapped text** (0253). At AX5 the
+  derived title and the status line each wrap to two lines and the tile comes to
+  rest between them rather than beside the title. Exactly the `.center`-is-the-
+  default form the notice components were already top-aligned to avoid; the row
+  was missed because it is drawn in a different file from the notices.
 - **A keyframe's manifest entry survives its JPEG failing to write** (0240).
   `acceptFrame` appends to `capturedFrames` synchronously while the encode and
   the write happen later on `jpegQueue`; both failure paths log, count, and
@@ -871,8 +1044,14 @@ gains.
   staged-list entry used to imply — the desk names the room in the link it
   hands over, so a list of the phone's own rooms tells it nothing (0218).
 - **`RSSound` is wired at three call sites with no cue files** — the app is
-  silent. The web has no sound at all. Branded fonts fall back to system faces.
-  The product **name** is settled (0245); the web lockup still needs re-cutting from mono to the serif.
+  silent. The web has no sound at all. **The branded-fonts claim was true of iOS
+  and false of the web, and is now stated per platform:** the web loads real
+  Google faces via `next/font/google` (Instrument Sans, Source Serif 4, and
+  JetBrains Mono since 0248); **iOS bundles no font files at all** and
+  `RSFont.swift` falls back to the spec's system substitutes — New York, SF Pro,
+  `.monospaced` — behind a named bundling seam that says to change only the
+  private face helpers. The web lockup no longer needs re-cutting: there is no
+  lockup (0248).
 - **There is no per-room deletion** — account deletion is all-or-nothing, which
   is conspicuous for a product whose thesis is that rooms are identity. **It is
   also a hard prerequisite of any hosted share link** (`docs/product/social-layer.md`
@@ -952,11 +1131,14 @@ gains.
   product is Pro-only / LiDAR-first; the shipped ARKIT_ONLY path stays live and
   is strictly better than before, but no further merge-knob grinding. The
   non-LiDAR device is not a test target and must not shape decisions.
-- **The two lockups set the NAME differently and the fork is now decided by
-  the name itself** — "The Good Guest" is too long for tracked uppercase mono
-  beside the corner mark, so the display serif wins by construction (0245). The
-  mark is identical everywhere (0193). **What remains is applying it**: the web
-  lockup still renders in mono and has not been re-cut to the serif.
+- **There are no lockups, on either platform** (0248). The fork between mono
+  and serif is not resolved, it is DISSOLVED: the mark is the "oo" of the name,
+  so setting the two together prints those letters twice. Chrome takes the mark
+  alone; the calling card and the OG image take the script wordmark alone; the
+  iOS splash is the one place both appear and shows them in sequence. The mark is
+  identical everywhere (0193). **Do not re-introduce a lockup as a convenience** —
+  `tools/test_gen_mark.py` fails if any of six files draws the mark and renders
+  the name.
 - **From the founding vision, still sound:** no AR overlay, no social feed, no
   photorealistic image generation, no floor plans as a product surface, no voice
   input. Desktop-first on web.
@@ -1118,7 +1300,7 @@ The iOS suite is **610 tests total** (was 590; the capture-dark pass added 20 �
 
 **A full-suite run does NOT spend the operator's capture quota — that claim was wrong and is corrected here.** `UploadSessionClientTests` does mint a fresh `bundleId = UUID()` per test, and the daily CAPTURE ceiling (12, `UPLOAD_SESSION_DAILY_CAPTURES`, confirmed on the serving revision) is charged on first claim. **But the ceiling is per-UID, and every one of those tests calls `Auth.auth().signInAnonymously()` and signs out in teardown** — so each test runs as a brand-new anonymous user with its own untouched allowance and spends one of ITS twelve. The operator's own quota is never touched. **The evidence is `upload-flake`'s 22 consecutive full-suite runs at 600 tests each**, which could not have happened under a shared 12/day ceiling and is what forced this re-check. The original claim came from live tests failing in a way that reads like quota exhaustion; the likelier cause is the first of the two measurement traps recorded below under **"Two measurement traps"** — `CODE_SIGNING_ALLOWED=NO` leaves Firebase unable to reach the keychain, surfacing as `SecItemAdd (-34018)` underneath and `FIRAuthErrorDomain 17995` at the Firebase layer. Same cause, two codes, and either reads like a backend outage. **What IS true:** each full run creates ~4 orphaned anonymous users, and anonymous-user auto-cleanup must stay OFF (it would fire the UID-churn mechanism), so they accumulate forever. `-skip-testing:RoomStudioCaptureTests/UploadSessionClientTests` is still worth using for repeat runs — it is faster and it stops the accumulation — but it is not protecting anyone's ability to scan.
 
-**What the suite does and does not cover.** It pins flow LOGIC — routing tables, restore selection, deferral scoping, poller visibility — deliberately extracted into pure functions so they are reviewable as tables instead of by reading SwiftUI. It does NOT cover rendering: a green suite is compatible with a screen whose only exit is clipped off-frame at accessibility sizes. **AX5 layout claims must be re-verified by screenshot, never by reading** (`xcrun simctl ui <udid> content_size accessibility-extra-extra-extra-large`, then a temporary app-entry swap to the screen under test); three separate review passes claimed AX coverage they did not have, and the two screens that actually failed — `AccountConflictView` (deleted since, 0216) and `QRBridgeView` (fixed; re-verified by screenshot 2026-08-22) — were both found by screenshot after being read as fine. **The sharpest thing to check is a PINNED action** (0224): home's scan button truncated to "Scan a ro…" because a notice stacked outside `HomeView`'s `ScrollView` took ~370pt at AX5 and the compression landed on the pinned sibling rather than on the scroll area. Content belongs in the scroll area; only the action is pinned. Both surfaces 0224 named — `UploadFailedBanner` and home's re-entry row — have now been screenshotted in that position, and both DID truncate the scan action; both moved into `HomeView`'s `notice` slot and are re-verified by screenshot (2026-08-24, decision 0238). **That slot now renders in BOTH home variants**, first-time and returning — a slot only the no-rooms branch could show pushes the next caller back outside, rebreaking the rule by following it. Screens NOT yet through this shot: `RoomsListView`, `WaitingView`, `FailureView`, `DoorwayView`, `ProfileView`. Second recurring form, same shot: `.center` is `HStack`'s default, so any glyph or button beside prose that wraps to four lines comes to rest in the middle of it — top-align it.
+**What the suite does and does not cover.** It pins flow LOGIC — routing tables, restore selection, deferral scoping, poller visibility — deliberately extracted into pure functions so they are reviewable as tables instead of by reading SwiftUI. It does NOT cover rendering: a green suite is compatible with a screen whose only exit is clipped off-frame at accessibility sizes. **AX5 layout claims must be re-verified by screenshot, never by reading** (`xcrun simctl ui <udid> content_size accessibility-extra-extra-extra-large`, then a temporary app-entry swap to the screen under test); three separate review passes claimed AX coverage they did not have, and the two screens that actually failed — `AccountConflictView` (deleted since, 0216) and `QRBridgeView` (fixed; re-verified by screenshot 2026-08-22) — were both found by screenshot after being read as fine. **The sharpest thing to check is a PINNED action** (0224): home's scan button truncated to "Scan a ro…" because a notice stacked outside `HomeView`'s `ScrollView` took ~370pt at AX5 and the compression landed on the pinned sibling rather than on the scroll area. Content belongs in the scroll area; only the action is pinned. Both surfaces 0224 named — `UploadFailedBanner` and home's re-entry row — have now been screenshotted in that position, and both DID truncate the scan action; both moved into `HomeView`'s `notice` slot and are re-verified by screenshot (2026-08-24, decision 0238). **That slot now renders in BOTH home variants**, first-time and returning — a slot only the no-rooms branch could show pushes the next caller back outside, rebreaking the rule by following it. **`ScreenGallery` (DEBUG) plus `tools/ios_layout_audit.py` are now the way this is checked** — `-rs.gallery.screen <id>` renders one state from fixtures, composed the way `RootFlowView` composes it, and the audit measures the result, so a claim that the layout is consistent exits non-zero when it is not (0257). **ONE ENTRY IS ONE STATE, NOT ONE SCREEN** (0270): 36 entries for 36 surfaces read as complete and covered a state space of 83, so most screens were photographed in one of the several states they can reach and in none of the others. **Every state is now shot at BOTH sizes and the not-yet-shot list is closed** — 166 frames, 2026-08-28. Photographing the ones that had never been looked at found two defects immediately, both invisible to a green suite: the pinned action bar was transparent, so at AX5 profile drew its closing line letter-on-letter over the body copy (as did the recovery screen and the QR bridge), and a filled button's label truncated to "Scan again fr…" under vertical pressure instead of wrapping. Under Reduce Motion — which the gallery could not set until this pass, because `\.accessibilityReduceMotion` is read-only and it has to come from `com.apple.Accessibility` on the device — the splash showed **no name at all**, then the mark. **A state that can only be reached by hand-assembling a lookalike is not a state the app has**, and that is the finding rather than an entry; where the simulator genuinely cannot produce one (`simctl privacy` has no camera service) the answer is a seam in the screen's own logic, never a second rendering path. Second recurring form, same shot: `.center` is `HStack`'s default, so any glyph or button beside prose that wraps to four lines comes to rest in the middle of it — top-align it.
 
 **Posture: fail-closed-live, not fail-open.** Each integration test calls `XCTSkipIf(!RUN_INTEGRATION_TESTS)` — the fail-open default — but because the sole scheme always sets the flag, that skip path is never taken here. With the flag set they hit the live `/upload_session` contract and go **red if the backend is unreachable**. Running the suite therefore requires a reachable backend; an offline run will fail those 4 (expected, not a regression).
 
@@ -1311,7 +1493,7 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 ## The punchlist
 
 **`docs/punchlist.md` is the working list of what is left before "finished."**
-Twenty-nine entries in six gates, in dependency order, written 2026-08-26 from a
+Thirty entries in six gates, in dependency order, written 2026-08-26 from a
 full review that RAN every suite and checked the live system rather than reading
 this file. Start there for "what should I do next"; this section below is
 narrative and historical, and it decays — the punchlist is the part maintained
@@ -1322,7 +1504,7 @@ DELETED, never annotated — a punchlist that accumulates closed items becomes t
 retired 207-entry tracker again. New entries are added freely in the same shape.
 IDs are stable and never reused.
 
-**Eleven of the twenty-nine carry an automated check.** Run
+**Eleven of the thirty carry an automated check.** Run
 `python3 tools/punchlist_check.py` (add `--offline` to skip the five that hit the
 network, or a filter like `G3` for one gate). It re-derives status from the live
 system and prints DONE / OPEN / UNKNOWN / MANUAL. **UNKNOWN is never DONE** — a
@@ -1345,7 +1527,7 @@ evidence for a human deleting an entry, not authority to.
 
 **ALL THREE PARALLEL LANES MERGED 2026-08-09** (`stage2` → 0135–0137, `perception-emit`, `ios-residue`; worktrees removed, branches deleted). Merged-tree verification: root **724 passed + 10 skipped**, perception **704**, web **204**, iOS **523**, tsc clean, zero conflict markers. **What the lanes left owed, now written:** lane B's two notes are 0142 (`/compress` as a third `/process` stage rather than a sidecar) and 0143 (`extent_axes_m` declared per box, horizontals deliberately unnamed). The `dims` correction is lane C's **0137**, reached independently — there is no third note on it.
 
-**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2, capture-dark, guest-closure and perception-deploy merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNWRITTEN: 0244 to perception-deploy** — deliberately NOT freed even though that lane has now landed; it may still write it. **0239 is SPENT by upload-flake** (the last decrement fires the gate in its own turn) — **nothing is unmerged now.** **0242 is SPENT by privacy-labels** (a privacy disclosure is measured, not described). **0243 is SPENT by perception-deploy** (the flip is three assertions); **0186, 0215, 0219–0220 by guest-closure**; **0225–0236 by selection-supply**; **0237–0238 by ios-surfaces-2**; **0240–0241 by capture-dark**; **0245 by the name swap**. Everything else through 0245 is used.
+**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2, capture-dark, guest-closure and perception-deploy merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246, 0271+ — **0252, 0258 and 0270 are SPENT by the ui-screenshots lane** (the audit measured the instrument; type scales by what it does; the gallery photographs states rather than screens) — and note that lane was RESERVED 0266–0270 and found 0266–0269 already written on `segment-quality`, which is the collision this paragraph exists to prevent and which a bare `ls-tree main` would not have shown. **0253–0257 are SPENT by the ui-organisation lane** (the pinned-action finding, the home rebuild, the splash hand-off, the accessibility ordering rule, the layout grid), and **0259–0265 are taken by the two perception lanes**** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNWRITTEN: 0244 to perception-deploy** — deliberately NOT freed even though that lane has now landed; it may still write it. **0239 is SPENT by upload-flake** (the last decrement fires the gate in its own turn) — **nothing is unmerged now.** **0242 is SPENT by privacy-labels** (a privacy disclosure is measured, not described). **0243 is SPENT by perception-deploy** (the flip is three assertions); **0186, 0215, 0219–0220 by guest-closure**; **0225–0236 by selection-supply**; **0237–0238 by ios-surfaces-2**; **0240–0241 by capture-dark**; **0245 by the name swap**. Everything else through 0245 is used.
 
 Two durable lessons, both learned by collision. **Put a session's number block INSIDE the prompt body**: a block written in a chat heading once reached nobody and two lanes claimed the same numbers, and the room-quality session was handed one stale block in its prompt and a different one in its handoff. When a prompt and this file disagree, **this file and the handoff win** — a prompt is written once, these are maintained. And **two sessions sharing one tree is how a note gets dropped**: decision 0179 was lost by the sam3d-pointmap merge and restored by `546281e`, which is why the Tooling conventions now insist every session gets its own worktree.
 

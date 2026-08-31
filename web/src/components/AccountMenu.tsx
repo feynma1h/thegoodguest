@@ -177,7 +177,7 @@ export default function AccountMenu() {
                 <button
                   type="button"
                   onClick={() => setDeleting(true)}
-                  className="block w-full cursor-pointer border-t border-ink/10 px-4 py-3 text-left text-sm text-ink/55 transition-colors hover:bg-ink/[0.04] hover:text-accent"
+                  className="block w-full cursor-pointer border-t border-ink/10 px-4 py-3 text-left text-sm text-ink/55 transition-colors hover:bg-ink/[0.04] hover:text-accent-deep"
                 >
                   Delete account
                 </button>

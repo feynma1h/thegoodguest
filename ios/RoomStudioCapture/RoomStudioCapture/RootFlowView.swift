@@ -24,17 +24,22 @@
 ///
 /// The §8/§9 history surfaces are WIRED, all three off one RoomsStore fetch of
 /// GET /scenes: the returning-home recent-rooms strip, RoomsListView behind
-/// "all N rooms", and WhySignInSheet on the first return home with a room and
-/// an unlinked identity. A ready room's chevron is gated on
+/// A ready room's chevron is gated on
 /// NetworkConfig.webBaseURL exactly as the doorway's CTA is — with no web
 /// origin configured, rows inform rather than offer a tap that lands nowhere.
 ///
 /// STILL STAGED, and not on that fetch: QRBridgeView (§9), whose blocker is
 /// deep-link infrastructure and the associated-domains entitlement, not a room
-/// list — the desk names the room in the link it hands over. And ColdStartView
-/// (§1 — the flow opens directly at .home, and identity is minted by the
-/// app-level launch task, so nothing ever waits on a splash). These have no entry point here and appear only in their own
-/// previews. §8's conflict SCREEN is not on that list: it is not built at all
+/// list — the desk names the room in the link it hands over. It has no entry
+/// point here and appears only in its own preview.
+///
+/// §1's cold start is not on that list, in either direction. The flow still
+/// opens directly at .home and identity is still minted by the app-level launch
+/// task, so nothing here WAITS on a splash — but the splash is real, and it is
+/// wrapped around this view by the app entry point rather than routed to from
+/// inside it. See SplashView.
+///
+/// §8's conflict SCREEN is not on that list: it is not built at all
 /// (decision 0216), because the count it was designed around cannot be obtained
 /// without becoming the account it asks about. SignInSheet owns the conflict.
 /// ReviewView's THIN-COVERAGE variant belongs to the staged list too:
@@ -64,14 +69,15 @@ struct RootFlowView: View {
 
     @ObservedObject private var auth = AuthManager.shared
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     @State private var stage: Stage = .home
     @State private var showGuidance = false
-    @State private var showProfile  = false
-    @State private var showRooms    = false
-    /// The §8 invitation, offered at most once (WhySignInOffer).
-    @State private var showWhySignIn = false
+    /// Where home has navigated to. Empty is home itself.
+    ///
+    /// A typed array rather than NavigationPath: the path only ever holds one
+    /// kind of thing, and the erased form makes every append need an annotation
+    /// while letting an unrelated Hashable compile.
+    @State private var path: [HomeRoute] = []
     /// The bundle id sent for processing — used to restart polling after a fatal
     /// poll error without depending on the current CaptureManager.
     @State private var sentBundleId: String?
@@ -246,95 +252,89 @@ struct RootFlowView: View {
         }
     }
 
-    private var homeScreen: some View {
-        // EVERY notice this screen carries goes through HomeView's `notice` slot,
-        // which is inside its ScrollView. None of them may be stacked around
-        // HomeView: that column is shared with the pinned scan action, and at
-        // accessibility sizes the action is what gives — "Scan a room" truncated
-        // to "Scan a ro…" (decision 0224). Content scrolls; only the action is
-        // pinned.
-        //
-        // A failed rooms fetch must not simply fall back to the first-time hero:
-        // in this flow that IS the no-rooms variant, so silently showing it tells
-        // a returning user their rooms are gone. The hero still holds the space
-        // (it is true for everyone), with an honest line saying the phone could
-        // not look.
-        HomeView(
-            onScan: { showGuidance = true },
-            onProfile: { showProfile = true },
-            hasRooms: homeRooms == .strip,
-            roomsStrip: {
-                if case .loaded(let list, let stale) = rooms.state {
-                    RecentRoomsStrip(
-                        rooms: list,
-                        stale: stale,
-                        canOpenWeb: canOpenAnyRoomOnWeb,
-                        onOpen: openRoomOnWeb,
-                        onSeeAll: { showRooms = true },
-                        onRetry: refreshRooms
-                    )
-                }
-            },
-            notice: {
-                VStack(spacing: 14) {
-                    if failures.latestFailure != nil {
-                        UploadFailedBanner(
-                            reason: failures.latestFailure?.reason,
-                            onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
-                        )
-                    }
-                    // Suppressed while THIS bundle's failure is showing: the banner
-                    // and the row otherwise contradicted each other for the same
-                    // capture. Also suppressed on the PERSISTED failure, which
-                    // dismissing the banner cannot erase — otherwise the row came
-                    // back claiming a terminally failed bundle was still "on its way".
-                    if sentBundleId != nil, failures.latestFailure?.bundleId != sentBundleId,
-                       !sentBundleFailedOnDisk {
-                        ReEntryRow { stage = .sent }
-                    }
-                    if homeRooms == .heroWithTrouble {
-                        RoomsTroubleLine(onRetry: refreshRooms)
-                    }
-                }
-            }
+    /// What today looks like, reduced to what home's sentence and the contents
+    /// sheet actually read. One value feeds both, so the two cannot disagree
+    /// about whether anything needs the user.
+    private var homeDay: HomeDay {
+        let screen = waitScreen
+        let hasFlight = sentBundleId != nil && SurfaceRouter.isInFlight(screen)
+        // Two independent sources of "needs you": the flight this launch, if it
+        // ended in a note, and a terminal failure persisted from an earlier one.
+        // Counted separately because they are different rooms.
+        var needs = 0
+        if sentBundleId != nil, SurfaceRouter.needsUser(screen) { needs += 1 }
+        if let failure = failures.latestFailure, failure.bundleId != sentBundleId { needs += 1 }
+        return HomeDay(
+            needsYou: needs,
+            hasUnseenArrival: sentBundleId != nil && screen == .doorway,
+            hasRoomInFlight: hasFlight,
+            roomCount: rooms.state.knownCount,
+            // First run is "nothing has ever been sent", and an unknown count
+            // is not that: a failed fetch must never produce the screen that
+            // says you have never scanned anything.
+            isFirstRun: rooms.state.knownCount == 0 && sentBundleId == nil
         )
-        // The kick from onFatalBlobError cannot outlive the process, so without this
-        // independent store scan a failure from a previous launch (crash, dead
-        // battery mid-upload) would never surface — exactly the case the banner
-        // exists for.
+    }
+
+    /// The notes waiting for the user, newest first.
+    private var openNotes: [NoteKind] {
+        var notes: [NoteKind] = []
+        if sentBundleId != nil, case .note(let kind) = SurfaceRouter.placement(for: waitScreen) {
+            // The placement deliberately carries no reason — it is read here,
+            // at the one call site that has the monitor.
+            if case .uploadFailed = kind {
+                notes.append(.uploadFailed(reason: failures.latestFailure?.reason))
+            } else {
+                notes.append(kind)
+            }
+        }
+        if let failure = failures.latestFailure, failure.bundleId != sentBundleId {
+            notes.append(.uploadFailed(reason: failure.reason))
+        }
+        return notes
+    }
+
+    /// Where home can push to. A route rather than a set of booleans: these are
+    /// screens on a stack now, not sheets over a screen, and the stack needs
+    /// something Hashable to hold.
+    enum HomeRoute: Hashable { case contents, house, desk, notes, recovery, you }
+
+    private var homeScreen: some View {
+        NavigationStack(path: $path) {
+            HomeView(
+                day: homeDay,
+                onScan: { showGuidance = true },
+                onOpenContents: { path.append(.contents) },
+                onFollowLine: { path.append(route(for: $0)) }
+            )
+            .toolbar(.hidden, for: .navigationBar)
+            // The bar is hidden because every screen sets its own title in the
+            // guest's serif; UIKit takes the swipe-back gesture away with it.
+            // See BackSwipe.
+            .rsBackSwipe()
+            .navigationDestination(for: HomeRoute.self) { screen in
+                destination(screen)
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+        }
+        // The kick from onFatalBlobError cannot outlive the process, so without
+        // this independent store scan a failure from a previous launch (crash,
+        // dead battery mid-upload) would never surface — exactly the case the
+        // notes screen exists for.
         .task { await UploadFailureMonitor.shared.refresh() }
-        // Relaunch recovery: adopt a bundle whose upload finished while the app
-        // was dead. Restoring the id is enough — the home re-entry row renders
-        // from it, and entering the wait resumes polling from the persisted
-        // record. Latched to one run per launch inside; this .task re-fires on
-        // every return to home.
-        //
-        // The phase refresh, by contrast, SHOULD run on every return: it is what
-        // keeps the re-entry row from advertising a bundle that failed while the
-        // user was away.
         .task {
             await restoreUnfinishedBundle()
             await refreshSentBundlePhase()
         }
         // Re-fires on every return to home, which is what makes a room the user
-        // just sent appear in the strip without a relaunch. Single-flighted in
-        // the store, so bouncing between home and the list cannot stack fetches.
-        .task {
-            await rooms.refresh()
-            // "After a first room" (§8) is, in this flow, the first time the
-            // user lands back on home with something to lose. The count is
-            // asserted to them, so the offer waits for a KNOWN one — a fetch
-            // that failed is not zero and not a reason to argue.
-            if WhySignInInvitation.shouldPresent(
-                rooms: rooms.state,
-                isLinked: auth.isLinked,
-                alreadyOffered: WhySignInOffer.hasOffered()
-            ) {
-                WhySignInOffer.markOffered()
-                showWhySignIn = true
-            }
-        }
-        .sheet(isPresented: $showGuidance) {
+        // just sent appear in the house without a relaunch. Single-flighted in
+        // the store, so bouncing between screens cannot stack fetches.
+        .task { await rooms.refresh() }
+        // Full screen rather than a detented sheet: what it holds is the last
+        // thing read before a two-minute walk around a room, and a half-height
+        // card made it look like a disclosure to skim past. There is no drag
+        // indicator because there is no drag — the cross is the way out.
+        .fullScreenCover(isPresented: $showGuidance) {
             GuidanceSheet(
                 onStart: {
                     showGuidance = false
@@ -343,47 +343,108 @@ struct RootFlowView: View {
                 },
                 onDismiss: { showGuidance = false }
             )
-            // At accessibility sizes the .medium detent leaves almost no room for
-            // content once the pinned CTA is placed — open large instead.
-            .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
-            .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showProfile) {
-            NavigationStack {
-                ProfileView(
-                    uid: auth.currentUID,
-                    isLinked: auth.isLinked,
-                    onClose: { showProfile = false }
-                )
-            }
-        }
-        .sheet(isPresented: $showRooms) {
-            RoomsListView(
-                state: rooms.state,
-                canOpenWeb: canOpenAnyRoomOnWeb,
-                onOpen: openRoomOnWeb,
-                onRetry: refreshRooms,
-                onScanAnother: { showRooms = false; showGuidance = true },
-                onProfile: { showRooms = false; showProfile = true },
-                onClose: { showRooms = false }
-            )
-        }
-        .sheet(isPresented: $showWhySignIn) {
-            // The count is re-read at presentation rather than captured at the
-            // trigger: a sheet that renders a number must take it from the same
-            // store everything else reads, and if it is somehow no longer known
-            // the sheet declines to make its argument rather than inventing one.
-            if let count = rooms.state.knownCount {
-                WhySignInInvitationSheet(roomCount: count) { showWhySignIn = false }
-                    .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
-                    .presentationDragIndicator(.visible)
-            }
         }
     }
 
-    // MARK: - Rooms
+    /// The pushed screens.
+    ///
+    /// Every one of them takes `back` for its own header rather than relying on
+    /// the system bar: the bars are hidden throughout, because a screen whose
+    /// title is set in the guest's display serif cannot be rendered by a
+    /// navigation bar without losing the voice.
+    @ViewBuilder
+    private func destination(_ screen: HomeRoute) -> some View {
+        switch screen {
+        case .contents:
+            ContentsScreen(day: homeDay,
+                           onOpen: { path.append(route(for: $0)) },
+                           onBack: back)
+        case .house:
+            HouseView(state: rooms.state,
+                      canOpenWeb: canOpenAnyRoomOnWeb,
+                      onOpen: openRoomOnWeb,
+                      onRetry: refreshRooms,
+                      onBack: back)
+        case .desk:
+            // With a room in flight the desk IS the post-send surface, which
+            // owns the poller's lifecycle; without one there is nothing to
+            // hand over to, so the clear state is drawn here in the stack.
+            if sentBundleId != nil {
+                Color.clear.onAppear { path = []; stage = .sent }
+            } else {
+                DeskView(state: nil,
+                         onOpenHouse: { path = [.house] },
+                         onClose: back)
+            }
+        case .notes:
+            NotesView(needsYou: openNotes,
+                      arrival: nil,
+                      canOpenArrival: canOpenAnyRoomOnWeb,
+                      onAcknowledge: acknowledge,
+                      onOpenNote: { _ in path = [.notes, .recovery] },
+                      onClose: back)
+        case .recovery:
+            // The one note that opens a screen rather than being acknowledged:
+            // whether the missing bytes can be re-sent is a question about this
+            // phone's disk, and the answer carries two different offers.
+            let actions = FailureCopy.recoverableActions(resendState)
+            FailureView(
+                kind: .recoverable(missingCount: missingPaths.count, resend: resendState),
+                onPrimary: { performRecovery(actions.primary) },
+                onSecondary: { performRecovery(actions.secondary) },
+                onBack: back
+            )
+            .task(id: missingPaths.count) { await refreshResendOffer() }
 
-    private var homeRooms: HomeRooms.Presentation { HomeRooms.presentation(for: rooms.state) }
+        case .you:
+            ProfileView(uid: auth.currentUID, isLinked: auth.isLinked, onClose: back)
+        }
+    }
+
+    /// One step back, or all the way home if something already emptied the path.
+    private func back() {
+        if path.isEmpty { return }
+        path.removeLast()
+    }
+
+    // MARK: - Going places
+
+    /// Home's sentence, followed. The doorway is not a route — it is the
+    /// post-send surface deciding for itself what to show.
+    private func route(for destination: HomeDestination) -> HomeRoute {
+        switch destination {
+        case .notes:          return .notes
+        case .house:          return .house
+        case .desk, .doorway: return .desk
+        }
+    }
+
+    /// A contents entry, as a route.
+    private func route(for entry: ContentsEntry) -> HomeRoute {
+        switch entry {
+        case .house: return .house
+        case .desk:  return .desk
+        case .notes: return .notes
+        case .you:   return .you
+        }
+    }
+
+    /// Acknowledge a note, for good.
+    ///
+    /// Permanent rather than session-local: the old banner returned on every
+    /// launch because it interrupted a screen the user came to for something
+    /// else. A note is a screen they navigated to on purpose, so a tap here is
+    /// a statement that they have read it.
+    private func acknowledge(_ kind: NoteKind) {
+        Task { await UploadFailureMonitor.shared.dismiss() }
+        if sentBundleId != nil, SurfaceRouter.needsUser(waitScreen) {
+            endFlight()
+        }
+        // Last note acknowledged: nothing left on this screen to read.
+        if openNotes.count <= 1 { back() }
+    }
+
+    // MARK: - Rooms
 
     /// The doorway's `canOpenWeb`, asked once for the history surfaces. Nil
     /// webBaseURL is the deliberate state today (NetworkConfig), so this is
@@ -448,52 +509,22 @@ struct RootFlowView: View {
                 .onChange(of: waitScreen, initial: true) { _, screen in
                     LiveActivityController.shared.noteWaitScreen(screen, bundleId: sentBundleId)
                 }
-            // A terminal blob failure for a DIFFERENT (earlier) bundle is otherwise
-            // invisible here — float it over whatever this capture is doing.
-            if let failure = failures.latestFailure, failure.bundleId != sentBundleId {
-                UploadFailedBanner(
-                    reason: failure.reason,
-                    onDismiss: { Task { await UploadFailureMonitor.shared.dismiss() } }
-                )
-                .padding([.horizontal, .top], 20)
-            }
+            // A terminal failure for a DIFFERENT bundle no longer floats here.
+            // It is a note, counted into home's sentence and read on the notes
+            // screen — a failure belonging to an earlier room has no business
+            // interrupting the wait for this one.
         }
     }
 
     @ViewBuilder
     private var postSendScreen: some View {
-        switch waitScreen {
-        case .sending:
-            // Covers both the session setup AND the blob upload: the poller is
-            // deliberately not started until the upload completes, so nothing here
-            // may claim the room has arrived.
-            WaitingView(phase: .sending, onLeave: { stage = .home })
-
-        case .waiting(let phase, let anchor):
-            WaitingView(phase: phase.waitingPhase,
-                        anchor: anchor,
-                        onTryNow: { ScenePoller.shared.checkNow() },
-                        onLeave: { stage = .home })
-
-        case .checkFailed(let anchor, let stopped):
-            // The room WAS uploaded, so "your room is safe up there" is honest;
-            // `stopped` swaps the "I'll keep trying quietly" half, and drives whether
-            // Try now resumes the loop or just fires an immediate tick.
-            WaitingView(phase: .connectionTrouble,
-                        anchor: anchor,
-                        pollingStopped: stopped,
-                        onTryNow: {
-                            // Fall back to the poller's own bundle: a loop started by
-                            // the completion kick can outlive/predate this view's
-                            // sentBundleId, and both branches being skipped left a
-                            // live-looking button doing nothing.
-                            if stopped, let id = sentBundleId ?? poller.currentBundleId {
-                                ScenePoller.shared.start(bundleId: id)
-                            } else {
-                                ScenePoller.shared.checkNow()
-                            }
-                        },
-                        onLeave: { stage = .home })
+        switch SurfaceRouter.placement(for: waitScreen) {
+        case .desk(let deskState):
+            DeskView(state: deskState,
+                     roomTitle: flightTitle,
+                     onAct: { deskAction(deskState) },
+                     onOpenHouse: { leaveFlight(); path = [.house] },
+                     onClose: { leaveDesk(deskState) })
 
         case .doorway:
             DoorwayView(onStepThrough: openWebDesk,
@@ -502,72 +533,69 @@ struct RootFlowView: View {
                         signedIntoWeb: auth.isLinked,
                         canOpenWeb: webRoomURL != nil)
 
-        case .processingFailed:
-            FailureView(kind: .terminal,
-                        onPrimary: rescanFromScratch,
-                        onSecondary: endFlight)
+        case .note:
+            // A room that has finished and failed is a note, not a screen the
+            // user is held on. Hand them straight to it: they were watching
+            // this room, so the kindest thing is to show them what happened
+            // rather than bounce them home to be told something needs them.
+            ParchmentBackground()
+                .onAppear { toNotes() }
 
-        case .incompleteUpload(let missingCount):
-            // failed_incomplete: an incomplete upload, not a bad scan. No region is
-            // named. The count IS named — the server sent it, and dropping it was
-            // decision 0085's finding 1.
-            //
-            // The offered path is now conditional (decisions 0084 + 0116): re-send
-            // the missing files when they are still on this phone, rescan when they
-            // are not. `resendState` is computed by the .task below, never guessed
-            // here, and both buttons bind through FailureCopy's own table so a
-            // label can never be paired with the wrong action.
-            let actions = FailureCopy.recoverableActions(resendState)
-            FailureView(
-                kind: .recoverable(missingCount: missingCount, resend: resendState),
-                onPrimary: { performRecovery(actions.primary) },
-                onSecondary: { performRecovery(actions.secondary) }
-            )
-            // Recompute on arrival AND whenever the count changes: a second
-            // round of recovery lands here again with a smaller list, and a
-            // stale offer would be describing the previous attempt.
-            .task(id: missingCount) { await refreshResendOffer() }
-
-        case .uploadFailed:
-            // The blobs for THIS bundle failed terminally: bundle.pb never lands, no
-            // Scene doc is ever created, and the poller would 404 → keep polling
-            // forever (it never hard-gives-up by design). Stop it and say so — with
-            // upload-honest copy and the reason, since the banner is suppressed here.
-            FailureView(kind: .uploadFailed(reason: failures.latestFailure?.reason),
-                        onPrimary: rescanFromScratch,
-                        onSecondary: endFlight)
-                .onAppear { ScenePoller.shared.reset() }
-
-        case .sendFailed(let terminal):
-            // Nothing was uploaded, so never the "didn't survive the trip" copy.
-            // terminal == a 4xx retrying cannot fix (our bug); the capture stays on
-            // disk for the relaunch rehydration path either way.
-            WaitingView(phase: terminal ? .sendFailedTerminal : .sendFailed,
-                        onTryNow: { if !terminal { sendItHome() } },
-                        onLeave: endFlight)
-
-        case .sendRateLimited(let resetsAt):
-            // The daily mint cap (decision 0087). No "Try now" — it would provably
-            // fail until the quota rolls — and no rescan offer: the capture on disk
-            // is fine, and rescanning would only spend a second mint against the
-            // same cap. Leaving is the only action, and it is enough: the record
-            // survives and the relaunch rehydration re-drives the send.
-            WaitingView(phase: .sendRateLimited(resetsAt: resetsAt), onLeave: endFlight)
-
-        case .sendPaused:
-            // Paused until the next launch — ending the flight is honest here:
-            // rehydrateAllUnfinishedBundles picks the bundle up on relaunch, and
-            // nothing in THIS process will move it.
-            WaitingView(phase: .sendPaused, onLeave: endFlight)
-
-        case .notOurs:
-            // Terminal-not-ours (decision 0074): the root-level onChange runs
-            // standDownNotOurs() on the same publish that produced this screen, so
-            // this renders for at most a frame on the way home. Bare parchment — a
-            // transition blink, not a message: there is no honest copy to show for
-            // a room this identity never owned, and no action to offer.
+        case .nowhere:
+            // Terminal-not-ours (decision 0074): the root-level onChange stands
+            // this down on the same publish that produced it, so this renders
+            // for at most a frame on the way home.
             ParchmentBackground()
         }
+    }
+
+    /// The room in flight, titled the way the house titles it, so one room
+    /// reads identically wherever it appears.
+    private var flightTitle: String? {
+        guard sentBundleId != nil else { return nil }
+        return RoomHistory.title(sentAt: lastSceneCreatedAt ?? Date(),
+                                 now: Date(), withTime: false)
+    }
+
+    /// The desk's one control, where it has one.
+    private func deskAction(_ state: DeskState) {
+        switch state {
+        case .retryableSendFailure:
+            sendItHome()
+        case .checkFailed(_, let stopped):
+            if stopped, let id = sentBundleId ?? poller.currentBundleId {
+                ScenePoller.shared.start(bundleId: id)
+            } else {
+                ScenePoller.shared.checkNow()
+            }
+        case .sending, .working, .paused, .rateLimited:
+            break
+        }
+    }
+
+    /// Leaving the desk, which is NOT the same as being done with the room.
+    ///
+    /// A room that is still moving keeps moving: the user just stops watching,
+    /// and home's sentence still points back here. Only the states that will
+    /// not move again on their own end the flight, which is what acknowledges
+    /// the record and lets the reaper reclaim it — ending a live flight would
+    /// orphan a room that was about to arrive.
+    private func leaveDesk(_ state: DeskState) {
+        switch state {
+        case .sending, .working, .checkFailed:
+            stage = .home
+        case .paused, .rateLimited, .retryableSendFailure:
+            endFlight()
+        }
+    }
+
+    /// Leave the flight without acknowledging it, then go home.
+    private func leaveFlight() { stage = .home }
+
+    /// Show the notes, from wherever.
+    private func toNotes() {
+        stage = .home
+        path = [.notes]
     }
 
     /// The server anchor as currently published by the poller (nil unless polling).

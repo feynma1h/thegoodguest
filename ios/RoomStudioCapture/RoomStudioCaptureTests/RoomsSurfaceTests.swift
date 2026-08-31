@@ -1,12 +1,11 @@
-/// Pins what each surface DOES with the load state — home's variant, and whether
-/// the sign-in invitation is offered at all.
+/// Pins the sign-in invitation's trigger and its once-ever memory.
 ///
-/// Both tables exist for the same reason: the first-time hero and the sign-in
-/// sheet each make a claim about how many rooms the user has, and a fetch that
-/// has not returned or has failed is not a licence to make either claim. The
-/// hero is allowed to hold the space (it is true for everyone) but never alone
-/// after a failure, and the sheet — whose entire argument is a count — is simply
-/// not offered until the count is known.
+/// The home-strip presentation table that used to live here went with the
+/// strip: home no longer carries rooms at all, so there is no longer a
+/// decision about whether to show them instead of the claim. What that table
+/// protected — that a failed fetch must never render as "no rooms" — is now
+/// pinned in HomeLineTests and ContentsTests, where the count is stated.
+
 
 import XCTest
 @testable import RoomStudioCapture
@@ -14,38 +13,6 @@ import XCTest
 private func room(_ id: String) -> RoomSummary {
     RoomSummary(id: id, bundleId: "\(id)-bundle", title: "the July 12 room",
                 statusLine: "on your desk", state: .ready)
-}
-
-final class HomeRoomsPresentationTests: XCTestCase {
-
-    func testPresentationTable() {
-        let cases: [(RoomsLoadState, HomeRooms.Presentation)] = [
-            (.idle,                                     .hero),
-            (.loading,                                  .hero),
-            (.loaded(rooms: [], stale: false),          .hero),
-            (.loaded(rooms: [], stale: true),           .hero),
-            (.loaded(rooms: [room("a")], stale: false), .strip),
-            (.loaded(rooms: [room("a")], stale: true),  .strip),
-            (.failed(reason: "offline"),                .heroWithTrouble),
-        ]
-        for (state, expected) in cases {
-            XCTAssertEqual(HomeRooms.presentation(for: state), expected, "\(state)")
-        }
-    }
-
-    func testAFailedFetchNeverPresentsAsTheFirstTimeHeroAlone() {
-        // The regression this exists to prevent: `hasRooms: !rooms.isEmpty` over
-        // a state that collapses failure to [], which silently shows a returning
-        // user the screen that says they have never scanned anything.
-        XCTAssertNotEqual(HomeRooms.presentation(for: .failed(reason: "offline")), .hero)
-    }
-
-    func testStripShowsAtMostItsLimitAndKeepsOrder() {
-        let rooms = ["a", "b", "c", "d", "e"].map(room)
-        XCTAssertEqual(HomeRooms.stripRooms(rooms).map(\.id), ["a", "b", "c"])
-        XCTAssertEqual(HomeRooms.stripRooms(Array(rooms.prefix(2))).map(\.id), ["a", "b"])
-        XCTAssertTrue(HomeRooms.stripRooms([]).isEmpty)
-    }
 }
 
 final class WhySignInInvitationTests: XCTestCase {

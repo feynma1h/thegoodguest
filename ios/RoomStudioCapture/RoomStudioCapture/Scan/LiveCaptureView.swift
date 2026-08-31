@@ -23,8 +23,8 @@ import SwiftUI
 /// session didn't give. `.finding` covers not-yet-tracking / initializing /
 /// relocalizing (no cause claimed); `.tooDark` is ONLY `.insufficientFeatures`.
 enum TrackingQuality {
-    case good       // mesh draws, pill green
-    case slowDown   // moving too fast (.excessiveMotion), pill gold, mesh pauses
+    case good       // mesh draws; the readout is muted, because nothing is wrong
+    case slowDown   // moving too fast (.excessiveMotion), mesh pauses
     case finding    // not tracking yet / initializing / relocalizing — no cause
     case tooDark    // .insufficientFeatures — the genuine light problem
 }
@@ -87,7 +87,7 @@ struct LiveCaptureView: View {
 
     private var captureBackdrop: some View {
         RadialGradient(
-            colors: [Color(rsHex: 0x2c2214), Color(rsHex: 0x221a0f), Color.rsCaptureBase],
+            colors: [Color(rsHex: 0x25241f), Color(rsHex: 0x1c1b18), Color.rsCaptureBase],
             center: .init(x: 0.5, y: 0.42),
             startRadius: 40, endRadius: 520
         )
@@ -98,8 +98,8 @@ struct LiveCaptureView: View {
 
     private var overlay: some View {
         VStack(spacing: 0) {
-            trackingPill
-                .padding(.top, 8)
+            trackingReadout
+                .padding(.top, 14)
 
             Spacer()
 
@@ -136,28 +136,44 @@ struct LiveCaptureView: View {
         .padding(.horizontal, 22)
     }
 
-    private var trackingPill: some View {
-        let (dot, text): (Color, String) = switch state.tracking {
-        case .good:     (.rsSensorGood, "Tracking is good")
-        case .slowDown: (.rsSensorWarn, "Go a little slower")
-        case .finding:  (.rsSensorWarn, "Finding the room…")
-        case .tooDark:  (.rsSensorLost, "Too dark to see")
+    /// What the tracker knows, in the machine's own voice.
+    ///
+    /// NOT A BADGE. This was a bordered capsule holding a coloured dot beside a
+    /// sentence — the single most generic status component in software, and the
+    /// only element on this screen not written in the app's own idiom. The
+    /// coverage ticks eighteen points below it are mono, uppercase, tracked and
+    /// uncontained; so is the desk's status line; so is every other piece of
+    /// machine truth in this app. The tracker is machine truth. It reads like
+    /// the rest of it now.
+    ///
+    /// THE ORDINARY STATE IS QUIET, which is the inversion the badge had
+    /// backwards: `.good` carried the ONLY glow in the component, so the state
+    /// where nothing is wrong was the loudest thing on screen. Good tracking is
+    /// now set in the same muted ink as the coverage labels, and colour is
+    /// spent only where something needs attention.
+    ///
+    /// THE DOT IS GONE AND NOTHING REPLACES IT. It duplicated the text, and it
+    /// duplicated it badly: two of the four states share a colour, so the dot
+    /// carried three values where the words carry four.
+    private var trackingReadout: some View {
+        let (ink, text): (Color, String) = switch state.tracking {
+        // Muted, not green: the resting state of a working instrument.
+        case .good:     (.rsOnDark.opacity(0.55), "TRACKING")
+        case .slowDown: (.rsSensorWarn, "MOVING TOO FAST")
+        case .finding:  (.rsSensorWarn, "FINDING THE ROOM")
+        case .tooDark:  (.rsSensorLost, "TOO DARK TO SEE")
         }
-        return HStack(spacing: 8) {
-            Circle()
-                .fill(dot)
-                .frame(width: 8, height: 8)
-                .shadow(color: dot, radius: state.tracking == .good ? 6 : 0)
-            Text(text)
-                .font(RSFont.ui(.subheadline, weight: .medium))
-                .foregroundStyle(Color.rsOnDark)
-        }
-        .padding(.horizontal, 15)
-        .padding(.vertical, 7)
-        .background(
-            Capsule().fill(Color.rsBlack.opacity(0.6))
-                .overlay(Capsule().stroke(dot.opacity(0.4), lineWidth: 1))
-        )
+        return Text(text)
+            .rsFont(.mono, size: 11, weight: .medium, maxSize: 15, cap: .mono)
+            .tracking(1.4)
+            .foregroundStyle(ink)
+            .lineLimit(1)
+            .fixedSize()
+            // The same shadow the guest's line carries, and for the same
+            // reason: this sits over a live camera feed with no plate behind
+            // it, and the feed is whatever the room happens to be.
+            .shadow(color: .black.opacity(0.75), radius: 10, y: 1)
+            .animation(.easeOut(duration: 0.2), value: text)
     }
 
     private var coverageTicks: some View {
@@ -171,7 +187,7 @@ struct LiveCaptureView: View {
     private func coverageTick(_ label: String, _ coverage: SurfaceCoverage) -> some View {
         HStack(spacing: 6) {
             Text(label)
-                .rsFont(.mono, size: 10, weight: .medium, maxSize: 13)
+                .rsFont(.mono, size: 10, weight: .medium, maxSize: 13, cap: .mono)
                 .tracking(0.5)
                 .lineLimit(1)
                 .fixedSize()

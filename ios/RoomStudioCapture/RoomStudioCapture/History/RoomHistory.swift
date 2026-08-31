@@ -31,6 +31,10 @@ nonisolated struct RoomSummary: Identifiable, Equatable {
     let title: String
     let statusLine: String
     let state: State
+    /// When the room was sent, for the house's mono stamp column. Optional
+    /// because `created_at` can fail to parse, and a fabricated date would be
+    /// worse than an absent one.
+    var sentAt: Date? = nil
 }
 
 // MARK: - Derivation
@@ -41,27 +45,26 @@ nonisolated enum RoomHistory {
 
     /// Map the server's scenes to rows, preserving its newest-first order.
     ///
-    /// Rooms sent on the same calendar day get the clock time appended to their
-    /// title; a room whose `created_at` did not parse gets neither a date nor a
-    /// time, because the alternative is a fabricated one.
+    /// A room whose `created_at` did not parse gets neither a date in its title
+    /// nor a stamp, because the alternative is a fabricated one.
+    ///
+    /// TWO ROOMS FROM ONE DAY are told apart by the house's mono stamp column
+    /// rather than by a time appended to the title. This function used to count
+    /// same-day occurrences across the whole list to decide that, which is why
+    /// it took the list rather than a scene — the disambiguation was a fact
+    /// about the list. It is now a fact about the room, so the counting is
+    /// gone, and `title(withTime:)` keeps its parameter for callers that want
+    /// the older single-line form.
     static func summaries(from scenes: [SceneResponse], now: Date, calendar: Calendar = .current) -> [RoomSummary] {
-        let days: [Date?] = scenes.map { scene in
-            scene.createdAtDate.map { calendar.startOfDay(for: $0) }
-        }
-        var occurrences: [Date: Int] = [:]
-        for day in days.compactMap({ $0 }) {
-            occurrences[day, default: 0] += 1
-        }
-
-        return zip(scenes, days).map { scene, day in
-            let sharesItsDay = day.map { (occurrences[$0] ?? 0) > 1 } ?? false
-            return RoomSummary(
+        scenes.map { scene in
+            RoomSummary(
                 id: scene.sceneId,
                 bundleId: scene.bundleId,
                 title: title(sentAt: scene.createdAtDate, now: now,
-                             withTime: sharesItsDay, calendar: calendar),
+                             withTime: false, calendar: calendar),
                 statusLine: statusLine(status: scene.status, sentAt: scene.createdAtDate, now: now),
-                state: state(for: scene.status)
+                state: state(for: scene.status),
+                sentAt: scene.createdAtDate
             )
         }
     }
@@ -157,6 +160,19 @@ nonisolated enum RoomHistory {
         formatter.locale     = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "MMMM d"
         return formatter.string(from: date)
+    }
+
+    /// "AUG 27" — the house's mono stamp column.
+    ///
+    /// Abbreviated where `monthDay` is not: the column is scanned down rather
+    /// than read, and a spelled-out month wraps the row at accessibility sizes
+    /// for a fact that is three letters wide. `monthDay` keeps its long form
+    /// because it is set inside a sentence ("the August 12 room").
+    static func shortStamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale     = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date).uppercased()
     }
 
     /// "3:40 pm" — lowercase meridiem, matching the guest's voice rather than
