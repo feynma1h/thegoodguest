@@ -35,7 +35,7 @@ import { heroVariant } from "@/lib/heroRoom";
 import { statusMeta } from "@/lib/status";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
-const HAS_ROOMS_KEY = "roomstudio:has-rooms";
+const HAS_ROOMS_KEY = "thegoodguest:has-rooms";
 const emptySubscribe = () => () => {};
 
 /** Shared load-entrance: rise + fade, staggered by `order`. */
