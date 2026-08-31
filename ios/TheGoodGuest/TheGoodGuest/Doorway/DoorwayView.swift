@@ -8,18 +8,22 @@
 /// light-semantic peak of the whole app. It NEVER auto-navigates: the user
 /// chooses to step through.
 ///
-/// Handoff transport (universal link to the web, same signed-in identity) is
-/// enrollment/entitlement-gated (associated-domains) — `onStepThrough` is the
-/// seam; wire the real link when the gate clears (decision 0072).
+/// The handoff is LIVE: `onStepThrough` opens the room on the web desk. It is a
+/// plain `open(_:)` of an https URL and never needed an associated-domains
+/// entitlement — that only governs links this app CLAIMS, which this is not.
 ///
 /// `onScanAnother` is NOT transport-gated and must exist now: without a way back,
 /// a successful capture is a dead end (the poller sits on .succeeded, so nothing
 /// re-enables capture) and the only escape is force-quitting the app.
 ///
-/// `signedIntoWeb` gates the "you're already signed in there" line: it is only
-/// true once the user has linked Sign in with Apple (decision 0051). An
-/// anonymous-only user is NOT signed in on the web (anon UIDs don't carry across
-/// devices), so the claim must not ship for them.
+/// ONE FLAG, NOT TWO. This screen used to take `canOpenWeb` (is there an origin)
+/// and `signedIntoWeb` (is the identity linked) separately, which made sense
+/// while the origin was nil for everyone. It is configured now, so the offer
+/// turns entirely on whether the person can be recognised over there — and
+/// `RoomHistory.webHandoffLands` folds both into one answer. The two flags would
+/// now always carry the same value, and the states where they disagreed are not
+/// states this app has: a CTA shown to an unlinked user promises a desk that
+/// will ask them to sign in with an account they do not have.
 
 import SwiftUI
 
@@ -30,10 +34,10 @@ struct DoorwayView: View {
     /// "Scan another room", which drops straight into live capture — the user who
     /// just wants to put the phone down had to start a scan.
     var onDone: () -> Void = {}
-    var signedIntoWeb: Bool = false
-    /// False when no web origin is configured yet — the CTA and its "opens your
-    /// desk in the browser" caption are then hidden rather than shown as a control
-    /// that does nothing. "Scan another room" remains, so the screen still has a way out.
+    /// Whether the handoff would land: an origin exists AND this identity is
+    /// linked, so the desk will recognise them. False hides the CTA rather than
+    /// showing a control that leads somewhere the person cannot be seen.
+    /// "Scan another room" remains either way, so the screen still has a way out.
     var canOpenWeb: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -75,20 +79,18 @@ struct DoorwayView: View {
                     .buttonStyle(RSGoldButtonStyle())
                     .padding(.top, 26)
 
-                    Text(signedIntoWeb
-                         ? "Opens your desk in the browser · you're already signed in there"
-                         : "Opens your desk in the browser")
+                    // No conditional: the CTA only shows when the identity is
+                    // linked, so "already signed in there" is always true here.
+                    Text("Opens your desk in the browser · you're already signed in there")
                         .font(RSFont.ui(.footnote))
                         .foregroundStyle(Color.rsOnDark.opacity(0.6))
                         .multilineTextAlignment(.center)
                         .padding(.top, 14)
                 } else {
-                    // Same rule as the CTA caption: an anonymous UID doesn't carry
-                    // across devices, so for an unlinked user there is no computer
-                    // where this room exists. Point at sign-in instead of promising.
-                    Text(signedIntoWeb
-                         ? "Open it on your computer — it's waiting there whenever you are."
-                         : "Sign in on this phone and it'll be waiting on your computer too.")
+                    // An anonymous UID doesn't carry across devices, so for an
+                    // unlinked user there is no computer where this room exists.
+                    // Point at sign-in, which is both true and the next step.
+                    Text("Sign in on this phone and it'll be waiting on your computer too.")
                         .font(RSFont.ui(.footnote))
                         .foregroundStyle(Color.rsOnDark.opacity(0.6))
                         .multilineTextAlignment(.center)

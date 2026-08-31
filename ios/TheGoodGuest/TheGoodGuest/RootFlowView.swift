@@ -447,10 +447,17 @@ struct RootFlowView: View {
 
     // MARK: - Rooms
 
-    /// The doorway's `canOpenWeb`, asked once for the history surfaces. Nil
-    /// webBaseURL is the deliberate state today (NetworkConfig), so this is
-    /// false and every row informs rather than offering a dead tap.
-    private var canOpenAnyRoomOnWeb: Bool { NetworkConfig.webBaseURL != nil }
+    /// The doorway's `canOpenWeb`, asked once for the history surfaces.
+    ///
+    /// Both halves, never just the origin: a live desk that cannot recognise
+    /// the visitor is not somewhere to send them. See
+    /// `RoomHistory.webHandoffLands`.
+    private var canOpenAnyRoomOnWeb: Bool {
+        RoomHistory.webHandoffLands(
+            hasWebOrigin: NetworkConfig.webBaseURL != nil,
+            isLinked: auth.isLinked
+        )
+    }
 
     private func refreshRooms() { Task { await rooms.refresh() } }
 
@@ -531,7 +538,6 @@ struct RootFlowView: View {
             DoorwayView(onStepThrough: openWebDesk,
                         onScanAnother: rescanFromScratch,
                         onDone: endFlight,
-                        signedIntoWeb: auth.isLinked,
                         canOpenWeb: webRoomURL != nil)
 
         case .note:

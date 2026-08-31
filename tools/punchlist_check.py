@@ -66,17 +66,6 @@ def _fetch(url: str, timeout: int = 30) -> str:
 
 # ── Gate 1 ───────────────────────────────────────────────────────────────────
 
-def check_web_base_url():
-    """G1-05 — NetworkConfig.webBaseURL must stop being nil."""
-    src = _read("ios/TheGoodGuest/TheGoodGuest/Networking/NetworkConfig.swift")
-    m = re.search(r"webBaseURL\s*:\s*URL\?\s*=\s*(.+)", src)
-    if not m:
-        raise RuntimeError("could not find the webBaseURL declaration")
-    value = m.group(1).strip().rstrip(";")
-    if value == "nil":
-        return False, "nil — the app has no route to the web; rooms cannot be opened"
-    return True, f"set to {value}"
-
 
 # ── Gate 2 ───────────────────────────────────────────────────────────────────
 
@@ -216,7 +205,6 @@ check_unrestricted_api_key.tag = NET
 # ── registry ─────────────────────────────────────────────────────────────────
 
 CHECKS = {
-    "G1-05": check_web_base_url,
     "G2-01": check_live_site_name,
     "G2-05": check_ios_fcm_registration,
     "G3-01": check_retention_claim,

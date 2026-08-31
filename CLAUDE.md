@@ -236,6 +236,18 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   a mint-429 screen that names the reset time rather than sleeping. Declaring a
   new flight stands the previous room's status down, so no surface can narrate a
   finished room over a scan still going up (0217).
+- **The way to the web.** `NetworkConfig.webBaseURL` is
+  `https://thegoodguest.web.app`, and `webRoomURL(bundleId:)` builds
+  `/room?bundle=<id>`. **The offer is gated on the handoff LANDING, not on the
+  origin existing** (`RoomHistory.webHandoffLands`): rooms are scoped to the
+  caller's token, an anonymous UID does not leave the phone, and Safari carries
+  no session from the app — so an unlinked user following the link reaches a
+  page correctly asking them to sign in with an account they do not have. Every
+  surface that offers a room — the doorway CTA, the house's rows, the arrival
+  card — takes that one predicate, and for an unlinked identity they point at
+  signing in instead. **The doorway now takes ONE flag rather than two**: with an
+  origin configured, "is there a desk" and "will it recognise you" always agreed,
+  and the two states where they differed are not states the app has.
 - **History.** `ScenesListClient` fetches `GET /scenes` — the caller's own
   rooms, scoped to the token — and `RoomsStore` holds one answer for all three
   surfaces that state a count: the returning-home strip, `RoomsListView`, and
@@ -344,7 +356,7 @@ fades in behind it. Home's mark shows the way in by playing a dotted leader and
 the word MENU out from behind itself, once per launch — no caption, and the
 plate-and-chevron treatment that preceded it is gone.
 
-Suite **667**: 661 asserting offline tests + 2 boilerplate stubs + 4 live
+Suite **671**: 665 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
@@ -970,9 +982,11 @@ re-argued here.
 - **The hero A/B is open** — the operator's taste call. Variant (b) cannot be seen
   on any deployed origin by design: a real object splat is a possession, so its
   files are gitignored and hosting-ignored. (0122)
-- **The bridge QR encodes nothing.** No deep-link infrastructure exists; the
-  caption says so. It is NOT blocked on the rooms fetch — the desk names the room
-  in the link it hands over. (0218)
+- **The bridge QR encodes nothing, and its blocker is now gone.** It was waiting
+  on there being a room URL to encode; `NetworkConfig.webRoomURL` is one, so the
+  caption saying it leads nowhere is the only thing still true about it. It was
+  never blocked on the rooms fetch — the desk names the room in the link it hands
+  over. (0218, punchlist G1-08)
 - **`RSSound` is wired at three call sites with no cue files** — the app is
   silent, and the web has no sound at all. **Branded fonts are per platform**: the
   web loads real Google faces via `next/font/google`; **iOS bundles no font files
@@ -1126,8 +1140,12 @@ ever done or ruled, delete it — do not annotate it.
   sparse by nature, so it is table-pinned and seeded-screenshot only. Review's
   `thinCoverage` and verdict are deliberately unwired pending an operator copy
   decision, and `didChange`/`didRemove` are deliberately unconsumed.
-- **The doorway universal-link handoff, the QR bridge, and push are stubbed at
-  named seams** pending associated-domains and APNs entitlements.
+- **The QR bridge and push are stubbed at named seams**; push waits on APNs.
+  **The doorway handoff is LIVE and never needed an entitlement** — it is a
+  plain `open(_:)` of an https URL, and associated-domains governs only links
+  an app CLAIMS, which this is not. "Pending associated-domains" was the wrong
+  reading of why the link was missing; what was actually missing was a durable
+  web origin, and `thegoodguest.web.app` is one.
 - **The `.recoverable` re-upload and add-more resume-with-progress** are built;
   the remaining iOS activation follow-up is the real web-handoff link.
 
@@ -1243,7 +1261,7 @@ re-enqueue (18) and ruff (non-gating) passed.
 
 ## iOS test policy
 
-The iOS suite is **667 tests total** (was 624; the account-deletion pass added 43 — `AccountDeletionClientTests` 19 for `DELETE /account`, `DeleteAccountCopyTests` 18 for the deletion screen's wording table, and `AppleAccountRevocationTests` 6 for the Sign in with Apple token revocation. Before that, 590 → 624; the capture-dark pass added 20 — and 590 was itself 600 before ios-surfaces-2 REMOVED 10 by deleting the 0072 rollback path, so neither lane's own figure is main's — `FrameLuminanceTests`, the mean-luma statistic and its session census, including the preserved rp6g2 capture's own 124 readings as a fixture. Before that, 553 → 600; the scenes-client pass added 47 — `ScenesListClientTests` 17, `RoomHistoryTests` 12, `RoomsStoreTests` 11, `RoomsSurfaceTests` 7, for the `GET /scenes` client and the three surfaces it feeds. Before that, 544 → 553; the ios-surfaces pass added 9 — the flight stand-down and the launch-adoption table, both in `ScenePollExpectationTests`. Before that, 535 → 544 from the uid-churn investigation — `IdentityContinuityTests`, the launch continuity table. Before that, 523 → 535 from the Google-linking pass and 482 → 523 from the ios-residue pass. Before that, 463 → 482; the walk-findings pass added 19 — Live Activity narration, failure copy, and the recoverable count. Before that, 391 → 463 from the Live Activity / 429 / guidance pass, which added 76 and relocated 4. Before that, 352 → 391 from the release-residue pass; the release-residue pass added 39 — `CaptureReclaimTests` 15, `CaptureReaperTests` 12, `StagingHooksTests` 7, `ScenePollExpectationTests` 5. Before that, 302 → 352 from RP-6/RP-7; RP-6 added 11 — 9 co-run/wire pins + 2 envelope-edge pins — and RP-7 added 39 — `FloorPlanMathTests` 18, `FloorPlanVoiceTests` 13, `FloorPlanFixtureTests` 8. Before that, 288 → 302 from the 0074 phantom-room pass), run manually via `xcodebuild … -scheme TheGoodGuest-Integration` — the only scheme in this project (no separate default scheme, no CI gate). That scheme bakes `RUN_INTEGRATION_TESTS=1`, so the 4 `UploadSessionClientTests` **execute live on every run**; they are NOT skipped in practice. They last ran live 2026-08-24 (the capture-dark pass, 620/620) against `api-public-00042-ruq`, the whole suite in ~16 s of test execution.
+The iOS suite is **671 tests total** (was 624; the account-deletion and web-route passes added 47 — the web route contributing 4 in `RoomHistoryTests` for the handoff predicate and the room URL; the account-deletion pass 43 — `AccountDeletionClientTests` 19 for `DELETE /account`, `DeleteAccountCopyTests` 18 for the deletion screen's wording table, and `AppleAccountRevocationTests` 6 for the Sign in with Apple token revocation. Before that, 590 → 624; the capture-dark pass added 20 — and 590 was itself 600 before ios-surfaces-2 REMOVED 10 by deleting the 0072 rollback path, so neither lane's own figure is main's — `FrameLuminanceTests`, the mean-luma statistic and its session census, including the preserved rp6g2 capture's own 124 readings as a fixture. Before that, 553 → 600; the scenes-client pass added 47 — `ScenesListClientTests` 17, `RoomHistoryTests` 12, `RoomsStoreTests` 11, `RoomsSurfaceTests` 7, for the `GET /scenes` client and the three surfaces it feeds. Before that, 544 → 553; the ios-surfaces pass added 9 — the flight stand-down and the launch-adoption table, both in `ScenePollExpectationTests`. Before that, 535 → 544 from the uid-churn investigation — `IdentityContinuityTests`, the launch continuity table. Before that, 523 → 535 from the Google-linking pass and 482 → 523 from the ios-residue pass. Before that, 463 → 482; the walk-findings pass added 19 — Live Activity narration, failure copy, and the recoverable count. Before that, 391 → 463 from the Live Activity / 429 / guidance pass, which added 76 and relocated 4. Before that, 352 → 391 from the release-residue pass; the release-residue pass added 39 — `CaptureReclaimTests` 15, `CaptureReaperTests` 12, `StagingHooksTests` 7, `ScenePollExpectationTests` 5. Before that, 302 → 352 from RP-6/RP-7; RP-6 added 11 — 9 co-run/wire pins + 2 envelope-edge pins — and RP-7 added 39 — `FloorPlanMathTests` 18, `FloorPlanVoiceTests` 13, `FloorPlanFixtureTests` 8. Before that, 288 → 302 from the 0074 phantom-room pass), run manually via `xcodebuild … -scheme TheGoodGuest-Integration` — the only scheme in this project (no separate default scheme, no CI gate). That scheme bakes `RUN_INTEGRATION_TESTS=1`, so the 4 `UploadSessionClientTests` **execute live on every run**; they are NOT skipped in practice. They last ran live 2026-08-24 (the capture-dark pass, 620/620) against `api-public-00042-ruq`, the whole suite in ~16 s of test execution.
 
 **A full-suite run does NOT spend the operator's capture quota — that claim was wrong and is corrected here.** `UploadSessionClientTests` does mint a fresh `bundleId = UUID()` per test, and the daily CAPTURE ceiling (12, `UPLOAD_SESSION_DAILY_CAPTURES`, confirmed on the serving revision) is charged on first claim. **But the ceiling is per-UID, and every one of those tests calls `Auth.auth().signInAnonymously()` and signs out in teardown** — so each test runs as a brand-new anonymous user with its own untouched allowance and spends one of ITS twelve. The operator's own quota is never touched. **The evidence is `upload-flake`'s 22 consecutive full-suite runs at 600 tests each**, which could not have happened under a shared 12/day ceiling and is what forced this re-check. The original claim came from live tests failing in a way that reads like quota exhaustion; the likelier cause is the first of the two measurement traps recorded below under **"Two measurement traps"** — `CODE_SIGNING_ALLOWED=NO` leaves Firebase unable to reach the keychain, surfacing as `SecItemAdd (-34018)` underneath and `FIRAuthErrorDomain 17995` at the Firebase layer. Same cause, two codes, and either reads like a backend outage. **What IS true:** each full run creates ~4 orphaned anonymous users, and anonymous-user auto-cleanup must stay OFF (it would fire the UID-churn mechanism), so they accumulate forever. `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` is still worth using for repeat runs — it is faster and it stops the accumulation — but it is not protecting anyone's ability to scan.
 
@@ -1251,7 +1269,7 @@ The iOS suite is **667 tests total** (was 624; the account-deletion pass added 4
 
 **Posture: fail-closed-live, not fail-open.** Each integration test calls `XCTSkipIf(!RUN_INTEGRATION_TESTS)` — the fail-open default — but because the sole scheme always sets the flag, that skip path is never taken here. With the flag set they hit the live `/upload_session` contract and go **red if the backend is unreachable**. Running the suite therefore requires a reachable backend; an offline run will fail those 4 (expected, not a regression).
 
-**Honest count:** report as "661 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 667 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-09-01, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **663**, and that suite holds exactly 4 tests, so the total is 667 and the offline set is 661 once the two stubs come out. **One of the 663 is skipped at runtime** — `AuthLinkingTests.test_appBundle_registersRedirectSchemeForLiveClientID`, which gates on the live Google client id — so 660 actually assert; it was skipping before this pass too and is not counted out above, to keep the arithmetic the same shape it has always had. The figures this replaced were 610 in one sentence and 620 in the next, and the second did not add up — 604 + 2 + 4 is 610, not 620 — so both were wrong and the arithmetic said so without anyone running anything.
+**Honest count:** report as "665 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 671 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-09-01, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **667**, and that suite holds exactly 4 tests, so the total is 671 and the offline set is 665 once the two stubs come out. **One of the 667 is skipped at runtime** — `AuthLinkingTests.test_appBundle_registersRedirectSchemeForLiveClientID`, which gates on the live Google client id — so 664 actually assert; it was skipping before this pass too and is not counted out above, to keep the arithmetic the same shape it has always had. The figures this replaced were 610 in one sentence and 620 in the next, and the second did not add up — 604 + 2 + 4 is 610, not 620 — so both were wrong and the arithmetic said so without anyone running anything.
 
 **No known flakes.** The one that was recorded here — `BlobUploadManagerTests.test_gate_lastDecrement_afterDrain_firesHandler` at roughly 1 run in 15 — was a production defect rather than a test defect, and is fixed (0239): the drain gate's last-decrement trigger hopped onto the actor through an unstructured `Task` that nothing held a handle on, so the test's `await Task.yield()` was a guess at how long the hop takes. The decrement is actor-isolated now and fires the gate inside `handleTaskCompletion`'s own defer, so awaiting that call IS the signal. Measured 2026-08-24 by holding the yield-less tests fixed and swapping only `BlobUploadManager.swift`: **2 failures in 16** with the hop, **0 in 22** without it. **A red suite is now a finding, not a re-run.**
 

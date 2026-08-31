@@ -244,4 +244,49 @@ final class RoomHistoryTests: XCTestCase {
         XCTAssertFalse(RoomHistory.isOpenable(failed, canOpenWeb: true))
         XCTAssertFalse(RoomHistory.isOpenable(noBundle, canOpenWeb: true))
     }
+
+    // MARK: - Whether the handoff would land
+
+    func testTheHandoffNeedsAnOriginAndALinkedIdentity() {
+        // The truth table, all four corners. The interesting one is the third:
+        // a live origin with an unlinked identity, which is what shipping the
+        // URL alone would have produced for every anonymous user.
+        XCTAssertTrue(RoomHistory.webHandoffLands(hasWebOrigin: true, isLinked: true))
+        XCTAssertFalse(RoomHistory.webHandoffLands(hasWebOrigin: false, isLinked: true))
+        XCTAssertFalse(RoomHistory.webHandoffLands(hasWebOrigin: true, isLinked: false))
+        XCTAssertFalse(RoomHistory.webHandoffLands(hasWebOrigin: false, isLinked: false))
+    }
+
+    func testAnUnlinkedIdentityIsNeverOfferedTheWeb() {
+        // Stated separately from the table because it is the property, not a
+        // row: rooms are scoped to the caller's token and an anonymous UID does
+        // not leave the phone, so following the link would reach a page asking
+        // for an account that does not exist. A disabled row is the better
+        // outcome, and this is what keeps it disabled.
+        let ready = RoomSummary(id: "1", bundleId: "b", title: "t", statusLine: "s", state: .ready)
+        let lands = RoomHistory.webHandoffLands(hasWebOrigin: true, isLinked: false)
+        XCTAssertFalse(RoomHistory.isOpenable(ready, canOpenWeb: lands))
+    }
+
+    func testTheOriginIsConfiguredSoLinkingIsWhatDecides() {
+        // Pins the constant AND the consequence together. If webBaseURL is ever
+        // unset, the first assertion fails and names why the rooms went quiet
+        // rather than leaving it to be discovered on a device.
+        XCTAssertNotNil(NetworkConfig.webBaseURL, "the web origin must stay configured")
+        XCTAssertEqual(
+            RoomHistory.webHandoffLands(
+                hasWebOrigin: NetworkConfig.webBaseURL != nil, isLinked: true),
+            true
+        )
+        XCTAssertEqual(
+            RoomHistory.webHandoffLands(
+                hasWebOrigin: NetworkConfig.webBaseURL != nil, isLinked: false),
+            false
+        )
+    }
+
+    func testTheRoomURLIsBuiltAgainstTheLiveOrigin() {
+        let url = NetworkConfig.webRoomURL(bundleId: "abc-123")
+        XCTAssertEqual(url?.absoluteString, "https://thegoodguest.web.app/room?bundle=abc-123")
+    }
 }
