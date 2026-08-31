@@ -1,4 +1,4 @@
-"""End-to-end smoke test for the roomstudio perception pipeline.
+"""End-to-end smoke test for the thegoodguest perception pipeline.
 
 SUPERSEDED AND NON-FUNCTIONAL: this targets the pre-split `api` Cloud Run
 service (INGESTER_SERVICE below), which no longer exists — the live services

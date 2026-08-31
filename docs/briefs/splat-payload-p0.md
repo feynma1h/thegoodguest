@@ -145,7 +145,7 @@ an automation artifact, not a product defect). Three routes, in preference
 order:
 
 1. **Ask the operator for a HAR** from their own browser on
-   `https://roomstudio.web.app`, plus the console log. They are already signed
+   `https://thegoodguest.web.app`, plus the console log. They are already signed
    in. This is the highest-fidelity option and the smallest ask.
 2. **Separate the terms without a browser session**: mint signed URLs
    server-side, then (a) `curl` them to get the pure network term over this

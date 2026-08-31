@@ -1,4 +1,4 @@
-"""Bundle validation logic for the roomstudio API ingester.
+"""Bundle validation logic for the thegoodguest API ingester.
 
 Pure functions: no I/O, no FastAPI. Takes a parsed CaptureBundle protobuf
 (plus the bundle_id the caller derived from the upload URI) and returns

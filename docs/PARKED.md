@@ -28,7 +28,7 @@ perception suite reads **1198 passed + 41 skipped** and root reads
 **844 + 102** as a result; the skips are the real-data and fixture-backed
 regressions with nothing left to regress against. Nothing fails.
 
-Do not go looking for `roomstudio-preserved` or `outputs/real-capture-*`. They
+Do not go looking for `thegoodguest-preserved` or `outputs/real-capture-*`. They
 were deleted deliberately, not lost.
 
 ## Where the work stopped

@@ -83,7 +83,7 @@ class TestEnvFileParser:
             "# comment\n"
             "\n"
             "ENVIRONMENT: production\n"
-            "CLOUD_TASKS_PROJECT: roomstudio\n"
+            "CLOUD_TASKS_PROJECT: thegoodguest\n"
             "PERCEPTION_OBJ_PROCESS_URL: https://x.a.run.app/process\n"
         )
         env = parse_env_file(p)

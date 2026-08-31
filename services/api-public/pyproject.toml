@@ -1,7 +1,7 @@
 [project]
-name = "roomstudio-api-public"
+name = "thegoodguest-api-public"
 version = "0.1.0"
-description = "roomstudio public API — Firebase-authenticated client endpoints (upload_session)"
+description = "thegoodguest public API — Firebase-authenticated client endpoints (upload_session)"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110,<1.0",

@@ -1,7 +1,7 @@
 [project]
 name = "thegoodguest-schemas"
 version = "0.1.0"
-description = "roomstudio capture-bundle schemas (proto + generated Python)"
+description = "thegoodguest capture-bundle schemas (proto + generated Python)"
 requires-python = ">=3.11"
 dependencies = [
     # Generated code (capture_bundle_pb2.py) calls ValidateProtobufRuntimeVersion

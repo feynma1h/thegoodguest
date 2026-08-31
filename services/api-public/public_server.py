@@ -1,4 +1,4 @@
-"""roomstudio public API — Firebase-authenticated client endpoints.
+"""thegoodguest public API — Firebase-authenticated client endpoints.
 
 Hosts endpoints for iOS client traffic. Auth is Firebase ID token verified
 in-app; Cloud Run is configured --allow-unauthenticated so the platform
@@ -220,7 +220,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 
 app = FastAPI(
-    title="roomstudio-api-public",
+    title="thegoodguest-api-public",
     description="Public client-facing API. Firebase-authenticated. Hosts upload_session and future client endpoints.",
     version="0.1.0",
     lifespan=lifespan,

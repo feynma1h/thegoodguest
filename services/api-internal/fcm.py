@@ -1,4 +1,4 @@
-"""FCM notifications for the roomstudio API ingester.
+"""FCM notifications for the thegoodguest API ingester.
 
 Sends push notifications to the iOS client when an upload is incomplete
 (some referenced blobs are absent at ingest time). The iOS client uses the

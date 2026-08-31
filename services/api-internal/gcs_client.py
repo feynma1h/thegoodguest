@@ -1,4 +1,4 @@
-"""Per-thread GCS client cache for the roomstudio API ingester.
+"""Per-thread GCS client cache for the thegoodguest API ingester.
 
 A single ingest request previously constructed one storage.Client per GCS
 call: one for the bundle fetch, one per blob in the step-5 existence check

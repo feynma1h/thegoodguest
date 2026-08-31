@@ -57,7 +57,7 @@ final class WhySignInOfferTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        suiteName = "roomstudio.tests.whysignin.\(UUID().uuidString)"
+        suiteName = "thegoodguest.tests.whysignin.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
     }
 

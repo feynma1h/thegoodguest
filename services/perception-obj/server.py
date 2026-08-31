@@ -245,7 +245,7 @@ def get_sam3_video():
 # -----------------------------------------------------------------------------
 # FastAPI app
 # -----------------------------------------------------------------------------
-app = FastAPI(title="roomstudio-perception-obj")
+app = FastAPI(title="thegoodguest-perception-obj")
 
 # Lazy-initialized singletons for the /process endpoint. In tests, replace via
 # patch.object(server, "_receiver_repo", ...) etc.

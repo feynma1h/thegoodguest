@@ -1,4 +1,4 @@
-"""Task dispatch abstraction for the roomstudio perception pipeline.
+"""Task dispatch abstraction for the thegoodguest perception pipeline.
 
 Wraps Google Cloud Tasks behind a thin interface so tests can swap in an
 in-memory fake without any GCP credentials or the library installed.
@@ -10,7 +10,7 @@ No google-cloud-tasks types leak outside CloudTasksDispatcher. The rest of
 the codebase works entirely with plain dicts and strings.
 
 Required environment variables (when running with the Cloud Tasks backend):
-  CLOUD_TASKS_PROJECT   — GCP project ID (e.g. "roomstudio-prod")
+  CLOUD_TASKS_PROJECT   — GCP project ID (e.g. "thegoodguest-prod")
   CLOUD_TASKS_LOCATION  — queue region (e.g. "asia-southeast1")
   CLOUD_TASKS_QUEUE     — queue name (e.g. "perception-dispatch")
   PERCEPTION_OBJ_PROCESS_URL — full URL of the perception-obj receiver

@@ -1,12 +1,12 @@
-# Dockerfile for the roomstudio public API (services/api-public/).
+# Dockerfile for the thegoodguest public API (services/api-public/).
 #
 # Build context is the REPO ROOT so that packages/schemas/ and
 # packages/api-core/ are reachable. Cloud Build stages this correctly;
 # see infra/cloudbuild/api-public.yaml.
 #
 # Usage (from repo root):
-#   docker build -f services/api-public/Dockerfile -t roomstudio-api-public .
-#   docker run -p 8080:8080 -e PORT=8080 roomstudio-api-public
+#   docker build -f services/api-public/Dockerfile -t thegoodguest-api-public .
+#   docker run -p 8080:8080 -e PORT=8080 thegoodguest-api-public
 #
 # DEPENDENCY NOTE — protobuf version conflict:
 #   thegoodguest-schemas requires protobuf>=7.35.0 (enforced by

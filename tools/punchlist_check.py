@@ -215,7 +215,7 @@ def check_rollback_tag():
     """G4-07 — the serving-rollback hold should be dropped once the flip is trusted."""
     out = _run([
         "gcloud", "artifacts", "docker", "images", "list",
-        "asia-southeast1-docker.pkg.dev/thegoodguest/roomstudio/perception-obj",
+        "asia-southeast1-docker.pkg.dev/thegoodguest/thegoodguest/perception-obj",
         "--include-tags", "--format=value(tags)",
     ])
     holds = [t for line in out.splitlines() for t in line.split(",") if t.startswith("serving-rollback")]

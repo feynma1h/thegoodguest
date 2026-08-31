@@ -95,7 +95,7 @@ status codes now that api-public is fixed.
 
 ### G2-01 · The live web app still carries the old product name
 **State:** open · **Blocks:** the name being true anywhere a person can see it
-`roomstudio.web.app` serves `<title>roomstudio</title>` while the repo has
+`thegoodguest.web.app` serves `<title>thegoodguest</title>` while the repo has
 "The Good Guest". The web has not been deployed since the name landed
 2026-08-24. The name is settled (0245); only the deploy is missing.
 **Check:** automated — live `<title>` must match the repo's.

@@ -6,8 +6,8 @@ makes it true; an uncited answer would be a guess, and this is a legal
 disclosure rather than a form.
 
 **Product name is "The Good Guest" (0245).** The repo, the GCP project, the
-buckets and the `roomstudio:` localStorage keys deliberately keep the
-`roomstudio` stand-in. Those are infrastructure and must not appear in a
+buckets and the `thegoodguest:` localStorage keys deliberately keep the
+`thegoodguest` stand-in. Those are infrastructure and must not appear in a
 filing. One exception is a real defect, not a naming convention — see F6.
 
 **What this document is for.** Apple's App Privacy questionnaire is answered
@@ -416,8 +416,8 @@ setup script.
 
 | What | Where | Rule | How verified |
 |---|---|---|---|
-| **Raw capture** — every JPEG frame, depth and confidence raster, RoomPlan JSON/USDZ, `bundle.pb` | `gs://roomstudio-captures/captures/` | **Delete at age 1 day** | LIVE: the bucket's only lifecycle rule is `Delete` / `age: 1` / `matchesPrefix: ["captures/"]` |
-| **The room** — manifest, shell, per-object splats | `gs://roomstudio-perception-outputs/scenes/` | **No age rule.** Kept until the user deletes it | LIVE: the outputs bucket's only rule is the masks rule below |
+| **Raw capture** — every JPEG frame, depth and confidence raster, RoomPlan JSON/USDZ, `bundle.pb` | `gs://thegoodguest-captures/captures/` | **Delete at age 1 day** | LIVE: the bucket's only lifecycle rule is `Delete` / `age: 1` / `matchesPrefix: ["captures/"]` |
+| **The room** — manifest, shell, per-object splats | `gs://thegoodguest-perception-outputs/scenes/` | **No age rule.** Kept until the user deletes it | LIVE: the outputs bucket's only rule is the masks rule below |
 | **Segmentation intermediates** — `masks.npz`, including the person silhouette union | same bucket | **Delete at age 180 days** | LIVE: `Delete` / `age: 180` / prefix `scenes/` / suffix `/masks.npz` |
 | **Failed scenes** | Firestore `scenes` | TTL on `expire_at`; api-internal stamps terminal failures at 90 days, clears on revival, never stamps `ready` | LIVE: `ttlConfig.state = ACTIVE` |
 | **Upload bookkeeping** | Firestore `upload_sessions` | TTL on `created_at` → **swept promptly, not after 7 days** | LIVE: `ttlConfig.state = ACTIVE`; see F1 |
@@ -643,7 +643,7 @@ INFOPLIST_KEY_NSCameraUsageDescription = "TheGoodGuest captures your room with A
 (`project.pbxproj:464`, `:500`.)
 
 This is **user-visible** — it appears in the camera permission dialog and in
-Settings — so it is not covered by the deliberate decision to keep `roomstudio`
+Settings — so it is not covered by the deliberate decision to keep `thegoodguest`
 as the infrastructure stand-in. The name is settled as The Good Guest (0245).
 An iOS lane's to fix, and it should be fixed before any TestFlight build, since
 the permission prompt is the first sentence the product says to a new user.

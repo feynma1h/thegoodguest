@@ -26,7 +26,7 @@ Every lane merged on 2026-08-31 is unshipped. What is actually serving:
 | `perception-obj` | `00074-var`, image `c538f699` (2026-08-23) | predates **all** merged perception work |
 | `api-public` | `00046-xig` | |
 | `api-internal` | `00023-mek` | |
-| web | `roomstudio.web.app` | serves `<title>roomstudio</title>` |
+| web | `thegoodguest.web.app` | serves `<title>thegoodguest</title>` |
 
 **The web is the sharpest drift.** The repo sets the product name to
 "The Good Guest" in both places that own it (`Wordmark.tsx:66`,
