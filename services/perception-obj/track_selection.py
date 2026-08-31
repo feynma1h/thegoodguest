@@ -403,10 +403,10 @@ def _hard_filter_reasons(
         if covered / area > config.max_occluded_frac:
             reasons.append("occluded")
 
-    # TODO(completeness): compare this frame's mask area against the object's
-    # peak area across its whole track -- a mask far below its own maximum is a
-    # partial view of the object even when nothing here rejects it. Left out
-    # deliberately and not merely unimplemented: the peak is the object's
+    # NOT a completeness filter, deliberately. Comparing this frame's mask area
+    # against the object's peak area across its whole track would flag a mask
+    # far below its own maximum as a partial view, even when nothing here
+    # rejects it. It is left out because the peak is the object's
     # LARGEST observed extent, not its true one, so the rule would rank
     # candidates against a fabricated bound, and 0197 measured that class of
     # ranking as large and bidirectional. It needs its own registered
