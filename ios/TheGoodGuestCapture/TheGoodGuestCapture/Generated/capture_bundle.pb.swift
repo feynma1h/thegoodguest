@@ -8,7 +8,7 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
-// roomstudio capture bundle — the contract between the iOS capture app and
+// thegoodguest capture bundle — the contract between the iOS capture app and
 // the perception backend.
 //
 // This file is the source of truth. Generated Python lives in
@@ -66,7 +66,7 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
   typealias Version = _2
 }
 
-public nonisolated enum Roomstudio_Capture_V1_CaptureTier: SwiftProtobuf.Enum, Swift.CaseIterable {
+public nonisolated enum Thegoodguest_Capture_V1_CaptureTier: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
 
@@ -106,7 +106,7 @@ public nonisolated enum Roomstudio_Capture_V1_CaptureTier: SwiftProtobuf.Enum, S
   }
 
   // The compiler won't synthesize support with the UNRECOGNIZED case.
-  public static let allCases: [Roomstudio_Capture_V1_CaptureTier] = [
+  public static let allCases: [Thegoodguest_Capture_V1_CaptureTier] = [
     .unspecified,
     .arkitOnly,
     .lidarArkit,
@@ -115,7 +115,7 @@ public nonisolated enum Roomstudio_Capture_V1_CaptureTier: SwiftProtobuf.Enum, S
 
 }
 
-public nonisolated enum Roomstudio_Capture_V1_PlaneAlignment: SwiftProtobuf.Enum, Swift.CaseIterable {
+public nonisolated enum Thegoodguest_Capture_V1_PlaneAlignment: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
   case horizontal // = 1
@@ -145,7 +145,7 @@ public nonisolated enum Roomstudio_Capture_V1_PlaneAlignment: SwiftProtobuf.Enum
   }
 
   // The compiler won't synthesize support with the UNRECOGNIZED case.
-  public static let allCases: [Roomstudio_Capture_V1_PlaneAlignment] = [
+  public static let allCases: [Thegoodguest_Capture_V1_PlaneAlignment] = [
     .unspecified,
     .horizontal,
     .vertical,
@@ -153,7 +153,7 @@ public nonisolated enum Roomstudio_Capture_V1_PlaneAlignment: SwiftProtobuf.Enum
 
 }
 
-public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendable {
+public nonisolated struct Thegoodguest_Capture_V1_CaptureBundle: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -182,8 +182,8 @@ public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendab
 
   /// Capture device + app version. Useful for backend telemetry, debugging,
   /// and tier dispatch (LiDAR-on-Pro vs ARKit-only).
-  public var device: Roomstudio_Capture_V1_Device {
-    get {_storage._device ?? Roomstudio_Capture_V1_Device()}
+  public var device: Thegoodguest_Capture_V1_Device {
+    get {_storage._device ?? Thegoodguest_Capture_V1_Device()}
     set {_uniqueStorage()._device = newValue}
   }
   /// Returns true if `device` has been explicitly set.
@@ -193,7 +193,7 @@ public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendab
 
   /// Tier this capture was collected as. The client picks based on hardware
   /// capability; the backend honors it for routing (which models to run).
-  public var tier: Roomstudio_Capture_V1_CaptureTier {
+  public var tier: Thegoodguest_Capture_V1_CaptureTier {
     get {_storage._tier}
     set {_uniqueStorage()._tier = newValue}
   }
@@ -223,7 +223,7 @@ public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendab
 
   /// Frames in capture order. Backend SHOULD NOT assume a fixed framerate;
   /// the client selects keyframes by pose delta and discards redundant ones.
-  public var frames: [Roomstudio_Capture_V1_Frame] {
+  public var frames: [Thegoodguest_Capture_V1_Frame] {
     get {_storage._frames}
     set {_uniqueStorage()._frames = newValue}
   }
@@ -233,8 +233,8 @@ public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendab
   /// exactly when tier == LIDAR_ROOMPLAN (decision 0077). A RoomPlan hard
   /// failure (RoomBuilder throw, zero surfaces) ships LIDAR_ARKIT with no
   /// room_plan; the capture is still valid.
-  public var roomPlan: Roomstudio_Capture_V1_RoomPlanModel {
-    get {_storage._roomPlan ?? Roomstudio_Capture_V1_RoomPlanModel()}
+  public var roomPlan: Thegoodguest_Capture_V1_RoomPlanModel {
+    get {_storage._roomPlan ?? Thegoodguest_Capture_V1_RoomPlanModel()}
     set {_uniqueStorage()._roomPlan = newValue}
   }
   /// Returns true if `roomPlan` has been explicitly set.
@@ -258,7 +258,7 @@ public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendab
   /// plane capture simply carry none; the shell degrades to "unavailable"
   /// downstream and the bundle stays valid (additive field, schema_version
   /// unchanged).
-  public var planeAnchors: [Roomstudio_Capture_V1_PlaneAnchor] {
+  public var planeAnchors: [Thegoodguest_Capture_V1_PlaneAnchor] {
     get {_storage._planeAnchors}
     set {_uniqueStorage()._planeAnchors = newValue}
   }
@@ -270,7 +270,7 @@ public nonisolated struct Roomstudio_Capture_V1_CaptureBundle: @unchecked Sendab
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public nonisolated struct Roomstudio_Capture_V1_Device: Sendable {
+public nonisolated struct Thegoodguest_Capture_V1_Device: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -302,7 +302,7 @@ public nonisolated struct Roomstudio_Capture_V1_Device: Sendable {
   public init() {}
 }
 
-public nonisolated struct Roomstudio_Capture_V1_Frame: @unchecked Sendable {
+public nonisolated struct Thegoodguest_Capture_V1_Frame: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -334,8 +334,8 @@ public nonisolated struct Roomstudio_Capture_V1_Frame: @unchecked Sendable {
   /// Camera pose at capture time. World frame is whatever ARKit assigned
   /// when the session started (gravity-aligned, origin at session-start
   /// device position). Backend can use `gravity` to reorient if needed.
-  public var cameraPose: Roomstudio_Capture_V1_Pose {
-    get {_storage._cameraPose ?? Roomstudio_Capture_V1_Pose()}
+  public var cameraPose: Thegoodguest_Capture_V1_Pose {
+    get {_storage._cameraPose ?? Thegoodguest_Capture_V1_Pose()}
     set {_uniqueStorage()._cameraPose = newValue}
   }
   /// Returns true if `cameraPose` has been explicitly set.
@@ -346,8 +346,8 @@ public nonisolated struct Roomstudio_Capture_V1_Frame: @unchecked Sendable {
   /// Camera intrinsics at this frame. iPhone main cameras don't change
   /// intrinsics mid-session in practice, but ARKit reports them per frame
   /// and we carry that through — cheaper than asserting it's constant.
-  public var intrinsics: Roomstudio_Capture_V1_Intrinsics {
-    get {_storage._intrinsics ?? Roomstudio_Capture_V1_Intrinsics()}
+  public var intrinsics: Thegoodguest_Capture_V1_Intrinsics {
+    get {_storage._intrinsics ?? Thegoodguest_Capture_V1_Intrinsics()}
     set {_uniqueStorage()._intrinsics = newValue}
   }
   /// Returns true if `intrinsics` has been explicitly set.
@@ -356,8 +356,8 @@ public nonisolated struct Roomstudio_Capture_V1_Frame: @unchecked Sendable {
   public mutating func clearIntrinsics() {_uniqueStorage()._intrinsics = nil}
 
   /// Gravity vector. Always set on ARKit captures.
-  public var gravity: Roomstudio_Capture_V1_Gravity {
-    get {_storage._gravity ?? Roomstudio_Capture_V1_Gravity()}
+  public var gravity: Thegoodguest_Capture_V1_Gravity {
+    get {_storage._gravity ?? Thegoodguest_Capture_V1_Gravity()}
     set {_uniqueStorage()._gravity = newValue}
   }
   /// Returns true if `gravity` has been explicitly set.
@@ -368,8 +368,8 @@ public nonisolated struct Roomstudio_Capture_V1_Frame: @unchecked Sendable {
   /// LiDAR depth + confidence. Set iff Device.has_lidar and the client chose
   /// to include depth for this frame (it may downsample depth-frame rate
   /// independently of RGB to control bundle size).
-  public var depth: Roomstudio_Capture_V1_Depth {
-    get {_storage._depth ?? Roomstudio_Capture_V1_Depth()}
+  public var depth: Thegoodguest_Capture_V1_Depth {
+    get {_storage._depth ?? Thegoodguest_Capture_V1_Depth()}
     set {_uniqueStorage()._depth = newValue}
   }
   /// Returns true if `depth` has been explicitly set.
@@ -408,7 +408,7 @@ public nonisolated struct Roomstudio_Capture_V1_Frame: @unchecked Sendable {
 ///   - Native form for both ARKit (ARAnchor decomposes to pos + quat) and
 ///     ARCore (Pose IS pos + quat). No cross-platform conversion asymmetry.
 ///   - Slerp-friendly if temporal smoothing is ever added.
-public nonisolated struct Roomstudio_Capture_V1_Pose: Sendable {
+public nonisolated struct Thegoodguest_Capture_V1_Pose: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -439,7 +439,7 @@ public nonisolated struct Roomstudio_Capture_V1_Pose: Sendable {
 /// plus image size for clarity and downstream-friendliness. No distortion
 /// fields: ARKit reports undistorted frames. If a future capture path adds
 /// distortion (e.g. ultrawide), bump schema_version and add a oneof.
-public nonisolated struct Roomstudio_Capture_V1_Intrinsics: Sendable {
+public nonisolated struct Thegoodguest_Capture_V1_Intrinsics: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -466,7 +466,7 @@ public nonisolated struct Roomstudio_Capture_V1_Intrinsics: Sendable {
 /// Unit vector. ARKit native is "-Y is down in world" but we resolve gravity
 /// into camera-local so downstream code never has to apply the pose just to
 /// know which way is down for this image.
-public nonisolated struct Roomstudio_Capture_V1_Gravity: Sendable {
+public nonisolated struct Thegoodguest_Capture_V1_Gravity: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -485,7 +485,7 @@ public nonisolated struct Roomstudio_Capture_V1_Gravity: Sendable {
 /// LiDAR depth map for one frame. Stored as a separate float32 raster in
 /// GCS; this message just points to it and carries the metadata needed to
 /// interpret it.
-public nonisolated struct Roomstudio_Capture_V1_Depth: Sendable {
+public nonisolated struct Thegoodguest_Capture_V1_Depth: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -512,8 +512,8 @@ public nonisolated struct Roomstudio_Capture_V1_Depth: Sendable {
 
   /// Depth raster's intrinsics — usually a downscale of the RGB frame's,
   /// since ARKit's sceneDepth is 256x192 while RGB is e.g. 1920x1440.
-  public var intrinsics: Roomstudio_Capture_V1_Intrinsics {
-    get {_intrinsics ?? Roomstudio_Capture_V1_Intrinsics()}
+  public var intrinsics: Thegoodguest_Capture_V1_Intrinsics {
+    get {_intrinsics ?? Thegoodguest_Capture_V1_Intrinsics()}
     set {_intrinsics = newValue}
   }
   /// Returns true if `intrinsics` has been explicitly set.
@@ -526,7 +526,7 @@ public nonisolated struct Roomstudio_Capture_V1_Depth: Sendable {
   public init() {}
 
   fileprivate var _confidenceGcsPath: String? = nil
-  fileprivate var _intrinsics: Roomstudio_Capture_V1_Intrinsics? = nil
+  fileprivate var _intrinsics: Thegoodguest_Capture_V1_Intrinsics? = nil
 }
 
 /// One detected ARKit plane (ARPlaneAnchor), serialized at capture stop.
@@ -546,14 +546,14 @@ public nonisolated struct Roomstudio_Capture_V1_Depth: Sendable {
 ///     ARPlaneExtent.rotationOnYAxis: the rotation of that rectangle around
 ///     the anchor's +Y, applied about the plane center. Detected extent only
 ///     — consumers must not extrapolate beyond it.
-public nonisolated struct Roomstudio_Capture_V1_PlaneAnchor: Sendable {
+public nonisolated struct Thegoodguest_Capture_V1_PlaneAnchor: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// world_from_anchor. Same world frame and conventions as Frame.camera_pose.
-  public var pose: Roomstudio_Capture_V1_Pose {
-    get {_pose ?? Roomstudio_Capture_V1_Pose()}
+  public var pose: Thegoodguest_Capture_V1_Pose {
+    get {_pose ?? Thegoodguest_Capture_V1_Pose()}
     set {_pose = newValue}
   }
   /// Returns true if `pose` has been explicitly set.
@@ -578,7 +578,7 @@ public nonisolated struct Roomstudio_Capture_V1_PlaneAnchor: Sendable {
   public var rotationOnYRad: Float = 0
 
   /// Horizontal (floor/table/ceiling) vs vertical (wall/door/window).
-  public var alignment: Roomstudio_Capture_V1_PlaneAlignment = .unspecified
+  public var alignment: Thegoodguest_Capture_V1_PlaneAlignment = .unspecified
 
   /// ARKit's plane classification, verbatim (e.g. "wall", "floor",
   /// "ceiling", "table", "seat", "window", "door"). Empty when the device
@@ -595,7 +595,7 @@ public nonisolated struct Roomstudio_Capture_V1_PlaneAnchor: Sendable {
 
   public init() {}
 
-  fileprivate var _pose: Roomstudio_Capture_V1_Pose? = nil
+  fileprivate var _pose: Thegoodguest_Capture_V1_Pose? = nil
 }
 
 /// The wire contract is Apple's CapturedRoom Codable JSON, VERBATIM, by
@@ -605,7 +605,7 @@ public nonisolated struct Roomstudio_Capture_V1_PlaneAnchor: Sendable {
 /// lossy boundary (any unmapped field is gone forever for that capture),
 /// violates the bundle convention that the iOS client emits values without
 /// transforming, and creates two schemas to keep in sync.
-public nonisolated struct Roomstudio_Capture_V1_RoomPlanModel: Sendable {
+public nonisolated struct Thegoodguest_Capture_V1_RoomPlanModel: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -638,17 +638,17 @@ public nonisolated struct Roomstudio_Capture_V1_RoomPlanModel: Sendable {
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
-fileprivate nonisolated let _protobuf_package = "roomstudio.capture.v1"
+fileprivate nonisolated let _protobuf_package = "thegoodguest.capture.v1"
 
-nonisolated extension Roomstudio_Capture_V1_CaptureTier: SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_CaptureTier: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CAPTURE_TIER_UNSPECIFIED\0\u{1}ARKIT_ONLY\0\u{1}LIDAR_ARKIT\0\u{1}LIDAR_ROOMPLAN\0")
 }
 
-nonisolated extension Roomstudio_Capture_V1_PlaneAlignment: SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_PlaneAlignment: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PLANE_ALIGNMENT_UNSPECIFIED\0\u{1}HORIZONTAL\0\u{1}VERTICAL\0")
 }
 
-nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_CaptureBundle: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CaptureBundle"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}schema_version\0\u{3}bundle_id\0\u{3}user_id\0\u{1}device\0\u{1}tier\0\u{3}started_at_device_us\0\u{3}ended_at_device_us\0\u{1}frames\0\u{3}room_plan\0\u{3}client_notes\0\u{3}started_at_wall_us\0\u{3}plane_anchors\0")
 
@@ -656,15 +656,15 @@ nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message
     var _schemaVersion: String = String()
     var _bundleID: String = String()
     var _userID: String = String()
-    var _device: Roomstudio_Capture_V1_Device? = nil
-    var _tier: Roomstudio_Capture_V1_CaptureTier = .unspecified
+    var _device: Thegoodguest_Capture_V1_Device? = nil
+    var _tier: Thegoodguest_Capture_V1_CaptureTier = .unspecified
     var _startedAtDeviceUs: Int64 = 0
     var _endedAtDeviceUs: Int64 = 0
     var _startedAtWallUs: Int64 = 0
-    var _frames: [Roomstudio_Capture_V1_Frame] = []
-    var _roomPlan: Roomstudio_Capture_V1_RoomPlanModel? = nil
+    var _frames: [Thegoodguest_Capture_V1_Frame] = []
+    var _roomPlan: Thegoodguest_Capture_V1_RoomPlanModel? = nil
     var _clientNotes: Dictionary<String,String> = [:]
-    var _planeAnchors: [Roomstudio_Capture_V1_PlaneAnchor] = []
+    var _planeAnchors: [Thegoodguest_Capture_V1_PlaneAnchor] = []
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -769,7 +769,7 @@ nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Roomstudio_Capture_V1_CaptureBundle, rhs: Roomstudio_Capture_V1_CaptureBundle) -> Bool {
+  public static func ==(lhs: Thegoodguest_Capture_V1_CaptureBundle, rhs: Thegoodguest_Capture_V1_CaptureBundle) -> Bool {
     if lhs._storage !== rhs._storage {
       let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
         let _storage = _args.0
@@ -795,7 +795,7 @@ nonisolated extension Roomstudio_Capture_V1_CaptureBundle: SwiftProtobuf.Message
   }
 }
 
-nonisolated extension Roomstudio_Capture_V1_Device: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_Device: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Device"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}hardware_id\0\u{3}os_version\0\u{3}app_version\0\u{3}has_lidar\0\u{3}device_id\0")
 
@@ -834,7 +834,7 @@ nonisolated extension Roomstudio_Capture_V1_Device: SwiftProtobuf.Message, Swift
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Roomstudio_Capture_V1_Device, rhs: Roomstudio_Capture_V1_Device) -> Bool {
+  public static func ==(lhs: Thegoodguest_Capture_V1_Device, rhs: Thegoodguest_Capture_V1_Device) -> Bool {
     if lhs.hardwareID != rhs.hardwareID {return false}
     if lhs.osVersion != rhs.osVersion {return false}
     if lhs.appVersion != rhs.appVersion {return false}
@@ -845,7 +845,7 @@ nonisolated extension Roomstudio_Capture_V1_Device: SwiftProtobuf.Message, Swift
   }
 }
 
-nonisolated extension Roomstudio_Capture_V1_Frame: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_Frame: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Frame"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}frame_index\0\u{3}timestamp_us\0\u{3}rgb_gcs_path\0\u{3}camera_pose\0\u{1}intrinsics\0\u{1}gravity\0\u{1}depth\0\u{c}\u{8}\u{1}\u{c}\u{9}\u{1}\u{c}\u{a}\u{1}")
 
@@ -853,10 +853,10 @@ nonisolated extension Roomstudio_Capture_V1_Frame: SwiftProtobuf.Message, SwiftP
     var _frameIndex: UInt32 = 0
     var _timestampUs: Int64 = 0
     var _rgbGcsPath: String = String()
-    var _cameraPose: Roomstudio_Capture_V1_Pose? = nil
-    var _intrinsics: Roomstudio_Capture_V1_Intrinsics? = nil
-    var _gravity: Roomstudio_Capture_V1_Gravity? = nil
-    var _depth: Roomstudio_Capture_V1_Depth? = nil
+    var _cameraPose: Thegoodguest_Capture_V1_Pose? = nil
+    var _intrinsics: Thegoodguest_Capture_V1_Intrinsics? = nil
+    var _gravity: Thegoodguest_Capture_V1_Gravity? = nil
+    var _depth: Thegoodguest_Capture_V1_Depth? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -936,7 +936,7 @@ nonisolated extension Roomstudio_Capture_V1_Frame: SwiftProtobuf.Message, SwiftP
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Roomstudio_Capture_V1_Frame, rhs: Roomstudio_Capture_V1_Frame) -> Bool {
+  public static func ==(lhs: Thegoodguest_Capture_V1_Frame, rhs: Thegoodguest_Capture_V1_Frame) -> Bool {
     if lhs._storage !== rhs._storage {
       let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
         let _storage = _args.0
@@ -957,7 +957,7 @@ nonisolated extension Roomstudio_Capture_V1_Frame: SwiftProtobuf.Message, SwiftP
   }
 }
 
-nonisolated extension Roomstudio_Capture_V1_Pose: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_Pose: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Pose"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}pos_x\0\u{3}pos_y\0\u{3}pos_z\0\u{3}quat_x\0\u{3}quat_y\0\u{3}quat_z\0\u{3}quat_w\0")
 
@@ -1004,7 +1004,7 @@ nonisolated extension Roomstudio_Capture_V1_Pose: SwiftProtobuf.Message, SwiftPr
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Roomstudio_Capture_V1_Pose, rhs: Roomstudio_Capture_V1_Pose) -> Bool {
+  public static func ==(lhs: Thegoodguest_Capture_V1_Pose, rhs: Thegoodguest_Capture_V1_Pose) -> Bool {
     if lhs.posX != rhs.posX {return false}
     if lhs.posY != rhs.posY {return false}
     if lhs.posZ != rhs.posZ {return false}
@@ -1017,7 +1017,7 @@ nonisolated extension Roomstudio_Capture_V1_Pose: SwiftProtobuf.Message, SwiftPr
   }
 }
 
-nonisolated extension Roomstudio_Capture_V1_Intrinsics: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_Intrinsics: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Intrinsics"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}fx\0\u{1}fy\0\u{1}cx\0\u{1}cy\0\u{1}width\0\u{1}height\0")
 
@@ -1060,7 +1060,7 @@ nonisolated extension Roomstudio_Capture_V1_Intrinsics: SwiftProtobuf.Message, S
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Roomstudio_Capture_V1_Intrinsics, rhs: Roomstudio_Capture_V1_Intrinsics) -> Bool {
+  public static func ==(lhs: Thegoodguest_Capture_V1_Intrinsics, rhs: Thegoodguest_Capture_V1_Intrinsics) -> Bool {
     if lhs.fx != rhs.fx {return false}
     if lhs.fy != rhs.fy {return false}
     if lhs.cx != rhs.cx {return false}
@@ -1072,7 +1072,7 @@ nonisolated extension Roomstudio_Capture_V1_Intrinsics: SwiftProtobuf.Message, S
   }
 }
 
-nonisolated extension Roomstudio_Capture_V1_Gravity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_Gravity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Gravity"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}x\0\u{1}y\0\u{1}z\0")
 
@@ -1103,7 +1103,7 @@ nonisolated extension Roomstudio_Capture_V1_Gravity: SwiftProtobuf.Message, Swif
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Roomstudio_Capture_V1_Gravity, rhs: Roomstudio_Capture_V1_Gravity) -> Bool {
+  public static func ==(lhs: Thegoodguest_Capture_V1_Gravity, rhs: Thegoodguest_Capture_V1_Gravity) -> Bool {
     if lhs.x != rhs.x {return false}
     if lhs.y != rhs.y {return false}
     if lhs.z != rhs.z {return false}
@@ -1112,7 +1112,7 @@ nonisolated extension Roomstudio_Capture_V1_Gravity: SwiftProtobuf.Message, Swif
   }
 }
 
-nonisolated extension Roomstudio_Capture_V1_Depth: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_Depth: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Depth"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}depth_gcs_path\0\u{3}confidence_gcs_path\0\u{1}width\0\u{1}height\0\u{1}intrinsics\0")
 
@@ -1155,7 +1155,7 @@ nonisolated extension Roomstudio_Capture_V1_Depth: SwiftProtobuf.Message, SwiftP
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Roomstudio_Capture_V1_Depth, rhs: Roomstudio_Capture_V1_Depth) -> Bool {
+  public static func ==(lhs: Thegoodguest_Capture_V1_Depth, rhs: Thegoodguest_Capture_V1_Depth) -> Bool {
     if lhs.depthGcsPath != rhs.depthGcsPath {return false}
     if lhs._confidenceGcsPath != rhs._confidenceGcsPath {return false}
     if lhs.width != rhs.width {return false}
@@ -1166,7 +1166,7 @@ nonisolated extension Roomstudio_Capture_V1_Depth: SwiftProtobuf.Message, SwiftP
   }
 }
 
-nonisolated extension Roomstudio_Capture_V1_PlaneAnchor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_PlaneAnchor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PlaneAnchor"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}pose\0\u{3}center_x\0\u{3}center_y\0\u{3}center_z\0\u{3}extent_width\0\u{3}extent_height\0\u{3}rotation_on_y_rad\0\u{1}alignment\0\u{1}classification\0\u{3}boundary_xz\0")
 
@@ -1229,7 +1229,7 @@ nonisolated extension Roomstudio_Capture_V1_PlaneAnchor: SwiftProtobuf.Message, 
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Roomstudio_Capture_V1_PlaneAnchor, rhs: Roomstudio_Capture_V1_PlaneAnchor) -> Bool {
+  public static func ==(lhs: Thegoodguest_Capture_V1_PlaneAnchor, rhs: Thegoodguest_Capture_V1_PlaneAnchor) -> Bool {
     if lhs._pose != rhs._pose {return false}
     if lhs.centerX != rhs.centerX {return false}
     if lhs.centerY != rhs.centerY {return false}
@@ -1245,7 +1245,7 @@ nonisolated extension Roomstudio_Capture_V1_PlaneAnchor: SwiftProtobuf.Message, 
   }
 }
 
-nonisolated extension Roomstudio_Capture_V1_RoomPlanModel: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Thegoodguest_Capture_V1_RoomPlanModel: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".RoomPlanModel"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}usdz_gcs_path\0\u{3}roomplan_version\0\u{4}\u{2}json_gcs_path\0\u{b}summary\0\u{c}\u{3}\u{1}")
 
@@ -1276,7 +1276,7 @@ nonisolated extension Roomstudio_Capture_V1_RoomPlanModel: SwiftProtobuf.Message
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Roomstudio_Capture_V1_RoomPlanModel, rhs: Roomstudio_Capture_V1_RoomPlanModel) -> Bool {
+  public static func ==(lhs: Thegoodguest_Capture_V1_RoomPlanModel, rhs: Thegoodguest_Capture_V1_RoomPlanModel) -> Bool {
     if lhs.usdzGcsPath != rhs.usdzGcsPath {return false}
     if lhs.roomplanVersion != rhs.roomplanVersion {return false}
     if lhs.jsonGcsPath != rhs.jsonGcsPath {return false}
