@@ -105,7 +105,7 @@ function getFirebaseAuth(): Auth {
           process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
         ),
         authDomain:
-          process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "thegoodguest.firebaseapp.com",
+          process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "thegoodguest.web.app",
         projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "thegoodguest",
         appId: requireEnv(
           "NEXT_PUBLIC_FIREBASE_APP_ID",
