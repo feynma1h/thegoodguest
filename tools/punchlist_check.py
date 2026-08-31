@@ -106,6 +106,24 @@ def check_live_site_name():
 check_live_site_name.tag = NET
 
 
+def check_ios_fcm_registration():
+    """G2-05 — the phone must actually obtain an FCM token, not just be able to
+    send one. The wire has been finished on both sides since the backend
+    threading landed; what is missing is registration, so the parameter defaults
+    to nil on every call and terminal-state push reaches nobody."""
+    ios = REPO / "ios"
+    wants = ("FirebaseMessaging", "registerForRemoteNotifications")
+    found = {w: [] for w in wants}
+    for path in ios.rglob("*.swift"):
+        src = path.read_text(encoding="utf-8", errors="replace")
+        for w in wants:
+            if w in src:
+                found[w].append(path.relative_to(REPO).as_posix())
+    missing = [w for w in wants if not found[w]]
+    if missing:
+        return False, f"no {' and no '.join(missing)} anywhere under ios/"
+    return True, "registers: " + "; ".join(f"{w} in {found[w][0]}" for w in wants)
+
 # ── Gate 3 ───────────────────────────────────────────────────────────────────
 
 RETENTION_FILES = [
@@ -233,6 +251,7 @@ CHECKS = {
     "G1-02": check_privacy_manifest,
     "G1-05": check_web_base_url,
     "G2-01": check_live_site_name,
+    "G2-05": check_ios_fcm_registration,
     "G3-01": check_retention_claim,
     "G3-03": check_per_room_deletion,
     "G4-01": check_alerting,
