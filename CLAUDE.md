@@ -1,5 +1,9 @@
 # The Good Guest (repo and infrastructure still named `roomstudio`)
 
+**PARKED 2026-08-31 — read `docs/PARKED.md` first.** It records where each
+lane stopped and the two things at risk only while parked: 24 branches exist
+on one disk, and `outputs/` is 9.4 GB with no copy anywhere.
+
 A spatial intelligence product that helps people discover the best version of their home: AI-powered room analysis, conversational redesign, and an immersive 3D representation of *their own* space.
 
 This file is the always-current state of the project. Both Claude Code (reads it automatically) and Claude Chat (you upload it) consume it at the start of every session. If something in here is wrong, fix it before doing anything else.
