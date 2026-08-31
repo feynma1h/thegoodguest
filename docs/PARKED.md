@@ -79,8 +79,11 @@ recoverable until roughly 30 September 2026; after that it is gone.
 
 Live and verified: `https://thegoodguest.web.app`, plus `api-public`,
 `api-internal` and `perception-obj` in `asia-southeast1`. Firebase Auth has
-**Anonymous enabled only** — Google and Apple sign-in still need OAuth and
-Apple Developer configuration before account linking works.
+**Anonymous and Google enabled** (Google's OAuth client belongs to the new
+project, 94380440502, and its consent screen resolves). **Apple is NOT
+configured** — and it never was: the retired project had `apple.com` toggled on
+with an EMPTY `appleSignInConfig`, so Apple sign-in has never worked here. It
+needs a Services ID, Team ID, Key ID and `.p8` from Apple Developer.
 
 `autodeleteAnonymousUsers` is OFF on the new project and must stay off
 (decision 0139).
