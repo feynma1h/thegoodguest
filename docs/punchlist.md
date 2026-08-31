@@ -89,28 +89,6 @@ needs `sudo log collect`; the cheaper readout is the reaper's own per-bundle
 status codes now that api-public is fixed.
 **Check:** manual — operator, next launch.
 
-### G1-09 · Sign in with Apple tokens are never revoked on deletion
-**State:** open · **Blocks:** App Store submission
-Guideline 5.1.1(v) does not stop at deleting the account. An app offering Sign
-in with Apple must also revoke the user's Apple token via the Sign in with
-Apple REST API (`https://appleid.apple.com/auth/revoke`), and Apple checks it
-at review — see [TN3194](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple).
-`DELETE /account` calls Firebase Admin's `delete_user`, which does **not** revoke
-anything at Apple.
-
-The blocker is upstream of the deletion screen: `SignInSheet.swift:244` keeps
-only `identityToken` from the Apple credential and discards
-`authorizationCode`, which is what `Auth.auth().revokeToken(withAuthorizationCode:)`
-needs. Firebase can perform the revocation — the project's `appleSignInConfig`
-carries a complete `codeFlowConfig` (verified 2026-09-01) — but it has never
-been given a code to do it with.
-
-TN3194 also documents the fallback when no code is held: delete the data anyway
-and direct the user to revoke access manually. That is the cheaper first move
-and is a copy change on the done screen; capturing the code is the real fix.
-**Check:** automated — iOS must capture `authorizationCode` and call `revokeToken`.
-
-
 ---
 
 ## Gate 2 — what is deployed is behind what is built

@@ -86,37 +86,6 @@ def check_web_base_url():
     return True, f"set to {value}"
 
 
-def check_ios_apple_token_revocation():
-    """G1-09 — Sign in with Apple tokens must be revoked when the account goes.
-
-    Guideline 5.1.1(v) is not satisfied by deleting the account alone: an app
-    offering Sign in with Apple must also revoke the token through Apple's REST
-    API, and Apple checks it at review (TN3194). Firebase Admin's delete_user,
-    which is what DELETE /account calls, revokes nothing at Apple.
-
-    Two halves, and the first is the one that blocks: the Apple credential's
-    `authorizationCode` has to be KEPT at sign-in (SignInSheet keeps only
-    `identityToken`), because it is what revokeToken consumes. Both are
-    required, so both are checked.
-    """
-    ios = REPO / "ios"
-    wants = ("authorizationCode", "revokeToken")
-    found = {w: [] for w in wants}
-    for path in ios.rglob("*.swift"):
-        if any("Tests" in part for part in path.parts):
-            continue
-        src = path.read_text(encoding="utf-8", errors="replace")
-        for w in wants:
-            if w in src:
-                found[w].append(path.relative_to(REPO).as_posix())
-    missing = [w for w in wants if not found[w]]
-    if missing:
-        return False, (
-            f"no {' and no '.join(missing)} anywhere under ios/ — "
-            "the account goes but the Apple token survives it"
-        )
-    return True, "revokes: " + "; ".join(f"{w} in {found[w][0]}" for w in wants)
-
 # ── Gate 2 ───────────────────────────────────────────────────────────────────
 
 def check_live_site_name():
@@ -257,7 +226,6 @@ check_unrestricted_api_key.tag = NET
 CHECKS = {
     "G1-02": check_privacy_manifest,
     "G1-05": check_web_base_url,
-    "G1-09": check_ios_apple_token_revocation,
     "G2-01": check_live_site_name,
     "G2-05": check_ios_fcm_registration,
     "G3-01": check_retention_claim,

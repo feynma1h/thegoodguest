@@ -23,6 +23,12 @@
 ///      in a partial state. "Some of it went" would be both wrong and the more
 ///      frightening reading, so each failure says plainly that nothing was
 ///      touched.
+///   4. **"Gone" must not overstate when Apple was not told.** Deletion
+///      proceeds even when the Sign in with Apple token could not be revoked —
+///      that is TN3194's instruction, not our leniency — but the account then
+///      still appears under the person's Apple ID. Saying only "gone" would be
+///      true of our systems and false of what they can see on their phone, so
+///      that one outcome carries the manual step and the others do not.
 ///
 /// Read by: DeleteAccountView. Pinned by: DeleteAccountCopyTests.
 
@@ -36,8 +42,10 @@ nonisolated enum DeleteAccountState: Equatable {
     case confirm
     /// A pass is running.
     case working
-    /// The identity is gone. Counts are what THIS pass removed.
-    case done(AccountDeletionCounts)
+    /// The identity is gone. Counts are what THIS pass removed; the
+    /// revocation is what happened to the Apple token, which changes what the
+    /// screen must still ask of the user.
+    case done(AccountDeletionCounts, AppleRevocation)
     /// A pass stopped early. Nothing the user owns has been removed.
     case partial(AccountDeletionCounts)
     /// A pass failed. Nothing was touched.
@@ -109,10 +117,10 @@ nonisolated enum DeleteAccountWording {
                 dismissable: false
             )
 
-        case .done(let counts):
+        case .done(let counts, let revocation):
             return DeleteAccountCopy(
                 title: "Gone",
-                body: doneBody(counts),
+                body: doneBody(counts, revocation),
                 primary: "Start again",
                 requiresConfirmation: false,
                 closing: "This device is a stranger now",
@@ -153,15 +161,39 @@ nonisolated enum DeleteAccountWording {
 
     /// Rule 1 lives here. A pass that removed nothing says so about the PASS,
     /// and says nothing at all about what the account once held.
-    private static func doneBody(_ counts: AccountDeletionCounts) -> String {
+    private static func doneBody(
+        _ counts: AccountDeletionCounts,
+        _ revocation: AppleRevocation
+    ) -> String {
         let tail = "Your rooms are not archived or held anywhere; they are deleted."
+        let opening: String
         if counts.isEmpty {
-            return "Your account is gone.\n\nThere was nothing left to take by the "
+            opening = "Your account is gone.\n\nThere was nothing left to take by the "
                 + "time this ran — either it was already empty, or an earlier "
-                + "attempt had finished the work.\n\n" + tail
+                + "attempt had finished the work."
+        } else {
+            opening = "Your account is gone, and so is everything this pass found: "
+                + inventory(counts) + "."
         }
-        return "Your account is gone, and so is everything this pass found: "
-            + inventory(counts) + ".\n\n" + tail
+        // THE INSTRUCTION COMES SECOND, NOT LAST, and that ordering was found
+        // by screenshot rather than by reading. Trailing it after the
+        // reassurance put the one ACTIONABLE sentence on this screen below the
+        // fold at accessibility sizes, under a pinned "Start again" that was
+        // fully visible — so the state whose entire purpose is to deliver that
+        // instruction could be dismissed without it ever being seen. It
+        // scrolled, which is what made the defect invisible to the layout
+        // audit and to reading the table.
+        return opening + appleStep(revocation) + "\n\n" + tail
+    }
+
+    /// Rule 4. Only `.notRevoked` asks for anything; the other two would be
+    /// giving a person a chore that is already done, on a screen whose whole
+    /// job is to say the work is finished.
+    private static func appleStep(_ revocation: AppleRevocation) -> String {
+        guard revocation == .notRevoked else { return "" }
+        return "\n\nOne thing I could not finish: this app still appears under "
+            + "your Apple ID. To remove it, open Settings, tap your name, then "
+            + "Sign in with Apple, and stop using it for The Good Guest."
     }
 
     /// The removed things, in the order a person would think of them. Only

@@ -13,8 +13,17 @@
 ///
 /// THE SCREEN IS A STATE MACHINE AND THE WORDS ARE A TABLE. Every string comes
 /// from `DeleteAccountWording`, which is pure and pinned — see its header for
-/// the three honesty rules that make this screen's copy load-bearing rather
+/// the four honesty rules that make this screen's copy load-bearing rather
 /// than decorative. Nothing here composes a sentence.
+///
+/// TWO STEPS, IN THIS ORDER. If the account carries an Apple identity, the
+/// Sign in with Apple token is revoked BEFORE `DELETE /account` — revocation
+/// runs against the live Firebase session, so once the server has removed the
+/// identity there is nothing left to revoke with. Guideline 5.1.1(v) wants
+/// both halves, and TN3194 is explicit that a revocation which cannot be
+/// completed must NOT hold up the deletion: the pass carries on and the done
+/// screen asks the person to finish it in Settings. See
+/// `AppleAccountRevocation`.
 ///
 /// WHAT HAPPENS AFTER. On `.done` the server has deleted the Firebase identity,
 /// so the credential this app is holding belongs to a user that no longer
@@ -43,6 +52,12 @@ struct DeleteAccountView: View {
     /// The caller returns the app to its first-run state.
     var onFinished: () -> Void = {}
 
+    /// Whether this identity carries an Apple provider, and so whether there
+    /// is a token to revoke. Read once at presentation rather than observed:
+    /// the deletion removes the provider, and a live binding would flip
+    /// mid-pass and change what the screen thinks it still owes.
+    var isAppleLinked: Bool = false
+
     /// Seam. Production passes the real client; the gallery and the tests pass
     /// a closure, which is what lets every state below be photographed without
     /// a network or an account.
@@ -62,6 +77,13 @@ struct DeleteAccountView: View {
                 return .failure(.unauthorized)
             }
         }
+
+    /// Revoking the Apple token. Injected so the tests reach every branch
+    /// without Apple's sheet — see AppleAccountRevocation for why a failure
+    /// here must not stop the deletion.
+    var revokeApple: (Bool) async -> AppleRevocation = { linked in
+        await AppleAccountRevocation.perform(isAppleLinked: linked)
+    }
 
     /// Signing out after a successful deletion. Injected so the tests can
     /// observe that it happened without touching Firebase.
@@ -195,6 +217,10 @@ struct DeleteAccountView: View {
         guard let uid else { return }
         state = .working
         Task {
+            // Apple first, and its outcome never gates what follows. A person
+            // who cancels Apple's sheet has still asked to be deleted, and
+            // TN3194 says to honour that.
+            let revocation = await revokeApple(isAppleLinked)
             let result = await perform(uid)
             await MainActor.run {
                 switch result {
@@ -203,7 +229,7 @@ struct DeleteAccountView: View {
                     // the done state, so the screen cannot be read as finished
                     // while the app still holds a session for a deleted user.
                     signOut()
-                    state = .done(counts)
+                    state = .done(counts, revocation)
                 case .success(.partial(let counts, _)):
                     state = .partial(counts)
                 case .failure(let error):
@@ -223,6 +249,7 @@ struct DeleteAccountView: View {
         uid: "rs_a4f9-2c7e-91d0",
         perform: { _ in .failure(.unavailable) },
         signOut: {},
-        initialState: .done(AccountDeletionCounts(rooms: 6, conversations: 3, files: 214))
+        initialState: .done(
+            AccountDeletionCounts(rooms: 6, conversations: 3, files: 214), .revoked)
     )
 }
