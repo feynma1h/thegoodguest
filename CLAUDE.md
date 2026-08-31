@@ -1409,7 +1409,7 @@ because a human bus was the only path between them.
 ## Git conventions
 
 This repo is tracked with git. The remote is `origin` =
-github.com/feynma1h/thegoodguest (private), and `main` tracks `origin/main`. The
+github.com/feynma1h/thegoodguest (public), and `main` tracks `origin/main`. The
 repo is now a single branch: `main`, tracking `origin/main`.
 
 **Claude Code's role with git:**
