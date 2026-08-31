@@ -982,14 +982,12 @@ re-argued here.
 - **The hero A/B is open** — the operator's taste call. Variant (b) cannot be seen
   on any deployed origin by design: a real object splat is a possession, so its
   files are gitignored and hosting-ignored. (0122)
-- **The bridge QR encodes nothing, and its blocker is the append path.** The
-  direction is WEB → PHONE (0218): the desk shows a code and the phone opens
-  into a targeted rescan of the room the desk named, so `webRoomURL` — which
-  goes the other way — does not help. It needs the associated-domains
-  entitlement, which the doorway handoff never did, an AASA that claims this app
-  (hosting serves an empty default today), and above all **an append path, which
-  does not exist**. It was never blocked on the rooms fetch. (0218, punchlist
-  G1-08)
+- **The bridge QR encodes nothing and now never will** — its destination was
+  the append path, which is ruled out (0294). Direction was WEB → PHONE (0218):
+  the desk shows a code, the phone opens into a targeted rescan of the named
+  room, so `webRoomURL` — which goes the other way — never helped. Listed here
+  rather than deleted because `QRBridgeView` still exists and is reachable from
+  nothing but the gallery; that is a delete candidate, not a defect.
 - **`RSSound` is wired at three call sites with no cue files** — the app is
   silent, and the web has no sound at all. **Branded fonts are per platform**: the
   web loads real Google faces via `next/font/google`; **iOS bundles no font files
@@ -1090,6 +1088,16 @@ re-argued here.
   and one applied a real fix to a screen no user will see. **Dead code that keeps
   accruing unverified fixes rusts shut rather than staying ready.** Do not restore
   it as a courtesy. (0237)
+- **The append path is ruled OUT, and the QR bridge goes with it** (0294). No
+  "add more", no targeted rescan, in either of the two halves that name hides.
+  The cheap half is resuming a session that was only paused; the expensive half
+  is re-localising into a room captured days ago, which needs an `ARWorldMap`
+  nothing saves today and fails on moved furniture and changed light with no
+  honest fallback. **Two surfaces are stranded and are NOT bugs**: `QRBridgeView`
+  can never get a route now (0237's give-it-a-route-or-delete-it applies, and
+  the only thing that could have given it one is this), and `ReviewView`'s
+  `thinCoverage` branch is permanently dormant with "Add more" as a primary that
+  does not exist. Re-open triggers are in 0294 and are measured, not felt.
 - **ARKIT_ONLY placement and shell quality investment is parked.** The product is
   Pro-only / LiDAR-first; the shipped path stays live and is strictly better than
   before, but no further merge-knob grinding. The non-LiDAR device is not a test

@@ -1,6 +1,6 @@
 # Decision notes
 
-277 notes. **234 of them are `Decided`** -- those govern code that
+278 notes. **235 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
 other 43 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
@@ -21,7 +21,7 @@ The status vocabulary and the numbering rule live in
 | `Superseded` | 7 | replaced by a later note |
 | `Amended` | 5 | partly corrected by a later note |
 | `Spent` | 15 | carried out; nothing left to comply with |
-| `Decided` | 234 | governs code that ships today |
+| `Decided` | 235 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -94,7 +94,7 @@ The status vocabulary and the numbering rule live in
 | [0182](0182-perception-obj-cannot-currently-be-rebuilt.md) | perception-obj cannot currently be rebuilt | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (234)
+## Decided (235)
 
 | # | title | status |
 |---|---|---|
@@ -332,3 +332,4 @@ The status vocabulary and the numbering rule live in
 | [0291](0291-the-vision-model-points-and-the-frame-is-sideways.md) | a vision model points at the missing part, and the frame is stored sideways | Decided |
 | [0292](0292-the-survivor-inherits-the-pairs-score.md) | collapsing a nested pair must not re-rank it against everything else | Decided |
 | [0293](0293-a-passing-audit-and-a-green-suite-both-miss-the-fold.md) | a passing audit and a green suite both miss the fold | Decided |
+| [0294](0294-the-append-path-is-two-features-and-neither-ships.md) | the append path is two features and neither ships | Decided |
