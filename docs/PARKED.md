@@ -48,10 +48,11 @@ deleted; the work is in `main`, not on a branch. What each lane was:
 New perception behaviour ships behind env flags that default OFF, so merging
 these changed no runtime behaviour. Nothing here is deployed.
 
-Two branches remain: `main`, and `backup/pre-trailer-strip` — 515 commits of
-pre-history-rewrite state kept as the sole record from before the 2026-08-09
-trailer strip. It carries none of the purged HEIC blobs (verified) and costs
-almost nothing, being mostly shared objects.
+**One branch remains: `main`.** `backup/pre-trailer-strip` — 515 commits of
+pre-history-rewrite state, described here as the sole record from before the
+2026-08-09 trailer strip — **no longer exists**, and no ref preserves that
+history. Whether it was dropped deliberately at parking or by accident is not
+recorded; verified 2026-08-31 that `refs/heads` holds `main` alone.
 
 ## The one branch that was deleted for its content
 
@@ -68,6 +69,14 @@ logger.info("[BlobUploadManager] \u{2717} fatal blob error: \(bundleId, privacy:
 The only change is `privacy: .public` on `reason`. Apply it temporarily when
 you need to read a fatal reason off the device, and do not commit it — that is
 why it lived on a throwaway branch rather than on `main`.
+
+## Before you treat anything as finished
+
+`docs/NOT-FINAL.md` lists everything in this tree that is not in final form,
+checked against the live system on 2026-08-31 rather than read off CLAUDE.md.
+The one item that will not announce itself: **`/segment` and `/track` are
+registered routes and are not flag-gated**, so the next `perception-obj` deploy
+exposes both. Everything else the merges added is off by default.
 
 ## Where to start when you come back
 
