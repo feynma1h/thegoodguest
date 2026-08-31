@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The privacy manifest. Required in the app bundle for App Store submission,
+  and separate from the App Store Connect nutrition labels — filing the labels
+  does not satisfy this, and shipping this does not satisfy the labels. Both
+  are required and they must agree.
+
+  THE TRACE FOR EVERY ENTRY BELOW is docs/product/privacy-nutrition-labels.md,
+  which reads the live system rather than the policy pages. When a data type
+  moves there it moves here in the same commit; a manifest that disagrees with
+  the labels is worse than either being wrong alone, because the disagreement
+  is what review notices.
+
+  REASON CODES ARE NOT INTERCHANGEABLE WITHIN A CATEGORY. Each category below
+  carries the code whose published description matches what this app actually
+  does, checked against Apple's own list rather than copied from an example —
+  a plausible-but-wrong code is ITMS-91055 at upload, not a warning. Three of
+  the five categories are declared; DiskSpace and ActiveKeyboards are absent
+  because no API in either category is called anywhere in the app, which is
+  worth stating since CaptureRecovery's behaviour makes DiskSpace look likely.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- No tracking, no tracking domains. There is no analytics SDK, no
+       advertising SDK, and no crash reporter in this app: the linked package
+       set is Firebase and GoogleSignIn only. -->
+  <key>NSPrivacyTracking</key><false/>
+  <key>NSPrivacyTrackingDomains</key><array/>
+
+  <key>NSPrivacyCollectedDataTypes</key>
+  <array>
+    <!-- The capture's keyframes. Photographs of the inside of a home, which is
+         the most sensitive thing this app handles. -->
+    <dict>
+      <key>NSPrivacyCollectedDataType</key>
+      <string>NSPrivacyCollectedDataTypePhotosorVideos</string>
+      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
+      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
+      <key>NSPrivacyCollectedDataTypePurposes</key>
+      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+    </dict>
+
+    <!-- ARKit/RoomPlan geometry: depth, planes, the measured room. Distinct
+         from photographs and declared separately, because a room's shape is
+         not a picture of it and Apple gives it its own type. -->
+    <dict>
+      <key>NSPrivacyCollectedDataType</key>
+      <string>NSPrivacyCollectedDataTypeEnvironmentScanning</string>
+      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
+      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
+      <key>NSPrivacyCollectedDataTypePurposes</key>
+      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+    </dict>
+
+    <!-- The Firebase uid. Every scene, conversation and upload session is
+         keyed on it, which is exactly what makes everything else Linked. -->
+    <dict>
+      <key>NSPrivacyCollectedDataType</key>
+      <string>NSPrivacyCollectedDataTypeUserID</string>
+      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
+      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
+      <key>NSPrivacyCollectedDataTypePurposes</key>
+      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+    </dict>
+
+    <!-- device_id on the capture bundle: a per-installation identifier, not
+         the IDFA and not a hardware id. -->
+    <dict>
+      <key>NSPrivacyCollectedDataType</key>
+      <string>NSPrivacyCollectedDataTypeDeviceID</string>
+      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
+      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
+      <key>NSPrivacyCollectedDataTypePurposes</key>
+      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+    </dict>
+
+    <!-- Name and email arrive only when someone links Apple or Google. An
+         anonymous user supplies neither, but the manifest describes what the
+         app CAN collect rather than what a given person happened to give. -->
+    <dict>
+      <key>NSPrivacyCollectedDataType</key>
+      <string>NSPrivacyCollectedDataTypeName</string>
+      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
+      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
+      <key>NSPrivacyCollectedDataTypePurposes</key>
+      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+    </dict>
+    <dict>
+      <key>NSPrivacyCollectedDataType</key>
+      <string>NSPrivacyCollectedDataTypeEmailAddress</string>
+      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
+      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
+      <key>NSPrivacyCollectedDataTypePurposes</key>
+      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+    </dict>
+
+    <!-- What a person types to the guest, and the arrangements that come back.
+         This is labels §3.1i, the broader of the two judgment calls: declared
+         because a sentence about your own home is user content even when the
+         app only ever sends words. -->
+    <dict>
+      <key>NSPrivacyCollectedDataType</key>
+      <string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
+      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
+      <key>NSPrivacyCollectedDataTypePurposes</key>
+      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+    </dict>
+
+    <!-- Scene status, failure reasons, and the pipeline's own bookkeeping. -->
+    <dict>
+      <key>NSPrivacyCollectedDataType</key>
+      <string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>
+      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
+      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
+      <key>NSPrivacyCollectedDataTypePurposes</key>
+      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+    </dict>
+
+    <!-- Labels §3.1h, the narrower judgment call: the profile photo URL a
+         linked provider hands over. Declared under Other rather than dropped,
+         because the conservative reading is the one that cannot be wrong in
+         the direction that matters. -->
+    <dict>
+      <key>NSPrivacyCollectedDataType</key>
+      <string>NSPrivacyCollectedDataTypeOtherDataTypes</string>
+      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
+      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
+      <key>NSPrivacyCollectedDataTypePurposes</key>
+      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+    </dict>
+  </array>
+
+  <key>NSPrivacyAccessedAPITypes</key>
+  <array>
+    <!-- UserDefaults.standard at five sites (BundleRestore, WhySignInSheet,
+         StagingHooks, ScreenGallery, CaptureReaper).
+
+         54BD.1, NOT CA92.1. CA92.1 is the App Group case — "accessible to the
+         apps, app extensions, and App Clips that are members of the same App
+         Group" — and this app has no App Group: no app-groups entitlement, no
+         UserDefaults(suiteName:), five plain `.standard` call sites. 54BD.1 is
+         the one whose description is "only accessible to the app itself". -->
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key><array><string>54BD.1</string></array>
+    </dict>
+
+    <!-- CACurrentMediaTime(), used two different ways, so both reasons are
+         declared rather than picking the tidier one:
+
+         35F9.1 — absolute timestamps for in-app events. CaptureManager's
+                  startedAtDeviceUs/endedAtDeviceUs go on the capture bundle as
+                  device-monotonic microseconds.
+         0A2A.1 — elapsed time between events. publishCameraPlanPose's 20 Hz
+                  gate is a subtraction between two readings. -->
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>35F9.1</string>
+        <string>0A2A.1</string>
+      </array>
+    </dict>
+
+    <!-- CaptureStorageSweeper reads .contentModificationDateKey to age out
+         captures.
+
+         DDA9.1, NOT C617.1. C617.1 is for files "the user specifically granted
+         access to, such as using a document picker" — there is no document
+         picker in this app. The swept directory is the app's own container
+         (applicationSupportDirectory, .userDomainMask), which is DDA9.1. -->
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key><array><string>DDA9.1</string></array>
+    </dict>
+  </array>
+</dict>
+</plist>

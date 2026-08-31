@@ -47,5 +47,6 @@ testpaths = [
     "tools/test_gen_mark.py",
     "tools/test_upstream_hook.py",
     "tools/test_punchlist_check.py",
+    "tools/test_privacy_manifest.py",
 ]
 addopts = "--import-mode=importlib"

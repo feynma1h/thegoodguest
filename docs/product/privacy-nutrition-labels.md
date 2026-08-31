@@ -662,148 +662,78 @@ Its own section — §9.
 
 ---
 
-## 9. The privacy manifest, which does not exist
+## 9. The privacy manifest, which ships
 
 Separate from the nutrition labels and also required. Apple requires a
 `PrivacyInfo.xcprivacy` in the app bundle declaring collected data types,
-required-reason API usage, and tracking domains. **This repo has none:**
+required-reason API usage, and tracking domains. Filing the labels does not
+satisfy it, and shipping it does not satisfy the labels: both are required and
+they must agree.
 
-```
-$ find ios -iname "*.xcprivacy"
-(no results)
-```
+**It exists** at `ios/TheGoodGuest/TheGoodGuest/PrivacyInfo.xcprivacy`, and it
+is verified in the built bundle rather than in the repo — `PrivacyInfo.xcprivacy`
+appears at the `.app` root, carried there by the target's file-system
+synchronized group. `tools/test_privacy_manifest.py` holds it to the app.
 
 The app uses **three** required-reason API categories, each verified by reading
 the call sites:
 
 | Category | Where | Reason code |
 |---|---|---|
-| `NSPrivacyAccessedAPICategoryUserDefaults` | `Home/BundleRestore.swift`, `Identity/WhySignInSheet.swift`, `Support/StagingHooks.swift`, `Upload/CaptureReaper.swift` | `CA92.1` — accessed only by the app itself |
-| `NSPrivacyAccessedAPICategorySystemBootTime` | `Capture/CaptureManager.swift:256`, `:308`, `:760` — `CACurrentMediaTime()` | `35F9.1` — measuring elapsed time within the app |
-| `NSPrivacyAccessedAPICategoryFileTimestamp` | `Capture/CaptureStorageSweeper.swift:100`, `:119`, `:122` — `contentModificationDateKey` | `C617.1` — timestamps of files inside the app container |
+| `NSPrivacyAccessedAPICategoryUserDefaults` | `Home/BundleRestore.swift`, `Identity/WhySignInSheet.swift`, `Support/StagingHooks.swift`, `Support/ScreenGallery.swift`, `Upload/CaptureReaper.swift` | `54BD.1` — accessible to the app itself |
+| `NSPrivacyAccessedAPICategorySystemBootTime` | `Capture/CaptureManager.swift` — `CACurrentMediaTime()` at `:259`, `:315` (absolute) and `:782` (elapsed) | `35F9.1` **and** `0A2A.1` |
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | `Capture/CaptureStorageSweeper.swift:100`, `:119` — `contentModificationDateKey` | `DDA9.1` — files inside the app container |
+
+**Two of those codes changed when the manifest was actually written, and the
+draft this section used to carry had both wrong.** They are recorded here
+because the failure mode is silent: a wrong-but-valid code lints, parses, and
+is refused at upload as ITMS-91055.
+
+- **UserDefaults was drafted as `CA92.1`**, whose published description is the
+  **App Group** case — "accessible to the apps, app extensions, and App Clips
+  that are members of the same App Group". This app has no app-groups
+  entitlement and no `UserDefaults(suiteName:)`; all five call sites are
+  `.standard`. The app-itself code is `54BD.1`.
+- **FileTimestamp was drafted as `C617.1`**, which is for files "the user
+  specifically granted access to, such as using a document picker view
+  controller". There is no document picker in this app, and the swept directory
+  is `applicationSupportDirectory` in `.userDomainMask` — the app's own
+  container, which is `DDA9.1`.
+- **SystemBootTime gained a second code.** `CACurrentMediaTime()` is used both
+  for absolute in-app timestamps on the capture bundle (`35F9.1`) and for
+  elapsed time in the camera-pose throttle (`0A2A.1`). Both are real, the array
+  takes several, and declaring one would have described half the usage.
 
 **No disk-space API is used** — no `volumeAvailableCapacity`, `statfs`,
 `systemFreeSize` or equivalent appears anywhere in the app source, so
 `NSPrivacyAccessedAPICategoryDiskSpace` is **not** required. Worth stating
-because it is easy to assume otherwise from `CaptureRecovery`'s behaviour.
+because it is easy to assume otherwise from `CaptureRecovery`'s behaviour, and
+it is pinned by its own test for that reason.
 
-`NSPrivacyTracking` is `false` and `NSPrivacyTrackingDomains` is empty — see §2.
-
-**A draft is below. It is product code and this lane does not write product
-code** — hand it to an iOS lane, which should also confirm at build time that
-the Firebase (11.15.0) and GoogleSignIn (9.2.0) SDKs ship their own signed
-manifests, as both versions should.
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>NSPrivacyTracking</key><false/>
-  <key>NSPrivacyTrackingDomains</key><array/>
-
-  <key>NSPrivacyCollectedDataTypes</key>
-  <array>
-    <dict>
-      <key>NSPrivacyCollectedDataType</key>
-      <string>NSPrivacyCollectedDataTypePhotosorVideos</string>
-      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
-      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
-      <key>NSPrivacyCollectedDataTypePurposes</key>
-      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyCollectedDataType</key>
-      <string>NSPrivacyCollectedDataTypeEnvironmentScanning</string>
-      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
-      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
-      <key>NSPrivacyCollectedDataTypePurposes</key>
-      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyCollectedDataType</key>
-      <string>NSPrivacyCollectedDataTypeUserID</string>
-      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
-      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
-      <key>NSPrivacyCollectedDataTypePurposes</key>
-      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyCollectedDataType</key>
-      <string>NSPrivacyCollectedDataTypeDeviceID</string>
-      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
-      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
-      <key>NSPrivacyCollectedDataTypePurposes</key>
-      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyCollectedDataType</key>
-      <string>NSPrivacyCollectedDataTypeName</string>
-      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
-      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
-      <key>NSPrivacyCollectedDataTypePurposes</key>
-      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyCollectedDataType</key>
-      <string>NSPrivacyCollectedDataTypeEmailAddress</string>
-      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
-      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
-      <key>NSPrivacyCollectedDataTypePurposes</key>
-      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyCollectedDataType</key>
-      <string>NSPrivacyCollectedDataTypeOtherUserContent</string>
-      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
-      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
-      <key>NSPrivacyCollectedDataTypePurposes</key>
-      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyCollectedDataType</key>
-      <string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>
-      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
-      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
-      <key>NSPrivacyCollectedDataTypePurposes</key>
-      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyCollectedDataType</key>
-      <string>NSPrivacyCollectedDataTypeOtherDataTypes</string>
-      <key>NSPrivacyCollectedDataTypeLinked</key><true/>
-      <key>NSPrivacyCollectedDataTypeTracking</key><false/>
-      <key>NSPrivacyCollectedDataTypePurposes</key>
-      <array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
-    </dict>
-  </array>
-
-  <key>NSPrivacyAccessedAPITypes</key>
-  <array>
-    <dict>
-      <key>NSPrivacyAccessedAPIType</key>
-      <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
-      <key>NSPrivacyAccessedAPITypeReasons</key><array><string>CA92.1</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyAccessedAPIType</key>
-      <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
-      <key>NSPrivacyAccessedAPITypeReasons</key><array><string>35F9.1</string></array>
-    </dict>
-    <dict>
-      <key>NSPrivacyAccessedAPIType</key>
-      <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
-      <key>NSPrivacyAccessedAPITypeReasons</key><array><string>C617.1</string></array>
-    </dict>
-  </array>
-</dict>
-</plist>
-```
+**The nine collected data types are as this document derives them**, and every
+string was checked against Apple's published value list rather than recalled:
+`PhotosorVideos` (Apple's own spelling, lowercase "or"), `EnvironmentScanning`,
+`UserID`, `DeviceID`, `Name`, `EmailAddress`, `OtherUserContent`,
+`OtherDiagnosticData`, `OtherDataTypes`. All nine are `Linked`, none is
+`Tracking`, and all carry `AppFunctionality` alone.
 
 The `OtherUserContent` and `OtherDataTypes` entries carry the two judgment calls
 from 3.1i and 3.1h. If the operator takes the strict reading on either, drop
 that entry from both the manifest and the label together — they must not
 disagree.
+
+**Firebase (11.15.0) and GoogleSignIn (9.2.0) ship their own manifests**, as
+required of third-party SDKs. Confirmed in the built bundle: 19 SDK
+`PrivacyInfo.xcprivacy` files sit beside ours, from Firebase, GoogleSignIn,
+GoogleUtilities, AppAuth, GTMAppAuth, GTMSessionFetcher, Promises and
+SwiftProtobuf.
+
+**What the manifest does NOT do is keep itself current.** The cross-check in
+`tools/test_privacy_manifest.py` scans `ios/` for all five required-reason API
+families and fails when the manifest declares too few (an undeclared call is
+ITMS-91053) or too many (a category with no call site is a claim that is not
+true). That is the guard against this section going quietly out of date, which
+is the thing it did before.
 
 ---
 
@@ -822,8 +752,6 @@ change and how to check it in one command.
    photo URL (3.1h).
 3. **Decide the server-log question** (§7) — either take the conservative Device
    ID reading, or fix the Privacy Policy. Not both silent.
-4. **Get the `PrivacyInfo.xcprivacy` into the app** (§9). It ships in the bundle;
-   the labels alone are not sufficient.
 
 **Fix before the build ships, not necessarily before the filing.**
 
