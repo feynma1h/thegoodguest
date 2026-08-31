@@ -89,6 +89,21 @@ needs `sudo log collect`; the cheaper readout is the reaper's own per-bundle
 status codes now that api-public is fixed.
 **Check:** manual — operator, next launch.
 
+### G1-08 · The app cannot delete the account it creates
+**State:** open · **Blocks:** App Store submission
+The app supports account creation — anonymous auth upgraded in place by linking
+Apple or Google (`Auth/SignInSheet.swift`, reached from `ProfileView`) — and App
+Review guideline 5.1.1(v) requires that an app which does so let the user
+*initiate* deletion from within it. `DELETE /account` is live and complete on
+api-public, deleting every per-user collection and prefix by hand; no Swift file
+calls it. So the only deletion route a person has is one they cannot reach from
+the app that made their rooms. The reviewer looks for this control specifically,
+which makes it a rejection rather than a risk.
+Not the same work as G3-03: that is per-room deletion, which this does not need
+and which would not satisfy it. What is missing here is a call site and a place
+to put it, not a route.
+**Check:** automated — a Swift file must issue DELETE against `/account`.
+
 ---
 
 ## Gate 2 — what is deployed is behind what is built
