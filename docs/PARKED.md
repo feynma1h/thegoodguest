@@ -6,21 +6,30 @@ worktree was clean and every lane's work was committed before stopping.
 This file is for whoever picks it up, including a future me. It records only
 what is NOT recoverable from the code, the punchlist, or `docs/decisions/`.
 
-## Two risks that exist only while parked
+## The backup was already done — this section used to say otherwise
 
-**1. `main` exists on exactly one disk.** `origin` holds `main` at a commit
-132 behind local. Every lane below was merged into `main` and its branch
-deleted, so `main` is now the single copy of all of it. A disk failure loses
-everything.
+**`main` is pushed and `origin/main` matches it.** One branch, one upstream,
+nothing local-only. Re-derive rather than trusting this paragraph:
 
 ```
-git push origin --all
+git fetch origin && git status -sb
 ```
 
-That is the whole backup. It was not run at parking time because pushing is
-the operator's call, not a session's.
+**What stood here was false when it was written, not merely stale.** It said
+`origin` was 132 commits behind, called that the one risk of parking, and said
+pushing had not been done because it was the operator's call. The reflog dates
+the catch-up push — 140 commits, tipped by "docs: correct every claim the
+parking cleanup made false" — to 2026-08-31 12:14:20 IST. This file was
+committed at 18:34:17 IST, **six hours and twenty minutes later**, and pushed
+seven seconds after that. Pushing had been happening all day: 12:53, 17:58,
+18:25, and every session since.
 
-**2. The room data is gone, on purpose.** `outputs/` held 9.4 GB and now holds
+Both corrections in this file run the same way — the Apple paragraph below is
+the other — and neither was found by reading. One command each.
+
+## The risk that does exist while parked
+
+**The room data is gone, on purpose.** `outputs/` held 9.4 GB and now holds
 1.1 MB — the reports, handoffs and verdicts only. Every preserved capture, the
 16 cloud scene directories, both GCS buckets' contents and all 392 Firestore
 documents were deleted at parking, because the next session starts fresh. The
@@ -132,7 +141,7 @@ served both here, which is why CI splits the jobs and local runs do not.
 
 ## Where to start when you come back
 
-`docs/punchlist.md` — 29 items in six gates, dependency-ordered. Run
+`docs/punchlist.md` — 38 entries in six gates, dependency-ordered. Run
 `python3 tools/punchlist_check.py` first: it re-derives status against the live
 system rather than trusting this file or CLAUDE.md, and reports UNKNOWN
 separately from DONE. Expect several entries to have rotted; that is what the

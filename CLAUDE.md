@@ -4,8 +4,9 @@
 which lists everything in this tree that is not finished and says which parts
 of it go live on the next deploy.** The tree is one branch (`main`), one
 worktree, and carries no room data: every capture, fixture and cloud scene was
-deleted at parking. The one standing risk is that `main` is the single copy of
-everything and is ahead of `origin`.
+deleted at parking. **`main` is pushed and `origin/main` matches it** — the
+one-disk risk this line used to state was already false when it was written
+(see `docs/PARKED.md`).
 
 A spatial intelligence product that helps people discover the best version of their home: AI-powered room analysis, conversational redesign, and an immersive 3D representation of *their own* space.
 
@@ -1489,7 +1490,7 @@ evidence for a human deleting an entry, not authority to.
 `docs/PARKED.md` for why and for the state of the tree, then `docs/NOT-FINAL.md`
 for what in here is unfinished and which parts of it go live on the next deploy.
 
-**`docs/punchlist.md` is the forward list** — 37 entries in six gates, in
+**`docs/punchlist.md` is the forward list** — 38 entries in six gates, in
 dependency order, each carrying a `Check:` line. Start there for "what should I
 do next", and run `python3 tools/punchlist_check.py` to have the checkable
 subset re-derived against the live system rather than believing any prose. An
