@@ -19,7 +19,7 @@ enrollment is not merely an inconvenience but an active source of data loss.
 ## What we tried
 
 First the premise was checked rather than the conclusion.
-`TheGoodGuestCapture.entitlements` declares only
+`TheGoodGuest.entitlements` declares only
 `com.apple.developer.applesignin` — there is no `keychain-access-groups` key —
 and `kSecAttrAccessGroup` appears nowhere in the iOS tree, nor does
 `useUserAccessGroup`. Both the app's own Keychain item and Firebase Auth's

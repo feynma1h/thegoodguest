@@ -158,7 +158,7 @@ never deleted: **the keychain went without the container.**
 
 **Refine the recorded hypothesis before testing it.** 0115 suspects "the
 entitlements-drop workaround altered the keychain access group". Check that
-premise: `TheGoodGuestCapture.entitlements` declares ONLY
+premise: `TheGoodGuest.entitlements` declares ONLY
 `com.apple.developer.applesignin` — no `keychain-access-groups` key — and no
 Swift code passes `kSecAttrAccessGroup`. An app with no explicit group defaults
 to its App ID (TEAM PREFIX + bundle id). So dropping `CODE_SIGN_ENTITLEMENTS`

@@ -6,7 +6,7 @@
 # Outputs:
 #   packages/schemas/thegoodguest_schemas/capture_bundle_pb2.py     (Python)
 #   packages/schemas/thegoodguest_schemas/capture_bundle_pb2.pyi    (Python stubs, if mypy-protobuf present)
-#   ios/TheGoodGuestCapture/TheGoodGuestCapture/Generated/capture_bundle.pb.swift  (Swift, if protoc-gen-swift present)
+#   ios/TheGoodGuest/TheGoodGuest/Generated/capture_bundle.pb.swift  (Swift, if protoc-gen-swift present)
 #
 # Tooling:
 #   - protoc:           brew install protobuf   (libprotoc 35.0 or newer)
@@ -49,7 +49,7 @@ protoc "${PROTOC_PY_ARGS[@]}" "${PROTO_FILES[@]}"
 echo "  -> ${PY_OUT}/capture_bundle_pb2.py"
 
 # Swift out (best-effort; skipped if protoc-gen-swift is not installed)
-SWIFT_OUT="ios/TheGoodGuestCapture/TheGoodGuestCapture/Generated"
+SWIFT_OUT="ios/TheGoodGuest/TheGoodGuest/Generated"
 echo "=== Swift ==="
 if command -v protoc-gen-swift >/dev/null 2>&1; then
     mkdir -p "${SWIFT_OUT}"

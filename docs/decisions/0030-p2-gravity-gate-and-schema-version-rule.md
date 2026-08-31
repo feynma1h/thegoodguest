@@ -15,7 +15,7 @@ This note records those rules so they survive session boundaries.
 
 ### Gate 1 — Gravity formula and test
 
-`PoseExtractor.gravity(from:)` in `ios/TheGoodGuestCapture/TheGoodGuestCapture/
+`PoseExtractor.gravity(from:)` in `ios/TheGoodGuest/TheGoodGuest/
 Capture/PoseExtractor.swift` returns `RSGravity()` (zero vector) in P1.
 The formula is deferred because gravity is the one ARKit→proto mapping that
 0029 left unconfirmed — and it is a silent sign/direction trap.
