@@ -633,104 +633,39 @@ Open problems, measured dead ends, and deliberate non-goals. An item leaves this
 list when it is fixed or ruled — not when it is explained. Closed items are
 deleted, not annotated; their story is in `docs/decisions/`.
 
-### Measured dead ends — do NOT re-attempt without new evidence
+### Measured dead ends
 
-These were tried and refuted with numbers. Each names what would have to change
-for it to be worth re-opening. Re-running one of these is the most expensive
-mistake available in this repo.
+**Sixteen approaches were tried and measured not to work.** Each carries
+`Status: Refuted` and they are listed together in
+[`docs/decisions/README.md`](docs/decisions/README.md). One line each here so
+nobody re-runs one by accident; **read the note before re-proposing one**, since
+the note is where the re-open condition lives. Most of these cost GPU time, and
+re-running one is the most expensive mistake available in this repo.
 
-- **View selection does not predict reconstruction quality** (0146, 0152, 0162).
-  Seven view features against two mapping-independent instruments: all coin
-  flips. The one GPU experiment ran — a view **1.7× sharper** seeing **2.1× more
-  surface** reconstructed **worse** on both instruments. Eleven candidate
-  measures have now failed. Re-opens only on a validated completeness
-  instrument, which no one has.
-- **A better-framed photograph is not a better photograph** (0197). Both
-  legless tables had a fully in-frame alternative already reconstructed in the
-  bucket, so the probe cost a download. Swapping them through production's own
-  `build_box_object`: rp6g1's table **0.406 → 1.004** of its measured box height
-  — a floating slab becomes a table with four legs — and rp7's desk **0.415 →
-  0.356**, stubby legs to none. Nothing on the input side separates them: both
-  alternatives are `in_frame` 1.000, ~10× smaller in frame, 2.3–3.3× more
-  Gaussians, and they land on opposite verdicts. **The effect is large and
-  BIDIRECTIONAL**, so a ranking key that can gain a set of legs or lose the ones
-  you had is worse than useless, and none was built. Two traps: the winning view
-  is the MORE occluded one (0.714 vs 0.503), and point count picks wrong on rp7
-  because Gaussian count tracks how much is visible, not how good the photograph
-  is.
-- **Raising `PERCEPTION_PLAN_VIEWS_PER_BOX` is inert on a warm room** (0160). A
-  cached frame's policy-skipped views are invisible to the planner forever, so
-  the plan comes back empty at budgets 2, 4, and 8. The cure is clearing the
-  per-frame `objects.json`, not the knob. Corollary: an OOM-failed view is never
-  retried by any warm re-drive.
-- **The multi-view union does not work** (0166). Given an oracle registration
-  production could never have, a second reconstruction adds **+0.057** coverage
-  against **+0.063 with no registration at all** — so registration was never the
-  constraint. It costs 1.76× the points and renders visibly worse in all three
-  cases including the best by the metric. Two reconstructions of one object are
-  two different fabricated objects, not two views of one.
-- **De-occlusion does not clear its own gate** (0165). Foreign occlusion is a
-  median 0.080 of an object's missing surface against a registered bar of 0.25.
-  The two named hard cases (the "legless" desk and table) come in at 0.08 and
-  0.16 — they run off the frame edge, not behind something.
-- **A measured point map does not fix truncation** (0181). SAM 3D accepts a
-  LiDAR-derived pointmap and the reconstruction barely moves: the
-  pre-registered prediction was refuted at 1.4% of predicted magnitude, wrong
-  direction. The layout half is untested.
-- **The 180° facing sign has six refuted instrument families** (0081, 0104,
-  0156, 0170). Appearance scorers, unioned clouds, per-view aggregation,
-  truncation priors, a vision model shown both renders, and the layout-derived
-  sign — the last is right 2 times in 3 and ships flag-only because no number it
-  reports separates the miss from the hits. The shared cause is measured: a
-  single-view reconstruction's unseen half is fabricated, and every one of these
-  asks that fabricated half a question. **Settled in conversation instead**
-  (0157) — and ruled a concession, not a feature (0183).
-- **Capture-time guidance cannot beat selection or multi-view** (0155). One
-  viewpoint of a solid object tops out at 0.50 surface coverage by geometry;
-  the best single frame already reaches 0.31. Guidance is the only one of the
-  three that asks anything of the person holding the phone and has the lowest
-  ceiling. **Do not build per-object capture-sufficiency feedback** (0150).
-- **Do not tune `FUSION_CLUSTER_DIST_M` or `SHELL_WALL_MERGE_*` to chase
-  under-merge symptoms** (0075). Both measured correct on real rooms; the
-  symptoms are label collapse and edge truncation.
-- **The FUSED cloud makes orientation WORSE, and the same-mass rule is dead**
-  (0225). Coverage for visibility questions, PURITY for orientation ones. A
-  box-clipped cloud accumulated over every keyframe medians a **0.0287**
-  axis-assignment margin against 0081's masked single-view **0.15-0.47**,
-  clears the shipped 0.10 gate on **1 of 20** boxes, and **7 of 20 winners
-  move** under cloud perturbation. That last number refutes the claim
-  everything here rested on — that clutter cancels across rotations of one
-  splat because the point set is identical. The mass IS common; its COST is
-  not, because rotating a table moves its legs relative to a bag that stays
-  put. **The 180-degree sign speculation dies with it** and the sign stays
-  where 0171 put it. Re-opens only on a per-object cloud accumulated through
-  each frame's own SAM mask — a purity mechanism, not more views.
-- **The OOM is HEADROOM, not size, and no retry reaches it** (0228). See the
-  open-defect entry; the refused half is that **downscale-and-retry is out**
-  even though the arithmetic green-lights it (a halved request fits 12 of 12
-  box views), because 0197's bidirectionality means an altered input yields
-  **a different object under the same identity** with nothing able to detect
-  the swap. Generalised: *where a fallback must choose between altering the
-  input and not running, it must not run.* **A deferred retry at a frame or
-  object boundary is also out** — refuted before implementation, needing no
-  measurement: the existing retry already runs after `gc.collect()` +
-  `empty_cache()` with no other object in flight, so the queue it would defer
-  into is already empty.
-- **A tighter floor tolerance inside a box restores FLOOR, not feet** (0232).
-  0.08 m looks like a room-scale number misapplied at object scale; it is
-  sized for the floor plane's own error. Open floor sits up to **+4.3 cm**
-  above RoomPlan's plane, so 0.02 is inside the noise, and 96-100% of the
-  restored points vanish by tol=0.06 where a leg would thin out linearly. The
-  real fix is a floor level estimated LOCALLY from each box's own depth, and
-  it needs its own registered prediction — the numbers to beat are that the
-  restored points must NOT collapse between 0.02 and 0.06. **No env switch
-  ships**: a control that fires into a defect under a conservative default is
-  worse than one that never fires, because the metric it moves reads as
-  improvement (the inverse of 0225's unfireable gate).
-- **Generic compression buys almost nothing** (0125). Float32 splat data is
-  high-entropy: gzip is 1.36×, where the SPZ tier is 5.8×.
-- **Spark is not the render bottleneck** (0123). Parse is under 1% of the wait;
-  fetch concurrency is flat from 1 to 10 because one GCS connection is capped.
+| what does not work | the number that killed it | note |
+|---|---|---|
+| View selection predicting reconstruction quality | eleven measures failed; a view 1.7× sharper seeing 2.1× more surface reconstructed **worse** | 0146, 0152, 0162 |
+| A better-framed photograph being a better photograph | the same swap gained one table its legs (0.406 → 1.004 of box height) and cost another the ones it had — **large and bidirectional**, so no sort key exists | 0197 |
+| Raising `PERCEPTION_PLAN_VIEWS_PER_BOX` on a warm room | empty plan at budgets 2, 4 and 8 — cached policy-skips are invisible to the planner forever | 0160 |
+| Unioning two reconstructions of one object | oracle registration adds **+0.057** coverage against **+0.063 with no registration at all**, at 1.76× the points | 0166 |
+| De-occlusion | foreign occlusion is a median **0.080** of missing surface against a registered bar of 0.25 | 0165 |
+| Feeding SAM 3D a measured LiDAR pointmap | refuted at 1.4% of predicted magnitude, wrong direction | 0181 |
+| Capture-time guidance | one viewpoint tops out at 0.50 surface coverage by geometry and the best single frame already reaches 0.31 | 0150, 0155 |
+| The fused cloud for orientation | median axis margin **0.0287** against a 0.10 gate; 7 of 20 winners move under perturbation | 0225 |
+| A vision model shown both renders, for the 180° facing sign | same noise floor as the four instrument families before it | 0156 |
+| Tuning `FUSION_CLUSTER_DIST_M` or `SHELL_WALL_MERGE_*` | both measured correct on real rooms; the symptoms are label collapse and edge truncation | 0075 |
+| A tighter floor tolerance inside a box | restores FLOOR, not feet — 96–100% of restored points vanish by tol=0.06 | 0232 |
+| The confidence threshold as a route to the missing leg | the model is not uncertain about the second leg; it does not see it | 0268 |
+| Ray triangulation to merge tracked fragments | separates known-same from known-different by only 1.8× with heavy overlap | 0280 |
+| Appearance as the box-free merge | calibrates well on boxed objects, merges the ones that matter | 0284 |
+| The SAM `mirror` label's depth-trust gate as a mirror detector | precision 18% | 0091 |
+| Generic compression of splat data | gzip 1.36× where the SPZ tier is 5.8× | 0125 |
+
+Two more that are not approaches but standing facts: **Spark is not the render
+bottleneck** (parse is under 1% of the wait; fetch concurrency is flat 1→10
+because one GCS connection is capped, 0123), and **the 180° facing sign has six
+refuted instrument families** — settled in conversation instead, and ruled a
+concession rather than a feature (0081, 0104, 0156, 0170, 0183).
 
 ### The strategy those dead ends leave
 
@@ -757,8 +692,7 @@ deletes from the model's input what the photograph actually contains.
 **4. But an input CANNOT be scored in advance.** Eleven view measures have
 failed, and 0197 is the sharpest: the same swap gained one table a full set of
 legs and cost another the ones it had, with every input measure pointing the
-same way on both. **The effect is large and bidirectional, so no sort key is
-buildable.**
+same way on both.
 
 **So the strategy is: change the input, and judge on the OUTPUT.** Generate
 candidate inputs — a different view, a repaired mask — reconstruct, and score
@@ -776,595 +710,369 @@ every object, on a service where one room already budget-stops with a 53-item
 tail. Any proposal here must say what it costs per room before it says what it
 gains.
 
-
 ### Open defects
+
+Each entry is what is broken and the measurement that pins it. The reasoning is
+in the note; this list exists so nothing is forgotten, not so it can be
+re-argued here.
 
 **Perception / room quality**
 
-- **The per-box shortlist's overlap score is FLAT, and a repair now has a
-  measured route** (0262–0269 and 0288–0289, capture `90eebfc4`). `mask_overlap_with_hull` is
-  precision with no recall term: **31 of 52 candidates score exactly 1.0000** in
-  that room and 27% across the four older captures, after which `frame_index` —
-  capture order — decides. Where SAM 3 returns one object at two nested extents
-  the sort takes the shorter in **9 of 10** pairs that associate to a box;
-  **keep the longer** is right **9 of 9** against the operator's rulings and
-  needs no gate, no score and no box (0266, which supersedes 0263's gate). The
-  desk's NEAR foot lies ~3 cm outside its measured box, which is what costs it
-  the pick; the SECOND leg is **100% inside** the box, so the box is not the
-  obstacle there. A click placed on the missing part takes second-leg coverage
-  **0.1% → 75.0%**, and merging every candidate that kept what it was given
-  retains 100% of the seed and near foot. **The keep-the-longer rule is now
-  BUILT and OFF** behind `PERCEPTION_KEEP_LONGER_MASK` (0292) — 4 of 25 boxes
-  across the four captures change their planned views, three to a longer mask in
-  the same frame, none losing an association, byte-identical off. The click
-  repair is NOT built: the pointer was a human eye, and no automated search
-  found the region. **Read
+- **The per-box shortlist's overlap score is FLAT.** `mask_overlap_with_hull` is
+  precision with no recall term: **31 of 52 candidates score exactly 1.0000** on
+  `90eebfc4` and 27% across the four older captures, after which `frame_index` —
+  capture order — decides. Keep-the-longer is right **9 of 9** against the
+  operator's rulings and is BUILT and OFF behind `PERCEPTION_KEEP_LONGER_MASK`
+  (4 of 25 boxes change planned views, none losing an association,
+  byte-identical off). The click repair is NOT built: the pointer was a human
+  eye and no automated search found the region. **Read
   `outputs/segment-quality/targets/README.md` before quoting any coverage
-  figure**: the denominator is a rectangle that includes floor, so every such
-  number understates what was recovered.
-- **`90eebfc4` carries LiDAR depth on 1 frame of 189** against 99–100% on all
+  figure** — the denominator includes floor, so every such number understates
+  what was recovered. (0261–0269 — the rule itself is 0266 — plus 0288–0289 and 0292)
+- **`90eebfc4` carries LiDAR depth on 1 frame of 189**, against 99–100% on the
   four older captures, correlating with iOS 26.5.2 → 26.6.1 on the same phone
-  and the same app build (0267). That disables mask refinement, `depth_fit` and
-  0231's band detector for the whole room, and **nothing in the pipeline reports
-  it** — tier is derived from the RoomPlan room, not from whether depth arrived.
-  Cause needs one scan to confirm; a depth-bearing frame count in the manifest
-  is the cheap fix and is independent of the cause.
-- **The repair and the chooser are RULED ON and flip together, refine first**
-  (0198/0201, 0204/0205, 0211/0212; operator sitting 2026-08-23). **Both are
-  SERVING** on `perception-obj-00074-var` since 2026-08-25, re-verified from
-  `gcloud`; the entry stays here for the measured residue below, not because
-  anything is unshipped.
-  SAM 3D's input is RGBA with **alpha = the SAM mask** (`models/sam3d.py`), so an
-  incomplete mask deletes from the model's input what the photograph actually
-  contains. On a 0%-traffic candidate the repair reproduced 0198's bench **to
-  the pixel** — 58,386 → 61,439 mask px at IoU 0.9493. `PERCEPTION_ARM_SELECT`
-  then moved exactly one object: rp7's desk. **The chooser did not change —
-  refinement changed what it was choosing between**, which is why these are one
-  decision and why refine goes first (0212). The measured COLD flag rate is
-  **10 of 37** planned box views (rp7 1/12, rp6g1 3/10, rp6g2 2/5, spike 4/10),
-  against the warm 9 of 25 that 0201 priced from — a warm room understates it.
-  **What the sitting measured that the flag report did not:** the headline
-  "0.321 → 1.122" is **one axis, and it is the box's HEIGHT** — `arm_fit`'s
-  `fill` divides the rendered vertical span by `box.dimensions[1]`, which for
-  this box is 0.795 m, not the 0.660 m narrowest axis both this file and the
-  throughput charter used to name. In the box's own axes the
-  refined desk is 0.734 × 0.877 × 0.665 against a box of 1.291 × 0.795 × 0.660
-  — **width falls to 0.569 of the box** and the three-axis error goes
-  **0.626 → 0.644 m, marginally worse**. It is not rotated: its longest extent
-  is 0.877 m against the box's 1.291 m, so it is a **partial object** — the
-  sit-stand desk's right-hand leg assembly plus a stub of top. **The operator
-  ruled ON having seen this**, on the merits: class-6 truncation is endemic,
-  and an object standing on its measured floor at the right height beats a
-  desktop floating 47 cm up. **Do not re-report the width as a fresh defect.**
-  The third Chamfer axis (0233) rides `ARM_SELECT` and needs no env of its own
-  (`PERCEPTION_ARM_S2C_MIN_CLOUD` is a threshold, not a gate); the
-  band-decomposed claim rate (0231) is inert and has no flag.
-- **The object-aware residue is PARKED, and the spike run is refused rather
-  than deferred** (0202, 0212; operator sitting 2026-08-23). It hit its
-  pre-registered frame set exactly and bought spike's bed a better arm — and
-  **cost rp7's desk its repair**, because frame 114 is not in the residue set.
-  **This is NOT a negative on 0202**: the prediction landed frame-for-frame and
-  the bed improvement is real. **The rp7 framing overstated the cost** — that
-  desk's three-axis residual is 0.626 (ships) vs 0.644 (repaired), inside
-  noise, so the chooser most likely refuses and the shipped arm survives
-  anyway. **The question changed under it:** the residue's core job has moved
-  into the cover pass (`68ed282`), and that work had to fix the residue for
-  **ignoring the frame vetoes** (`9320099`) — two stages now overlap and
-  neither knows what the repair stage needs. So the real question is whether
-  this stage should exist separately at all, and it is answerable **on CPU**:
-  diff the new selector against cover-pass-plus-residue across all four
-  captures (largely agree → retire the flag rather than ship it), and compute
-  which frames the residue selects on spike without reconstructing anything.
-  **It cannot ship until supply, repair and the vetoes draw from one
-  allocator, and it belongs to the throughput charter, not to a parked flag
-  with no owner.**
-- **`PERCEPTION_VISIBILITY_VETO` is MEASURED and stays OFF — a veto is a
-  re-roll, not a filter** (0234, 0236; drive run at review 2026-08-24 on the
-  serving revision with both other flags off). 0234's restriction — reject
-  only, never rank — is airtight about ORDER and says nothing about how much
-  of the answer moves: a vetoed (frame, box) pair leaves its box uncovered, so
-  the greedy cover pass spends an extra pick, which changes the seed AND the
-  count of the farthest-point residue, and the residue re-rolls. Measured
-  offline through production's own selector: **16 of 48 frames change across
-  the four captures** — rp7 5/12, rp6g1 8/12, rp6g2 3/12, spike 0/12 — where
-  0234 reports a three-frame change. On rp6g1 **one** band-vetoed pair moves
-  **8 frames**. The GPU drive then answered 0234's blocker, and
-  **answered it mostly favourably** — corpus detections **228 → 250, +10%**
-  (rp7 +46%, rp6g2 +10%, spike 0, rp6g1 **−12%**, the only room that falls —
-  and there the objects RoomPlan does not box, which is what the residue
-  exists to serve, go **33 → 27**). **The check the flag was held on is
-  not the check that decides it.** On the output-side instrument it is 0197's
-  bidirectionality again — rp7's chair **0.655 → 0.083** and rp6g1 gains a
-  box that had no arm at all, against rp7's bed **0.419 → 0.799** and rp6g1's
-  nightstand **fill 1.169 → 0.223**. **The sharpest cost is invisible to a
-  flags-off run, which is every measurement 0234 took:** the veto removes
-  rp6g1 f178 and rp7 f114, which are not those boxes' shipped arms but their
-  better ALTERNATIVES — the one walked arm-select switch and mask
-  refinement's target. Replayed through `choose_arm` over rp6g1's two
-  selections, the nightstand is the whole argument in one row: today it has
-  **two** arms and arm selection correctly refuses the bad one (fill 1.169
-  kept over 0.223); under the veto it has **one**, so the chooser has nothing
-  to choose and **fill 0.223 ships**. **The veto shrinks the candidate set
-  arm selection exists to search** — 0212's enable order already puts the
-  veto last, and this is the stronger reason for it. A supply change and a
-  chooser cannot be evaluated apart. **rp7's bed is the same argument from
-  the other side and it indicts 0205 rather than the veto**: both f294 and
-  f363 are in the veto's selection, so the chooser HAS the better arm — f294
-  wins the three-axis error by 0.38 m — and refuses it, because f294
-  overshoots vertically (fill 1.404) where f363 sits at 0.946 and unanimity
-  requires both axes. **0205's measured hole now has a price**, which is the
-  trigger that note was waiting for. Two follow-ups in 0236: **split the
-  flag** (veto 1 removes two frames that produced literally 0 detections and
-  is free; veto 2 causes the whole cascade), and **contain the cascade** by
-  relaxing a vetoed box's own bar in place rather than buying an extra cover
-  pick. Also measured and general: **adding a frame can replace a good arm
-  with a worse one on association overlap alone**, which is a property of
-  association rather than of this flag.
-- **The object→frame map is BUILT and its ids are measurably unstable — the
-  tracker survives a visit, not a revisit** (0279). Mean box purity **0.6404**
-  over all six RoomPlan boxes — 30 concepts, all 189 frames, 48 instances of
-  which 6 are boxed and 42 are not — against bands fixed in `tools/track_map.py`
-  BEFORE the first GPU run (0.90 stable, 0.70 marginal), so 0271's instruction
-  applies: report the number, do not build on the raw ids. **Coverage is not
-  the problem** — 0.73-0.97 of the frames where a box is on screen have
-  something claiming it. The failure is re-acquisition: four of six boxes have
-  their object arrive as THREE ids in disjoint frame windows
-  (`nightstand#1/#2/#3` at frames 15-27, 79-100, 131-142), and 25 of 42
-  competing claimant pairs share no frame at all, which rules out the reading
-  that two neighbours are arguing over one hull. It is not a clean rule: `bed#0`
-  and `cabinet#0` hold one id across 28- and 124-frame absences. **The sting is
-  for 0271's plan** — the box is what you would need to REPAIR the tracked
-  instances, and the nine unboxed kinds have no such repair. **The obvious
-  box-free merge is already measured and insufficient** (0280): pooled
-  mask-centroid ray triangulation separates known-same (median 0.182 m) from
-  known-different (0.327 m) by only 1.8x with heavy overlap, because a chair
-  tucked under a desk is 0.088 m away by that instrument.
-- **The SAME-FRAME half of that identity problem IS exactly answerable, and it
-  is a different duplication from 0279's** (0281). `/track` runs one concept
-  per pass, so one object is claimed by every prompt that fits it in the SAME
-  frames — `artwork#0 ≡ painting#1` over 54 shared frames, `monitor#1 ≡ tv#0`
-  over 38, a wardrobe's `door` nested inside its `cabinet`. Measured over all
-  48 overlapping pairs the split is bimodal with **nothing in the middle**: 14
-  pairs at containment 0.996-1.000, then 0.511 (a speaker on a desk), then
-  ≤ 0.047. Merging them takes the capture **48 instances → 34 objects** in 11
-  groups that all read correctly. **This is why an occlusion rule cannot use a
-  bare union of the other masks** — applied literally it reports eight
-  instances as ~99% occluded by duplicates of themselves. It does NOT touch
-  0279: `nightstand#1/#2/#3` share no frame, so 34 still over-counts what is
-  perhaps 15 objects.
-- **Nine objects have no uncut view at all, and the border margin is the one
-  number that decides it** (0282). Of `track_selection.py`'s three hard
-  filters, border rejects **768 of 1,241 detections (61.9%)** against
-  too_small's 79 and occluded's 55 — they are not peers, and an argument about
-  stage 1 is an argument about one threshold. Even mask-touches-edge with no
-  band refuses 57.7%, because 0273's rotation-paced capture runs large
-  furniture off the frame. **Two of the three objects 0259 recorded the
-  operator naming come back exactly** — `desk#0` → 50 and `chair#0` → 42, from
-  tracked masks rather than projected hulls. The bed is the disagreement and
-  it is the margin: at 2.5% all 87 of its frames are refused, at 0.5-1.0% it
-  keeps four and picks **f0**, the operator's own choice. **The threshold
-  ships as specified and was deliberately not tuned to the bed** — tuning to
-  the one case that can be checked would stop it being evidence. What is owed
-  is the operator's eye on the nine fallback objects.
-- **`/track` is bounded by frames × objects on the L4, and the bound is not
-  ours to remove** (0278). Every OOM lands in one allocation — the detector
-  grounding a batch of frames, 1.27 GiB, with 1.0-1.2 GiB free — and the
-  headroom is eaten by per-object tracker state that has nowhere to go: the
-  multiplex `init_state` sets no `storage_device` and takes no
-  `offload_state_to_cpu`, while `Sam3BasePredictor.start_session` passes exactly
-  that argument. `PERCEPTION_TRACK_GROUNDING_BATCH` (default 4; 1 disables
-  batching) is the lever, and it is an env var so the next turn costs a revision
-  rather than a build. At upstream's 16 the capture OOM'd at 189 frames AND at
-  63; at 4 it completes 189 in ~78 s a concept.
-- **The shorter of two nested same-label masks is the one without the legs,
-  and `/track` only ever offers the shorter one** (0283). Operator-reported
-  on the desk and confirmed: SAM 3 returns a legged and a legless reading of
-  one object, the shortlist's precision-only sort takes the legless one
-  (0261), and SAM 3.1's tracker reproduces that shorter reading on **all 78**
-  desk detections — longest tail 100 px against SAM 3's 533. **Cross-label,
-  not a desk quirk:** all six nested pairs in the 19 probed frames (desk,
-  monitor, door, chair) have the larger instance reaching **+0.111 to +0.288**
-  of the frame further toward the floor, never the other way. Two excuses are
-  measured dead — a stride-4 round trip costs ≤0.4% of area and a 4 px bar
-  survives intact. **This names a candidate mechanism for class 6** via 0198
-  (alpha IS the mask), and 0283 carries the ~25 s GPU test that would settle
-  it. **The tracker cannot be fixed into carrying both readings** — read from
-  SAM 3.1's source, the multiplex VIDEO builder sets `det_nms_thresh=0.1`
-  with `det_nms_use_iom=True` and gates new objects on
-  `mask_iom >= assoc_iou_thresh=0.1`, while `build_sam3_image_model`
-  configures neither. The desk pair sits at containment **0.995**, ~10x both
-  gates, so exactly one reading survives and score decides which. **This is
-  the video path, not the version.** The knob (raising both thresholds above
-  0.995) also disables NMS and would worsen 0279's already-UNSTABLE ids — do
-  not reach for it. **Prompting is measured dead too** (0283): of eight
-  phrasings on frame 50 only `desk` and `sit-stand desk` ground at all, and
-  they return the SAME masks (IoU 0.9954 short, 0.9889 long); `desk with
-  legs`, `desk leg` and four others return NOTHING. A compositional phrase
-  does not extend a silhouette, and `desk leg` failing also closes the
-  prompt-the-part-and-union route. **The resolution is architectural and free: let `/track`
-  choose the FRAME and the image path produce the MASK**, which is what
-  production already does. **Two traps:** the capture is rotated 90°, so a mask profile taken by
-  image ROW measures a horizontal world axis and wrongly reports no
-  difference — project gravity first; and do NOT fix this by preferring the
+  and app build. That disables mask refinement, `depth_fit` and the band
+  detector (0231) for the whole room, and **nothing in the pipeline reports it** — tier
+  comes from the RoomPlan room, not from whether depth arrived. A depth-bearing
+  frame count in the manifest is the cheap fix and is independent of the cause.
+  (0267)
+- **rp7's desk ships as a partial object, and that was ruled ON on the merits.**
+  Mask refinement plus arm selection put it at the right height on its measured
+  floor, but in the box's own axes it is 0.734 × 0.877 × 0.665 against a box of
+  1.291 × 0.795 × 0.660 — width falls to **0.569** of the box and the three-axis
+  error goes 0.626 → 0.644 m. It is not rotated; it is the sit-stand desk's
+  right-hand leg assembly plus a stub of top. The operator ruled on it having
+  seen this: class-6 truncation is endemic, and an object standing on its floor
+  beats a desktop floating 47 cm up. (0198/0201, 0204/0205, 0211/0212)
+- **The object-aware residue is PARKED and its question has changed.** It hit
+  its pre-registered frame set exactly and bought spike's bed a better arm; the
+  rp7 cost was overstated (0.626 vs 0.644 is inside noise, so the chooser most
+  likely refuses). But its core job moved into the cover pass, and that work had
+  to fix the residue for ignoring the frame vetoes — two stages now overlap and
+  neither knows what the repair stage needs. **It cannot ship until supply,
+  repair and the vetoes draw from one allocator**, and it belongs to the
+  throughput charter rather than to a parked flag with no owner. (0202, 0212)
+- **`PERCEPTION_VISIBILITY_VETO` is measured and stays OFF: a veto is a re-roll,
+  not a filter.** 16 of 48 frames change across the four captures; on rp6g1 one
+  band-vetoed pair moves 8 frames. Corpus detections go 228 → 250 (+10%), but
+  the veto removes rp6g1 f178 and rp7 f114 — not those boxes' shipped arms but
+  their better ALTERNATIVES. rp6g1's nightstand is the whole argument: today it
+  has two arms and the chooser correctly refuses the bad one; under the veto it
+  has one, and fill 0.223 ships. **A supply change and a chooser cannot be
+  evaluated apart.** Two follow-ups: split the flag (veto 1 is free, veto 2
+  causes the cascade), and contain the cascade by relaxing a vetoed box's own
+  bar in place. (0234, 0236)
+- **The object→frame map's ids are unstable — the tracker survives a visit, not
+  a revisit.** Mean box purity **0.6404** against bands fixed before the first
+  GPU run (0.90 stable, 0.70 marginal). Coverage is fine at 0.73–0.97; the
+  failure is re-acquisition — four of six boxes arrive as three ids in disjoint
+  frame windows, and 25 of 42 competing claimant pairs share no frame at all.
+  The sting is for the boxless-object plan: the box is what you would need to
+  REPAIR the tracked instances. (0279)
+- **The SAME-FRAME half of that is exactly answerable, and is a different
+  duplication.** One concept per pass means one object is claimed by every
+  prompt that fits it: `artwork#0 ≡ painting#1` over 54 shared frames,
+  `monitor#1 ≡ tv#0` over 38. Across all 48 overlapping pairs the split is
+  bimodal with nothing in the middle — 14 at containment 0.996–1.000, then
+  0.511, then ≤ 0.047. Merging takes the capture 48 instances → 34 objects.
+  **This is why an occlusion rule cannot use a bare union of the other masks**:
+  applied literally it reports eight instances as ~99% occluded by duplicates of
+  themselves. (0281)
+- **Nine objects have no uncut view, and the border margin is the one number
+  that decides it.** Border rejects **768 of 1,241 detections (61.9%)** against
+  too_small's 79 and occluded's 55. Two of the three objects the operator named
+  come back exactly (`desk#0` → 50, `chair#0` → 42). The bed is the
+  disagreement: at 2.5% all 87 frames are refused, at 0.5–1.0% it keeps four and
+  picks f0, the operator's own choice. A high rejection rate is the room rather
+  than a defect — 0273's rotation-paced capture runs large furniture off the
+  frame, and 0259's border measurements stand behind the filter. The threshold
+  ships as specified and was
+  deliberately not tuned to the bed. What is owed is the operator's eye on the
+  nine fallback objects. (0282)
+- **`/track` is bounded by frames × objects on the L4, and the bound is not ours
+  to remove.** Every OOM lands in one allocation — the detector grounding a
+  batch, 1.27 GiB, with 1.0–1.2 free — and the headroom is eaten by per-object
+  tracker state with nowhere to go: the multiplex `init_state` sets no
+  `storage_device` and takes no `offload_state_to_cpu`.
+  `PERCEPTION_TRACK_GROUNDING_BATCH` (default 4) is the lever. (0278)
+- **The shorter of two nested same-label masks is the one without the legs, and
+  `/track` only ever offers the shorter one.** Reproduced on all 78 desk
+  detections — longest tail 100 px against SAM 3's 533. Cross-label, not a desk
+  quirk: all six nested pairs reach +0.111 to +0.288 of the frame further toward
+  the floor. **The tracker cannot be fixed into carrying both readings** — the
+  video builder's NMS gates sit ~10× below the pair's 0.995 containment, so
+  exactly one survives. **Prompting is measured dead too**: of eight phrasings
+  only `desk` and `sit-stand desk` ground at all and they return the same masks.
+  The resolution is architectural and free: let `/track` choose the FRAME and
+  the image path produce the MASK. Two traps — the capture is rotated 90°, so
+  project gravity before profiling by row; and do NOT fix this by preferring the
   larger mask, since the door pair jumps 7.62% → 23.15% and that rule takes a
-  doorway over a door.
+  doorway over a door. (0283)
 - **Class-6 splat truncation is untouched and has no live route.** Reconstructions
-  are missing legs, bases, and backs. Every placement fix to date positions or
-  orients an incomplete reconstruction better rather than completing it, and all
-  three attacks on the cause are measured dead above. What remains is decision
-  0052's standing trigger: a different model — one that consumes several views
-  itself, or exposes calibrated metric scale or pose.
-- **CUDA OOM is the largest measured loss in the corpus** (0228) — **22 of 163
-  detections**, twelve of them box views, and **two boxes lost their only
-  compatible mask**. It is **capacity, not scheduling**: the models hold
-  ~16.4 GiB, the forward pass PEAKS at 5.23–6.43 GiB, and the card has
-  **5.26 left**. Read the peak, not the request: **21 of the 22 failing
-  allocations are 0.500–0.861 GiB**, the median box-view shortfall is 133 MiB
-  and three cases miss by 16 MiB, so this is headroom rather than object size
-  — mask area does not predict it at all (Spearman r = −0.009 over an 84×
-  area range).
-  Freeing 1.2 GiB covers 21 of the 22. **The second arm is currently the OOM
-  fallback in six of nine affected boxes** (0229) — which is why
-  `PERCEPTION_CONDITIONAL_SECOND_ARM` stays OFF until the throughput charter
-  closes. **The charter's named option (evicting SAM 3 for pass 2) is mutually
-  exclusive with mask refinement, which is now ON** — so the live path is the
-  charter's own escape: batch pass 2's refinement calls into their own sub-pass
-  so SAM 3 can be evicted after it. That restructure and the frozen-plan retry
-  work are **one project, not two**.
-- **`b667f891` is budget-starved.** Its census plan carries a 53-item long tail
-  against the 900 s request budget, so it budget-stops every round and the
-  fusion post-passes never run there. Not a placement defect — the room's
-  clutter exceeds one request. **Measured cost, 2026-08-20:** a warm re-drive
-  on the colour image still came back `budget_stopped: true,
-  refinement_skipped: true`, and the room gained colour on 0 of 45 objects
-  while 40 of them had readable splats. The post-passes it loses are not
-  abstract.
-  **rp6g2 is NOT a representative room** (0235): its last **28 keyframes are
-  black**, mean luma 0.13–4.49 against a capture median of 129.5 — **23.4% of
-  a room that has been the thin case in every round of analysis.** Re-read
-  every prior conclusion drawn from it — including the 53-item budget-starved
-  tail and the 0-of-45 colour result — against this. **The cause is settled and
-  is NOT the app (0240): the operator's hand covered the lens** for the last
-  5.7 s of a 32.8 s capture. The RGB carries 150–250 kB of red-dominant sensor
-  noise rather than a blank buffer — a zero-filled YCbCr buffer renders mid
-  GREEN, not black — the frames show fingers arriving at f95, and the depth map
-  turns at f96 into a plane at 0.39–0.59 m, flat to ~1 cm, that holds its
-  distance while the phone walks a metre. **Do not re-open this as a pipeline
-  stall**; what would re-open the class is a dark run with *room-scale* depth
-  behind it, which is what 0241's logging now makes visible.
-  **Measured 2026-08-24 for the `capture-dark` lane:** the two black frames
-  the shipped sampler takes, f103 and f119, read mean luma **2.46** and
-  **1.88** and produce **0 detections each** — SAM 3 finds literally nothing
-  in them, so they consume two of that room's eight cover picks and return
-  nothing. That is independent of the veto and true of today's production.
-- **An unmatched RoomPlan box has FIVE causes and the two anyone looks for
-  are the smallest** (0227). Of nine unmatched boxes across the four
-  captures: 2 PLAN_SKIP, 2 DETECTION, 1 OOM, 1 COMPETITION, 1 SAMPLING, 1
-  NEVER_FRAMED, 1 LABEL. Four carry family-compatible masks at up to overlap
-  **1.0000** and are invisible to association only because `ok=False` — no
-  splat, so not an observation. Every failure is recorded faithfully in its
-  frame's `objects.json`; nothing aggregates them, which is why four boxes
-  had their answer written down and unread. **Two of the declined label
-  matches (rp6g1 b04, rp6g2 b09) are NOT label problems** — both have good
-  uncontested `cabinet` masks that OOM'd or were policy-skipped. The declines
-  stand; do not re-open them as label cases. rp6g2 b07 is confirmed LABEL.
+  are missing legs, bases and backs. Every placement fix to date positions or
+  orients an incomplete reconstruction better; all three attacks on the cause are
+  refuted above. What remains is 0052's standing trigger — a different model, one
+  that consumes several views itself or exposes calibrated metric scale or pose.
+- **CUDA OOM is the largest measured loss in the corpus** — **22 of 163
+  detections**, twelve of them box views, and two boxes lost their only
+  compatible mask. It is capacity, not scheduling: models hold ~16.4 GiB, the
+  forward pass peaks at 5.23–6.43, the card has 5.26 left. **Read the peak, not
+  the request** — 21 of 22 failing allocations are 0.500–0.861 GiB and mask area
+  does not predict it at all (r = −0.009 over an 84× range). Freeing 1.2 GiB
+  covers 21 of 22. Downscale-and-retry is refused (0197's bidirectionality means
+  an altered input yields a different object under the same identity), and so is
+  a deferred retry (the existing retry already runs with an empty queue). **The
+  second arm is currently the OOM fallback in six of nine affected boxes**, which
+  is why `PERCEPTION_CONDITIONAL_SECOND_ARM` stays OFF until the throughput
+  charter closes. The third Chamfer axis rides `PERCEPTION_ARM_SELECT` and needs
+  no env of its own; it can only veto a switch, never enable one (0233). The
+  charter's named option (evicting SAM 3 for pass 2) is
+  mutually exclusive with mask refinement, now ON. The live path is batching pass
+  2's refinement into its own sub-pass. (0228, 0229)
+- **`b667f891` is budget-starved** — a 53-item census tail against the 900 s
+  request budget, so it budget-stops every round and the fusion post-passes never
+  run. A warm re-drive still came back `budget_stopped`, gaining colour on 0 of
+  45 objects while 40 had readable splats. **But rp6g2 is NOT a representative
+  room**: its last 28 keyframes are black (mean luma 0.13–4.49 against a capture
+  median of 129.5) — 23.4% of the room that has been the thin case in every round
+  of analysis. **The cause is settled and is NOT the app: the operator's hand
+  covered the lens.** Re-read every prior conclusion drawn from this room. The
+  two black frames the sampler takes read luma 2.46 and 1.88 and produce **0
+  detections each**, consuming two of eight cover picks. (0235, 0240)
+- **An unmatched RoomPlan box has FIVE causes and the two anyone looks for are
+  the smallest.** Of nine across four captures: 2 PLAN_SKIP, 2 DETECTION, 1 OOM,
+  1 COMPETITION, 1 SAMPLING, 1 NEVER_FRAMED, 1 LABEL. Four carry
+  family-compatible masks at up to overlap 1.0000 and are invisible to
+  association only because `ok=False`. Every failure is recorded faithfully in
+  its frame's `objects.json`; nothing aggregates them. (0227)
 - **A window ships with ~30° in-plane skew.** Near-square planar objects are
   ~90°-ambiguous to the model and no instrument scores in-plane orientation.
-- **The "cabinet behind a wall" is not the declip bound** (0104). The declip pass
-  never engages: the object's centre projects outside every wall rectangle. Start
-  from that fact, not from `PLACEMENT_SPLAT_CLIP_MARGIN_M`.
+- **The "cabinet behind a wall" is not the declip bound** — the declip pass never
+  engages, because the object's centre projects outside every wall rectangle.
+  Start from that fact, not from `PLACEMENT_SPLAT_CLIP_MARGIN_M`. (0104)
 - **Two same-label objects closer than `FUSION_CLUSTER_DIST_M` (0.4 m) can still
-  merge into one** (0052).
+  merge into one.** (0052)
 
 **The guest**
 
-- **Object colour ships in three of the four walk rooms, not the fourth**
-  (0184/0185; deployed 2026-08-20). rp7 8/16, rp6g1 9/20, spike 14/25 objects
-  carry a measured `color` block, and `scene_facts` turns them into spoken
-  names — spike's `red chair` is a real production referent. **rp6g2
-  (`b667f891`) has 0 of 45 and another re-drive will not change that**:
-  `apply_object_colors` runs inside the refinement pass, and that room's
-  manifest reports `budget_stopped: true, refinement_skipped: true`, so
-  colour is one of the post-passes its long tail costs it. Objects with no
-  block inside a coloured room are the confidence gate working, not a
-  failure.
-- **Two voice evals are flaky, both measured 2026-08-24 rather than guessed.**
-  `TestFacingCorrection::test_a_piece_with_no_second_way_round_is_refused_plainly`
-  misses about **1 run in 4** — it asks the guest to turn a rug with no measured
-  box and greps its reply for a refusal word, so the miss is phrasing, not
-  behaviour. `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`
-  misses about **1 run in 13**, on `main`'s charter and the current one alike.
-  Re-run before believing either, and **measure with the rate harness rather
-  than by re-running the test and counting pass/fail** — 0215 records why that
-  is not a rate. **The other long-recorded flake — "one setup asks about an
-  ambiguous wall roughly 1 time in 8" — is probably not a flake and its rate
-  was understated.** 0186 measured that setup refused 9 times in 26, and one
-  refusal was verbatim "only works if you tell me which wall". Re-measure
-  rather than assuming it is gone: 0186's fix took the same setup to 14/14.
-- **Rule 10's literal "would" has collapsed — 2/16 against 12/16 when 0174
-  measured it** (0215) — while the property the rule states holds at 14/16, so
-  the evals now grade the property. **0214 was the obvious suspect and is
-  RULED OUT**: on a paired, interleaved A/B of its provenance opening, the two
-  arms do not separate (2/16 vs 4/16, p = 0.33) and the arm with the suspect
-  clause REMOVED is still far below 0174's rate (p = 0.006). Removing it does
-  not bring the word back. The remaining explanation is the model behind
-  `GUEST_MODEL`, which is the suite's own trigger 2. **Do not re-open this by
-  re-running the test and counting pass/fail** — that method is what made the
-  first attempt uninterpretable.
-- **The voice evals RAN 2026-08-24 and 0213/0214's deploy gate is CLEARED**
-  (26 passed, 1 failed at `PROMPT_VERSION 6`; the single failure was not in
-  either of them). They found two defects underneath that work — 0186's charter
-  contradiction and 0215's instrument — both now fixed on `main`. **The
-  `ANTHROPIC_API_KEY` was never absent**: `anthropic-api-key` has been in
-  Secret Manager since 2026-07-21 and the operator's own account can read it;
-  nothing had connected it to the harness, and the belief that it was missing
-  cost that lane two days.
-- **`PROMPT_VERSION 7`'s voice evals are GREEN — 27 passed, 2026-08-24 — so
-  the deploy gate is CLEARED.** The run before it read 26 passed, 1 failed on
-  `TestTalkingAboutARoomNotAnInventory::test_a_referent_the_previous_turn_fixed_is_not_re_asked`,
-  which was measured rather than argued about and is a **pre-existing flake**:
-  paired and interleaved against `main`'s charter it reads **19/20 on both
-  arms** (33/36 vs 34/35 pooled, p = 0.32). It is a PER-SAMPLE assertion, so
-  the test goes red whenever one sample misses. **Do not re-report it as a
-  regression, and do not attribute it to 0186 or 0220** — 0220's resolver is
-  separately ruled out offline, because in that room `"it"` resolves to
-  `unknown_object` with an EMPTY detail before and after, and `"chair"` differs
-  only in a tail that is strictly more decisive afterwards.
+- **Object colour ships in three of the four walk rooms, not the fourth.** rp7
+  8/16, rp6g1 9/20, spike 14/25 objects carry a measured `color` block, and
+  spike's `red chair` is a real production referent. **rp6g2 has 0 of 45 and
+  another re-drive will not change that** — `apply_object_colors` runs inside the
+  refinement pass, which that room's tail costs it. Objects with no block inside
+  a coloured room are the confidence gate working. (0184/0185)
+- **Two voice evals are flaky, both measured rather than guessed.** The facing
+  refusal misses about **1 run in 4** (phrasing, not behaviour — it greps a reply
+  for a refusal word); the re-asked-referent test misses about **1 in 13** on
+  `main`'s charter and the current one alike. Re-run before believing either, and
+  **measure with the rate harness rather than by re-running the test and counting
+  pass/fail**. The long-recorded "ambiguous wall 1 time in 8" is probably not a
+  flake and its rate was understated — 9 refusals in 26; re-measure rather than
+  assuming it is gone. **Do not re-report the re-asked-referent miss as a
+  regression and do not attribute it to 0186 or 0220** — paired and interleaved
+  it reads 19/20 on both arms. And the `ANTHROPIC_API_KEY` was never absent:
+  `anthropic-api-key` has been in Secret Manager since 2026-07-21, and the belief
+  that it was missing cost that lane two days. (0215, 0186, 0220)
+- **Rule 10's literal "would" has collapsed** — 2/16 against 12/16 when it was
+  measured — while the property the rule states holds at 14/16, so the evals now
+  grade the property. **0214 was the obvious suspect and is RULED OUT** on a
+  paired interleaved A/B. The remaining explanation is the model behind
+  `GUEST_MODEL`. Do not re-open this by re-running the test and counting
+  pass/fail. (0215)
+- **The guest refuses rather than picking when two candidates tie**, and the
+  refusal names a handle a person would have used. Both are live behaviour, not
+  open work — listed here because the voice evals are the only thing that
+  measures them and two of those are flaky above. (0213, 0220)
 
 **iOS**
 
-- **The mark's fill rule is guarded on the Python side only.**
-  `tools/gen_mark.py` warns that even-odd across both rings punches holes where
-  the bands cross, and `tools/test_gen_mark.py` pins it by building the wrong
-  version and asserting ours differs — but nothing pins the Swift or TypeScript
-  CONSUMERS. The generator warned, the test passed, and iOS's splash re-made the
-  mistake anyway (0255). All six other surfaces that draw the ring pair were
-  audited and are correct, so this is a latent gap rather than a live defect:
-  the fix is a consumer-side pin, not a better docstring.
+- **The mark's fill rule is guarded on the Python side only.** `gen_mark.py`
+  warns that even-odd across both rings punches holes where the bands cross and
+  `test_gen_mark.py` pins it, but nothing pins the Swift or TypeScript
+  CONSUMERS — the generator warned, the test passed, and iOS's splash re-made the
+  mistake anyway. All six other surfaces were audited and are correct, so this is
+  a latent gap: the fix is a consumer-side pin. (0255)
 - **Notes has no past.** The design gives news an "EARLIER" list of observed
   facts; that needs the phone to remember what it previously saw and diff
-  successive fetches, which nothing does today. Deferred by operator ruling; the
-  section does not render rather than showing an empty shell. The arrival card
-  is deferred with it, since detecting an arrival is the same change detection.
+  successive fetches. Deferred by operator ruling; the section does not render
+  rather than showing an empty shell. The arrival card is deferred with it, since
+  detecting an arrival is the same change detection.
 - **The menu peek's two greys are literal hexes**, given by the design brief and
-  named in one place in `MenuPeek.swift`. They are the only colours in the app
-  outside the token system and will not follow a brand repaint.
-- **The pinned-action rule reached ONE screen out of eleven when measured**
-  (0253, 2026-08-26) and is now applied everywhere by `RSActions` (0257). Kept
-  for the finding, not as an open defect: 0224's
-  rule — content scrolls, only the action is pinned — is implemented on
-  `HomeView` (action outside the `ScrollView`) and `GuidanceSheet`
-  (`safeAreaInset`). Every other screen puts its primary action inside the
-  scroll region. **Home itself PASSES**: "Scan a room" wraps rather than
-  truncating, so 0224's fix holds — but with all three notices present the
-  scroll region above it collapses to roughly one visible notice, and nothing
-  says the other two are below. **`RoomsListView` loses its action entirely** —
-  the screen ends mid-sentence in its footer and "Scan another room" is off the
-  bottom, on the one screen where a scan action and room history already share
-  space. **`FailureView` shows no action on arrival** — a fixed 200pt art block
-  takes the top third and both buttons are pushed off, on a screen whose copy
-  promises "exactly one concrete path". Both are reachable by scrolling, which
-  is why the suite is green and why reading did not catch them. **Both named
-  screens are now CLOSED and neither by a layout change to itself**: the rooms
-  list was replaced by `HouseView`, which carries no scan action at all because
-  capture is home's gesture, and `FailureView`'s two buttons moved into a
-  `safeAreaInset` and are pinned on arrival at AX5 (photographed 2026-08-28).
-  What the finding leaves is the rule, not the two screens.
-- **One filled button in the app carries a glyph, and two deliberately do
-  not** (0287; photographed, not decided). The guidance sheet's denied CTA is
-  `Label("Open Settings", systemImage: "gear")`, while the two buttons that
-  START a capture — home's "Scan a room" and guidance's own "Start scanning" —
-  ship bare, because at button size the product's own mark collapsed into a
-  smudge and Apple's stock viewfinder was worse than nothing. Nobody applied
-  that reasoning to the third button. **This is a consistency question, not a
-  layout one, and it is ALL that is left of it**: the recorded complaint used
-  to be that the label wrapped at AX5 and the gear came to rest beside "Open"
-  alone — 0258's control-label clamp fixed that, and the label is one line at
-  every size the app renders. Re-photograph before re-reporting the wrap.
+  named in one place in `MenuPeek.swift`. The only colours outside the token
+  system; they will not follow a brand repaint.
+- **The pinned-action rule reached ONE screen out of eleven when measured**, and
+  is now applied everywhere by `RSActions`. Kept for the finding: both named
+  screens are closed and **neither by a layout change to itself** — the rooms list
+  was replaced by `HouseView`, and `FailureView`'s buttons moved into a
+  `safeAreaInset`. Both were reachable by scrolling, which is why the suite was
+  green and why reading did not catch them. (0253, 0257)
+- **One filled button carries a glyph and two deliberately do not.** The guidance
+  sheet's denied CTA is `Label("Open Settings", systemImage: "gear")`; the two
+  buttons that START a capture ship bare, because at button size the product's
+  mark collapsed into a smudge and Apple's viewfinder was worse than nothing.
+  **This is a consistency question, not a layout one** — the label-wrap complaint
+  was fixed by the control-label clamp. Re-photograph before re-reporting it.
+  (0287)
 - **`WhySignInSheet` is presented by no call site** outside the screenshot
-  gallery, so the invitation the rooms count exists to make is never made; its
-  checklist also reads "Your 1 rooms stay exactly as they are" while the
-  sentence above it correctly reads "one room", the two count words being
-  written in different places. **Deliberately NOT fixed**: 0237's rule is that
-  dead code accruing unverified fixes rusts shut rather than staying ready, and
-  a copy fix to a screen with no route is exactly that. Give it a route or
-  delete it; do not tidy it.
-- **`RoomRow` centres its thumbnail against wrapped text** (0253). At AX5 the
-  derived title and the status line each wrap to two lines and the tile comes to
-  rest between them rather than beside the title. Exactly the `.center`-is-the-
-  default form the notice components were already top-aligned to avoid; the row
-  was missed because it is drawn in a different file from the notices.
-- **A keyframe's manifest entry survives its JPEG failing to write** (0240).
-  `acceptFrame` appends to `capturedFrames` synchronously while the encode and
-  the write happen later on `jpegQueue`; both failure paths log, count, and
-  return without removing the entry. So the bundle can declare a frame whose
-  file was never written. **This is a MISSING file, not a dark one** — 0105's
-  declared-blob check turns it into `failed_incomplete` — and no capture has
-  been observed hitting it; the stop-time verification already counts accepted
-  vs written vs on-disk but does not reconcile them. Found while ruling the app
-  out of the rp6g2 dark tail, deliberately not fixed there.
-- **The luminance census has never run against a live camera buffer** (0241).
-  It is pinned against the preserved capture's readings and synthetic planes
-  only. A real scan on a re-signed device build is the confirmation, and it is
-  the operator's. The one thing it would settle that offline work cannot is
-  which luma range ARKit vends on this hardware — the code reads the format and
-  handles both, so a wrong assumption shows up as a scale error, not a crash.
-- **The Live Activity count freezes when the process is dead** (0114). The word
-  stays honest, the count sticks at the moment of death. Only remote push fixes
-  it — `LiveActivityController.pushTokenSeam` is named and unbuilt.
-- **The anonymous UID churn has happened twice on real hardware** (0139, 0140).
-  Mechanism named — the SDK deletes its own Keychain credential on a token
-  rejection and the app silently mints a new UID, orphaning that period's rooms.
-  Churn 1 is dated and attributed; churn 2 is open. `IdentityContinuity` (0141)
-  instruments the next occurrence.
-- **Foreign-record stand-down drains one record per launch** (0115), so N
-  phantoms need N relaunch cycles. Deliberately not fixed: quieting the symptom
-  before the churn's cause is known makes orphaning less visible, not less real.
+  gallery, and its checklist reads "Your 1 rooms" where the sentence above reads
+  "one room". **Deliberately NOT fixed**: dead code accruing unverified fixes
+  rusts shut rather than staying ready. Give it a route or delete it; do not tidy
+  it. (0237)
+- **`RoomRow` centres its thumbnail against wrapped text.** At AX5 both lines wrap
+  and the tile rests between them. Exactly the `.center`-is-the-default form the
+  notice components were top-aligned to avoid; missed because the row is drawn in
+  a different file. (0253)
+- **A keyframe's manifest entry survives its JPEG failing to write.**
+  `acceptFrame` appends synchronously while the encode happens later on
+  `jpegQueue`, and both failure paths log and return without removing the entry.
+  This is a MISSING file, not a dark one — the declared-blob check turns it into
+  `failed_incomplete` — and no capture has been observed hitting it. (0240)
+- **The luminance census has never run against a live camera buffer.** Pinned
+  against a preserved capture and synthetic planes only. The one thing a real
+  scan would settle that offline work cannot is which luma range ARKit vends on
+  this hardware. (0241)
+- **The Live Activity count freezes when the process is dead.** The word stays
+  honest, the count sticks. Only remote push fixes it;
+  `LiveActivityController.pushTokenSeam` is named and unbuilt. (0114)
+- **The anonymous UID churn has happened twice on real hardware.** Mechanism
+  named — the SDK deletes its own Keychain credential on a token rejection and
+  the app silently mints a new UID, orphaning that period's rooms. Churn 1 is
+  dated and attributed; churn 2 is open. `IdentityContinuity` instruments the
+  next occurrence. (0139, 0140, 0141)
+- **Foreign-record stand-down drains one record per launch**, so N phantoms need
+  N relaunch cycles. Deliberately not fixed: quieting the symptom before the
+  churn's cause is known makes orphaning less visible, not less real. (0115)
 - **Terminal-failure UI has never rendered on hardware** — server-side scene
   failure and blob-failure banners.
 - **The 401 recovery-*success* leaf is untested.** The live test used a garbage
-  token, exercising the give-up branch, not expired → refresh → valid → 200.
+  token, exercising the give-up branch.
 
 **Web / product**
 
-- **The hero A/B is open** — the operator's taste call (0122). Variant (b)
-  cannot be seen on any deployed origin by design: a real object splat is a
-  possession, so its files are gitignored and hosting-ignored.
+- **The hero A/B is open** — the operator's taste call. Variant (b) cannot be seen
+  on any deployed origin by design: a real object splat is a possession, so its
+  files are gitignored and hosting-ignored. (0122)
 - **The bridge QR encodes nothing.** No deep-link infrastructure exists; the
-  caption says so. It is NOT blocked on the rooms fetch, which is what its
-  staged-list entry used to imply — the desk names the room in the link it
-  hands over, so a list of the phone's own rooms tells it nothing (0218).
+  caption says so. It is NOT blocked on the rooms fetch — the desk names the room
+  in the link it hands over. (0218)
 - **`RSSound` is wired at three call sites with no cue files** — the app is
-  silent. The web has no sound at all. **The branded-fonts claim was true of iOS
-  and false of the web, and is now stated per platform:** the web loads real
-  Google faces via `next/font/google` (Instrument Sans, Source Serif 4, and
-  JetBrains Mono since 0248); **iOS bundles no font files at all** and
-  `RSFont.swift` falls back to the spec's system substitutes — New York, SF Pro,
-  `.monospaced` — behind a named bundling seam that says to change only the
-  private face helpers. The web lockup no longer needs re-cutting: there is no
-  lockup (0248).
-- **There is no per-room deletion** — account deletion is all-or-nothing, which
-  is conspicuous for a product whose thesis is that rooms are identity. **It is
-  also a hard prerequisite of any hosted share link** (`docs/product/social-layer.md`
-  §7): revocation of a share and deletion of a room are one mechanism seen from
-  two angles, so shipping the link first would ship a share that outlives every
-  means of stopping it. Unshare is not a feature of sharing; it is a precondition.
-  Rung 0 — the calling card — is built and needs none of this, because nothing
-  leaves our systems; every rung above it is still behind this gap.
+  silent, and the web has no sound at all. **Branded fonts are per platform**: the
+  web loads real Google faces via `next/font/google`; **iOS bundles no font files
+  at all** and falls back to the spec's system substitutes behind a named
+  bundling seam. (0248)
+- **There is no per-room deletion** — account deletion is all-or-nothing, which is
+  conspicuous for a product whose thesis is that rooms are identity. **It is also
+  a hard prerequisite of any hosted share link**: revocation of a share and
+  deletion of a room are one mechanism seen from two angles, so shipping the link
+  first would ship a share that outlives every means of stopping it. Rung 0 — the
+  calling card — needs none of this; every rung above it is behind this gap.
 - **The card's date gate refuses rooms that are genuinely eligible** — an older
-  scene re-driven cold on a suppression-armed revision qualifies and the gate
-  still says no, because `created_at` cannot see a re-drive. One-directional by
-  construction and the safe direction; the manifest provenance field is the
-  durable fix and 0221 carries its trigger. Related and untested: the card has
-  never been drawn against a real `anchor_envelope` shell — the v2 mock
-  exercises the measured-vs-rendered divergence, a real LIDAR_ARKIT capture
-  would be the better test.
+  scene re-driven cold on a suppression-armed revision qualifies and `created_at`
+  cannot see a re-drive. One-directional by construction and the safe direction;
+  the manifest provenance field is the durable fix. Related and untested: the card
+  has never been drawn against a real `anchor_envelope` shell. (0221)
 
 **Infra / release**
 
 - **The scene lease expires mid-job on 70% of runs, and what actually prevents
-  double-processing is not the lease (0286).** `SCENE_LEASE_TTL_SECONDS`
-  defaults to 300 and is unset in the deploy script, while the claim is taken
-  after model load and the request may run to 900 s. Measured over 66
-  production runs (logs 2026-08-05 → 2026-08-25): lease held **median 613.5 s,
-  max 899.8 s, 46 of 66 over the TTL**. Two unrelated guards have been doing
-  the work — api-internal's `DISPATCH_DEADLINE_SECONDS = 930` exceeding the
-  900 s Cloud Run timeout, and `--max-instances=1 --concurrency=1` — so the
-  lease has been wrong throughout with nothing consulting it. **One thing does
-  consult it:** `tools/reenqueue_scene.py` uses the lease as its "is a worker
-  active?" test, so on an actively-processing scene it says PROCEED without
-  `--force` and dispatches a second task. **The fix is one number — TTL 960 s,
-  above the request ceiling — and it is not applied.** Nothing would detect a
-  violation: `lease_expires_at` is never passed to `_log_lease_action` so it
-  logs `none` everywhere, `RECLAIMED` reads identically for an expired and a
-  cleared lease, and the holder guard's rejection is a bare `return` after
-  which the worker reports 200 "ready" having written nothing.
-- **The lease-expiration branch has never run in production, and the reference
-  scene for it is gone (0286).** Three `reclaim_stale` events in a month of
-  logs, every one preceded by a `release_error` from the same worker — all
-  eager release. The load-bearing branch is unit-tested only.
-  `f077e9ed-d339-4be8-8dbf-37b952abfec2` was the canonical stuck-scene
-  reference and was deleted with everything else at parking; its bundle had
-  survived the captures sweep (the lifecycle rule carries
-  `matchesPrefix: ["captures/"]` and the bundle sat under `smoke-test/`) and is
-  gone too. **`reenqueue_scene.py` could not have run the test anyway** — it
-  resets to `queued` before dispatching, which erases the expired lease that is
-  the subject. Re-testing now means constructing the state deliberately on a
-  fresh capture and dispatching without the reset.
-- **The SIGTERM lease-release path has never fired, and may be unable to
-  (0286).** 0 of 65 scenes ever carried a `shutdown_release_count`, and nothing
-  outside tests reads that field. `run_perception` is a synchronous call from
-  the async handler with no `to_thread`, so it blocks the main thread for the
-  whole run; Python delivers SIGTERM there at a bytecode boundary, so a signal
-  arriving inside a long CUDA or GCS call is lost to the 10 s drain. **A
-  cycle-limit gate on `shutdown_release_count` is REFUSED rather than
-  deferred** — Cloud Tasks already caps the loop at `maxAttempts=3`. The
-  residual failure is a scene left in `queued` forever with no terminal state
-  and no FCM, which wants a stale-scene sweep, not a counter.
+  double-processing is not the lease.** `SCENE_LEASE_TTL_SECONDS` defaults to 300
+  and is unset in the deploy script, while the claim is taken after model load and
+  the request may run to 900 s. Over 66 production runs the lease held **median
+  613.5 s, max 899.8 s, 46 of 66 over the TTL**. Two unrelated guards have been
+  doing the work — `DISPATCH_DEADLINE_SECONDS = 930` exceeding the 900 s timeout,
+  and `--max-instances=1 --concurrency=1`. **One thing does consult it**:
+  `reenqueue_scene.py` uses the lease as its is-a-worker-active test, so on an
+  actively-processing scene it says PROCEED without `--force`. **The fix is one
+  number — TTL 960 s — and it is not applied.** Nothing would detect a violation:
+  `lease_expires_at` is never passed to `_log_lease_action`, and the holder
+  guard's rejection is a bare `return` after which the worker reports 200 "ready"
+  having written nothing. (0286)
+- **The lease-expiration branch has never run in production.** Three
+  `reclaim_stale` events in a month of logs, every one preceded by a
+  `release_error` from the same worker — all eager release. The load-bearing
+  branch is unit-tested only, and the canonical stuck-scene reference was deleted
+  at parking. `reenqueue_scene.py` could not run the test anyway: it resets to
+  `queued` before dispatching, erasing the expired lease that is the subject.
+  (0286)
+- **The SIGTERM lease-release path has never fired, and may be unable to.** 0 of
+  65 scenes ever carried a `shutdown_release_count`. `run_perception` is a
+  synchronous call from the async handler with no `to_thread`, so a signal
+  arriving inside a long CUDA or GCS call is lost to the 10 s drain. A
+  cycle-limit gate is REFUSED rather than deferred — Cloud Tasks already caps the
+  loop at `maxAttempts=3`. The residual failure is a scene left in `queued`
+  forever, which wants a stale-scene sweep. (0286)
 - **Alerting and monitoring do not exist and the deferral is unrecorded.** An
-  unrecorded accepted deferral is indistinguishable from an oversight. Record
-  the acceptance or schedule the work.
-- **A second, unrestricted Firebase browser key exists** (no referrer
-  restriction, 27 APIs). The key the web app ships is properly restricted.
-  Closing the gap breaks the live-authed-check path every recent api-public
-  deploy uses — ship a replacement first.
-- **The `perception-obj` image count sits ABOVE 3 by design, and a high count is the policy working rather than a fault (0190).** The keep rule is *the 3 newest PLUS anything tagged `serving` or `buildcache`* — never "exactly 3", because a lane iterating on builds pushes the live image out of the top three, and exactly-3-by-recency would then delete the image Cloud Run is running on a scale-to-zero GPU service. On 2026-08-20 three undeployed builds landed and the live `20260813-222442` sat **4th, held only by its `serving` tag**; the policy evicted `20260816-050851` automatically when the third arrived, so the count is pinned at 4 (worst case 5) and self-maintaining. **The fix for a high count is to deploy or delete the surplus builds, never to tighten the policy.** Billing confirms the mechanism: ₹420/day at 1,446.7 GiB is ₹0.2903/GiB-day (= AR's $0.10/GB-month), Aug 19's ₹140 implies a 482 GiB daily average as GC drained, and the state after the geom retirement is 154.3 GiB ≈ **₹45/day, 89% below**. Two of those four images are undeployed and untagged, worth ~₹22/day — **untagging frees nothing; deleting the version is what reclaims it.** **Measured 2026-08-31, after the parking cleanup: THREE versions**, which is the steady state rather than a coincidence. `c538f699` is the live image (`20260824-013501` + `serving`), `c45098c5` is `buildcache`, and `b21408a5` is the parked candidate `00093-pav`'s image. **The rollback hold is gone**: `faa005c8` and its `serving-rollback-00062-hum` tag were deleted along with two untagged builds, which 0243 sanctioned once `00074-var` was trusted. The consequence is real and worth stating — revisions `00062-hum`, `00064-taz`, `00065-fab` and `00066-hic` pin an image that no longer exists and cannot boot. They hold 0% traffic, so nothing serving is affected, but **there is no rollback image any more; recovery from a bad flip is a rebuild.**
-- **Terms §9–§11 need an Indian lawyer.** Consumer Protection Act 2019 §2(46)
-  can void the §11 liability cap against a consumer.
-- **Apple Developer Program enrollment CLEARED 2026-08-23** (filed 2026-07-22).
-  Gate A, APNs, TestFlight, submission and Apple sign-in on the web are all
-  unblocked. **Of the three things that followed, the first is DONE:**
-  (1) **the device build is VERIFIED — 2026-08-25.** It built with
-  `project.pbxproj` UNTOUCHED, which retires the personal-team
-  `CODE_SIGN_ENTITLEMENTS` workaround; both profiles were freshly issued and
-  expire **2027-08-25**, so **the 7-day treadmill is over**; and the app
-  installed and ran on the 16 Pro. The Team ID `3HU2SP8346` is unchanged from
-  every pre-enrollment build, so enrollment kept the team and only extended
-  profile validity — meaning the keychain access-group prefix was never a
-  variable, which independently corroborates 0138. (2) **check 0115** — the identity-destroying
-  defect was flagged as possibly enrollment-gated, and if it persists it was a
-  real bug hiding behind the gate and must surface **before TestFlight**;
-  (3) **the product name is now live**, forced by the App Store listing.
-- **App Store collateral: the icon and the privacy labels are done; the rest
-  is two dependencies.** **Screenshots** wait on a verified device build.
-  **Age rating and the support URL** no longer wait on the name (settled,
-  0245) — they are simply unstarted, and the support URL is expensive to
-  change once filed. **The privacy nutrition labels are FILLED IN and TRACED**
-  at `docs/product/privacy-nutrition-labels.md` (0242): every Apple category
-  answered against the LIVE system rather than the policy, the
-  material-inference vision call named explicitly (0089), and eight places
-  where the shipped Privacy Policy and the labels disagree flagged rather than
-  reconciled — three with drafted corrections. Four things block the filing,
-  all listed in its §10: the vendors' own retention/training terms confirmed
-  (Privacy Policy operator note 2, open since 2026-08-08), two judgment calls
-  ruled, the server-log question ruled, and a **`PrivacyInfo.xcprivacy` landed
-  in the app** — it does not exist, it is required for submission, and a
-  complete draft plist is in §9 for an iOS lane.
+  unrecorded accepted deferral is indistinguishable from an oversight. Record the
+  acceptance or schedule the work.
+- **A second, unrestricted Firebase browser key exists** (no referrer restriction,
+  27 APIs). The key the web app ships is properly restricted. Closing the gap
+  breaks the live-authed-check path every recent api-public deploy uses — ship a
+  replacement first.
+- **The `perception-obj` image count sits ABOVE 3 by design.** The keep rule is
+  *the 3 newest PLUS anything tagged `serving` or `buildcache`* — never exactly 3,
+  because a lane iterating on builds pushes the live image out of the top three
+  and exactly-3-by-recency would delete the image a scale-to-zero GPU service
+  boots from. **The fix for a high count is to deploy or delete the surplus
+  builds, never to tighten the policy.** Measured 2026-08-31 after parking:
+  **three versions** — the live image, `buildcache`, and the parked candidate's.
+  **The rollback hold is gone**: revisions `00062-hum`, `00064-taz`, `00065-fab`
+  and `00066-hic` pin an image that no longer exists and cannot boot. They hold 0%
+  traffic, but **there is no rollback image any more; recovery from a bad flip is
+  a rebuild.** (0190)
+- **Terms §9–§11 need an Indian lawyer.** Consumer Protection Act 2019 §2(46) can
+  void the §11 liability cap against a consumer.
+- **Apple Developer Program enrollment CLEARED 2026-08-23.** Gate A, APNs,
+  TestFlight, submission and Apple sign-in on the web are all unblocked. The
+  device build is VERIFIED with `project.pbxproj` untouched; both profiles expire
+  **2027-08-25**, so the 7-day treadmill is over. Two follow-ons: **check the
+  identity-destroying defect** flagged as possibly enrollment-gated — if it
+  persists it must surface **before TestFlight** — and the product name is now
+  live, forced by the App Store listing.
+- **App Store collateral: the icon and the privacy labels are done; the rest is
+  two dependencies.** Screenshots wait on a verified device build. Age rating and
+  the support URL are simply unstarted, and the support URL is expensive to change
+  once filed. The privacy nutrition labels are FILLED IN and TRACED at
+  `docs/product/privacy-nutrition-labels.md` against the live system, with eight
+  policy/label disagreements flagged. Four things block the filing, all in its
+  §10 — including a **`PrivacyInfo.xcprivacy` landed in the app**, which does not
+  exist and is required for submission. (0242)
 
 ### Deliberately not doing
 
-- **Decision 0072's rollback path is CLOSED and now actually DELETED**
-  (operator sitting 2026-08-23; executed 2026-08-24, decision 0237).
-  `ContentView`, `SceneStatusView` and `UploadFailureView` are gone — 719 lines,
-  plus `SceneStatusViewTests`, four `ScenePollExpectationTests` assertions, and
-  25 docstrings across 14 files that described the live flow by contrast with
-  the dead one. The escape
-  hatch was worth its cost in July when the design was untested on hardware;
-  that risk is spent — the design has since absorbed RP-6, RP-7, Live Activity,
-  Google linking, the flight stand-down and the scenes client without anyone
-  reaching for it. **Four lanes edited a path no build could reach**, and 0217
-  applied a real fix plus a seven-line comment to a screen no user will see.
-  **Dead code that keeps accruing unverified fixes rusts shut rather than
-  staying ready** — it gets less usable as a rollback over time. **Do not
-  restore it as a courtesy.**
-- **ARKIT_ONLY placement and shell quality investment is parked** (0071). The
-  product is Pro-only / LiDAR-first; the shipped ARKIT_ONLY path stays live and
-  is strictly better than before, but no further merge-knob grinding. The
-  non-LiDAR device is not a test target and must not shape decisions.
-- **There are no lockups, on either platform** (0248). The fork between mono
-  and serif is not resolved, it is DISSOLVED: the mark is the "oo" of the name,
-  so setting the two together prints those letters twice. Chrome takes the mark
-  alone; the calling card and the OG image take the script wordmark alone; the
-  iOS splash is the one place both appear and shows them in sequence. The mark is
-  identical everywhere (0193). **Do not re-introduce a lockup as a convenience** —
-  `tools/test_gen_mark.py` fails if any of six files draws the mark and renders
-  the name.
+- **Decision 0072's rollback path is CLOSED and DELETED** — `ContentView`,
+  `SceneStatusView` and `UploadFailureView`, 719 lines plus their tests and 25
+  docstrings that described the live flow by contrast with the dead one. The
+  escape hatch was worth its cost in July when the design was untested on
+  hardware; that risk is spent. **Four lanes edited a path no build could reach**,
+  and one applied a real fix to a screen no user will see. **Dead code that keeps
+  accruing unverified fixes rusts shut rather than staying ready.** Do not restore
+  it as a courtesy. (0237)
+- **ARKIT_ONLY placement and shell quality investment is parked.** The product is
+  Pro-only / LiDAR-first; the shipped path stays live and is strictly better than
+  before, but no further merge-knob grinding. The non-LiDAR device is not a test
+  target and must not shape decisions. (0071)
+- **There are no lockups, on either platform.** The fork between mono and serif is
+  not resolved, it is DISSOLVED: the mark is the "oo" of the name, so setting the
+  two together prints those letters twice. Chrome takes the mark alone; the card
+  and the OG image take the wordmark alone; the iOS splash is the one place both
+  appear and shows them in sequence. **Do not re-introduce a lockup as a
+  convenience** — `tools/test_gen_mark.py` fails if any of six files draws the
+  mark and renders the name. (0248)
 - **From the founding vision, still sound:** no AR overlay, no social feed, no
   photorealistic image generation, no floor plans as a product surface, no voice
   input. Desktop-first on web.
-- **The ledger is deferred with its vocabulary ban** (0133) — no pin, keep, or
-  "put into words" anywhere.
-- **Mirror-as-mirror was probed and cut** (0091). The depth-trust gate is not a
-  mirror detector (precision 18%); the SAM `mirror` label is. What a mirror
-  should look like is a design call, not a build.
-- **Free rotation in proposals is out** (0133). Rotation returned as a facing
-  *correction* — one half turn, no angle, no direction — and that is a
-  concession whose success condition is its own disuse (0183).
-- **`expires_at` on mint responses and content-type hardening are won't-build**
-  (0087), each with a named re-open trigger.
+- **The ledger is deferred with its vocabulary ban** — no pin, keep, or "put into
+  words" anywhere. (0133)
+- **Mirror-as-mirror was probed and cut.** What a mirror should look like is a
+  design call, not a build. (0091)
+- **Free rotation in proposals is out.** Rotation returned as a facing
+  *correction* — one half turn, no angle, no direction — and that is a concession
+  whose success condition is its own disuse. (0133, 0183)
+- **`expires_at` on mint responses and content-type hardening are won't-build**,
+  each with a named re-open trigger. (0087)
 - **NEVER enable anonymous-user auto-cleanup in Firebase Auth.** It is off and
-  must stay off — it would fire the UID-churn mechanism above for every user on
-  a schedule. It is a single checkbox in the console.
+  must stay off — it would fire the UID-churn mechanism above for every user on a
+  schedule. It is a single checkbox in the console.
 
 ### Small deferred items recorded nowhere else
 
