@@ -66,6 +66,34 @@ final class AppleReauthorizer: NSObject,
 
     private var continuation: CheckedContinuation<String?, Never>?
 
+    /// The window Apple's sheet attaches to, resolved once at init.
+    ///
+    /// NON-OPTIONAL, AND THE INIT FAILS INSTEAD. `presentationAnchor` must
+    /// return a window, and the old shape returned a freshly constructed one
+    /// when no scene could be found. iOS 26 deprecates every way of building a
+    /// window without a scene, which is Apple pointing at a real defect rather
+    /// than a style preference: a scene-less window cannot present anything, so
+    /// returning one turned "there is no UI" into a silent failure inside
+    /// AuthenticationServices. Now it is refused before the request is made.
+    private let anchor: UIWindow
+
+    private init(anchor: UIWindow) {
+        self.anchor = anchor
+        super.init()
+    }
+
+    /// nil when the app has no window to present on. A factory rather than a
+    /// failable init because `init?()` cannot override `NSObject.init()`.
+    ///
+    /// The caller reads nil the same way it reads a cancellation: the token was
+    /// not revoked, and the deletion carries on regardless (TN3194).
+    static func make() -> AppleReauthorizer? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let window = scene?.keyWindow ?? scene?.windows.first else { return nil }
+        return AppleReauthorizer(anchor: window)
+    }
+
     /// A fresh authorization code, or nil if the user cancelled or Apple
     /// refused. Never throws: every failure is the same instruction to the
     /// caller, which is to carry on with the deletion.
@@ -111,10 +139,7 @@ final class AppleReauthorizer: NSObject,
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        let scene = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first { $0.activationState == .foregroundActive }
-        return scene?.keyWindow ?? ASPresentationAnchor()
+        anchor
     }
 }
 
@@ -152,7 +177,10 @@ nonisolated enum AppleAccountRevocation {
     static func perform(isAppleLinked: Bool) async -> AppleRevocation {
         await revokeIfNeeded(
             isAppleLinked: isAppleLinked,
-            fetchCode: { await AppleReauthorizer().authorizationCode() },
+            fetchCode: {
+                guard let reauthorizer = AppleReauthorizer.make() else { return nil }
+                return await reauthorizer.authorizationCode()
+            },
             revoke: { try await Auth.auth().revokeToken(withAuthorizationCode: $0) }
         )
     }
