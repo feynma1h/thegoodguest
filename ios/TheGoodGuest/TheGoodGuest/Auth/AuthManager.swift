@@ -333,6 +333,39 @@ final class AuthManager: ObservableObject {
         return try await user.getIDToken()
     }
 
+    // MARK: - After deletion
+
+    /// Clear the local session once the SERVER has deleted this identity.
+    ///
+    /// THIS IS NOT A SIGN-OUT CONTROL, and the name is long so it cannot be
+    /// mistaken for one. There is deliberately no sign-out in this app
+    /// (decision 0064): `signInIfNeeded` runs at launch, so signing out would
+    /// mint a fresh anonymous UID and read to the user as losing every room.
+    /// That objection does not apply here, because the rooms are already gone
+    /// and a fresh UID is exactly the correct next state.
+    ///
+    /// The alternative is to clear nothing and let the next token refresh
+    /// discover that the user is absent. That path works, but it is the
+    /// decision 0139 churn mechanism arriving unannounced — the SDK drops its
+    /// own Keychain credential on rejection and the app silently mints a new
+    /// UID, which is indistinguishable from the identity-destroying bug that
+    /// mechanism causes when nobody asked for it. Doing it here, deliberately
+    /// and at a known moment, is what keeps the instrumented churn reading
+    /// honest.
+    ///
+    /// Best-effort by design: a throwing sign-out must not turn a completed
+    /// deletion into a failure the user sees. The account is gone either way,
+    /// and the stale credential cannot outlive its next refresh.
+    func signOutAfterDeletion() {
+        guard isConfigured else { return }
+        try? Auth.auth().signOut()
+        uid = nil
+        isAppleLinked = false
+        isGoogleLinked = false
+        appleEmail = nil
+        googleEmail = nil
+    }
+
     // MARK: - Errors
 
     enum AuthError: LocalizedError {
