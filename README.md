@@ -39,7 +39,6 @@ All four run on Cloud Run in `asia-southeast1`, project `thegoodguest`.
 | `api-public`      | live   | Client-facing. Firebase JWT verified in-app; `--allow-unauthenticated`. Upload sessions, scene reads, signed asset URLs, the conversation, account deletion. |
 | `api-internal`    | live   | Eventarc ingest. Cloud Run IAM gated; `--no-allow-unauthenticated`. Validates a finalized bundle and enqueues perception. |
 | `perception-obj`  | live   | L4 GPU. SAM 3 segmentation + SAM 3D Objects reconstruction, placement/fusion, room shell, splat compression. |
-| `perception-geom` | parked | L4 GPU. VGGT, for a photo-upload path that is deferred. Deployed but nothing calls it. |
 
 The pipeline: iOS uploads a capture bundle to GCS → the `bundle.pb` finalize
 event reaches `api-internal/ingest/eventarc` → Cloud Tasks dispatches

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Deploy a perception service (geom or obj) to Cloud Run.
+# Deploy perception-obj to Cloud Run.
 #
 # Run from the repo root:
-#     ./infra/deploy_perception.sh geom              # deploy perception-geom (VGGT)
 #     ./infra/deploy_perception.sh obj               # deploy perception-obj, straight to 100%
 #     ./infra/deploy_perception.sh obj --candidate   # hold the new revision at 0%, smoke, then flip
 #
@@ -25,15 +24,15 @@
 
 set -euo pipefail
 
-if [[ $# -lt 1 || $# -gt 2 || ( "$1" != "geom" && "$1" != "obj" ) ]]; then
-    echo "Usage: $0 {geom|obj} [--candidate]"
+if [[ $# -lt 1 || $# -gt 2 || "$1" != "obj" ]]; then
+    echo "Usage: $0 obj [--candidate]"
     exit 1
 fi
 
 CANDIDATE_MODE=0
 if [[ $# -eq 2 ]]; then
     if [[ "$2" != "--candidate" ]]; then
-        echo "Usage: $0 {geom|obj} [--candidate]"
+        echo "Usage: $0 obj [--candidate]"
         exit 1
     fi
     CANDIDATE_MODE=1
@@ -53,7 +52,7 @@ REPO="thegoodguest"
 # ran as the default compute SA, which holds project-level roles/editor).
 # Everything it is granted is enumerated in ensure_obj_runtime_iam below —
 # that function IS the grant list, and it is idempotent so every deploy
-# reasserts it. perception-geom keeps the default SA (parked, no workload).
+# reasserts it.
 OBJ_RUNTIME_SA="perception-obj-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
 IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:${IMAGE_TAG}"
@@ -181,11 +180,7 @@ echo "=== 2/3: Build container via Cloud Build ==="
 echo "Image:   ${IMAGE_URI}"
 echo "Context: ${CONTEXT_DIR}/"
 echo "Config:  ${CLOUDBUILD_CONFIG}"
-if [[ "${WHICH}" == "geom" ]]; then
-    echo "(First build downloads PyTorch + VGGT weights; expect 15-25 min.)"
-else
-    echo "(First build downloads PyTorch + SAM 3 + SAM 3D weights; expect 25-40 min.)"
-fi
+echo "(First build downloads PyTorch + SAM 3 + SAM 3D weights; expect 25-40 min.)"
 
 gcloud builds submit . \
     --project="${PROJECT_ID}" \
@@ -193,30 +188,20 @@ gcloud builds submit . \
     --config="${CLOUDBUILD_CONFIG}" \
     --substitutions="_IMAGE_URI=${IMAGE_URI}"
 
-if [[ "${WHICH}" == "obj" ]]; then
-    ensure_obj_runtime_iam
-fi
+ensure_obj_runtime_iam
 
 echo "=== 3/3: Deploy to Cloud Run with L4 GPU ==="
-# perception-obj pins its dedicated runtime SA (0090); geom keeps the default.
+# perception-obj pins its dedicated runtime SA (0090).
 # --platform seeds the array so it is never empty: expanding an empty array
 # under `set -u` is an unbound-variable error on bash < 4.4, and macOS ships
 # 3.2 as /bin/bash.
-DEPLOY_FLAGS=(--platform=managed)
-if [[ "${WHICH}" == "obj" ]]; then
-    DEPLOY_FLAGS+=(--service-account="${OBJ_RUNTIME_SA}")
-    # Platform-gated (decision 0106 outcome, flipped 2026-08-10): Cloud
-    # Tasks — OIDC as tasks-invoker@, which holds run.invoker on this
-    # service (asserted post-deploy below) — is the only caller. An
-    # unauthenticated probe now gets the platform 403 and can no longer
-    # boot the L4 (the cost vector 0106 measured). App-side OIDC
-    # verification stays as defence-in-depth.
-    DEPLOY_FLAGS+=(--no-allow-unauthenticated)
-else
-    # geom is parked (photo path) and has no Cloud Tasks caller; it keeps
-    # the app-as-gate posture until it has a workload worth re-deciding.
-    DEPLOY_FLAGS+=(--allow-unauthenticated)
-fi
+DEPLOY_FLAGS=(--platform=managed --service-account="${OBJ_RUNTIME_SA}")
+# Platform-gated (decision 0106 outcome, flipped 2026-08-10): Cloud Tasks —
+# OIDC as tasks-invoker@, which holds run.invoker on this service (asserted
+# post-deploy below) — is the only caller. An unauthenticated probe gets the
+# platform 403 and cannot boot the L4 (the cost vector 0106 measured).
+# App-side OIDC verification stays as defence-in-depth.
+DEPLOY_FLAGS+=(--no-allow-unauthenticated)
 # Candidate mode holds the revision at 0% and gives it its own tagged URL.
 # --no-traffic is silently ignored on a first-ever service creation, so pass it
 # only when there is prior traffic to protect; the tag is useful either way.
@@ -367,10 +352,5 @@ if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
     fi
 fi
 
-if [[ "${WHICH}" == "geom" ]]; then
-    echo "Update .env at the repo root:"
-    echo "  PERCEPTION_GEOM_URL=${URL}"
-else
-    echo "Update .env at the repo root:"
-    echo "  PERCEPTION_OBJ_URL=${URL}"
-fi
+echo "Update .env at the repo root:"
+echo "  PERCEPTION_OBJ_URL=${URL}"
