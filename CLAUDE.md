@@ -257,7 +257,7 @@ then exactly one closing line — so a button's height off the bottom cannot
 depend on how many controls a screen has. A block pinned over a scroll region
 uses `rsPinnedActions`, which is opaque and full-bleed: `safeAreaInset` lets
 content scroll BEHIND what sits there, so a transparent bar is one the body
-copy renders through (0270).
+copy renders through (0287).
 
 `tools/ios_screenshot_gallery.py` photographs **83 states across 17 screens** —
 one frame per distinct state rather than one per screen — at both the default
@@ -446,7 +446,7 @@ Three pipeline stages plus a probe, all Cloud Tasks driven:
   shortlist scores them, keeping the LARGER. The survivor competes at its pair's
   best overlap — dropping the loser outright re-ranks it against every
   observation, and on a saturated metric with capture order as the tie-break
-  that hands the box to whoever was photographed first (0274). It does NOT fix
+  that hands the box to whoever was photographed first (0292). It does NOT fix
   0262's flat metric and a reading that says so is wrong.
 - **`/segment`** — a segmentation-only probe, built on `segment-quality` and
   deployed only to 0%-traffic candidates. **The candidate live on 2026-08-31 is
@@ -782,7 +782,7 @@ gains.
 **Perception / room quality**
 
 - **The per-box shortlist's overlap score is FLAT, and a repair now has a
-  measured route** (0262–0271, capture `90eebfc4`). `mask_overlap_with_hull` is
+  measured route** (0262–0269 and 0288–0289, capture `90eebfc4`). `mask_overlap_with_hull` is
   precision with no recall term: **31 of 52 candidates score exactly 1.0000** in
   that room and 27% across the four older captures, after which `frame_index` —
   capture order — decides. Where SAM 3 returns one object at two nested extents
@@ -794,7 +794,7 @@ gains.
   obstacle there. A click placed on the missing part takes second-leg coverage
   **0.1% → 75.0%**, and merging every candidate that kept what it was given
   retains 100% of the seed and near foot. **The keep-the-longer rule is now
-  BUILT and OFF** behind `PERCEPTION_KEEP_LONGER_MASK` (0274) — 4 of 25 boxes
+  BUILT and OFF** behind `PERCEPTION_KEEP_LONGER_MASK` (0292) — 4 of 25 boxes
   across the four captures change their planned views, three to a longer mask in
   the same frame, none losing an association, byte-identical off. The click
   repair is NOT built: the pointer was a human eye, and no automated search
@@ -1151,7 +1151,7 @@ gains.
   `safeAreaInset` and are pinned on arrival at AX5 (photographed 2026-08-28).
   What the finding leaves is the rule, not the two screens.
 - **One filled button in the app carries a glyph, and two deliberately do
-  not** (0270; photographed, not decided). The guidance sheet's denied CTA is
+  not** (0287; photographed, not decided). The guidance sheet's denied CTA is
   `Label("Open Settings", systemImage: "gear")`, while the two buttons that
   START a capture — home's "Scan a room" and guidance's own "Start scanning" —
   ship bare, because at button size the product's own mark collapsed into a
@@ -1759,7 +1759,7 @@ evidence for a human deleting an entry, not authority to.
 
 **ALL THREE PARALLEL LANES MERGED 2026-08-09** (`stage2` → 0135–0137, `perception-emit`, `ios-residue`; worktrees removed, branches deleted). Merged-tree verification: root **724 passed + 10 skipped**, perception **704**, web **204**, iOS **523**, tsc clean, zero conflict markers. **What the lanes left owed, now written:** lane B's two notes are 0142 (`/compress` as a third `/process` stage rather than a sidecar) and 0143 (`extent_axes_m` declared per box, horizontals deliberately unnamed). The `dims` correction is lane C's **0137**, reached independently — there is no third note on it.
 
-**Decision numbers.** **Always derive the free list from `git ls-tree main --name-only docs/decisions/`, not from this paragraph** — it has lagged five times. **And `git ls-tree main` ALONE IS NOT ENOUGH: union `main` with every UNMERGED branch.** Verified 2026-08-23 — `selection-supply` holds **0225–0235** unmerged, so `ls-tree main` reports all eleven free and would cost a collision the same day. **Re-verified 2026-08-24 with five lanes in flight**: 0186, 0215, 0219–0220 and 0239–0242 are live on unmerged branches and invisible to `main`. Scan `refs/heads/` AND `refs/remotes/`. **A merge does not settle this** — `selection-supply` landing moved twelve numbers at once, so re-derive after every merge, not once a day. Not a bare `ls`: that reads the WORKING TREE, and a lane worktree is routinely behind main. Reproduced 2026-08-21 — both live lane worktrees sat four commits back, where `ls` showed 0192 and 0193 as free while both were taken. `git ls-tree main` is correct from any worktree without syncing, and is the form to use. As of 2026-08-25, with selection-supply, ios-surfaces-2, capture-dark, guest-closure and perception-deploy merged: **free are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196, 0246+** — **0083, 0092 and 0093 were never created and are cited nowhere.** **Reserved and UNWRITTEN: 0244 to perception-deploy** — deliberately NOT freed even though that lane has now landed; it may still write it. **0239 is SPENT by upload-flake** (the last decrement fires the gate in its own turn) — **nothing is unmerged now.** **0242 is SPENT by privacy-labels** (a privacy disclosure is measured, not described). **0243 is SPENT by perception-deploy** (the flip is three assertions); **0186, 0215, 0219–0220 by guest-closure**; **0225–0236 by selection-supply**; **0237–0238 by ios-surfaces-2**; **0240–0241 by capture-dark**; **0252, 0258 and 0270 are SPENT by the ui-screenshots lane**; **0253–257 are SPENT by the ui-organisation lane**; **0259–0265 are taken by the two perception lanes**;  **0273-0280 by sam31-object-map** (the SAM 3.1 tracker and the object→frame map); **0281-0283 by track-selection** (same-frame duplication is exactly answerable; the border rule is the whole filter; the short mask is the legless one); **0245 by the name swap**. Everything else through 0245 is used.
+**Decision numbers.** `docs/decisions/README.md` is the index and is GENERATED — run `python3 tools/gen_decision_index.py` after adding a note, and `--check` in review: it fails on a duplicate number, a status outside the closed vocabulary (`Decided` / `Spent` / `Superseded by NNNN` / `Amended by NNNN` / `Refuted`, defined in `0000-template.md`), a dangling link, or a stale index. **Derive the free list from `git ls-tree main --name-only docs/decisions/` unioned with every UNMERGED branch — never from a paragraph like this one, which has lagged five times, and never from a bare `ls`, which reads a working tree that may be behind main.** Scan `refs/heads/` AND `refs/remotes/`, and re-derive after every merge rather than once a day: one lane landing moved twelve numbers at once. As of 2026-08-31 the tree is one branch and **the highest number is 0292**; the gaps below it are 0083, 0092, 0093, 0113, 0121, 0128, 0134, 0144, 0145, 0167, 0168, 0189, 0194, 0195, 0196 and 0244, and none of them is cited anywhere. **The 0270–0274 collision is REPAIRED** — two concurrent lanes had written ten notes on five numbers, and a third claimant on 0270 was a note that was never written but was cited from `census_sampling.py`. The segment-quality chain moved to **0288–0292**, the iOS gallery note to **0287**, the sam31-object-map lane kept 0271–0274, and 0270 is now the whole-view pass its citations always meant. The checker's duplicate-number test exists so this cannot recur silently.
 
 Two durable lessons, both learned by collision. **Put a session's number block INSIDE the prompt body**: a block written in a chat heading once reached nobody and two lanes claimed the same numbers, and the room-quality session was handed one stale block in its prompt and a different one in its handoff. When a prompt and this file disagree, **this file and the handoff win** — a prompt is written once, these are maintained. And **two sessions sharing one tree is how a note gets dropped**: decision 0179 was lost by the sam3d-pointmap merge and restored by `546281e`, which is why the Tooling conventions now insist every session gets its own worktree.
 
