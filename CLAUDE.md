@@ -90,68 +90,30 @@ outputs/                          gitignored; generated artifacts
 
 ## What cannot be remade
 
-`outputs/` is gitignored and looks disposable. Most of it is. Roughly 1.3 GiB
-of it is not, and **no copy exists anywhere else** — the captures bucket
-deletes at age 1 day, so GCS does not hold these:
+**Nothing, as of 2026-08-31 — and that is deliberate.** Every preserved capture,
+every derived probe artifact, all 16 cloud scene directories and all 392
+Firestore documents were deleted when the project was parked, because the next
+session starts from fresh captures. `outputs/` now holds only 1.1 MB of written
+judgment — the reports, handoffs and walk verdicts — which is the one thing in
+there that was never room data.
 
-- `outputs/real-capture-*` — preserved capture bundles; the substrate the whole
-  perception thread regresses against.
-- `outputs/device-pull/` — three RP-6/7 rooms physically pulled off the 16 Pro's
-  app container. The app reaps completed captures (0084), so a capture that has
-  been reaped exists nowhere else.
-  **LAUNCHING A REBUILT APP RUNS THE REAPER. Pull the container BEFORE the
-  first launch, every time.** Measured 2026-08-25: the phone still held five
-  un-reaped captures, and the first launch of the re-signed build removed
-  three. Two were already here; `893663fd` (26/07, LIDAR_ROOMPLAN,
-  `uploadPhase: complete`) was not, and its raw bundle is **gone for good** —
-  the captures bucket deletes at 24 h, so nothing anywhere holds it. Only its
-  `upload_sessions/*.json` survives, in `outputs/device-evidence-2026-08-13/`.
-  The cost of pulling first is minutes; the cost of not is unbounded.
-- `outputs/capture-90eebfc4/` — **the 2026-08-25 capture, and the ONLY copy.**
-  189 frames, `bundle.pb`, and the `/segment` probe output. GCS swept the
-  original at its 24 h lifecycle on 2026-08-26; this was pulled hours before.
-  It is the room decisions 0247, 0259-0263 and 0266-0272 are all measured on,
-  the substrate for the SAM 3.1 object→frame work, and the only capture whose
-  frame-by-frame candidates the operator has judged by eye. Tier 3
-  (LIDAR_ROOMPLAN) but carrying **no depth at all** (0267), which is itself
-  what several of those notes turn on.
-  Restoring it to GCS for a re-drive is supported and documented — write the
-  blobs directly, per 0164; the mint path is a trust boundary, not a storage
-  mechanism.
-- `outputs/roomplan-spike/` — the four-run spike RECORDING, incl. the
-  722-keyframe RGB/depth archive. **The source, not a derivative.**
-- Every `outputs/reports/*.md`, `outputs/**/verdicts.md`, and the walk packs'
-  text. Kilobytes, and they are the operator's own judgments.
+What this costs, measured rather than estimated: **23 tests**. The perception
+suite goes from 1237 passed + 2 skipped to **1214 passed + 25 skipped**; the
+real-data suites are `skipif`-guarded and skip cleanly. Most test files that
+mention `outputs/` synthesize their own data and are unaffected.
 
-**The trap:** `outputs/roomplan-spike-bundle/` is NOT on that list — it is
-GENERATED from `outputs/roomplan-spike/` by `tools/convert_roomplan_spike.py`.
-The names are one word apart and the sizes are within 2 MiB (494 vs 496 MiB).
-One costs a script run to remake; the other is gone forever.
+**So the rule this section used to state now runs the other way.** The moment a
+new capture is preserved under `outputs/`, it is again the only copy — the
+captures bucket deletes at age 1 day, so GCS will not hold it, and
+`outputs/` is gitignored so git will not either. Re-read the reaper rule below
+before the first launch of any rebuilt app, and copy a capture you care about
+off this machine the day you take it.
 
-Everything else under `outputs/` is regenerable, and cheaply: the probe
-artifacts replay production code over the preserved captures offline, so they
-cost CPU and no GPU — **no reconstruction lives here**, they live in the
-outputs bucket, which still holds all 12 scene dirs. Their conclusions already
-live in `docs/decisions/`; the raw artifacts exist only for re-verification.
-
-**When disk is short, look outside the repo first — that is where the free
-wins are.** `~/Library/Developer/Xcode/DerivedData` is pure Xcode build cache
-and is routinely the largest single item on the machine (16 GiB at the
-2026-08-19 pass, in a dozen per-configuration copies); deleting it does not
-touch the app installed on the phone. `npm cache clean --force` and `web/out`
-(recreated by every `next build`) are equally free. Two that are NOT free and
-want the operator's say-so: a *booted* simulator device holds GiB of installed
-apps and seeded state (`simctl erase` reclaims it but wipes the staging — the
-8 never-booted devices are 17 MiB each), and a CoreSimulator *runtime* is a
-multi-GiB re-download.
-
-Worth knowing while you are in there: `web/public/dev-fixtures` is 3.9 GiB of
-real captured homes sitting inside `web/public`, and `next build` copies
-`public/` into `out/`, so a full build doubles it. `firebase.json` ignores
-`dev-fixtures/**` on deploy, but that is one config line standing between real
-rooms and a public origin — 0122 already caught a splat one deploy away.
-Moving the fixtures outside `public/` would remove the hazard rather than
-guard it.
+**The reaper still runs on launch.** `CaptureReaper` frees a capture's record
+and files once the user has seen the outcome, so a capture that has been reaped
+exists nowhere else. **Pull the container BEFORE the first launch of a rebuilt
+app, every time.** That rule cost a capture on 2026-08-25 and is unchanged by
+the wipe.
 
 ## What works right now
 
@@ -181,7 +143,8 @@ test fixtures.
 Suites, re-measured on `segment-quality` WITHOUT `web/public/dev-fixtures`
 (re-measured on `main` 2026-08-31, after the iOS/brand, perception and
 segment-quality lane merges, with `web/public/dev-fixtures` STAGED — perception
-**1237 + 2**, web **276**): schemas **126** (`pytest packages/schemas/tests`);
+**1214 + 25** (1237 + 2 before the capture wipe; 23 real-data tests now skip),
+web **276**): schemas **126** (`pytest packages/schemas/tests`);
 root **919 + 27** by bare `pytest` (which uses `testpaths` in `pyproject.toml`);
 root **849 + 102** by `pytest packages services tools
 --ignore=services/perception-obj`, which collects 18 tests `testpaths` does

@@ -19,13 +19,15 @@ git push origin --all
 That is the whole backup. It was not run at parking time because pushing is
 the operator's call, not a session's.
 
-**2. `outputs/` is 9.4 GB, gitignored, and has no copy anywhere.** The
-irreplaceable part is listed in CLAUDE.md under "What cannot be remade" —
-`real-capture-*`, `device-pull/` (459 MB, reaped from the phone and gone from
-GCS), `roomplan-spike/` (496 MB, the source recording), `capture-90eebfc4/`
-(174 MB, the 2026-08-25 capture and its 189 frames), and every
-`outputs/reports/*.md`. The captures bucket deletes at 24 h, so GCS does not
-hold these. Copy that directory somewhere before cleaning this machine.
+**2. The room data is gone, on purpose.** `outputs/` held 9.4 GB and now holds
+1.1 MB — the reports, handoffs and verdicts only. Every preserved capture, the
+16 cloud scene directories, both GCS buckets' contents and all 392 Firestore
+documents were deleted at parking, because the next session starts fresh. The
+perception suite reads **1214 passed + 25 skipped** as a result; the 23 skips
+are the real-data regressions with nothing to regress against.
+
+Do not go looking for `roomstudio-preserved` or `outputs/real-capture-*`. They
+were deleted deliberately, not lost.
 
 ## Where the work stopped
 
