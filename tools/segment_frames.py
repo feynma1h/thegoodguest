@@ -82,9 +82,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--candidate", action="store_true",
                     help="POST to the candidate revision instead of the serving one")
     ap.add_argument("--no-png", action="store_true", help="masks.npz only")
+    ap.add_argument(
+        "--probs", action="store_true",
+        help="also write probs.npz — the per-pixel probability map each binary "
+             "mask was thresholded from, so the upstream 0.5 cut can be "
+             "re-examined offline without another GPU run",
+    )
     ap.add_argument("--bundle-uri", help="override; otherwise read from Firestore")
-    ap.add_argument("--prompt", help="SAM 3 concept list; default is the "
-                                     "service's DEFAULT_OBJECT_PROMPT")
+    ap.add_argument(
+        "--refine-seed", type=int,
+        help="mask index to seed SAM 3's VISUAL path with, then click in its "
+             "own leftover and repeat (writes refine_NN.npz)",
+    )
+    ap.add_argument("--refine-rounds", type=int, default=3)
+    ap.add_argument(
+        "--refine-click",
+        help="extra opening click as x,y in original image pixels — put it on "
+             "the part that is MISSING, not on the object",
+    )
+    ap.add_argument(
+        "--prompt",
+        help="override DEFAULT_OBJECT_PROMPT for this call — comma-separated "
+             "noun phrases. SAM 3 returns the term verbatim, so a term that no "
+             "box family accepts lands in the long tail (0226); for a probe "
+             "that is fine and is the point.",
+    )
     args = ap.parse_args(argv)
 
     frames = [int(x) for x in args.frames.replace(" ", "").split(",") if x]
@@ -105,6 +127,12 @@ def main(argv: list[str] | None = None) -> int:
         "bundle_uri": bundle_uri,
         "frame_indices": frames,
         "write_png": not args.no_png,
+        "write_prob": args.probs,
+        **({"object_prompt": args.prompt} if args.prompt else {}),
+        **({"refine_seed_mask": args.refine_seed,
+            "refine_rounds": args.refine_rounds} if args.refine_seed is not None else {}),
+        **({"refine_click": [int(v) for v in args.refine_click.split(",")]}
+           if args.refine_click else {}),
     }
     if args.prompt:
         # Omitted entirely when unset, so the default path sends the same body

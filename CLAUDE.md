@@ -178,18 +178,19 @@ state machine, the scene read/write repositories, `UploadSessionRepository` +
 `gcs_mint_resumable_uri`, semantic manifest validation, and the capture-bundle
 test fixtures.
 
-Suites, all re-measured on `main` with `selection-supply` landed and
-`web/public/dev-fixtures` STAGED (2026-08-25, guest-closure landed): schemas **126**;
-root **884 + 27** by bare `pytest` (which uses `testpaths` in
-`pyproject.toml`); root **902 + 27** by `pytest packages services tools
+Suites, re-measured on `segment-quality` WITHOUT `web/public/dev-fixtures`
+(worktree, 2026-08-30): schemas **126** (`pytest packages/schemas/tests`); root
+**831 + 102** by bare `pytest` (which uses `testpaths` in `pyproject.toml`);
+root **849 + 102** by `pytest packages services tools
 --ignore=services/perception-obj`, which collects 18 tests `testpaths` does
 not. **Those two commands are both called "root" in this repo and differ by
 18 tests** — "always say which" was never enough on its own, because the
 figures were recorded without the command that produced them. Write the
 command. Without fixtures the second form is **811 + 102** (review worktree,
-2026-08-24). On `brand-identity` with fixtures ABSENT, bare `pytest` reads
-**822 + 102** — the eleven added are `tools/test_gen_mark.py` growing from 15 to
-26 as the mark, the wordmark and the app's own name all gained pins (0248-0251). re-enqueue **18**.
+2026-08-24); on `brand-identity` with fixtures ABSENT bare `pytest` read
+**822 + 102**, the eleven added being `tools/test_gen_mark.py` growing from 15
+to 26 (0248-0251). The fixture-backed set skips silently, so a lower number
+from a worktree is correct rather than regressed. re-enqueue **18**.
 
 ### iOS capture app — `ios/RoomStudioCapture/`
 
@@ -414,7 +415,7 @@ platform-gated — only `tasks-invoker@` holds `run.invoker` (0106). Scales to
 zero with lazy model loading: `/health` answers immediately, `/ready` reports
 per-model state.
 
-Three stages, all Cloud Tasks driven:
+Three pipeline stages plus a probe, all Cloud Tasks driven:
 
 - **`/process`** — the census two-pass. Pass 1 segments with SAM 3 and writes
   masks; pass 2 reconstructs per a deterministic plan (box best views, then
@@ -461,6 +462,34 @@ Three stages, all Cloud Tasks driven:
   and the plane ships a clean matte in its measured albedo.
 - **`/compress`** — transcodes each PLY to SPZ beside it plus a
   `compressed.json` index. ~5.8× smaller, Gaussian counts preserved exactly.
+- **Nested-mask collapse** rides association rather than being a stage:
+  `PERCEPTION_KEEP_LONGER_MASK` (default `0`, on `segment-quality`, unbuilt into
+  any image) collapses same-frame same-label nested pairs before the per-box
+  shortlist scores them, keeping the LARGER. The survivor competes at its pair's
+  best overlap — dropping the loser outright re-ranks it against every
+  observation, and on a saturated metric with capture order as the tie-break
+  that hands the box to whoever was photographed first (0274). It does NOT fix
+  0262's flat metric and a reading that says so is wrong.
+- **`/segment`** — a segmentation-only probe, built on `segment-quality` and
+  deployed only to a 0%-traffic candidate (`perception-obj-00088-vot`, carrying
+  `PERCEPTION_SAM3_INTERACTIVE=1`). **The serving revision does not carry this
+  route.** It takes an EXPLICIT frame list, runs pass 1 only and never loads
+  SAM 3D — "what does SAM 3 actually see there?" costs ~4 s a frame against
+  ~25 s an object, and `/process` cannot answer it, because its request carries
+  only `{scene_id, bundle_uri}` and it re-runs the census sampler, so a frame
+  the sampler did not pick is unreachable. **Two guarantees keep it unable to
+  affect a room a person can see** (0260): it writes exclusively under
+  `scenes/{id}/segment_probe/` and never under `frames/`, where a `masks.npz`
+  would be read as production cache by the next `/process` — the prefix IS the
+  boundary — and it never touches Firestore, so the scene is read-only and a
+  probe cannot regress a `ready` room the way a re-drive does. It verifies its
+  own OIDC audience (`RECEIVER_URL + "/segment"`) rather than reusing
+  `/process`'s, and `tools/segment_frames.py` drives it through Cloud Tasks
+  because an operator cannot mint that token — impersonating `tasks-invoker@`
+  is denied by design (0090), which is least privilege working rather than an
+  obstacle to route around. `PERCEPTION_SAM3_INTERACTIVE` (default `0`) gates
+  SAM 3's interactive visual path, which the click-refinement loop needs and
+  which loads the tracker onto a card 0228 measured at ~5.26 GiB headroom.
 - **`/track`** — SAM 3.1's multiplex VIDEO tracker across a capture's frames,
   producing an object→frame map: per frame, per instance, an `obj_id`, a box, an
   area and a stride-4 mask. **BUILT and exercised on a 0%-traffic candidate;
@@ -516,13 +545,17 @@ neither direction can silently re-open, and `DEFAULT_OBJECT_PROMPT` now lives in
 `process_receiver.py` because `server.py` imports torch and no GPU-free test
 could read it there.
 
-Suite **1060 passed + 2 skipped** with `web/public/dev-fixtures` staged
-(`main`, 2026-08-25) and **1053 + 9** without
-(`PYTHONPATH=<tree>/packages/schemas pytest services/perception-obj/tests`,
-review worktree 2026-08-24 — the PYTHONPATH is load-bearing, see the Python
-test policy). Main measured **955 + 2** WITH the fixtures on the same day, so
-the with-fixtures figure after this merge is owed a measurement rather than
-an arithmetic guess; the spread has been seven tests.
+Suite **1119 passed + 9 skipped** on `segment-quality` WITHOUT
+`web/public/dev-fixtures` (`PYTHONPATH=<tree>/packages/schemas pytest
+services/perception-obj/tests`, worktree 2026-08-30 — the PYTHONPATH is
+load-bearing, see the Python test policy). `test_segment_receiver.py` and `test_upstream_pins.py`
+contribute **64** of those, measured directly. The last recorded figure on the
+same command is `main`'s **1053 + 9** (review worktree, 2026-08-24), which the
+64 does not reconcile with by two — `main` has not been re-measured here, and
+the branch touches no existing test file, so the two belong to `main` having
+moved rather than to this work. The last with-fixtures figure is **1060 + 2**
+(2026-08-25); the with-fixtures figure for this branch is owed a measurement
+rather than an arithmetic guess, and the spread has been seven tests.
 
 ### Web app — `web/`, live at https://roomstudio.web.app
 
@@ -768,6 +801,34 @@ gains.
 
 **Perception / room quality**
 
+- **The per-box shortlist's overlap score is FLAT, and a repair now has a
+  measured route** (0262–0271, capture `90eebfc4`). `mask_overlap_with_hull` is
+  precision with no recall term: **31 of 52 candidates score exactly 1.0000** in
+  that room and 27% across the four older captures, after which `frame_index` —
+  capture order — decides. Where SAM 3 returns one object at two nested extents
+  the sort takes the shorter in **9 of 10** pairs that associate to a box;
+  **keep the longer** is right **9 of 9** against the operator's rulings and
+  needs no gate, no score and no box (0266, which supersedes 0263's gate). The
+  desk's NEAR foot lies ~3 cm outside its measured box, which is what costs it
+  the pick; the SECOND leg is **100% inside** the box, so the box is not the
+  obstacle there. A click placed on the missing part takes second-leg coverage
+  **0.1% → 75.0%**, and merging every candidate that kept what it was given
+  retains 100% of the seed and near foot. **The keep-the-longer rule is now
+  BUILT and OFF** behind `PERCEPTION_KEEP_LONGER_MASK` (0274) — 4 of 25 boxes
+  across the four captures change their planned views, three to a longer mask in
+  the same frame, none losing an association, byte-identical off. The click
+  repair is NOT built: the pointer was a human eye, and no automated search
+  found the region. **Read
+  `outputs/segment-quality/targets/README.md` before quoting any coverage
+  figure**: the denominator is a rectangle that includes floor, so every such
+  number understates what was recovered.
+- **`90eebfc4` carries LiDAR depth on 1 frame of 189** against 99–100% on all
+  four older captures, correlating with iOS 26.5.2 → 26.6.1 on the same phone
+  and the same app build (0267). That disables mask refinement, `depth_fit` and
+  0231's band detector for the whole room, and **nothing in the pipeline reports
+  it** — tier is derived from the RoomPlan room, not from whether depth arrived.
+  Cause needs one scan to confirm; a depth-bearing frame count in the manifest
+  is the cheap fix and is independent of the cause.
 - **The repair and the chooser are RULED ON and flip together, refine first**
   (0198/0201, 0204/0205, 0211/0212; operator sitting 2026-08-23). **Both are
   SERVING** on `perception-obj-00074-var` since 2026-08-25, re-verified from
@@ -1552,6 +1613,20 @@ Default model for routine work: **Sonnet 5**. Switch to **Opus 5** for hard reas
 Default tool for code work: **Claude Code**. Default for strategy / architecture decisions: **Claude Chat**. See `.claude/WORKFLOW.md` for the full rubric and prompt templates.
 
 **A whole thread — a quality push, an investigation, a migration — is briefed as a CHARTER, not a task list**, per `.claude/WORKFLOW.md`. Its five parts exist because a task-scoped brief produces a session that stops at the first adjacent defect: an outcome with a self-checkable acceptance test, autonomy grants stated POSITIVELY (the part most briefs omit, and the reason sessions stall), named stopping conditions, the batched-judgment protocol when the acceptance test is the operator's eyes, and a scope boundary that is not a file list. A charter loosens scope, never rigour.
+
+**Read the vendored upstream before asserting what SAM 3 or SAM 3D does
+(decision 0264).** The source we run lives inside the container image, so no
+worktree session could read it at any price, and reasoning from our own wrapper
+plus priors produced five wrong claims in one session — including two "it is off
+by default" and a stale docstring that cost a GPU round trip.
+`services/perception-obj/upstream/` holds verbatim copies of the entry points our
+wrappers call, with Meta's LICENSE beside them (§1.b.i requires the Agreement to
+travel with any copy), and the Dockerfile now fetches both repositories **by
+commit** — pinned to the commits the serving image was built from, so the pin
+reproduces what runs rather than moving it. `tests/test_upstream_pins.py` asserts
+the Dockerfile, the README's table and the vendored files agree, and that the
+vendored copy stays unimportable. The `upstream-models` skill and a `PreToolUse`
+hook on the wrappers carry the rule to the next session.
 
 **A lane that walks the room page will 404 on `dev-fixtures`** — it is deliberately absent from worktrees (3.9 GB). The cheap fix is `tools/make_synthetic_splat.py` (~14 MB of synthetic rooms, no real capture), and the rule is DELETE THEM AFTERWARDS so nothing real or bulky can reach a build. **Cheaper still, and free, for any lane that draws GEOMETRY rather than splats: `/room?bundle=!hero` serves `web/public/hero/room.json` — the one genuinely captured room this repo ships (0122's fixture, 3.5 KB, already a tracked static file) — and `!v3`, `!old` and the six list rooms need no fixtures at all.** Nothing to generate and nothing to delete; the splat viewer 404s and everything shell-shaped renders. The calling-card lane built its whole surface this way and never staged a fixture.
 

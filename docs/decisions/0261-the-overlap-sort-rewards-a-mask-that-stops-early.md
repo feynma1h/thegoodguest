@@ -1,7 +1,7 @@
 # 0261 — the overlap sort rewards a mask that stops early
 
 **Date:** 2026-08-27
-**Status:** Decided (mechanism measured; three checks named below are open)
+**Status:** Decided (mechanism measured). The three checks below are answered in 0262 and 0263. **This note's reading of the desk pair is correct and was briefly contradicted during 0263's work; the operator ruled and it stands.**
 
 ## Context
 
@@ -28,6 +28,15 @@ two extents — same top, same bottom, same left edge, the larger continuing
 
 **The operator confirms it is a single desk with no adjoining surface**, so the
 longer mask is the correct extent and the shorter one is partial.
+
+**What the longer mask adds is the table's own LEG** — ruled by the operator
+during 0263's work, after an intermediate reading in that lane mistook it for a
+neighbouring object and had to be withdrawn. Measured since: the leg lies
+**54.5% / 53.0% / 69.9%** outside the table's projected box in frames 50 / 51 /
+109, clearing it by a median 2.6-3.4 cm and never more than 7.7 cm. So the box
+under-covers the object by about a hand's width, and the sort marks the correct
+mask down 9-12 points for it. The mechanism this note names is real, and the
+desk is a true instance of it.
 
 The per-box shortlist sorts by `(-overlap, frame_index, mask_index)`, and
 `overlap` is `box_placement.mask_overlap_with_hull`:
@@ -80,19 +89,36 @@ so fusion is handed one observation and has nothing to reconcile —
 `deduped_observations: 0` on the shipped desk confirms it. **The budget
 pre-empts the reconciliation the design provides.**
 
-## What would change this decision — the three open checks
+## What would change this decision — the three checks, now answered
 
-All are offline and free; none needs a GPU.
+All were offline and free. **Answers in 0262 and 0263**; kept here as asked so
+the question and its answer sit together.
 
 1. **Does the bias hit the other objects?** The chair, bed and cabinets also
    returned multiple same-label masks in some frames. If the shorter mask wins
    there too, this is systemic rather than a desk story.
+   **ANSWERED: yes — the sort takes the shorter mask in 9 of 10 pairs that
+   associate to a box, across five captures, spanning `chair`, `desk` and
+   `cabinet` in four rooms. It is wrong to do so in 7 of those 10 (0263).**
 2. **What would a recall-aware metric pick** — IoU against the hull, or
    precision gated on "not contained by a sibling of the same label"? The second
    is attractive because it changes nothing when there is no sibling.
+   **ANSWERED: no recall-aware ranking works, and neither does making precision
+   tolerant — a 10 cm tolerance takes saturation to 100%. Precision belongs in a
+   GATE: grown-box precision >= 0.98, then prefer the larger mask. That agrees
+   with the operator's eye 10 of 10, against today's 1 of 10 (0263).**
 3. **How often does SAM 3 return nested same-label pairs at all?** Across the 19
    probed frames. Frequency decides whether this is worth a code change.
+   **ANSWERED: 6 of 28 here, and 15 of 93 over the four preserved captures —
+   21 nested pairs across five captures. Containment is bimodal on both:
+   of 121 same-label pairs, exactly ONE sits between 0.003 and 0.989 (0263).**
 
 If (1) says the desk is alone in this, it is a narrow curiosity. If nested pairs
 are common, the shortlist is systematically shipping the smaller half of every
 object SAM 3 reads twice, and that is a bigger finding than anything in 0259.
+
+**The second branch is what happened.** Nested pairs recur — 21 across five
+captures — and the shortlist takes the smaller half in 9 of 10 that associate,
+wrongly in 7. A bigger finding sits underneath it: the overlap score is **flat**,
+tying at exactly 1.0000 for 27% of candidates corpus-wide and 60% here, so the
+view is often chosen by frame index rather than by any measurement (0262).

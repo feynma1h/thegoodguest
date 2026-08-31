@@ -25,6 +25,11 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Verbatim third-party source, vendored as documentation (decision 0264). It is
+# never imported and never edited, so linting it produces hundreds of findings
+# about code we do not own and cannot change. Excluded from the moment it
+# landed: a lint run over the service directory reports 216 errors without this.
+extend-exclude = ["services/perception-obj/upstream"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
@@ -40,5 +45,6 @@ testpaths = [
     "tools/test_smoke_test_e2e.py",
     "tools/test_backfill_scene_expiry.py",
     "tools/test_gen_mark.py",
+    "tools/test_upstream_hook.py",
 ]
 addopts = "--import-mode=importlib"
