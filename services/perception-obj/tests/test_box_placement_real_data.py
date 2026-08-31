@@ -37,8 +37,8 @@ import reproject
 from roomplan_room import RoomPlanBox
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "scene_247003de" / "frames"
-BED_PLY = Path("/Users/aubrey/projects/roomstudio/outputs/roomplan-design/splats/00_bed.ply")
-RGB_DIR = Path("/Users/aubrey/projects/roomstudio/outputs/real-capture-247003de/frames")
+BED_PLY = Path("/Users/aubrey/projects/thegoodguest/outputs/roomplan-design/splats/00_bed.ply")
+RGB_DIR = Path("/Users/aubrey/projects/thegoodguest/outputs/real-capture-247003de/frames")
 
 _needs_real_data = pytest.mark.skipif(
     not (BED_PLY.exists() and RGB_DIR.exists()),

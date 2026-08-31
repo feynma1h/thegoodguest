@@ -12,7 +12,7 @@ That leaves CI two options: hand-copy the dependency lists into the workflow,
 where they rot silently the first time someone adds a dep, or read them from
 the pyprojects at install time. This script is the second option.
 
-Local sibling packages (`roomstudio-*`) are dropped from the output: they are
+Local sibling packages (`thegoodguest-*`) are dropped from the output: they are
 installed separately and editable, because they ARE real packages.
 
 Usage:
@@ -32,7 +32,7 @@ import tomllib
 from pathlib import Path
 
 # Installed separately, editable, by the workflow — they live in this repo.
-LOCAL_PREFIX = "roomstudio"
+LOCAL_PREFIX = "thegoodguest"
 
 
 def deps_for(path: Path, extras: list[str]) -> list[str]:

@@ -46,7 +46,7 @@ ROOM_JSON = (
     Path(__file__).resolve().parent
     / "fixtures" / "roomplan_spike" / "captured_room_built.json"
 )
-SPLAT_DIR = Path("/Users/aubrey/projects/roomstudio/outputs/rp8-walk/splats")
+SPLAT_DIR = Path("/Users/aubrey/projects/thegoodguest/outputs/rp8-walk/splats")
 
 _needs_splats = pytest.mark.skipif(
     not SPLAT_DIR.exists(),

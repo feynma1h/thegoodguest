@@ -17,7 +17,7 @@ the script appeared to succeed (empty output, no error exit) while actually doin
    the gcloud CLI. It fails with "Invalid choice: 'test-iam-permissions'" and produces empty
    stdout. A check built around the empty output always passes, falsely confirming IAM.
    Fix: replaced with a REST call to
-   `cloudresourcemanager.googleapis.com/v1/projects/roomstudio:testIamPermissions` via curl
+   `cloudresourcemanager.googleapis.com/v1/projects/thegoodguest:testIamPermissions` via curl
    + `gcloud auth print-access-token`.
 
 2. **Phase 2 health check — unauthenticated curl on `--no-allow-unauthenticated` service**:
