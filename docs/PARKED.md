@@ -8,9 +8,10 @@ what is NOT recoverable from the code, the punchlist, or `docs/decisions/`.
 
 ## Two risks that exist only while parked
 
-**1. Twenty-four branches exist on exactly one disk.** `origin` holds `main`
-and nothing else, and even local `main` is 7 commits ahead of it. Every lane
-below is unpushed. A disk failure loses all of it.
+**1. `main` exists on exactly one disk.** `origin` holds `main` at a commit
+132 behind local. Every lane below was merged into `main` and its branch
+deleted, so `main` is now the single copy of all of it. A disk failure loses
+everything.
 
 ```
 git push origin --all
@@ -31,20 +32,42 @@ were deleted deliberately, not lost.
 
 ## Where the work stopped
 
-All measured against `main`. Each branch is committed and clean.
+All seven lanes were merged into `main` on 2026-08-31 and their branches
+deleted; the work is in `main`, not on a branch. What each lane was:
 
-| branch | ahead | what it was doing |
-|---|---|---|
-| `track-selection` | 47 | frame/track selection |
-| `ui-screenshots` | 46 | AX screenshot pass over the iOS screens |
-| `sam31-object-map` | 35 | SAM 3.1 migration for a per-object frame map |
-| `segment-quality` | 33 | segmentation quality, nested-mask work |
-| `ui-organisation` | 32 | iOS app UI reorganisation |
-| `perception-segment` | 12 | the `/segment` probe and whole-view frame selection |
-| `brand-identity` | 6 | name, mark, icons |
+| lane | what it built |
+|---|---|
+| `track-selection` | per-object frame selection over the SAM 3.1 track map |
+| `ui-screenshots` | the Dynamic Type ceiling and the AX screenshot pass |
+| `sam31-object-map` | the SAM 3.1 video tracker and `/track` |
+| `segment-quality` | nested-mask collapse, vendored upstream source and pins |
+| `ui-organisation` | the iOS screen reorganisation |
+| `perception-segment` | the `/segment` probe and whole-view frame selection |
+| `brand-identity` | the name, mark and icon geometry |
 
-`backup/pre-trailer-strip` (515) and `diag-bundlepb-reason-public` (143) are
-long-standing and deliberately not merged; leave both alone.
+New perception behaviour ships behind env flags that default OFF, so merging
+these changed no runtime behaviour. Nothing here is deployed.
+
+Two branches remain: `main`, and `backup/pre-trailer-strip` — 515 commits of
+pre-history-rewrite state kept as the sole record from before the 2026-08-09
+trailer strip. It carries none of the purged HEIC blobs (verified) and costs
+almost nothing, being mostly shared objects.
+
+## The one branch that was deleted for its content
+
+`diag-bundlepb-reason-public` was 143 commits of stale May history carrying a
+single one-line change, kept for the OS-kill hardware gate (board item 2) so a
+fatal blob error's `reason=` survives redaction in the log. The branch is gone;
+the line is here:
+
+```swift
+// ios/RoomStudioCapture/RoomStudioCapture/Upload/BlobUploadManager.swift
+logger.info("[BlobUploadManager] \u{2717} fatal blob error: \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason, privacy: .public)")
+```
+
+The only change is `privacy: .public` on `reason`. Apply it temporarily when
+you need to read a fatal reason off the device, and do not commit it — that is
+why it lived on a throwaway branch rather than on `main`.
 
 ## Where to start when you come back
 
