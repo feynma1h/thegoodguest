@@ -9,6 +9,12 @@ system — not from reading CLAUDE.md. Every claim here was checked against
 construction, but not all of it, and the difference is not visible from the
 code alone.
 
+**The three that will not announce themselves**, if you read nothing else:
+`/segment` and `/track` are registered routes and are NOT flag-gated, so the
+next perception deploy exposes both (§3); nothing here has ever run on Linux,
+because CI is 136 commits behind and was already red (§8); and the Dockerfile
+now needs a HuggingFace token with access to a second gated repo (§5).
+
 ---
 
 ## 1. The live system is BEHIND `main` — nothing here is deployed
@@ -102,7 +108,59 @@ Green tests do not cover these:
 - `unprompted_proposal` has never been observed in real traffic.
 - RoomPlan's guidance relay has never fired live.
 
-## 8. Registry residue
+## 8. NOTHING here has been verified on Linux
+
+**CI has never seen any of this work.** `origin/main` is at `bc56f9a`
+(2026-08-25); local `main` is **136 commits ahead**. The last CI run was on the
+old `origin/main`, so every merged lane is verified only on this Mac.
+
+**And CI was already red.** The `python` job has failed on every run for five
+days — the documented cause being `tools/test_gen_mark.py` importing Pillow,
+which the root job did not install. **That fix is now in `main`**
+(`pyproject.toml:22` declares `pillow>=10`), but it arrived on a merged branch
+and has never run on Linux. So "CI is red" describes `origin/main`, and whether
+the fix works is untested.
+
+Push before believing any of it: the first CI run after a push is the first
+Linux verification these 136 commits have had.
+
+## 9. Test suites that do NOT run in a normal invocation
+
+A green local run does not cover these:
+
+- **The guest voice evals** — `services/api-public/tests/test_guest_voice_evals.py`
+  is gated on `RUN_VOICE_EVALS=1` plus an `ANTHROPIC_API_KEY`, and makes real
+  model calls. It is skipped by default and was skipped in every count above.
+- **The 4 iOS live integration tests** — they need a reachable backend, and the
+  sole Xcode scheme always sets `RUN_INTEGRATION_TESTS=1`, so they go red when
+  the backend is down. Offline runs fail them by design.
+- **18 tests are never collected by the default command.** `pytest` uses
+  `testpaths`, which collects **946**; `pytest packages services tools
+  --ignore=services/perception-obj` collects **964**. Both are called "root" in
+  this repo. Always write which command produced a count.
+
+## 10. Broken by the parking cleanup, deliberately
+
+Deleting the captures and `web/public/dev-fixtures` left two things pointing at
+nothing. Neither is a defect to fix — they are waiting for fresh captures:
+
+- **`/viewer` will 404.** The dev workbench fetches `/dev-fixtures/<dir>/assets.json`
+  or `/dev-fixtures/manifest.json`; both are gone. `/room?bundle=!hero` still
+  works — `web/public/hero/room.json` is a tracked 3.5 KB file and needs no
+  fixtures, which is the cheap way to walk a room page.
+- **23 perception tests skip**, plus most of root's 102 skips, all
+  `skipif`-guarded on absent fixtures.
+
+Regenerate fixtures with `tools/make_synthetic_splat.py` (~14 MB, synthetic,
+no real capture) and **delete them afterwards** — `next build` copies
+`public/` into `out/`.
+
+**One path correction while here:** the hosting config is at
+**`web/firebase.json`**, not the repo root. Its `dev-fixtures/**` ignore is
+present and intact (verified) — the guard CLAUDE.md describes is real, the
+path it implies is not.
+
+## 11. Registry residue
 
 Six `perception-obj` versions, against a documented steady state of 3 + holds:
 
