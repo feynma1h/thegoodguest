@@ -9,8 +9,11 @@ import SwiftUI
 /// behind screen content.
 struct ParchmentBackground: View {
     var body: some View {
+        // From the tokens, not hexes: this is the backdrop of every light
+        // screen, and inline stops silently kept the old palette through a
+        // whole rebrand while RSColor's own rule says no view hard-codes one.
         LinearGradient(
-            colors: [Color(rsHex: 0xf2e9d7), Color(rsHex: 0xe7ddc7)],
+            colors: [Color.rsSurface, Color.rsBackground],
             startPoint: .top,
             endPoint: .bottom
         )

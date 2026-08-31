@@ -19,25 +19,25 @@ extension Color {
     // MARK: Surfaces & ink (light chrome)
 
     /// Parchment — grouped background for light screens.
-    static let rsBackground = Color(rsHex: 0xe9e2d2)
+    static let rsBackground = Color(rsHex: 0xebe5df)
     /// Cream — cards, sheets, secondary fills.
-    static let rsSurface = Color(rsHex: 0xf7efdf)
+    static let rsSurface = Color(rsHex: 0xf9f2ec)
     /// Ink — primary label; also the dark capture & failure surface base.
-    static let rsInk = Color(rsHex: 0x3a2d22)
+    static let rsInk = Color(rsHex: 0x282723)
 
     /// Muted ink for support copy (~70% ink on parchment).
-    static let rsInkMuted = Color(rsHex: 0x3a2d22).opacity(0.68)
+    static let rsInkMuted = Color(rsHex: 0x282723).opacity(0.68)
     /// Faint ink for eyebrows / tertiary (~50%).
-    static let rsInkFaint = Color(rsHex: 0x3a2d22).opacity(0.5)
+    static let rsInkFaint = Color(rsHex: 0x282723).opacity(0.5)
     /// Hairline separators.
-    static let rsHairline = Color(rsHex: 0x3a2d22).opacity(0.12)
+    static let rsHairline = Color(rsHex: 0x282723).opacity(0.12)
 
     // MARK: Actions
 
     /// Rust — the `.tint`; primary buttons, the capture shutter. NOT a light cue.
-    static let rsAction = Color(rsHex: 0x8e3b2f)
+    static let rsAction = Color(rsHex: 0xc04d3e)
     /// Rust, pressed/hover.
-    static let rsActionPressed = Color(rsHex: 0x6e2d24)
+    static let rsActionPressed = Color(rsHex: 0xa54235)
 
     // MARK: Gold — LIGHT-SEMANTIC ONLY
 
@@ -52,13 +52,13 @@ extension Color {
     // MARK: Dark capture surfaces
 
     /// Deepest bezel/notch black.
-    static let rsBlack = Color(rsHex: 0x0e0b07)
+    static let rsBlack = Color(rsHex: 0x0e0d0b)
     /// Warm dark — capture backdrop base.
-    static let rsCaptureBase = Color(rsHex: 0x181109)
+    static let rsCaptureBase = Color(rsHex: 0x181714)
     /// Warm dark — one step up (guidance sheet, panels on dark).
-    static let rsCaptureRaised = Color(rsHex: 0x241c12)
+    static let rsCaptureRaised = Color(rsHex: 0x24231f)
     /// Warm cream text on dark surfaces.
-    static let rsOnDark = Color(rsHex: 0xf3e9d5)
+    static let rsOnDark = Color(rsHex: 0xfbf5f2)
 
     // MARK: Sensor / tracking — OUTSIDE the brand (instrument truth)
 
@@ -67,14 +67,14 @@ extension Color {
     /// Slow down / re-find surface. (Shares the gold hue but is a sensor read.)
     static let rsSensorWarn = Color(rsHex: 0xc9a25e)
     /// Lost tracking / too dark.
-    static let rsSensorLost = Color(rsHex: 0x8e3b2f)
+    static let rsSensorLost = Color(rsHex: 0xc04d3e)
 
     // MARK: Positive affordance (the sign-in checklist ticks)
 
     /// Sage — the "your rooms stay" reassurance ticks. Muted, never a brand accent.
     static let rsAffirm = Color(rsHex: 0x7a8f5a)
 
-    /// Build a Color from a 24-bit RGB hex literal (e.g. 0xe9e2d2). Internal to
+    /// Build a Color from a 24-bit RGB hex literal (e.g. 0xebe5df). Internal to
     /// the design system — screens use the named tokens above, not raw hex.
     init(rsHex hex: UInt32) {
         self.init(

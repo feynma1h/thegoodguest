@@ -7,7 +7,7 @@
 /// user reads without opening the app is the kind that never gets caught. Stating
 /// it once, as a table, makes both the wording and the mirroring testable.
 ///
-/// THE COPY MIRRORS THE APP, deliberately: the titles are WaitingView's and
+/// THE COPY MIRRORS THE APP, deliberately: the titles are the desk's and
 /// FailureView's own lines, shortened where the Lock Screen's width demands it.
 /// The Lock Screen contradicting the screen the user just left is the failure this
 /// guards. Voice rules hold (design spec §7/§10): the guest owns what it couldn't
@@ -51,7 +51,7 @@ nonisolated enum RoomActivityVoice {
         case .preparing:
             return "Packing it up for the trip."
         case .sending:
-            // Matches WaitingView.sending: leaving is safe, the background session
+            // Matches the desk's sending state: leaving is safe, the background session
             // carries it. No "keep the app open" — that would be false.
             return "On its way up. You can put the phone down."
         case .finalizing:

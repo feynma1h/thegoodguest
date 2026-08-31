@@ -43,7 +43,7 @@ struct DoorwayView: View {
         ZStack {
             // Warm gold-lit darkness.
             RadialGradient(
-                colors: [Color(rsHex: 0x4a3a24), Color(rsHex: 0x2e2213), Color.rsCaptureBase],
+                colors: [Color(rsHex: 0x3f3d35), Color(rsHex: 0x26241f), Color.rsCaptureBase],
                 center: .init(x: 0.5, y: 0.34), startRadius: 20, endRadius: 560
             )
             .ignoresSafeArea()
@@ -55,7 +55,7 @@ struct DoorwayView: View {
             VStack(spacing: 0) {
                 Spacer()
                 Text("Your room is ready.")
-                    .rsFont(.display, size: 27)
+                    .rsFont(.display, size: 27, cap: .display)
                     .foregroundStyle(Color.rsOnDark)
                     .multilineTextAlignment(.center)
 

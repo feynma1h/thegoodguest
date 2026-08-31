@@ -10,7 +10,7 @@ struct UnsupportedDeviceView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            Wordmark()
+            Mark(height: 24)
 
             Image(systemName: "cube.transparent")
                 .font(.system(size: 34, weight: .regular))
@@ -18,7 +18,7 @@ struct UnsupportedDeviceView: View {
                 .padding(.top, 40)
 
             Text("This one needs a depth camera.")
-                .rsFont(.display, size: 24)
+                .rsFont(.display, size: 24, cap: .display)
                 .foregroundStyle(Color.rsInk)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)

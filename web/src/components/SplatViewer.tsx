@@ -1280,7 +1280,7 @@ export default function SplatViewer({
         // ambient register — §11's family, dimmed). CSS, not clear-color,
         // so it can be a gradient.
         background:
-          "radial-gradient(120% 90% at 50% 42%, #3f3226 0%, #2a2017 55%, #1c1610 100%)",
+          "radial-gradient(120% 90% at 50% 42%, #36342f 0%, #23221e 55%, #181715 100%)",
       }}
     >
       <div ref={containerRef} className="absolute inset-0" />
@@ -1303,7 +1303,7 @@ export default function SplatViewer({
       {phase === "error" && (
         <Overlay>
           <div className="max-w-sm text-center">
-            <p className="text-sm font-medium text-[#e8a68e]">Viewer error</p>
+            <p className="text-sm font-medium text-[#e0a9a1]">Viewer error</p>
             <p className="mt-1 break-words text-xs text-paper/50">{error}</p>
           </div>
         </Overlay>

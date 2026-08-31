@@ -61,7 +61,7 @@ export default function TermsPage() {
         </p>
         <p>
           Our{" "}
-          <a href="/privacy" className="text-accent hover:text-accent-deep">
+          <a href="/privacy" className="text-accent-deep hover:text-ink">
             Privacy Policy
           </a>{" "}
           is part of this agreement and describes what we do with your data.

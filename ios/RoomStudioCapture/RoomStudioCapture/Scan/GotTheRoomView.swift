@@ -15,7 +15,7 @@ struct GotTheRoomView: View {
         ZStack {
             // Warm gold-lit darkness.
             RadialGradient(
-                colors: [Color(rsHex: 0x3a2c17), Color(rsHex: 0x241a0d), Color.rsCaptureBase],
+                colors: [Color(rsHex: 0x302e28), Color(rsHex: 0x1d1c18), Color.rsCaptureBase],
                 center: .init(x: 0.5, y: 0.42), startRadius: 30, endRadius: 520
             )
             .ignoresSafeArea()
@@ -35,12 +35,12 @@ struct GotTheRoomView: View {
                         .shadow(color: Color.rsGold.opacity(0.6), radius: 40)
                     Image(systemName: "checkmark")
                         .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(Color(rsHex: 0x2a2114))
+                        .foregroundStyle(Color.rsInk)
                 }
                 .scaleEffect(breathe ? 1.06 : 1.0)
 
                 Text("I've got the room.")
-                    .rsFont(.display, size: 26)
+                    .rsFont(.display, size: 26, cap: .display)
                     .foregroundStyle(Color.rsOnDark)
                     .padding(.top, 26)
 

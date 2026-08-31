@@ -8,8 +8,13 @@
 /// scanning is a fade, not a jolt. Under the LiDAR-only pivot (decision 0072) the
 /// tier chip is always "PRO CAPTURE"; the STANDARD-CAPTURE variant is not built.
 ///
-/// Presented as a medium-detent sheet (the caller sets the detents). Calls
-/// `onStart` once camera access is granted.
+/// Presented FULL SCREEN. It was a half-height sheet, which framed the last
+/// thing a person reads before walking a room for two minutes as a disclosure
+/// to skim past. Full screen also removes the drag-to-dismiss it used to have,
+/// so the cross at the top right is the only way out — which is the same shape
+/// every other screen in the app has.
+///
+/// Calls `onStart` once camera access is granted.
 
 import AVFoundation
 import SwiftUI
@@ -17,6 +22,24 @@ import SwiftUI
 struct GuidanceSheet: View {
     var onStart: () -> Void = {}
     var onDismiss: () -> Void = {}
+    /// How the camera's authorization is read. Production asks AVFoundation;
+    /// nothing else does.
+    ///
+    /// A CLOSURE, not a captured value, because this is asked twice and the two
+    /// answers must be able to differ: once as the sheet appears, and again
+    /// every time the app comes back to the foreground, which is how returning
+    /// from Settings with access granted clears the denial. A stored status
+    /// would freeze the first answer and leave the sheet offering "Open
+    /// Settings" forever.
+    ///
+    /// It is a seam because the denied branch is otherwise unphotographable:
+    /// `simctl privacy` has no camera service, so a simulator cannot be put
+    /// into the state a person reaches by tapping Don't Allow. The screen still
+    /// decides for itself what counts as denied — the seam only supplies the
+    /// status, which is the same thing AVFoundation supplies.
+    var cameraStatus: () -> AVAuthorizationStatus = {
+        AVCaptureDevice.authorizationStatus(for: .video)
+    }
 
     @State private var permissionDenied = false
     @Environment(\.scenePhase) private var scenePhase
@@ -30,7 +53,7 @@ struct GuidanceSheet: View {
             header
 
             proChip
-                .padding(.top, 14)
+                .rsBelowHeader()
 
             VStack(alignment: .leading, spacing: 18) {
                 GuidanceRow(
@@ -65,46 +88,58 @@ struct GuidanceSheet: View {
 
             privacyLine
                 .padding(.top, 20)
-                .padding(.bottom, 12)
             }
-            .padding(.horizontal, 26)
-            .padding(.top, 20)
+            .padding(.horizontal, RSScreen.horizontal)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .safeAreaInset(edge: .bottom) {
             // Pinned OUTSIDE the scroll region: the one action this sheet exists for
             // must stay on screen at every text size.
-            startButton
-                .padding(.horizontal, 26)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-                .background(Color.rsCaptureRaised)
+            // The closing line is the same one home uses, for the same reason:
+            // it is true, it is one line, and one line is what keeps this
+            // screen's button level with every other screen's. The privacy
+            // disclosure stays in the scroll region where it can be two lines
+            // without moving anything.
+            RSActions {
+                startButton
+            } closing: {
+                Text("Takes about two minutes")
+                    .font(RSFont.ui(.footnote))
+                    .foregroundStyle(Color.rsOnDark.opacity(0.5))
+            }
+            .rsPinnedActions(surface: .rsCaptureRaised)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.rsCaptureRaised.ignoresSafeArea())
+        .onAppear { permissionDenied = Self.isDenied(cameraStatus()) }
         // Coming back from Settings with permission granted must clear the denied
         // state; otherwise the sheet keeps offering "Open Settings" forever.
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
-            permissionDenied = AVCaptureDevice.authorizationStatus(for: .video) == .denied
-                || AVCaptureDevice.authorizationStatus(for: .video) == .restricted
+            permissionDenied = Self.isDenied(cameraStatus())
         }
     }
 
     // MARK: - Pieces
 
+    /// The shared header band, on the dark surface. The title is set at the
+    /// same size as every other screen's now that this is a screen rather than
+    /// a card — it was two-thirds that when it was something you peered at over
+    /// the top of home.
     private var header: some View {
-        HStack {
+        ScreenHeaderFrame {
             Text("Before you start")
-                .rsFont(.display, size: 15, weight: .medium)
-                .foregroundStyle(Color.rsOnDark.opacity(0.8))
-            Spacer()
+                .rsFont(.display, size: 22, weight: .medium, maxSize: 30, cap: .display)
+                .foregroundStyle(Color.rsOnDark)
+                .fixedSize(horizontal: false, vertical: true)
+        } trailing: {
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color.rsOnDark)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
                     .background(Color.rsOnDark.opacity(0.12), in: Circle())
+                    .contentShape(Circle())
             }
             .accessibilityLabel("Close")
         }
@@ -114,7 +149,7 @@ struct GuidanceSheet: View {
         HStack(spacing: 7) {
             Circle().fill(Color.rsGold).frame(width: 7, height: 7)
             Text("LiDAR READY · PRO CAPTURE")
-                .rsFont(.mono, size: 11, weight: .medium)
+                .rsFont(.mono, size: 11, weight: .medium, cap: .mono)
                 .tracking(0.8)
                 .foregroundStyle(Color.rsGoldLight)
         }
@@ -152,7 +187,10 @@ struct GuidanceSheet: View {
             Button {
                 requestCameraThenStart()
             } label: {
-                Label("Start scanning", systemImage: "camera.viewfinder")
+                // No glyph, matching home's scan action. Apple's viewfinder was
+                // the generic stock symbol on both, and the two buttons that
+                // start a capture should look like each other.
+                Text("Start scanning")
             }
             .buttonStyle(RSGoldButtonStyle())
         }
@@ -160,8 +198,15 @@ struct GuidanceSheet: View {
 
     // MARK: - Camera permission (in context)
 
+    /// One reading of "denied", shared by the first render and every return
+    /// from Settings — the two used to be written out separately, which is how
+    /// they would come to disagree about `.restricted`.
+    static func isDenied(_ status: AVAuthorizationStatus) -> Bool {
+        status == .denied || status == .restricted
+    }
+
     private func requestCameraThenStart() {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        switch cameraStatus() {
         case .authorized:
             onStart()
         case .notDetermined:

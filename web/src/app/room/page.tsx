@@ -27,7 +27,7 @@ import { Suspense, useEffect, useState } from "react";
 
 import SignInPanel from "@/components/SignInPanel";
 import RoomStage from "@/components/RoomStage";
-import Wordmark from "@/components/Wordmark";
+import { Mark } from "@/components/Wordmark";
 import { PillLink } from "@/components/ui/spring";
 import { DisabledComposer, GuestLine } from "@/components/ui/voice";
 import { getApiClient } from "@/lib/api";
@@ -66,7 +66,7 @@ function RoomChrome({
           href="/"
           className="pointer-events-auto hidden transition-opacity hover:opacity-70 sm:block"
         >
-          <Wordmark tone={tone} className="whitespace-nowrap" />
+          <Mark height="20px" tone={tone === "cream" ? "reverse" : "ink"} />
         </Link>
         <span
           className={`hidden font-serif text-[15px] italic sm:inline ${
@@ -255,13 +255,13 @@ function RoomDetail() {
           {state.phase === "missing" ? (
             <p className="text-ink/70">
               No room selected.{" "}
-              <Link href="/rooms" className="text-accent underline underline-offset-4">
+              <Link href="/rooms" className="text-accent-deep underline underline-offset-4">
                 Back to your house
               </Link>
             </p>
           ) : (
             <>
-              <p className="text-sm font-medium text-accent">
+              <p className="text-sm font-medium text-accent-deep">
                 Couldn&apos;t open this room
               </p>
               <p className="mt-2 text-sm text-ink/60">{state.message}</p>
@@ -280,7 +280,7 @@ function RoomDetail() {
 
   if (scene.status === "ready") {
     return (
-      <div className="relative min-h-dvh bg-[#1c1610]">
+      <div className="relative min-h-dvh bg-[#181715]">
         <RoomStage
           key={scene.scene_id}
           sceneId={scene.scene_id}

@@ -62,7 +62,7 @@ export default function RoomCard({ scene }: { scene: SceneSummary }) {
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="font-serif text-[15px] italic text-ink">{title}</h2>
             {scene.status === "ready" && (
-              <span className="whitespace-nowrap text-xs text-ink/45 transition-colors group-hover:text-accent">
+              <span className="whitespace-nowrap text-xs text-ink/45 transition-colors group-hover:text-accent-deep">
                 step inside →
               </span>
             )}

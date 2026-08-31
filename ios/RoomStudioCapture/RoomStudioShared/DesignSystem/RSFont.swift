@@ -29,10 +29,24 @@
 ///   • it honours in-app `.dynamicTypeSize(...)` overrides, which never touch
 ///     `UITraitCollection.current` at all.
 ///
-/// Fixed-size text scales UNCAPPED by default; pass `maxSize` only for text inside
-/// a fixed frame (the capture shutter, coverage ticks, a metric strip). A blanket
-/// cap inverts the type hierarchy, because the text-style variants scale without
-/// one.
+/// SCALING TIERS. Reading text scales without limit — body copy, the guest's
+/// lines, status sentences, instructions. Everything that is NOT read as prose
+/// carries a ceiling, expressed as a multiple of its own base size by
+/// `RSTypeCap`: titles signal hierarchy rather than being read, machine data
+/// keeps its shape, and a control's label must not burst the control.
+///
+/// A BLANKET cap is still wrong and always was: the semantic text-style
+/// variants (`ui(_:)`, `guest(_:)`) scale without one, so capping the fixed
+/// sizes alone once left a capped serif hero rendering smaller than the
+/// uncapped sans support text beneath it. What makes tiers safe where a blanket
+/// cap was not is that the tier is chosen by what the text DOES, and every
+/// control label was moved onto the fixed-size path at the same time — so the
+/// two halves of a hierarchy are never on opposite sides of the ceiling.
+///
+/// `maxSize` remains, in absolute points, for text inside a genuinely fixed
+/// frame (the capture shutter, the coverage ticks, a metric strip). Where both
+/// are given the tighter wins: those frames were measured, and a tier is a
+/// house rule rather than a measurement of that control.
 ///
 /// There are deliberately NO fixed-size `Font`-returning helpers: a `Font` cannot
 /// read the environment, so offering one would be offering a silently inert path.
@@ -44,6 +58,102 @@ import UIKit
 
 /// Which of the three Good Guest type roles a fixed-size line belongs to.
 enum RSFontRole { case guest, display, ui, mono }
+
+/// How far a line is allowed to grow, as a multiple of its own base size.
+///
+/// Stated once, here, because the whole value of a tier is that every screen
+/// gets the same answer — the previous per-call `maxSize` ceilings were each
+/// correct for their own control and collectively said nothing.
+///
+/// There is deliberately NO case for reading text. Body copy, the guest's
+/// voice and every instruction scale without limit, and the way to say so is
+/// to pass no cap at all rather than to pass a large one.
+///
+/// Nor is there one for control labels: those are set from semantic styles,
+/// which this mechanism cannot reach, and are clamped by `rsControlLabel()`
+/// below instead. See that comment for why the obvious alternative — moving
+/// them onto the fixed-size path — is worse.
+enum RSTypeCap: CGFloat {
+    /// Serif titles and screen headers. They mark where you are; they are not
+    /// read at length.
+    case display = 1.4
+    /// Machine data — IDs, elapsed clocks, capture metrics, the status
+    /// eyebrows. Keeps its uppercase and its letterspacing at every size.
+    case mono = 1.6
+}
+
+// MARK: - The ceiling
+
+enum RSTypeSize {
+
+    /// The largest Dynamic Type step the app renders at.
+    ///
+    /// WHY A CEILING EXISTS AT ALL. The tiers below stop titles, machine data
+    /// and control labels, and measured across all 83 states they hit their
+    /// target on every screen those cover — a median 1.73x denser at AX5, 29 of
+    /// 30 under 2x. They could not touch the screens made of the guest's prose,
+    /// which stayed at a median 3.93x, because reading text scaled without
+    /// limit. On this app that is most of it: the desk, notes and the house are
+    /// a title, an eyebrow and a paragraph, and at the top step the paragraph
+    /// is the screen.
+    ///
+    /// WHY UNIFORM, AND NOT A READING TIER. A tier for prose would have to be
+    /// tighter than the display tier above it to help, which inverts the
+    /// hierarchy — a colophon set larger than the titles it sits under. One
+    /// ceiling applied to the whole tree keeps every ratio between every pair
+    /// of styles exactly where the default size has it, so the accessibility
+    /// layout is the same layout, larger. Nothing is dropped, reordered or
+    /// summarised to make it fit; that was the constraint.
+    ///
+    /// WHAT IT COSTS, plainly: someone who sets the top step asks for body text
+    /// at 53pt and gets 33. That is a real reduction for the people the setting
+    /// exists for, and it is the reason this is ONE constant rather than a
+    /// number spread across call sites. Raising it is a one-line change, and
+    /// `tools/ios_density_guard.py` will say what it costs in crowding.
+    static let ceiling: DynamicTypeSize = .accessibility2
+}
+
+extension View {
+
+    /// Hold the whole tree at `RSTypeSize.ceiling`.
+    ///
+    /// Applied ONCE, at the app's root, so no screen can forget it and no
+    /// screen can disagree with another about how large is too large.
+    func rsTypeCeiling() -> some View {
+        dynamicTypeSize(...RSTypeSize.ceiling)
+    }
+}
+
+// MARK: - The control tier
+
+extension View {
+
+    /// The control tier: a label may grow to about 1.35x and no further.
+    ///
+    /// A DYNAMIC TYPE CLAMP, not a point ceiling, and the difference is not
+    /// cosmetic. Every filled button in the app sets its label from a SEMANTIC
+    /// style (`RSFont.ui(.headline, weight: .semibold)`), and `maxSize` only
+    /// reaches the fixed-size path — so capping these by that mechanism meant
+    /// rewriting them as `.rsFont(.ui, size: 17, relativeTo: .headline)`.
+    /// Measured, that is not the same font: a text style carries its own line
+    /// height, a bare point size does not, and the primary button came out
+    /// visibly SHORTER at the default text size. The brief's own rule is that
+    /// buttons keep their shape, and the fix for the accessibility sizes had
+    /// broken it at the default one.
+    ///
+    /// Clamping instead changes nothing at or below `xxxLarge` — verified
+    /// pixel-identical — and above it holds the label where `xxxLarge` left it.
+    /// That lands at exactly 1.35x for `.headline` (17 -> 23pt), 1.38x for
+    /// `.callout` and 1.46x for `.footnote`: the tier is quantised to Dynamic
+    /// Type's own steps rather than exact, which is the price of not
+    /// substituting the font.
+    ///
+    /// It clamps a SUBTREE, so it belongs on the label and nowhere wider — put
+    /// it on a screen and the screen's reading text stops scaling with it.
+    func rsControlLabel() -> some View {
+        dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+}
 
 enum RSFont {
 
@@ -182,11 +292,22 @@ extension View {
         size: CGFloat,
         weight: Font.Weight? = nil,
         relativeTo: Font.TextStyle = .body,
-        maxSize: CGFloat? = nil
+        maxSize: CGFloat? = nil,
+        cap: RSTypeCap? = nil
     ) -> some View {
-        modifier(RSScaledFont(
+        // The tighter of the two wins. A `maxSize` was measured against a
+        // specific frame; a tier is a house rule. Where a control already had
+        // a tighter ceiling than its tier, that ceiling was load-bearing.
+        let tier = cap.map { size * $0.rawValue }
+        let ceiling: CGFloat? = switch (maxSize, tier) {
+        case let (m?, t?): min(m, t)
+        case let (m?, nil): m
+        case let (nil, t?): t
+        case (nil, nil): nil
+        }
+        return modifier(RSScaledFont(
             role: role, size: size, weight: weight,
-            relativeTo: relativeTo, maxSize: maxSize
+            relativeTo: relativeTo, maxSize: ceiling
         ))
     }
 }

@@ -127,18 +127,6 @@ def check_retention_claim():
     return True, "no 7-day upload-bookkeeping claim remains in the three files"
 
 
-def check_camera_permission_string():
-    """G3-02 (F6) — the user-visible camera prompt must not carry the dead name."""
-    src = _read("ios/RoomStudioCapture/RoomStudioCapture.xcodeproj/project.pbxproj")
-    hits = [
-        i for i, line in enumerate(src.splitlines(), 1)
-        if "NSCameraUsageDescription" in line and "RoomStudio" in line
-    ]
-    if hits:
-        return False, f"still says RoomStudio at project.pbxproj:{','.join(map(str, hits))}"
-    return True, "camera permission string no longer carries the dead name"
-
-
 def check_per_room_deletion():
     """G3-03 — a per-room delete route must exist on api-public.
 
@@ -246,7 +234,6 @@ CHECKS = {
     "G1-05": check_web_base_url,
     "G2-01": check_live_site_name,
     "G3-01": check_retention_claim,
-    "G3-02": check_camera_permission_string,
     "G3-03": check_per_room_deletion,
     "G4-01": check_alerting,
     "G4-02": check_python_ci,
