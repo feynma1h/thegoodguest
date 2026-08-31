@@ -316,9 +316,6 @@ enum ScreenGallery {
         .init(id: "review-cannot-send", group: "Review", title: "Nothing to send",
               note: "The rescan is promoted to primary and the send is withheld — better than letting the backend refuse it and reporting that as a broken upload.",
               delay: 2),
-        .init(id: "review-thin", group: "Review", title: "Thin coverage (dormant)",
-              note: "BUILT AND UNREACHABLE: thinCoverage is never set true. Photographed so the designed treatment can be judged, not as something the screen can say today.",
-              delay: 2),
 
         // TWO screens, not four. This was canOpenWeb x signedIntoWeb until the
         // web origin was configured; the offer now turns on one question — will
@@ -413,9 +410,6 @@ enum ScreenGallery {
         .init(id: "splash-mark-reduced", group: "The splash", title: "The mark, reduce motion",
               note: "The same two beats, separated by a fade rather than a morph — the gather IS the motion, so there is nothing left to cross-fade between. Same order, same total length.",
               delay: 3.4, reduceMotion: true),
-        .init(id: "qr", group: "QR bridge", title: "Built, blocked on deep links",
-              note: "The code encodes nothing and the caption says so. Kept photographable so the surface does not rot unseen.",
-              delay: 2),
     ]
 }
 
@@ -683,14 +677,6 @@ struct ScreenGalleryView: View {
                        verdict: "I didn't get enough to send. Let's walk it again — it only takes a couple of minutes.",
                        canSend: false,
                        rescanLabel: "Scan again from scratch")
-        case "review-thin":
-            ReviewView(metrics: "48 frames · LiDAR + RoomPlan",
-                       census: "2 objects · 3 walls",
-                       verdict: GalleryFixture.verdict,
-                       thinCoverage: true,
-                       rescanLabel: "Scan again from scratch")
-
-        // Arrival
         case "doorway":
             DoorwayView(canOpenWeb: true)
         case "doorway-noweb":
@@ -749,8 +735,6 @@ struct ScreenGalleryView: View {
         case "splash-name", "splash-mark",
              "splash-name-reduced", "splash-mark-reduced":
             SplashView()
-        case "qr":
-            QRBridgeView()
 
         default:
             unknown

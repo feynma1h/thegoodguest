@@ -7,21 +7,17 @@
 /// NO PREVIEW OF THE REAL ROOM, on purpose: this shows the SKETCH, never a
 /// rendered 3D room — the real room belongs to the reveal, on the web. Showing a
 /// rough version here would spend the magic early.
+
 ///
-/// THIN-COVERAGE VARIANT: BUILT BUT NOT REACHABLE TODAY. `thinCoverage` is never
-/// set true. A coverage SIGNAL now exists (the live census + floor plan), but
-/// wiring it into a "your capture is thin" verdict is a copy claim about capture
-/// quality that deserves an operator decision, not a threshold invented here —
-/// deliberately deferred pending that decision. Until then its copy ("I've got
-/// the bones, but a few gaps") must be read as designed-but-dormant, NOT as
-/// something the screen can say today.
-///
-/// COPY FOLLOWS THE ACTIONS. `cardText` mirrors `actions`' precedence exactly, and
-/// they must stay in step: the two disagreed once — a capture that could not be
-/// sent at all (empty, or bundle.pb assembly failed) showed the rescan action
-/// correctly while the card discarded the caller's verdict and claimed "I've got
-/// the bones, but a few gaps", which is a coverage claim about a capture that does
-/// not exist. The caller's verdict wins whenever the capture is not sendable.
+/// THE CARD IS THE CALLER'S VERDICT, ALWAYS. It used to run through a `cardText`
+/// precedence function that could override the verdict with a thin-coverage
+/// claim, and the two expressions of that one decision drifted apart once: a
+/// capture that could not be sent at all showed the rescan action correctly
+/// while the card threw the verdict away and claimed "I've got the bones, but a
+/// few gaps" — a coverage claim about a capture that did not exist. With the
+/// append path ruled out (0294) the gaps copy has nowhere to lead, so the
+/// override is gone and the two cannot disagree again by construction rather
+/// than by a test.
 ///
 /// NOTE ON THE SECONDARY ACTION: it RESCANS, it does not extend. CaptureManager's
 /// startCapture() mints a new bundleId and clears frames/anchors/outputDir, so
@@ -51,9 +47,6 @@ struct ReviewView: View {
     /// reason as `metrics` and `rescanLabel`: the old default asserted "I can see the
     /// whole room", which is a coverage claim the app deliberately does not make.
     var verdict: String
-    /// When true, coverage is thin — the rescan path leads. NEVER TRUE TODAY; see the
-    /// thin-coverage note in the file header before wiring it.
-    var thinCoverage: Bool = false
     /// False when there is nothing worth sending (an empty capture). The send
     /// action is withheld rather than letting the backend reject it and report the
     /// failure as if the upload broke in transit.
@@ -86,10 +79,8 @@ struct ReviewView: View {
                     .rsBelowHeader()
 
                 RSCard {
-                    Text(Self.cardText(verdict: verdict,
-                                       thinCoverage: thinCoverage,
-                                       canSend: canSend,
-                                       isPreparing: isPreparing))
+                    // Unconditional — see the header.
+                    Text(verdict)
                         .rsFont(.guest, size: 15.5)
                         .foregroundStyle(Color.rsInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -112,25 +103,6 @@ struct ReviewView: View {
     }
 
     // MARK: Copy
-
-    /// The verdict card's text. Static + internal so the precedence can be pinned by
-    /// tests instead of read out of a ViewBuilder — the copy and the action set are
-    /// two expressions of one decision, and when they were written separately they
-    /// drifted apart (see the header note).
-    ///
-    /// Precedence, mirroring `actions`:
-    ///   1. Not sendable at all (still packing, empty capture, assembly failed) →
-    ///      the CALLER's verdict, which is the only thing that knows which of those
-    ///      it is. A coverage claim here would describe a capture that may not exist.
-    ///   2. Thin coverage → the gaps copy. (Unreachable today; see the header.)
-    ///   3. Otherwise → the caller's verdict.
-    static func cardText(verdict: String, thinCoverage: Bool, canSend: Bool, isPreparing: Bool) -> String {
-        if isPreparing || !canSend { return verdict }
-        if thinCoverage {
-            return "I've got the bones, but a few gaps. Worth another minute to fill them in?"
-        }
-        return verdict
-    }
 
     // MARK: Pieces
 
@@ -181,9 +153,6 @@ struct ReviewView: View {
     /// The rescan moved ABOVE the send to make that true. It reads before the
     /// primary rather than after it, which is not the usual iOS order; that is
     /// the trade for the buttons lining up across screens.
-    ///
-    /// Precedence still mirrors `cardText` exactly, which is what stopped the
-    /// copy and the actions drifting apart before.
     @ViewBuilder
     private var actions: some View {
         let leave = Button { onLeave() } label: { Text("Not now") }
@@ -200,14 +169,6 @@ struct ReviewView: View {
         } else if !canSend {
             // Nothing to send — the rescan leads, and there is nothing extra.
             RSActions {
-                Button { onRescan() } label: { Text(rescanLabel) }
-                    .buttonStyle(RSPrimaryButtonStyle())
-            } closing: { leave }
-        } else if thinCoverage {
-            RSActions {
-                Button { onSend() } label: { Text("Send it as is") }
-                    .buttonStyle(RSQuietButtonStyle())
-            } primary: {
                 Button { onRescan() } label: { Text(rescanLabel) }
                     .buttonStyle(RSPrimaryButtonStyle())
             } closing: { leave }
@@ -270,14 +231,5 @@ struct RoomSketch: View {
                census: "3 objects · 4 walls · 1 door",
                floorPlan: .previewRoom,
                verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",
-               rescanLabel: "Scan again from scratch")
-}
-
-// DORMANT TREATMENT — thinCoverage is never true in the app. This preview is
-// the only place it renders; see the header note before wiring it.
-#Preview("Thin coverage (dormant)") {
-    ReviewView(metrics: "48 frames · LiDAR + RoomPlan",
-               verdict: "Here's your capture. Send it, and I'll start making sense of it on your desk.",
-               thinCoverage: true,
                rescanLabel: "Scan again from scratch")
 }
