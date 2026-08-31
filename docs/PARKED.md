@@ -79,6 +79,26 @@ The one item that will not announce itself: **`/segment` and `/track` are
 registered routes and are not flag-gated**, so the next `perception-obj` deploy
 exposes both. Everything else the merges added is off by default.
 
+## Recreating the environment
+
+`.venv` was deleted at parking (296 MB, fully regenerable). CI's recipe is the
+authoritative one — `tools/ci_deps.py` reads each component's own pyproject, so
+the dependency list cannot rot:
+
+```bash
+python3 -m venv .venv && .venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install $(.venv/bin/python tools/ci_deps.py \
+  pyproject.toml packages/schemas/pyproject.toml packages/api-core/pyproject.toml \
+  services/api-public/pyproject.toml services/api-internal/pyproject.toml --extra dev)
+.venv/bin/python -m pip install -e packages/schemas -e packages/api-core
+```
+
+Perception needs its own environment in principle — its pyproject declares
+`numpy<2` while the shared venv carries 2.x — but in practice one venv has
+served both here, which is why CI splits the jobs and local runs do not.
+
+`web/node_modules` is also gone: `npm install` in `web/`.
+
 ## Where to start when you come back
 
 `docs/punchlist.md` — 29 items in six gates, dependency-ordered. Run
