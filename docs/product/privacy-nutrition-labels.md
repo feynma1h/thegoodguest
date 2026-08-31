@@ -58,7 +58,7 @@ $ grep -rniE "ASIdentifierManager|AdSupport|AppTrackingTransparency|advertisingI
 
 The linked SPM products are exactly `FirebaseCore`, `FirebaseAuth`,
 `GoogleSignIn`, `GoogleSignInSwift`, `SwiftProtobuf`
-(`ios/RoomStudioCapture/RoomStudioCapture.xcodeproj/project.pbxproj`,
+(`ios/TheGoodGuestCapture/TheGoodGuestCapture.xcodeproj/project.pbxproj`,
 `XCSwiftPackageProductDependency` section). `GoogleAppMeasurement` and
 `google-ads-on-device-conversion-ios-sdk` appear in `Package.resolved` because
 they are in the Firebase package graph's transitive closure; **neither is linked
@@ -277,7 +277,7 @@ Each of these is an answer, and several are load-bearing.
 camera:
 
 ```
-INFOPLIST_KEY_NSCameraUsageDescription = "RoomStudio captures your room with ARKit."
+INFOPLIST_KEY_NSCameraUsageDescription = "TheGoodGuest captures your room with ARKit."
 ```
 
 (`project.pbxproj:464` and `:500` — both build configurations, and no other
@@ -481,7 +481,7 @@ its shape:
 
 ```
 httpRequest.remoteIp    "103.139.xx.xx"
-httpRequest.userAgent   "RoomStudioCapture/1 CFNetwork/3860.600.12 Darwin/25.5.0"
+httpRequest.userAgent   "TheGoodGuestCapture/1 CFNetwork/3860.600.12 Darwin/25.5.0"
 httpRequest.requestUrl  ".../captures/<bundle_id>/upload_session"
 timestamp               2026-08-23T20:05:50Z
 ```
@@ -591,7 +591,7 @@ with Apple or Google."* Both scope Google to the web.
 **Google linking shipped on iOS** (decision 0118):
 `AuthManager.linkGoogleAccount`, `SignInSheet.startGoogleSignIn` with its
 preflight, the `CFBundleURLTypes` reversed-client-id scheme in
-`RoomStudioCapture-Info.plist`, and `GoogleSignIn` + `GoogleSignInSwift` linked
+`TheGoodGuestCapture-Info.plist`, and `GoogleSignIn` + `GoogleSignInSwift` linked
 in the project.
 
 This matters to the labels because it changes *when* Name and Email are
@@ -635,10 +635,10 @@ provider-linked account in the live aggregate.
 > to share, and — from Google — a link to your profile picture. With Apple you
 > may choose to hide your email, in which case we receive only a relay address.
 
-### F6 — The camera permission string still says "RoomStudio"
+### F6 — The camera permission string still says "TheGoodGuest"
 
 ```
-INFOPLIST_KEY_NSCameraUsageDescription = "RoomStudio captures your room with ARKit."
+INFOPLIST_KEY_NSCameraUsageDescription = "TheGoodGuest captures your room with ARKit."
 ```
 (`project.pbxproj:464`, `:500`.)
 
@@ -829,7 +829,7 @@ change and how to check it in one command.
 
 5. F1, F3, F4, F5 — the four Privacy Policy corrections. F1 is the only one that
    is factually wrong rather than incomplete.
-6. F6 — the camera permission string still says RoomStudio.
+6. F6 — the camera permission string still says TheGoodGuest.
 
 **Re-check whenever any of these changes.**
 

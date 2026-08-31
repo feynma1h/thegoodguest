@@ -167,10 +167,10 @@ def test_the_two_rings_interlock_rather_than_cancel():
     "relative",
     [
         "web/src/components/markGeometry.ts",
-        "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/MarkGeometry.swift",
+        "ios/TheGoodGuestCapture/TheGoodGuestCapture/DesignSystem/MarkGeometry.swift",
         "web/src/app/icon.svg",
         "web/src/components/wordmarkGeometry.ts",
-        "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/WordmarkGeometry.swift",
+        "ios/TheGoodGuestCapture/TheGoodGuestCapture/DesignSystem/WordmarkGeometry.swift",
     ],
 )
 def test_generated_text_matches_the_generator(relative: str):
@@ -236,7 +236,7 @@ def test_mark_colours_match_the_web_design_tokens():
 
 
 def test_mark_colours_match_the_ios_design_tokens():
-    swift = (REPO / "ios/RoomStudioCapture/RoomStudioShared/DesignSystem/RSColor.swift").read_text()
+    swift = (REPO / "ios/TheGoodGuestCapture/TheGoodGuestShared/DesignSystem/RSColor.swift").read_text()
 
     def token(name: str) -> str:
         match = re.search(rf"static let {name} = Color\(rsHex: 0x([0-9a-fA-F]{{6}})\)", swift)
@@ -256,7 +256,7 @@ def test_no_surface_hand_authors_the_mark():
     assert "markGeometry" in wordmark_tsx
 
     wordmark_swift = (
-        REPO / "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/Wordmark.swift"
+        REPO / "ios/TheGoodGuestCapture/TheGoodGuestCapture/DesignSystem/Wordmark.swift"
     ).read_text()
     assert "MarkGeometry." in wordmark_swift
 
@@ -271,7 +271,7 @@ def test_no_surface_hand_authors_the_mark():
     # The placeholder diamond the iOS lockup and the share card used to draw.
     for relative in (
         "web/src/components/Wordmark.tsx",
-        "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/Wordmark.swift",
+        "ios/TheGoodGuestCapture/TheGoodGuestCapture/DesignSystem/Wordmark.swift",
         "docs/product/og-card.html",
     ):
         assert "❖" not in (REPO / relative).read_text(), relative
@@ -290,9 +290,9 @@ def test_no_surface_sets_the_mark_beside_the_name():
         "web/src/components/Wordmark.tsx",
         "web/src/components/SiteNav.tsx",
         "web/src/app/room/page.tsx",
-        "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/Wordmark.swift",
-        "ios/RoomStudioCapture/RoomStudioCapture/Home/HomeView.swift",
-        "ios/RoomStudioCapture/RoomStudioCapture/Gating/UnsupportedDeviceView.swift",
+        "ios/TheGoodGuestCapture/TheGoodGuestCapture/DesignSystem/Wordmark.swift",
+        "ios/TheGoodGuestCapture/TheGoodGuestCapture/Home/HomeView.swift",
+        "ios/TheGoodGuestCapture/TheGoodGuestCapture/Gating/UnsupportedDeviceView.swift",
     ):
         text = (REPO / relative).read_text()
         # Strip comments and docstrings, which discuss the rule by name.
@@ -392,19 +392,19 @@ def test_the_wordmark_is_never_the_mark_at_chrome_size():
 
 
 def _pbxproj() -> str:
-    return (REPO / "ios/RoomStudioCapture/RoomStudioCapture.xcodeproj/project.pbxproj").read_text()
+    return (REPO / "ios/TheGoodGuestCapture/TheGoodGuestCapture.xcodeproj/project.pbxproj").read_text()
 
 
 def test_the_home_screen_name_is_the_products_name():
     """What sits under the icon, which is the most-seen brand surface there is.
 
     Without CFBundleDisplayName the app falls through to TARGET_NAME and the
-    Home Screen reads "RoomStudioCapture" -- which it did, unnoticed, past every
+    Home Screen reads "TheGoodGuestCapture" -- which it did, unnoticed, past every
     "the name lives in N places" claim in the repo. The key cannot read
     RSBrand.name, so this is what keeps the two in step.
     """
     swift = (
-        REPO / "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/Wordmark.swift"
+        REPO / "ios/TheGoodGuestCapture/TheGoodGuestCapture/DesignSystem/Wordmark.swift"
     ).read_text()
     name = re.search(r'static let name = "([^"]+)"', swift).group(1)
 
@@ -421,13 +421,13 @@ def test_the_bundle_identifier_is_untouched():
     the keychain access group, and every existing room's ownership. The Home
     Screen name is the presentation, and that is what was fixed instead.
     """
-    assert "PRODUCT_BUNDLE_IDENTIFIER = com.roomstudio.RoomStudioCapture;" in _pbxproj()
+    assert "PRODUCT_BUNDLE_IDENTIFIER = com.thegoodguest.TheGoodGuestCapture;" in _pbxproj()
 
 
 def test_no_user_visible_string_carries_the_old_stand_in():
     """The permission dialog is the first sentence the product says to anyone.
 
-    It said "RoomStudio captures your room with ARKit" past the name landing.
+    It said "TheGoodGuest captures your room with ARKit" past the name landing.
     Every INFOPLIST_KEY_* value is user-visible somewhere -- a permission
     dialog, Settings, the Home Screen, the Lock Screen -- so none may carry it.
     """

@@ -681,7 +681,7 @@ def wordmark_ring_paths(wm: Wordmark) -> tuple[str, str]:
     return tuple(paths)  # type: ignore[return-value]
 
 
-ICON_DIR = REPO / "ios/RoomStudioCapture/RoomStudioCapture/Assets.xcassets/AppIcon.appiconset"
+ICON_DIR = REPO / "ios/TheGoodGuestCapture/TheGoodGuestCapture/Assets.xcassets/AppIcon.appiconset"
 WEB_APP = REPO / "web/src/app"
 
 
@@ -832,7 +832,7 @@ def main() -> None:
     ts.write_text(emit_ts())
     print(f"  {ts.relative_to(REPO)}")
 
-    sw = REPO / "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/MarkGeometry.swift"
+    sw = REPO / "ios/TheGoodGuestCapture/TheGoodGuestCapture/DesignSystem/MarkGeometry.swift"
     sw.write_text(emit_swift())
     print(f"  {sw.relative_to(REPO)}")
 
@@ -842,7 +842,7 @@ def main() -> None:
     wts.write_text(emit_wordmark_ts(wm))
     print(f"  {wts.relative_to(REPO)}")
 
-    wsw = REPO / "ios/RoomStudioCapture/RoomStudioCapture/DesignSystem/WordmarkGeometry.swift"
+    wsw = REPO / "ios/TheGoodGuestCapture/TheGoodGuestCapture/DesignSystem/WordmarkGeometry.swift"
     wsw.write_text(emit_wordmark_swift(wm))
     print(f"  {wsw.relative_to(REPO)}")
 

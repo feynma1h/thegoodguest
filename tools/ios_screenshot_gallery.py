@@ -35,8 +35,8 @@ import time
 from pathlib import Path
 
 UDID = "84D7059A-C756-4DE6-B3BD-4C88A38D16DB"
-BUNDLE = "com.roomstudio.RoomStudioCapture"
-GALLERY = Path("ios/RoomStudioCapture/RoomStudioCapture/Support/ScreenGallery.swift")
+BUNDLE = "com.thegoodguest.TheGoodGuestCapture"
+GALLERY = Path("ios/TheGoodGuestCapture/TheGoodGuestCapture/Support/ScreenGallery.swift")
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/rs-shots")
 
 SIZES = [("default", "large"),
