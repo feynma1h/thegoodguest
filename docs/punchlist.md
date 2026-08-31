@@ -229,6 +229,54 @@ will reap them now that api-public answers properly.
 
 ---
 
+### G4-08 · The scene lease is shorter than the job it protects
+**State:** open · **Blocks:** the re-drive tool's safety guard being sound
+`SCENE_LEASE_TTL_SECONDS` defaults to 300 s, is unset in the deploy script, and
+is claimed after model load, while a request may run to 900 s. Measured over 66
+production runs: median lease held **613.5 s**, max **899.8 s**, **46 of 66 past
+the TTL** (0286). Nothing has double-processed only because two unrelated things
+prevent it — api-internal's 930 s dispatch deadline and `--max-instances=1`.
+`tools/reenqueue_scene.py` DOES read the lease to decide whether a worker is
+active, so on a live scene it proceeds without `--force` and dispatches a second
+task.
+
+The fix is one number: **TTL 960 s**, above the 900 s request ceiling, which
+makes "lease live" mean "a worker may be running" — what the tool already
+assumes. Also unfixed and part of this entry: `lease_expires_at` is never passed
+to `_log_lease_action`, so the field 0011 added for exactly this logs `none`
+everywhere.
+**Check:** manual — read `SCENE_LEASE_TTL_SECONDS` in `process_receiver.py` and
+the deploy script's env; it must exceed the Cloud Run request timeout.
+
+### G4-09 · Non-terminal scenes strand and nothing sweeps them
+**State:** open · **Blocks:** a user ever being told their room failed
+A scene can sit in `queued` or `processing` forever: no terminal state, no
+`expire_at` (only failure statuses are stamped), no FCM. At the last measurement
+before the parking wipe, **12 scenes were stranded** — 4 `queued`, 8
+`processing` with cleared leases — none of them from the SIGTERM path, which has
+never fired (0286). Cloud Tasks caps retries at 3 and then simply stops.
+
+The wanted mechanism is a sweep for non-terminal scenes older than some bound
+with no live task, transitioning them to a terminal state so the phone hears
+something. Explicitly NOT the `shutdown_release_count` gate, which 0286 refuses.
+**Check:** manual — no sweep exists to check for yet.
+
+### G4-10 · The lease-expiration branch has never run in production
+**State:** open · verification debt, not a defect
+Crash recovery has two paths. The tidy one — the worker clears its own lease on
+a caught error — is the only one production has ever exercised: three
+`reclaim_stale` events in a month of logs, each preceded by a `release_error`
+from the same worker. The load-bearing one, where an abandoned lease is reclaimed
+because it expired, is unit-tested only (0286).
+
+The reference scene for it, `f077e9ed`, was deleted with everything else at
+parking, and `reenqueue_scene.py` could not have tested it regardless — it resets
+to `queued` first, erasing the expired lease that is the subject. Testing it now
+means writing the state deliberately on a fresh capture and dispatching without
+the reset. Success is `reclaim_stale` with no preceding `release_error`, then a
+clean `ready` or `failed`.
+**Check:** manual — needs a fresh capture and a `--no-reset` dispatch path.
+
 ## Gate 5 — finished against the thesis, not against the backlog
 
 Gates 1–4 produce a shippable product. This gate is where "finished" becomes a
