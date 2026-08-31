@@ -24,8 +24,9 @@ the operator's call, not a session's.
 1.1 MB — the reports, handoffs and verdicts only. Every preserved capture, the
 16 cloud scene directories, both GCS buckets' contents and all 392 Firestore
 documents were deleted at parking, because the next session starts fresh. The
-perception suite reads **1214 passed + 25 skipped** as a result; the 23 skips
-are the real-data regressions with nothing to regress against.
+perception suite reads **1198 passed + 41 skipped** and root reads
+**844 + 102** as a result; the skips are the real-data and fixture-backed
+regressions with nothing left to regress against. Nothing fails.
 
 Do not go looking for `roomstudio-preserved` or `outputs/real-capture-*`. They
 were deleted deliberately, not lost.

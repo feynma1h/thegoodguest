@@ -211,14 +211,6 @@ it breaks the live-authed-check path recent api-public deploys use, so a
 replacement ships first.
 **Check:** automated — no unrestricted browser key should remain.
 
-### G4-06 · `web/public/dev-fixtures` is 4.0 GB of real homes inside `public/`
-**State:** open
-`next build` copies `public/` into `out/`. `firebase.json` ignores
-`dev-fixtures/**` on deploy, which is one config line between real captured homes
-and a public origin. Moving the directory outside `public/` removes the hazard
-rather than guarding it.
-**Check:** automated — the path must not live under `web/public/`.
-
 ### G4-07 · Registry and device housekeeping
 **State:** open
 The `serving-rollback-00062-hum` tag still pins `faa005c8…` in Artifact Registry
