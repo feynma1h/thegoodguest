@@ -1,7 +1,7 @@
 # 0120 — perception-obj builds cache layers via BuildKit inline cache on a stable tag
 
 **Date:** 2026-08-10
-**Status:** Decided; speedup measured 2026-08-13 (see Outcome)
+**Status:** Superseded by 0199, which measured the inline cache alternating and replaced it with buildx. The speedup recorded below was real.
 
 ## Context
 

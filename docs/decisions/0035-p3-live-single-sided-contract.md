@@ -1,5 +1,6 @@
 # 0035 — P3 is a single-sided client build against a live contract
-Date: 2026-05-31  •  Status: Decided
+**Date:** 2026-05-31
+**Status:** Spent
 
 ## Context
 P3 (Firebase anon auth + POST /upload_session) is a write→read contract

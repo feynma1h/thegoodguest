@@ -1,7 +1,7 @@
 # 0090 — perception-obj runs as a dedicated least-privilege runtime SA
 
 **Date:** 2026-08-08
-**Status:** built and deployed; closes decision 0088's finding 1
+**Status:** Decided — built and deployed; closes decision 0088's finding 1
 
 ## Context
 

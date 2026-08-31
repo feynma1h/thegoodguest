@@ -1,7 +1,7 @@
 # 0112 — Clip-sign A/B: the shipped render was never measured, and the numbers invert the shear story
 
 **Date:** 2026-08-10
-**Status:** CLOSED 2026-08-12 — the operator walk ran and MEASURED WINS.
+**Status:** Spent — the operator walk ran 2026-08-12, measured won, the flip shipped and the toggle was deleted.
 The default is flipped, the toggle is deleted, and 0135's open question is
 answered-positive. Verdicts and outcome in the section at the end.
 

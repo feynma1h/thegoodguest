@@ -1,5 +1,6 @@
 # 0047 — P5(a) scene-status poll client: the non-obvious design choices
-Date: 2026-06-04  •  Status: Decided
+**Date:** 2026-06-04
+**Status:** Decided
 
 > Companion: 0046 — the "what we tried" history and the separation-of-concerns
 > framing of the two start paths. Read alongside this note.

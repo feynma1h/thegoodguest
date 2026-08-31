@@ -1,7 +1,7 @@
 # 0108 — "back against the wall" reads as a revert, and stands anyway
 
 **Date:** 2026-08-09
-**Status:** Superseded by the operator's ruling — the word changed (2026-08-10)
+**Status:** Spent — the word changed (2026-08-10)
 
 > **Outcome (2026-08-10):** the operator ruled "back" is revert's word,
 > exclusively. The unconditional branch now reads "the {name} is against the

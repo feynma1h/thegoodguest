@@ -1,7 +1,7 @@
 # 0023 — Eventarc trigger uses bucket-level filter + handler-side `bundle.pb` check (addendum to 0014)
 
 **Date:** 2026-05-27
-**Status:** Accepted
+**Status:** Decided
 
 ## Context
 

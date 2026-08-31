@@ -1,7 +1,7 @@
 # 0135 — `yaw_rad` is not the rotation the viewer applies, and the clip volume is built with the wrong sign
 
 **Date:** 2026-08-09
-**Status:** Measured. The solver uses the correct convention; the shipped
+**Status:** Decided — measured. The solver uses the correct convention; the shipped
 renderer is deliberately NOT changed — see "What we did not do".
 
 ## Context

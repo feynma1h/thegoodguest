@@ -1,7 +1,7 @@
 # 0089 — Person as a suppression-only SAM 3 concept
 
 **Date:** 2026-08-08
-**Status:** built, deployed (`perception-obj-00036-l9l`), and live-verified
+**Status:** Decided — built, deployed (`perception-obj-00036-l9l`), and live-verified
 end-to-end on the person-carrying capture
 
 ## Context

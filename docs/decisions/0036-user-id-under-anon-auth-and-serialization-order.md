@@ -1,5 +1,6 @@
 # 0036 — user_id under anonymous auth; offline-safe serialization order
-Date: 2026-05-31  •  Status: Decided  •  Resolves the 0022 question for P3
+**Date:** 2026-05-31
+**Status:** Decided — resolves the 0022 question for P3
 
 ## Context
 CaptureBundle.user_id was deferred at chunk B (BundleAssembler.swift: "populated

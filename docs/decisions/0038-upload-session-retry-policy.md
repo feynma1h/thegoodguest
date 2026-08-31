@@ -1,5 +1,6 @@
 # 0038 — /upload_session client retry/backoff policy
-Date: 2026-05-31  •  Status: Decided
+**Date:** 2026-05-31
+**Status:** Decided
 
 ## Context
 The /upload_session call can fail transiently (network, 5xx) or terminally

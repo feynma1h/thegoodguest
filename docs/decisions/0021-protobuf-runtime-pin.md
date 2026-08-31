@@ -1,7 +1,7 @@
 # 0021 — Pin protobuf runtime to match gencode in api-internal/api-public images
 
 **Date:** 2026-05-27
-**Status:** Accepted
+**Status:** Decided
 
 ## Context
 

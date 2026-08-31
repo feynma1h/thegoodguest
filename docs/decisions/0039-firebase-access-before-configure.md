@@ -1,5 +1,6 @@
 # 0039 — Firebase calls in property defaults fire before configure()
-Date: 2026-05-31  •  Status: Decided (guidance)
+**Date:** 2026-05-31
+**Status:** Decided — guidance
 
 ## Context
 During P3, the app crashed at launch: Auth.auth() asserts FirebaseApp is

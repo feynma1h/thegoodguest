@@ -1,7 +1,7 @@
 # 0111 — The Live Activity had no way to say the send finished
 
 **Date:** 2026-08-08
-**Status:** accepted
+**Status:** Decided
 **Relates to:** 0085 (the walk that saw the card), 0110 (the stall the same card
 narrated wrongly), 0072 (the Good Guest surfaces), 0040 (bundle.pb goes last)
 

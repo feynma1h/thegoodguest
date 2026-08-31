@@ -1,5 +1,6 @@
 # 0037 — Upload-session local persistence: protected file, not Keychain
-Date: 2026-05-31  •  Status: Decided  •  Routed to and signed off by Chat
+**Date:** 2026-05-31
+**Status:** Decided — routed to and signed off by Chat
 
 ## Context
 P3 must persist the /upload_session result locally so P4 can PUT to each

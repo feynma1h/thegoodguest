@@ -1,7 +1,7 @@
 # 0033 — C decoupled from B's depth residual; B-3 split per-tier
 
 **Date:** 2026-05-31
-**Status:** Decided
+**Status:** Spent
 
 ## Context
 

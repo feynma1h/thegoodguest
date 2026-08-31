@@ -1,7 +1,7 @@
 # 0256 — when only one thing fits, the one that changes wins
 
 **Date:** 2026-08-28
-**Status:** Decided
+**Status:** Spent
 
 ## Context
 

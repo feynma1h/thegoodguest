@@ -1,7 +1,7 @@
 # 0180 — The pointmap conditions the shape, not only the layout
 
 **Date:** 2026-08-16
-**Status:** Measured inside the serving image
+**Status:** Decided — measured inside the serving image
 
 ## Context
 

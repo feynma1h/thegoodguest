@@ -1,7 +1,7 @@
 # 0019 — Scene read endpoint and polling contract (smoke tool pass 4)
 
 **Date:** 2026-05-26
-**Status:** Accepted
+**Status:** Decided
 
 ## Context
 

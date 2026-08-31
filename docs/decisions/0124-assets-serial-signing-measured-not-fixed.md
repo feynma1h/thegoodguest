@@ -1,7 +1,7 @@
 # 0124 — the assets endpoint's serial signing is real, measured, and not the P0
 
 **Date:** 2026-08-09
-**Status:** Trigger fired — placed-only filter shipped 2026-08-10
+**Status:** Spent — placed-only filter shipped 2026-08-10
 
 > **Outcome (2026-08-10):** the first trigger fired (the compressed tier put
 > the payload in the tens of MB), and the placed-only filter shipped. The

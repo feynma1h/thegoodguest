@@ -1,7 +1,7 @@
 # 0087 — /upload_session hardening: gaps a/b/c/F1/F2/F3 dispositions
 
 **Date:** 2026-08-07
-**Status:** accepted (a/b/c/F3 shipped; F1/F2 resolved won't-build with re-open triggers)
+**Status:** Decided — a/b/c/F3 shipped; F1/F2 resolved won't-build with re-open triggers
 
 ## Context
 

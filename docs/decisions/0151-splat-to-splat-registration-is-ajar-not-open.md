@@ -1,7 +1,7 @@
 # 0151 — splat-to-splat registration is ajar, not open
 
 **Date:** 2026-08-13
-**Status:** Probed, not built
+**Status:** Refuted — probed, not built
 
 ## Context
 

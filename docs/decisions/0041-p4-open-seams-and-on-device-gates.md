@@ -1,7 +1,7 @@
 # 0041 — P4 open seams and on-device verification gates (tracking note)
 
 **Date:** 2026-06-01
-**Status:** Open — tracking-only (no decision reversed here)
+**Status:** Spent — all three seams built; both on-device gates passed in 0085. Kept for its citations in `AppDelegate.swift`, `RootFlowView.swift` and `BlobUploadManager.swift`.
 
 ## Context
 

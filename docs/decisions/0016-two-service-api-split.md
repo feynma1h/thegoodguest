@@ -1,7 +1,7 @@
 # 0016 — Two-service split for API trust-boundary separation
 
 **Date:** 2026-05-26
-**Status:** accepted
+**Status:** Decided
 
 ## Context
 

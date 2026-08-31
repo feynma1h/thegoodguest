@@ -1,7 +1,7 @@
 # 0013 — Capture-bundle timestamps: device-monotonic, with wall-clock alongside
 
-Status: accepted
-Date: 2026-05-26
+**Date:** 2026-05-26
+**Status:** Decided
 
 ## Context
 

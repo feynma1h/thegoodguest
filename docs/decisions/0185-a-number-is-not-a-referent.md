@@ -1,7 +1,7 @@
 # 0185 — a number is not a referent
 
 **Date:** 2026-08-19
-**Status:** Built, at PROMPT_VERSION 6
+**Status:** Decided — built, at PROMPT_VERSION 6
 
 ## Context
 

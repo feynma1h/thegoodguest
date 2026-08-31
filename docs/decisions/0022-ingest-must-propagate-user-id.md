@@ -1,7 +1,7 @@
 # 0022 — Ingest must propagate `user_id` to scene on all ingest branches
 
 **Date:** 2026-05-27
-**Status:** Accepted
+**Status:** Decided
 
 ## Context
 

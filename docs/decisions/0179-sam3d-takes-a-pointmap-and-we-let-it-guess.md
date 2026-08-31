@@ -1,7 +1,7 @@
 # 0179 — SAM 3D takes a LiDAR pointmap, and we let it guess one instead
 
 **Date:** 2026-08-14
-**Status:** SUPERSEDED by 0180 and 0181 — read those first.
+**Status:** Superseded by 0180 and 0181 — read those first. Kept as where the parameter was found.
 
 This note recorded the discovery from upstream source and left the decisive
 question open. Both halves were then settled inside the serving image: **0180**

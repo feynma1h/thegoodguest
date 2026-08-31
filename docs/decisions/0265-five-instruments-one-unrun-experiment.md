@@ -1,7 +1,7 @@
 # 0265 — five instruments for one choice, and the experiment none of them needs
 
 **Date:** 2026-08-28
-**Status:** SUPERSEDED by 0266 on the operator's rulings of 2026-08-28. Both author-judged labels were wrong; rescored, no discriminator beats keeping the longer mask.
+**Status:** Superseded by 0266 — on the operator's rulings of 2026-08-28. Both author-judged labels were wrong; rescored, no discriminator beats keeping the longer mask.
 
 ## Context
 

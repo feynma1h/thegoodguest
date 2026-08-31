@@ -1,7 +1,7 @@
 # 0020 — Smoke tool: failure-mode flag semantics (pass 5)
 
 **Date:** 2026-05-27
-**Status:** Accepted
+**Status:** Decided
 
 ## Context
 
