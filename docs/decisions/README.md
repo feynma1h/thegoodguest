@@ -1,8 +1,8 @@
 # Decision notes
 
-278 notes. **235 of them are `Decided`** -- those govern code that
+278 notes. **234 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
-other 43 record decisions that were carried out, replaced, or
+other 44 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
 because they constrain you.
 
@@ -20,8 +20,8 @@ The status vocabulary and the numbering rule live in
 | `Refuted` | 16 | a measured negative -- read before proposing it again |
 | `Superseded` | 7 | replaced by a later note |
 | `Amended` | 5 | partly corrected by a later note |
-| `Spent` | 15 | carried out; nothing left to comply with |
-| `Decided` | 235 | governs code that ships today |
+| `Spent` | 16 | carried out; nothing left to comply with |
+| `Decided` | 234 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -72,7 +72,7 @@ The status vocabulary and the numbering rule live in
 | [0173](0173-the-guest-cannot-tell-which-room-its-facts-describe.md) | the guest reads its own re-derived facts as stale, and says so | Amended by 0174 |
 | [0259](0259-disqualify-a-frame-do-not-rank-it.md) | disqualify a frame, do not rank it | Amended by 0270 |
 
-## Spent (15)
+## Spent (16)
 
 *Carried out; nothing left to comply with.*
 
@@ -92,9 +92,10 @@ The status vocabulary and the numbering rule live in
 | [0112](0112-clip-sign-ab-the-shipped-render-was-never-measured.md) | Clip-sign A/B: the shipped render was never measured, and the numbers invert the shear story | Spent |
 | [0124](0124-assets-serial-signing-measured-not-fixed.md) | the assets endpoint's serial signing is real, measured, and not the P0 | Spent |
 | [0182](0182-perception-obj-cannot-currently-be-rebuilt.md) | perception-obj cannot currently be rebuilt | Spent |
+| [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (235)
+## Decided (234)
 
 | # | title | status |
 |---|---|---|
@@ -265,7 +266,6 @@ The status vocabulary and the numbering rule live in
 | [0215](0215-the-conditional-survived-the-word.md) | the conditional survived the word | Decided |
 | [0216](0216-a-count-that-cannot-exist.md) | a count that cannot exist | Decided |
 | [0217](0217-the-declaration-is-the-stand-down.md) | the declaration is the stand-down | Decided |
-| [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Decided |
 | [0219](0219-the-pin-covers-what-the-model-reads.md) | the pin covers what the model reads | Decided |
 | [0220](0220-the-refusal-names-a-handle.md) | the refusal names a handle a person would have used | Decided |
 | [0221](0221-a-rooms-eligibility-is-a-date.md) | a room's eligibility is a date, not a field | Decided |

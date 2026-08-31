@@ -28,10 +28,6 @@
 /// NetworkConfig.webBaseURL exactly as the doorway's CTA is — with no web
 /// origin configured, rows inform rather than offer a tap that lands nowhere.
 ///
-/// STILL STAGED, and not on that fetch: QRBridgeView (§9), whose blocker is
-/// deep-link infrastructure and the associated-domains entitlement, not a room
-/// list — the desk names the room in the link it hands over. It has no entry
-/// point here and appears only in its own preview.
 ///
 /// §1's cold start is not on that list, in either direction. The flow still
 /// opens directly at .home and identity is still minted by the app-level launch
@@ -42,12 +38,6 @@
 /// §8's conflict SCREEN is not on that list: it is not built at all
 /// (decision 0216), because the count it was designed around cannot be obtained
 /// without becoming the account it asks about. SignInSheet owns the conflict.
-/// ReviewView's THIN-COVERAGE variant belongs to the staged list too:
-/// `thinCoverage` is never passed true below. A coverage signal does
-/// exist — the live census drives the FLOOR/WALLS/CORNERS ticks on the capture
-/// screen — but promoting it to a quality VERDICT is a copy claim deliberately
-/// left unwired, so the "I've got the bones, but a few gaps" treatment renders
-/// only in that file's preview.
 
 import ARKit
 import SwiftUI
@@ -219,10 +209,10 @@ struct RootFlowView: View {
                 // "the room you got" is what the server will see.
                 census: capture.builtCensus?.reviewLine,
                 floorPlan: capture.builtFloorPlan,
-                // Neutral verdict, still: a coverage signal now exists (the live
-                // census + floor plan), but turning it into a quality VERDICT
-                // ("clean" / thinCoverage) is a copy claim that deserves an
-                // operator decision — deliberately deferred.
+                // Neutral verdict. A coverage signal exists (the live census
+                // + floor plan), and promoting it to a quality VERDICT is a
+                // copy claim nobody has made — the treatment that would have
+                // consumed one went with the append path (0294).
                 verdict: reviewVerdict,
                 // An empty capture cannot be sent: the backend would reject it as
                 // invalid and the user would be told "the scan didn't survive the

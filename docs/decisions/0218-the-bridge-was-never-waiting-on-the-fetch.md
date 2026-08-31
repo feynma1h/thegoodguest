@@ -1,7 +1,7 @@
 # 0218 — the bridge was never waiting on the fetch
 
 **Date:** 2026-08-22
-**Status:** Decided
+**Status:** Spent — `QRBridgeView` was deleted 2026-09-01 with the append path it waited on (0294). The finding stands; the surface it was about is gone.
 
 ## Context
 
