@@ -211,16 +211,6 @@ it breaks the live-authed-check path recent api-public deploys use, so a
 replacement ships first.
 **Check:** automated — no unrestricted browser key should remain.
 
-### G4-07 · Registry and device housekeeping
-**State:** open
-The `serving-rollback-00062-hum` tag still pins `faa005c8…` in Artifact Registry
-and is owed back once `00074-var` is trusted. Three captures — `1805949c`,
-`8c05fa72`, `f47ca8b7` — are still on the phone and preserved nowhere; a launch
-will reap them now that api-public answers properly.
-**Check:** automated — the rollback tag; the captures are manual.
-
----
-
 ### G4-08 · The scene lease is shorter than the job it protects
 **State:** open · **Blocks:** the re-drive tool's safety guard being sound
 `SCENE_LEASE_TTL_SECONDS` defaults to 300 s, is unset in the deploy script, and
