@@ -71,6 +71,23 @@ The only change is `privacy: .public` on `reason`. Apply it temporarily when
 you need to read a fatal reason off the device, and do not commit it — that is
 why it lived on a throwaway branch rather than on `main`.
 
+## The infrastructure moved on 2026-08-31
+
+Everything was renamed from `roomstudio` to **The Good Guest** and migrated to
+a **new GCP project, `thegoodguest`**. The old project is DELETE_REQUESTED and
+recoverable until roughly 30 September 2026; after that it is gone.
+
+Live and verified: `https://thegoodguest.web.app`, plus `api-public`,
+`api-internal` and `perception-obj` in `asia-southeast1`. Firebase Auth has
+**Anonymous enabled only** — Google and Apple sign-in still need OAuth and
+Apple Developer configuration before account linking works.
+
+`autodeleteAnonymousUsers` is OFF on the new project and must stay off
+(decision 0139).
+
+**There is no fallback environment any more**, and no rollback image for any
+service until each has been deployed twice.
+
 ## Before you treat anything as finished
 
 `docs/NOT-FINAL.md` lists everything in this tree that is not in final form,

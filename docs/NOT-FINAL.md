@@ -17,26 +17,24 @@ now needs a HuggingFace token with access to a second gated repo (§5).
 
 ---
 
-## 1. The live system is BEHIND `main` — nothing here is deployed
+## 1. Everything IS deployed now — to a new project
 
-Every lane merged on 2026-08-31 is unshipped. What is actually serving:
+Superseded 2026-08-31. The whole stack was migrated to a new GCP project,
+`thegoodguest`, and every surface is live and verified:
 
-| service | serving | note |
-|---|---|---|
-| `perception-obj` | `00074-var`, image `c538f699` (2026-08-23) | predates **all** merged perception work |
-| `api-public` | `00046-xig` | |
-| `api-internal` | `00023-mek` | |
-| web | `thegoodguest.web.app` | serves `<title>thegoodguest</title>` |
+| surface | state |
+|---|---|
+| `thegoodguest.web.app` | 200, titled "The Good Guest" |
+| `api-public` | 200 |
+| `api-internal` | 200 (403 unauthenticated, IAM-gated) |
+| `perception-obj` | 200 on L4 GPU, `serving` tag on its image |
 
-**The web is the sharpest drift.** The repo sets the product name to
-"The Good Guest" in both places that own it (`Wordmark.tsx:66`,
-`Wordmark.swift:43`); the deployed origin still serves the old name. The web
-has not been deployed since the name landed.
+Verified as a path rather than as health checks: CORS preflight from the live
+origin returns the matching allow-origin, the served CSP names the new API
+host, and anonymous sign-up against the shipped web key returns 200.
 
-**A 0%-traffic candidate is parked:** `perception-obj-00093-pav`, image
-`b21408a5` (2026-08-30) — the SAM 3.1 / `/track` build. It costs nothing
-idle (scale-to-zero) but it is a reachable URL with the same flags as
-production.
+The old `roomstudio` project is DELETE_REQUESTED and recoverable until roughly
+30 September 2026. **There is no fallback environment any more.**
 
 ## 2. Flag-gated behaviour — inert, and safe
 
@@ -54,12 +52,12 @@ revision.
 (0234/0236). Do not read "off by default" as "untried and promising" for that
 one.
 
-## 3. Two routes that go live on the NEXT deploy — the actual trap
+## 3. Two routes are now LIVE on a serving revision
 
-`server.py` registers **`/segment`** and **`/track`** beside `/process`,
-`/shell` and `/compress`. Neither has ever served production traffic; both were
-exercised only on 0%-traffic candidates. **They are not flag-gated.** The next
-`perception-obj` deploy exposes both.
+**This fired.** The migration deploy exposed both: the serving revision's route
+list is `/ /compress /health /process /ready /segment /shell /track`. Neither
+had ever served production traffic before; both were previously exercised only
+on 0%-traffic candidates, and neither is flag-gated.
 
 They are containment-guarded and cannot corrupt a room — each writes only under
 its own probe prefix (`segment_probe/`, `track_probe/`), never under `frames/`
@@ -73,13 +71,13 @@ in the service imports it — only `tools/track_select.py` and
 `tools/track_views.py` do. It is dead weight in the container until something
 calls it.
 
-## 5. A build change no image has been made from yet
+## 5. The SAM 3.1 layer, now built once
 
-The Dockerfile now downloads the **SAM 3.1 multiplex weights** unconditionally,
-from `facebook/sam3.1` — a *second* gated HuggingFace repo. Not flag-gated. The
-next image build therefore pulls ~3.5 GB more than the last one and needs a
-token with access to both `facebook/sam3` and `facebook/sam3.1`. Budget the
-time and check the token before assuming a slow build is broken.
+The Dockerfile downloads the **SAM 3.1 multiplex weights** unconditionally from
+`facebook/sam3.1` — a *second* gated HuggingFace repo. This has now been built
+once, in the new project, and the token in `hf-token` is verified against both
+repos. Any replacement token needs access to **both** or the build fails near
+the end of a ~50 minute run.
 
 ## 6. iOS seams wired to nothing
 
@@ -108,21 +106,15 @@ Green tests do not cover these:
 - `unprompted_proposal` has never been observed in real traffic.
 - RoomPlan's guidance relay has never fired live.
 
-## 8. NOTHING here has been verified on Linux
+## 8. Linux verification — done once
 
-**CI has never seen any of this work.** `origin/main` is at `bc56f9a`
-(2026-08-25); local `main` is **136 commits ahead**. The last CI run was on the
-old `origin/main`, so every merged lane is verified only on this Mac.
+Superseded 2026-08-31. The 140-commit backlog was pushed and CI ran **green on
+both jobs**, which is the first Linux verification this work had. The `python`
+job had been red for five days; the fix (declaring Pillow) was among the
+commits and is now proven rather than assumed.
 
-**And CI was already red.** The `python` job has failed on every run for five
-days — the documented cause being `tools/test_gen_mark.py` importing Pillow,
-which the root job did not install. **That fix is now in `main`**
-(`pyproject.toml:22` declares `pillow>=10`), but it arrived on a merged branch
-and has never run on Linux. So "CI is red" describes `origin/main`, and whether
-the fix works is untested.
-
-Push before believing any of it: the first CI run after a push is the first
-Linux verification these 136 commits have had.
+The standing point survives the update: **local green says nothing about
+Linux.** Push and let CI run before believing a suite count.
 
 ## 9. Test suites that do NOT run in a normal invocation
 
@@ -160,24 +152,15 @@ no real capture) and **delete them afterwards** — `next build` copies
 present and intact (verified) — the guard CLAUDE.md describes is real, the
 path it implies is not.
 
-## 11. Registry — cleaned, and the rollback path is gone
+## 11. Registry
 
-Three `perception-obj` versions remain, which is the documented steady state:
+Three images in `thegoodguest`, one per service plus the buildcache. There is
+no rollback image for any service: the new project has been deployed once, so
+until a second deploy of each there is nothing to roll back to. Recovery from
+a bad flip is a rebuild.
 
-- `c538f699` — `serving`, the live image `00074-var` boots from
-- `b21408a5` — the parked candidate `00093-pav`'s image
-- `c45098c5` — `buildcache`
-
-**There is no rollback image any more.** `faa005c8` and its
-`serving-rollback-00062-hum` hold were deleted 2026-08-31, along with two
-untagged builds. That was sanctioned by 0243 once `00074-var` was trusted, and
-it means revisions `00062-hum`, `00064-taz`, `00065-fab` and `00066-hic` can no
-longer boot — they pin an image that is gone. They hold 0% traffic, so nothing
-serving is affected, but **if `00074-var` ever fails there is nothing to fall
-back to.** The cure would be a rebuild, not a rollback.
-
-The `serving` tag on `c538f699` is what stops the cleanup policy from
-reclaiming the image a scale-to-zero GPU service needs. Never delete it.
+The `serving` tag on perception's image is what stops the cleanup policy
+reclaiming the image a scale-to-zero GPU service boots from. Never delete it.
 
 ## How to re-derive all of this
 

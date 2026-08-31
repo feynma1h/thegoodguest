@@ -119,6 +119,14 @@ the wipe.
 
 ## What works right now
 
+**EVERY Cloud Run revision number below other than the three service headers
+refers to the RETIRED `roomstudio` project and no longer exists.** The stack
+was migrated to the `thegoodguest` project on 2026-08-31; all three services
+are at their first revision there. Read revision numbers in the narrative as
+history, and derive live state from `gcloud run services describe <svc>
+--region asia-southeast1 --project thegoodguest`.
+
+
 State, not history. Every claim here is about the live system; the story of how
 it got this way is in `docs/decisions/`. Serving revisions and suite counts were
 last verified 2026-08-20.
@@ -320,7 +328,7 @@ Suite **610**: 604 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
-### api-public — `api-public-00046-xig`, image `20260825-213937`
+### api-public — `api-public-00001-pid`, image `20260831-152649`
 
 Client-facing, `--allow-unauthenticated`, with in-app Firebase JWT verification
 as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
@@ -352,7 +360,7 @@ The guest has hands but not coordinates (0132): `propose`, `revert`, and `turn`
 carry no numeric field anywhere. A server-side solver owns geometry and refuses
 when it cannot ground an instruction.
 
-### api-internal — `api-internal-00023-mek`
+### api-internal — `api-internal-00001-hat`, image `20260831-144728`
 
 `--no-allow-unauthenticated`, Cloud Run IAM gated. Hosts `/ingest/eventarc` and
 nothing else. Validates in order: `schema_version`, bundle_id cross-check
@@ -362,7 +370,7 @@ declared-blob presence (0105). A rejection is a `failed_invalid` or
 Terminal-failure scenes are stamped with `expire_at`; revival clears it; `ready`
 is never stamped.
 
-### perception-obj — `perception-obj-00074-var`, image `sha256:c538f699…`
+### perception-obj — `perception-obj-00001-dw6`, image `20260831-160150`
 
 **Serving 100%, carrying both ruled-on flags** (flipped 2026-08-25, 0243;
 re-verified from `gcloud` 2026-08-25). `perception-obj-00074-var` pins
