@@ -114,6 +114,17 @@ has no sound at all; branded faces fall back to system. Asset-shaped, not
 code-shaped.
 **Check:** manual — asset delivery.
 
+### G2-05 · The phone can send an FCM token and has never had one
+**State:** open
+The wire is finished on both sides: `/upload_session` accepts `fcm_token` and
+threads it through to the notifiers, and `UploadSessionClient` carries an
+`fcmToken` parameter. Nothing fills it — there is no `FirebaseMessaging` import
+and no `registerForRemoteNotifications` call anywhere in `ios/`, so the parameter
+defaults to nil on every call. Until the phone registers, a room that finishes
+while the app is closed is announced to nobody, and the Live Activity's frozen
+count (0114) has no remedy.
+**Check:** automated — iOS registers for FCM and passes a non-nil token.
+
 ---
 
 ## Gate 3 — what users are told must be true
@@ -259,6 +270,29 @@ the reset. Success is `reclaim_stale` with no preceding `release_error`, then a
 clean `ready` or `failed`.
 **Check:** manual — needs a fresh capture and a `--no-reset` dispatch path.
 
+### G4-11 · A stale re-mint is fatal where one forced re-mint would do
+**State:** open
+`remint_returned_stale_uris` is a fatal for the upload, and it predates
+`force_remint` (0116), which is now serving and vends fresh URIs for a consumed
+session. The fix is to convert the fatal into ONE forced re-mint before giving
+up. This is smaller than and separate from the `.recoverable` coordinator, and
+is easy to assume that work already covers. (0049, item 1)
+**Check:** manual — `grep -rn remint_returned_stale_uris ios/` should show one
+forced re-mint before the fatal, not a bare fatal.
+
+### G4-12 · Two IAM leftovers from the launch-hardening audit
+**State:** open · operator's, both one-liners
+The audit flagged a `firebase-adminsdk-fbsvc` tokenCreator grant and recommended
+revoke plus re-grant-per-walk; it has not been actioned. Separately the
+pre-split `api-runtime@` service account and its captures binding still exist
+and are unused — perception-obj runs as `perception-obj-runtime@` (0090). The
+commands are in the note. (0088)
+**Check:** manual — `gcloud iam service-accounts get-iam-policy` on
+`firebase-adminsdk-fbsvc@`, and `gcloud iam service-accounts list` for
+`api-runtime@`.
+
+---
+
 ## Gate 5 — finished against the thesis, not against the backlog
 
 Gates 1–4 produce a shippable product. This gate is where "finished" becomes a
@@ -292,6 +326,26 @@ Android and no-iPhone users have no route in. Deliberately deferred until the iO
 path was solid — which, after the 2026-08-25 device verification, it now is, so
 the stated precondition has been met and this is a live choice again.
 **Check:** manual.
+
+### G5-05 · The guest is restricted to a longest dimension
+**State:** open
+`scene_facts` lets the guest state only an object's longest dimension. The
+reason originally given — that the extent triple is descending-sorted and its
+axis semantics unrecoverable — was refuted by measurement, and `extent_axes_m`
+now declares the up axis per box (0143). The RESTRICTION still stands anyway,
+because changing what the guest may SAY is 0096's call and needs a
+`FACTS_VERSION` bump and its own voice evals. Sizes, comparisons and clearance
+lower bounds already ship; this is the remaining half.
+**Check:** manual — needs a ruling, then evals.
+
+### G5-06 · The furniture catalog's re-open trigger has fired
+**State:** open · direction, not commitment
+0133 deferred the catalog and named the `i_up` chain as its re-open trigger.
+That chain is closed end to end: perception declares the up axis (0143) and the
+guest speaks a measured height and footprint from it (0178, 0184). Nothing has
+scheduled the catalog since, which is the same way the conversational-redesign
+layer became a sub-clause. Belongs under G5-03's ruling.
+**Check:** manual — operator.
 
 ---
 
@@ -377,3 +431,14 @@ planar objects are ~90°-ambiguous and no instrument scores in-plane orientation
 The parked flags — object-aware residue, conditional second arm, visibility veto —
 are measured and deliberately off.
 **Check:** manual.
+
+### G6-07 · Frame coverage is one-capture-calibrated and its trigger has fired
+**State:** open
+0062 chose a deterministic pose-diverse sampler with the budget as the
+guarantee, and named its own re-open condition: real rooms under-covering at the
+default frame count means raise the default or make it adaptive. That evidence
+now exists — `b667f891` carries a 53-item census tail and 17 of 22 objects came
+back `insufficient_observations`. The knobs are still described as
+"one-capture-calibrated", which reads as posture rather than as a fired trigger.
+Entangled with GPU cost, so it is a sizing decision rather than a code change.
+**Check:** manual — needs a cost estimate per room before a number.
