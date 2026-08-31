@@ -46,7 +46,7 @@ import mask_refine  # noqa: E402
 import process_receiver  # noqa: E402
 from process_receiver import run_perception  # noqa: E402
 from roomplan_room import parse_captured_room  # noqa: E402
-from roomstudio_schemas import (  # noqa: E402
+from thegoodguest_schemas import (  # noqa: E402
     LIDAR_ROOMPLAN,
     SCHEMA_VERSION,
     CaptureBundle,

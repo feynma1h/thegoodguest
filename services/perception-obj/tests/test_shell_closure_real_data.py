@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from roomstudio_schemas import CaptureBundle
+from thegoodguest_schemas import CaptureBundle
 from shell_geometry import assemble_shell, close_shell
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "scene_f3d70236" / "bundle.pb"

@@ -227,14 +227,14 @@ def quat_average(quats: "list[QuatXYZW] | tuple[QuatXYZW, ...]") -> QuatXYZW:
 # -----------------------------------------------------------------------------
 
 def pose_quat(pose) -> QuatXYZW:
-    """Extract the quaternion from a roomstudio_schemas.Pose protobuf as a
+    """Extract the quaternion from a thegoodguest_schemas.Pose protobuf as a
     plain tuple. Keeps consumer code free of the (pose.quat_x, pose.quat_y, ...)
     boilerplate."""
     return pose.quat_x, pose.quat_y, pose.quat_z, pose.quat_w
 
 
 def pose_position(pose) -> np.ndarray:
-    """Extract the position from a roomstudio_schemas.Pose protobuf as a
+    """Extract the position from a thegoodguest_schemas.Pose protobuf as a
     numpy array."""
     return np.array([pose.pos_x, pose.pos_y, pose.pos_z], dtype=np.float64)
 

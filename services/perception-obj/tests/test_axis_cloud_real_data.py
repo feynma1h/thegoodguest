@@ -111,7 +111,7 @@ class FixtureCtx:
             return z["mask"].astype(bool)
 
     def evidence_for(self, frame_index, mask_index):
-        from roomstudio_schemas.placement_math import prepare_mask
+        from thegoodguest_schemas.placement_math import prepare_mask
 
         m = self.mask_for(frame_index, mask_index)
         return None if m is None else prepare_mask(m)

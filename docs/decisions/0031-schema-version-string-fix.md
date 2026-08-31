@@ -20,7 +20,7 @@ correctness question about what the version field is supposed to mean.
 
 ## What we chose
 
-Standardize on `"1"`. `SCHEMA_VERSION` in `packages/schemas/roomstudio_schemas/__init__.py`
+Standardize on `"1"`. `SCHEMA_VERSION` in `packages/schemas/thegoodguest_schemas/__init__.py`
 and `SUPPORTED_VERSIONS` in `services/api-internal/validation.py` both set to
 `"1"`. `"1.0.0"` is not carried in the accepted set.
 

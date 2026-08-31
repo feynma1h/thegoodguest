@@ -23,14 +23,14 @@
 # wheel matches SAM 3D's pinned commit exactly.
 #
 # DEPENDENCY NOTE — protobuf version conflict (same issue as services/api/):
-#   roomstudio-schemas requires protobuf>=7.35.0 (enforced by
+#   thegoodguest-schemas requires protobuf>=7.35.0 (enforced by
 #   ValidateProtobufRuntimeVersion in the generated pb2 file).
 #   google-cloud-firestore (via proto-plus 1.x) declares protobuf<7.0.0dev.
 #   These constraints are mutually exclusive in a single pip resolve.
 #
 #   Workaround (identical to services/api/Dockerfile, see docs/decisions/0005):
 #   install google-cloud-* first (gets protobuf 6.x), then force-reinstall
-#   protobuf>=7.35.0 before installing roomstudio-schemas.  --no-deps prevents
+#   protobuf>=7.35.0 before installing thegoodguest-schemas.  --no-deps prevents
 #   pip from re-resolving proto-plus's constraint on the upgrade step.
 
 FROM condaforge/mambaforge:24.7.1-0
@@ -222,8 +222,8 @@ RUN pip install \
         "firebase-admin>=6.0,<7.0" \
         "anthropic>=0.100,<1.0"
 
-# ── App-level deps: Layer B — protobuf upgrade + roomstudio-schemas ──────────
-# Force-reinstall protobuf to >=7.35.0 BEFORE installing roomstudio-schemas so
+# ── App-level deps: Layer B — protobuf upgrade + thegoodguest-schemas ──────────
+# Force-reinstall protobuf to >=7.35.0 BEFORE installing thegoodguest-schemas so
 # that ValidateProtobufRuntimeVersion in capture_bundle_pb2.py succeeds.
 # --no-deps prevents pip from re-resolving proto-plus's protobuf constraint
 # (which would downgrade again).  See docs/decisions/0005.
@@ -278,7 +278,7 @@ COPY services/perception-obj/track_receiver.py /app/track_receiver.py
 # the single deliberate omission — uvicorn imports it at start, so a
 # missing server.py never reaches a probe to fool.
 #
-# (Light imports only — numpy + roomstudio_schemas; no torch, no model
+# (Light imports only — numpy + thegoodguest_schemas; no torch, no model
 # weights. process_receiver holds its heavy stack behind function-scoped
 # imports, so it stays inside that budget.) `anthropic` is on the line
 # because shell_material defers it: a missing pip install would not crash —

@@ -1,4 +1,4 @@
-"""Tests for roomstudio_api_core.test_fixtures.capture_bundle.
+"""Tests for thegoodguest_api_core.test_fixtures.capture_bundle.
 
 Pins the invariants of build_capture_bundle — the blob set, the proto
 structure, and the validation contract — so that smoke-tool changes
@@ -9,7 +9,7 @@ Run from repo root:
 """
 from __future__ import annotations
 
-from roomstudio_api_core.test_fixtures.capture_bundle import (
+from thegoodguest_api_core.test_fixtures.capture_bundle import (
     TestBundleArtifacts,
     build_capture_bundle,
     TIER_ARKIT_ONLY,
@@ -124,28 +124,28 @@ class TestLidarRoomplanBlobs:
 
 class TestBundlePbValidity:
     def test_bundle_pb_deserializes(self):
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
         arts = build_capture_bundle(tier=TIER_LIDAR_ROOMPLAN, frame_count=2)
         b = CaptureBundle()
         b.ParseFromString(arts.blobs["bundle.pb"])
         assert b.bundle_id == arts.bundle_id
 
     def test_arkit_only_passes_validation(self):
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
         arts = build_capture_bundle(tier=TIER_ARKIT_ONLY, frame_count=2)
         b = CaptureBundle()
         b.ParseFromString(arts.blobs["bundle.pb"])
         assert validate_bundle(b) is None
 
     def test_lidar_arkit_passes_validation(self):
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
         arts = build_capture_bundle(tier=TIER_LIDAR_ARKIT, frame_count=2)
         b = CaptureBundle()
         b.ParseFromString(arts.blobs["bundle.pb"])
         assert validate_bundle(b) is None
 
     def test_lidar_roomplan_passes_validation(self):
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
         arts = build_capture_bundle(tier=TIER_LIDAR_ROOMPLAN, frame_count=2)
         b = CaptureBundle()
         b.ParseFromString(arts.blobs["bundle.pb"])
@@ -153,7 +153,7 @@ class TestBundlePbValidity:
 
     def test_all_bundle_paths_are_in_blobs(self):
         """Every path referenced in the proto must have a corresponding blob entry."""
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
         arts = build_capture_bundle(tier=TIER_LIDAR_ROOMPLAN, frame_count=2)
         b = CaptureBundle()
         b.ParseFromString(arts.blobs["bundle.pb"])
@@ -177,7 +177,7 @@ class TestBundlePbValidity:
             assert path in arts.blobs, f"Proto references {path!r} but it is not in blobs"
 
     def test_hardware_id_fallback(self):
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
         arts = build_capture_bundle(
             tier=TIER_ARKIT_ONLY, frame_count=1,
             device_id="hw-id-123",
@@ -189,7 +189,7 @@ class TestBundlePbValidity:
         assert b.device.device_id == ""
 
     def test_user_id_round_trips(self):
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
         arts = build_capture_bundle(
             tier=TIER_ARKIT_ONLY, frame_count=1, user_id="firebase-uid-xyz"
         )
@@ -206,7 +206,7 @@ class TestPlaneAnchors:
     def test_default_has_no_plane_anchors(self):
         """The default mirrors pre-plane clients — the shell's honest
         'unavailable' degrade path starts from an empty list."""
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
         arts = build_capture_bundle(tier=TIER_ARKIT_ONLY, frame_count=1)
         b = CaptureBundle()
         b.ParseFromString(arts.blobs["bundle.pb"])
@@ -219,7 +219,7 @@ class TestPlaneAnchors:
         through the real validate_bundle)."""
         import math
 
-        from roomstudio_schemas import (
+        from thegoodguest_schemas import (
             PLANE_HORIZONTAL,
             PLANE_VERTICAL,
             CaptureBundle,
@@ -258,7 +258,7 @@ class TestRoomPlanModel:
         precedent)."""
         import json
 
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
 
         arts = build_capture_bundle(tier=TIER_LIDAR_ROOMPLAN, frame_count=1)
         b = CaptureBundle()
@@ -278,7 +278,7 @@ class TestRoomPlanModel:
         """Absence is clean on the other tiers: no room_plan field, and the
         bundle still validates — the degrade contract starts from HasField
         being False, never from a half-populated message."""
-        from roomstudio_schemas import CaptureBundle
+        from thegoodguest_schemas import CaptureBundle
 
         for tier in (TIER_ARKIT_ONLY, TIER_LIDAR_ARKIT):
             arts = build_capture_bundle(tier=tier, frame_count=1)

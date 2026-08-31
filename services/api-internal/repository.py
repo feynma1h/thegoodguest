@@ -8,7 +8,7 @@ Defines the SceneRepository interface and two implementations:
                              module is safe to import in test environments
                              without GCP credentials or the library installed.
 
-SceneRepository extends roomstudio_api_core.scene_read_repo.SceneReadRepository,
+SceneRepository extends thegoodguest_api_core.scene_read_repo.SceneReadRepository,
 adding write methods (create, update_status). api-public only receives the read
 interface; api-internal gets the full read+write interface.
 
@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from scene import Scene, SceneStatus, validate_transition
-from roomstudio_api_core.scene_read_repo import (
+from thegoodguest_api_core.scene_read_repo import (
     FirestoreSceneReadRepository,
     InMemorySceneReadRepository,
     SceneNotFoundError,  # re-exported; callers may import from here or api-core

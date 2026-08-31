@@ -76,8 +76,8 @@ logger = logging.getLogger(__name__)
 # exists, so a rename there cannot silently desync this module. `conversations`
 # / `turns` are api-public's own (conversation_repo).
 from design_spec import FirestoreDesignSpecRepository
-from roomstudio_api_core.scene_read_repo import FirestoreSceneReadRepository
-from roomstudio_api_core.upload_session_repo import FirestoreUploadSessionRepository
+from thegoodguest_api_core.scene_read_repo import FirestoreSceneReadRepository
+from thegoodguest_api_core.upload_session_repo import FirestoreUploadSessionRepository
 
 SCENES_COLLECTION = FirestoreSceneReadRepository.COLLECTION
 UPLOAD_SESSIONS_COLLECTION = FirestoreUploadSessionRepository.COLLECTION

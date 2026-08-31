@@ -51,7 +51,7 @@ if str(_schemas_path) not in sys.path:
 
 import mask_refine  # noqa: E402
 from roomplan_room import RoomPlanBox, RoomPlanSurface  # noqa: E402
-from roomstudio_schemas import capture_bundle_pb2  # noqa: E402
+from thegoodguest_schemas import capture_bundle_pb2  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mask_refine"
 INDEX = json.loads((FIXTURES / "index.json").read_text())

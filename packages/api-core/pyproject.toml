@@ -1,5 +1,5 @@
 [project]
-name = "roomstudio-api-core"
+name = "thegoodguest-api-core"
 version = "0.1.0"
 description = "Shared logic for roomstudio API services — upload session repository and GCS resumable URI minting"
 requires-python = ">=3.11"
@@ -20,4 +20,4 @@ dev = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-# No packages = line needed: setuptools finds roomstudio_api_core/ automatically.
+# No packages = line needed: setuptools finds thegoodguest_api_core/ automatically.

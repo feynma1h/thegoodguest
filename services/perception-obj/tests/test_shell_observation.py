@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 import shell_observation
 from room_planes import ShellPlaneGeom
-from roomstudio_schemas import Intrinsics, Pose
+from thegoodguest_schemas import Intrinsics, Pose
 from shell_observation import FrameSample, observe_plane
 
 # ---------------------------------------------------------------------------

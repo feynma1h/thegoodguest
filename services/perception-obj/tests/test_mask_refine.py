@@ -23,7 +23,7 @@ if str(_schemas_path) not in sys.path:
     sys.path.insert(0, str(_schemas_path))
 
 import mask_refine  # noqa: E402
-from roomstudio_schemas import capture_bundle_pb2  # noqa: E402
+from thegoodguest_schemas import capture_bundle_pb2  # noqa: E402
 
 
 def _stack(*masks: np.ndarray) -> np.ndarray:

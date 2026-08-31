@@ -53,7 +53,7 @@ Task:        Build the bundle ingester FastAPI route.
 Constraints: New code in services/api-internal/ only. Don't modify
              perception-obj or perception-geom. Don't touch packages/schemas.
 Contract:    Accepts a bundle by GCS URI, parses with
-             roomstudio_schemas.CaptureBundle, validates schema_version,
+             thegoodguest_schemas.CaptureBundle, validates schema_version,
              quaternion norms (< 1e-3), and tier-vs-depth consistency.
              Returns 400 on validation failure with a structured error.
 Verify by:   Running the route locally against outputs/test_bundle/bundle.pb

@@ -349,7 +349,7 @@ def test_sign_flag_bed_true_rotation_beats_identity_twin(refined_objects):
     pose, intr = _get_camera(116)
     mask = _load_mask_stack(116)[1]
 
-    from roomstudio_schemas.pose_math import pose_quat, quat_to_rotmat
+    from thegoodguest_schemas.pose_math import pose_quat, quat_to_rotmat
 
     R_wc = quat_to_rotmat(pose_quat(pose))
     view_dir_world = R_wc @ np.array([0.0, 0.0, -1.0])

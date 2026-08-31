@@ -32,7 +32,7 @@ PUT must NOT set `Content-Type`. No chunk-size rule for a complete single-shot P
    recon status table omitted it.
 
 3. `failed_incomplete` as a term is verified: `SceneStatus.FAILED_INCOMPLETE = "failed_incomplete"`
-   in `packages/api-core/roomstudio_api_core/scene.py`; `_handle_failed_incomplete` in the
+   in `packages/api-core/thegoodguest_api_core/scene.py`; `_handle_failed_incomplete` in the
    ingest handler creates/updates to that state when referenced blobs are absent at
    existence-check time. Confirmed correct; not a guess.
 

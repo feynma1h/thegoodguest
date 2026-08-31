@@ -1,7 +1,7 @@
 """Path setup for tools/ tests.
 
 Adds tools/, api-core, and schemas to sys.path so that test files can import
-upload_test_bundle, smoke_test_e2e, and roomstudio_api_core without
+upload_test_bundle, smoke_test_e2e, and thegoodguest_api_core without
 installing packages.
 """
 

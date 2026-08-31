@@ -1,4 +1,4 @@
-"""Unit tests for roomstudio_api_core.scene_read_repo.
+"""Unit tests for thegoodguest_api_core.scene_read_repo.
 
 Tests the module directly — no FastAPI, no HTTP, no GCP credentials.
 
@@ -27,8 +27,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from roomstudio_api_core.scene import Scene, SceneStatus
-from roomstudio_api_core.scene_read_repo import InMemorySceneReadRepository, SceneNotFoundError
+from thegoodguest_api_core.scene import Scene, SceneStatus
+from thegoodguest_api_core.scene_read_repo import InMemorySceneReadRepository, SceneNotFoundError
 
 
 # ---------------------------------------------------------------------------

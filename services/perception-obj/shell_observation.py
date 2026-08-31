@@ -57,7 +57,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from room_planes import ShellPlaneGeom
-from roomstudio_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
+from thegoodguest_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
 
 # ---------------------------------------------------------------------------
 # Tunables (env-overridable)
@@ -108,8 +108,8 @@ class FrameSample:
     frame_index: int
     rgb: np.ndarray  # (H, W, 3) uint8
     exclusion_mask: np.ndarray  # (H, W) bool
-    pose: object  # roomstudio_schemas.Pose (world_from_camera)
-    intrinsics: object  # roomstudio_schemas.Intrinsics
+    pose: object  # thegoodguest_schemas.Pose (world_from_camera)
+    intrinsics: object  # thegoodguest_schemas.Intrinsics
     suppressed_mask: np.ndarray | None = None  # (H, W) bool
 
 

@@ -22,13 +22,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-# roomstudio_schemas lives at packages/schemas; add to sys.path if not already present.
+# thegoodguest_schemas lives at packages/schemas; add to sys.path if not already present.
 _repo_root = Path(__file__).resolve().parents[4]
 _schemas_dir = str(_repo_root / "packages" / "schemas")
 if _schemas_dir not in sys.path:
     sys.path.insert(0, _schemas_dir)
 
-from roomstudio_schemas import (  # noqa: E402
+from thegoodguest_schemas import (  # noqa: E402
     ARKIT_ONLY,
     LIDAR_ARKIT,
     LIDAR_ROOMPLAN,

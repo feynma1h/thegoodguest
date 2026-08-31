@@ -317,7 +317,7 @@ and that is the form the draft's own two examples already take.
 ### 5.1 The hole at the bottom
 
 **Nothing in the system links two scans of the same physical room.** The `Scene`
-model (`packages/api-core/roomstudio_api_core/scene.py`) carries `scene_id`,
+model (`packages/api-core/thegoodguest_api_core/scene.py`) carries `scene_id`,
 `device_id`, `status`, `bundle_uri`, timestamps, `result_uri`, `attempt_count`,
 `last_error`, `expire_at` — and no field that would relate one capture to
 another. None of the nine routes on api-public would set one. The only

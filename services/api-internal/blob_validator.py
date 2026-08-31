@@ -31,7 +31,7 @@ import logging
 import os
 from typing import Optional
 
-from roomstudio_api_core.scene import InvalidBlobReason
+from thegoodguest_api_core.scene import InvalidBlobReason
 
 import gcs_client
 

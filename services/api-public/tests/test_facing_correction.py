@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from roomstudio_schemas.pose_math import quat_mul, quat_to_rotmat
+from thegoodguest_schemas.pose_math import quat_mul, quat_to_rotmat
 
 from design_spec import (
     DEPARTS_FROM_MEASUREMENT,

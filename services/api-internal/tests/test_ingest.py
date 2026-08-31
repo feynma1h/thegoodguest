@@ -23,7 +23,7 @@ the pre-crosscheck fixtures here used to carry a random UUID against a
 "test" URI, exactly the silent mismatch the check now catches).
 
 The GCS fetch (_fetch_bundle_bytes) is patched out in every test.
-Bundles are built in-memory using roomstudio_schemas directly — no file I/O,
+Bundles are built in-memory using thegoodguest_schemas directly — no file I/O,
 no network, no GCS credentials required.
 
 Run from repo root:
@@ -39,7 +39,7 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
-from roomstudio_schemas import (
+from thegoodguest_schemas import (
     ARKIT_ONLY,
     LIDAR_ARKIT,
     LIDAR_ROOMPLAN,
@@ -272,7 +272,7 @@ def test_unsupported_schema_version_creates_failed_invalid_scene(client: TestCli
     rejection via GET /scenes/by-bundle/{bundle_id} polling (the iOS path
     never calls /ingest directly; it uploads to GCS and polls).
     """
-    from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository
+    from thegoodguest_api_core.upload_session_repo import InMemoryUploadSessionRepository
     bundle_bytes = _make_bundle(schema_version="99.0.0")
     repo = InMemorySceneRepository()
     with (
@@ -300,7 +300,7 @@ def test_old_version_1_0_0_creates_failed_invalid_scene(client: TestClient) -> N
     Confirms the realistic rejected value (not just the synthetic '99.0.0') creates
     a pollable failed_invalid Scene with a schema-rejection last_error.
     """
-    from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository
+    from thegoodguest_api_core.upload_session_repo import InMemoryUploadSessionRepository
     bundle_bytes = _make_bundle(schema_version="1.0.0")
     repo = InMemorySceneRepository()
     with (
@@ -402,7 +402,7 @@ def test_depth_on_arkit_only_tier_creates_failed_invalid_scene(client: TestClien
     trigger the tier-vs-depth consistency check. Returns 200 + Scene (not 400)
     for the same reason as schema rejection: iOS clients poll, not call /ingest.
     """
-    from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository
+    from thegoodguest_api_core.upload_session_repo import InMemoryUploadSessionRepository
     bundle_bytes = _make_bundle(frame_count=1, add_depth=True, tier=ARKIT_ONLY)
     repo = InMemorySceneRepository()
     with (
@@ -761,4 +761,4 @@ class TestBlobValidationGate:
 
 
 # Import needed for TestBlobValidationGate
-from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402
+from thegoodguest_api_core.upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402

@@ -44,12 +44,12 @@ import fusion
 import numpy as np
 import pytest
 import roomplan_room as rr
-from roomstudio_schemas.placement_math import (
+from thegoodguest_schemas.placement_math import (
     minimal_rotation,
     project_points,
     robust_cloud_stats,
 )
-from roomstudio_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
+from thegoodguest_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "roomplan_spike" / "captured_room_built.json"
 

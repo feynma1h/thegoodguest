@@ -23,7 +23,7 @@ dependencies = [
     "google-auth>=2.0,<3.0",
     "google-cloud-firestore>=2.14,<3.0",
     "firebase-admin>=6.0,<7.0",
-    "roomstudio-schemas",
+    "thegoodguest-schemas",
 ]
 
 [project.optional-dependencies]

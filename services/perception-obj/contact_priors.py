@@ -15,7 +15,7 @@ object touches the measured room.
     wall's measured normal orients it.
 
 The geometry of each closure is pure math in
-roomstudio_schemas.placement_math (solve_floor_contact / solve_wall_contact,
+thegoodguest_schemas.placement_math (solve_floor_contact / solve_wall_contact,
 unit-tested against synthetic ground truth). This module holds the POLICY
 around it: which object classes are trusted to touch which surface (a
 conservative, env-overridable class map — ambiguous classes like `table
@@ -44,12 +44,12 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import room_planes as rp
-from roomstudio_schemas.placement_math import (
+from thegoodguest_schemas.placement_math import (
     DegenerateGeometryError,
     solve_floor_contact,
     solve_wall_contact,
 )
-from roomstudio_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
+from thegoodguest_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
 
 # ---------------------------------------------------------------------------
 # Class -> prior map (decision 0067 lock 5). Conservative buckets over the

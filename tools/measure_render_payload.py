@@ -121,7 +121,7 @@ def measure_waste(objects: list[dict], splat_dir: Path) -> dict:
     import numpy as np
 
     # Quaternion math lives in one place (CLAUDE.md); never re-implement it.
-    from roomstudio_schemas.pose_math import quat_to_rotmat  # type: ignore
+    from thegoodguest_schemas.pose_math import quat_to_rotmat  # type: ignore
 
     tot = clipped = faint = 0
     tot_bytes = waste_bytes = 0.0

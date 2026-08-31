@@ -16,8 +16,8 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages/schemas"))
-from roomstudio_schemas import CaptureBundle, CaptureTier  # noqa: E402
-from roomstudio_schemas.pose_math import (  # noqa: E402
+from thegoodguest_schemas import CaptureBundle, CaptureTier  # noqa: E402
+from thegoodguest_schemas.pose_math import (  # noqa: E402
     conjugate_quat,
     pose_position,
     pose_quat,

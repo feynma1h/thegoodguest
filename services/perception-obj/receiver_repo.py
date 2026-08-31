@@ -12,14 +12,14 @@ writes on the ingest side):
 `lease_expires_at` is an implementation detail of the receiver. It lives in
 the Firestore document alongside the standard Scene fields (written by the
 ingester) but is not part of the Scene domain model in
-packages/api-core/roomstudio_api_core/scene.py.
+packages/api-core/thegoodguest_api_core/scene.py.
 
 The receiver drives the queued→processing→ready|failed arc.
 The ingester owns failed→queued (manual retry). The receiver treats `failed`
 on entry as a bug (per 0004) and 200-exits without clobbering state.
 
 Status strings match the SceneStatus enum values in
-packages/api-core/roomstudio_api_core/scene.py (re-exported from
+packages/api-core/thegoodguest_api_core/scene.py (re-exported from
 services/api-internal/scene.py):
   "queued" / "processing" / "ready" / "failed"
 

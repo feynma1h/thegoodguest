@@ -7,7 +7,7 @@
 
 The ingest validation gate (board item 1) introduced a new terminal `SceneStatus` member —
 `failed_invalid` — written by `api-internal` and read by `api-public`. Both services share
-`SceneStatus` via `packages/api-core/roomstudio_api_core/scene.py`, but are deployed
+`SceneStatus` via `packages/api-core/thegoodguest_api_core/scene.py`, but are deployed
 independently on Cloud Run.
 
 ## What we tried
@@ -21,7 +21,7 @@ ValueError: 'failed_invalid' is not a valid SceneStatus
 ```
 
 The api-public image was built from an older HEAD where the member did not yet exist in
-`packages/api-core/roomstudio_api_core/scene.py`. The deserialization call
+`packages/api-core/thegoodguest_api_core/scene.py`. The deserialization call
 `SceneStatus(data["status"])` raises `ValueError` on any unknown member. The new member and
 the gate handler were introduced together in the same commit (`f1edf4a`), so rebuilding
 api-public from current HEAD was sufficient to fix both images in one step.

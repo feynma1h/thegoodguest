@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 import sampling
 from roomplan_room import RoomPlanBox, parse_captured_room
-from roomstudio_schemas import CaptureBundle
+from thegoodguest_schemas import CaptureBundle
 
 SPIKE_ROOM_JSON = (
     Path(__file__).resolve().parent / "fixtures" / "roomplan_spike"

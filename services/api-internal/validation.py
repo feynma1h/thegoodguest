@@ -122,7 +122,7 @@ def _check_device_id(bundle) -> tuple[str, str] | None:
 
 
 def _check_quaternion_norms(bundle) -> tuple[str, str] | None:
-    from roomstudio_schemas.pose_math import quat_norm, pose_quat
+    from thegoodguest_schemas.pose_math import quat_norm, pose_quat
 
     for frame in bundle.frames:
         q = pose_quat(frame.camera_pose)
@@ -137,7 +137,7 @@ def _check_quaternion_norms(bundle) -> tuple[str, str] | None:
 
 
 def _check_tier_depth_consistency(bundle) -> tuple[str, str] | None:
-    from roomstudio_schemas import LIDAR_ARKIT, LIDAR_ROOMPLAN
+    from thegoodguest_schemas import LIDAR_ARKIT, LIDAR_ROOMPLAN
 
     lidar_tiers = {LIDAR_ARKIT, LIDAR_ROOMPLAN}
     for frame in bundle.frames:
@@ -193,6 +193,6 @@ def _check_gcs_paths_relative(bundle) -> tuple[str, str] | None:
 
 
 def _tier_name(tier_value: int) -> str:
-    from roomstudio_schemas import CaptureTier
+    from thegoodguest_schemas import CaptureTier
 
     return CaptureTier.Name(tier_value)

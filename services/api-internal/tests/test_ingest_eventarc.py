@@ -37,7 +37,7 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 from fastapi.testclient import TestClient
 
-from roomstudio_schemas import (
+from thegoodguest_schemas import (
     ARKIT_ONLY,
     LIDAR_ARKIT,
     LIDAR_ROOMPLAN,
@@ -50,7 +50,7 @@ from repository import InMemorySceneRepository  # noqa: E402
 from dispatcher import InMemoryTaskDispatcher  # noqa: E402
 from scene import SceneStatus  # noqa: E402
 from fcm import NullFcmNotifier  # noqa: E402
-from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402
+from thegoodguest_api_core.upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

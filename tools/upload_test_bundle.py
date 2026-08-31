@@ -72,7 +72,7 @@ for _pkg in ("packages/schemas", "packages/api-core"):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from roomstudio_api_core.test_fixtures.capture_bundle import (  # noqa: E402
+from thegoodguest_api_core.test_fixtures.capture_bundle import (  # noqa: E402
     TestBundleArtifacts,
     build_capture_bundle,
     TIER_ARKIT_ONLY,

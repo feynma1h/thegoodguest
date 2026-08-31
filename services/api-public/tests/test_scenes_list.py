@@ -25,8 +25,8 @@ from fastapi.testclient import TestClient
 
 import public_server as server
 from auth import NullTokenVerifier  # noqa: E402
-from roomstudio_api_core.scene import Scene, SceneStatus  # noqa: E402
-from roomstudio_api_core.scene_read_repo import InMemorySceneReadRepository  # noqa: E402
+from thegoodguest_api_core.scene import Scene, SceneStatus  # noqa: E402
+from thegoodguest_api_core.scene_read_repo import InMemorySceneReadRepository  # noqa: E402
 
 _NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 

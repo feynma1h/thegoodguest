@@ -42,7 +42,7 @@ from fastapi.testclient import TestClient
 
 import public_server as server
 from auth import NullTokenVerifier  # noqa: E402
-from roomstudio_api_core.upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402
+from thegoodguest_api_core.upload_session_repo import InMemoryUploadSessionRepository  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ def _post_upload_session(
         patch.object(server, "_token_verifier", NullTokenVerifier()),
         patch.object(server, "_upload_session_repo", repo),
         # The endpoint's mint seam. Patching
-        # roomstudio_api_core.upload_session_repo.gcs_mint_resumable_uri here
+        # thegoodguest_api_core.upload_session_repo.gcs_mint_resumable_uri here
         # did NOT work and was the CI defect: public_server binds the function
         # by from-import at module load, so rebinding the api-core module
         # attribute leaves the handler's own global pointing at the real
@@ -707,7 +707,7 @@ class TestUploadSessionNeedsNoCredentials:
         """
         import google.auth
         from google.auth.exceptions import DefaultCredentialsError
-        from roomstudio_api_core import upload_session_repo as usr
+        from thegoodguest_api_core import upload_session_repo as usr
 
         def _no_credentials_anywhere(scopes=None):
             raise DefaultCredentialsError("no ADC (simulated CI runner)")

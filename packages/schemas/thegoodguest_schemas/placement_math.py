@@ -36,7 +36,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from roomstudio_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
+from thegoodguest_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
 
 # Below this many points a cloud is too sparse for a trustworthy fit; the
 # caller should mark the object unplaced rather than fit garbage.

@@ -5,8 +5,8 @@
 
 ## Context
 
-`process_receiver.py` imports `CaptureBundle` from `roomstudio_schemas`, but
-when the file was written `roomstudio-schemas` was not installed as a pip
+`process_receiver.py` imports `CaptureBundle` from `thegoodguest_schemas`, but
+when the file was written `thegoodguest-schemas` was not installed as a pip
 package in the perception-obj container — it was only available as source in
 the repo. To work around this the file inserted `packages/schemas/` into
 `sys.path` at import time:
@@ -45,12 +45,12 @@ Run startup probe never gets a TCP connection, and the deploy rolls back.
 
 ## What we chose
 
-Install `roomstudio-schemas` as a proper pip package in the container image,
+Install `thegoodguest-schemas` as a proper pip package in the container image,
 using the same two-stage 0005 protobuf workaround already applied in
 `services/api/Dockerfile` (that service was later split into api-internal and
 api-public, which both still build this way). Remove the `sys.path` manipulation and the now-
 unused `sys` and `Path` imports. The import becomes a straightforward
-top-level `from roomstudio_schemas import CaptureBundle`.
+top-level `from thegoodguest_schemas import CaptureBundle`.
 
 This required switching the perception-obj Cloud Build context from the
 service directory (`services/perception-obj/`) to the repo root, so that
@@ -73,8 +73,8 @@ api-public, which both still build this way) and adds negligible complexity.
 
 ## What would change this decision
 
-If `roomstudio-schemas` were published to PyPI, the `COPY packages/schemas/`
+If `thegoodguest-schemas` were published to PyPI, the `COPY packages/schemas/`
 + local `pip install` could be replaced with a simple versioned
-`pip install roomstudio-schemas==X.Y.Z`. The repo-root build context would
+`pip install thegoodguest-schemas==X.Y.Z`. The repo-root build context would
 remain the right choice (it also covers `COPY services/perception-obj/…`
 paths), but the schemas COPY layer could be dropped.

@@ -23,7 +23,7 @@ import numpy as np
 import pytest
 
 import placement
-from roomstudio_schemas import CaptureBundle
+from thegoodguest_schemas import CaptureBundle
 
 
 # -----------------------------------------------------------------------------

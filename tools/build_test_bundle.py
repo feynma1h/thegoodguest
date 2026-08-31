@@ -54,12 +54,12 @@ except ImportError:
 # Make the schemas package importable without installing it. In production
 # this is `pip install -e packages/schemas`.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages/schemas"))
-from roomstudio_schemas import (  # noqa: E402
+from thegoodguest_schemas import (  # noqa: E402
     ARKIT_ONLY,
     CaptureBundle,
     SCHEMA_VERSION,
 )
-from roomstudio_schemas.pose_math import (  # noqa: E402
+from thegoodguest_schemas.pose_math import (  # noqa: E402
     conjugate_quat,
     rotate_vec_by_quat,
     rotmat_to_quat,

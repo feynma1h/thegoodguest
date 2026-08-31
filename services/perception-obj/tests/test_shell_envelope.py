@@ -25,7 +25,7 @@ import numpy as np
 import pytest
 import room_planes
 from room_planes import Opening, ShellPlaneGeom
-from roomstudio_schemas import CaptureBundle
+from thegoodguest_schemas import CaptureBundle
 from shell_envelope import (
     derive_envelope,
     envelope_floor_geom,

@@ -43,7 +43,7 @@ import numpy as np
 import pytest
 
 import placement
-from roomstudio_schemas.capture_bundle_pb2 import CaptureBundle
+from thegoodguest_schemas.capture_bundle_pb2 import CaptureBundle
 
 # --- Recorded real data: scene 25a14caf ------------------------------------
 # Camera pose quaternions (xyzw, ARKit world-from-camera) per frame index.
@@ -200,7 +200,7 @@ def test_layout_translations_point_at_true_centers():
     predictions, must point each source observation at its triangulated
     center (pure sign-sensitive geometry — the instrument that settled
     diag(-1,1,-1) over its identity twin)."""
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
 
     B = placement._SAM3D_CAM_TO_ARKIT_CAM
     for label, _f, cam_q, cam_p, t_layout, center in TRANSLATION_PINS:
@@ -229,7 +229,7 @@ def test_wrong_conventions_fail_the_bed(wrong_chain):
     vacuously. (0052 shipped wxyz-unconjugated + CV basis; 0063's offline
     candidate was xyzw-as-read + identity.)"""
     a, b, c, d = RAW_ROTATION[(18, 1)]
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
 
     if wrong_chain == "shipped_0052":
         q = (b, c, d, a)  # wxyz read, NOT conjugated -> xyzw

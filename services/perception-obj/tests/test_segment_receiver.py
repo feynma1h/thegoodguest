@@ -89,7 +89,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(pr, "_gcs_upload_for_scene", uploads, raising=False)
     monkeypatch.setattr(pr, "_bundle_prefix", lambda uri: "gs://caps/x/", raising=False)
     monkeypatch.setattr(
-        "roomstudio_schemas.CaptureBundle", lambda: FakeBundle(), raising=False
+        "thegoodguest_schemas.CaptureBundle", lambda: FakeBundle(), raising=False
     )
     return uploads
 

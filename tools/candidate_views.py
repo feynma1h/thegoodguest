@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.join(_HERE, "..", "packages", "schemas"))
 import box_placement as bp  # noqa: E402  (needs the sys.path lines above)
 import census_sampling as cs  # noqa: E402
 import roomplan_room  # noqa: E402
-from roomstudio_schemas import CaptureBundle  # noqa: E402
+from thegoodguest_schemas import CaptureBundle  # noqa: E402
 
 TILE_W, TILE_H = 250, 250
 COLS, PAD, HEADER, CAPTION = 7, 6, 64, 30

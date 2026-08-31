@@ -8,11 +8,11 @@ that interprets the Pose message's quaternion fields.
 
 Usage:
 
-    from roomstudio_schemas import (
+    from thegoodguest_schemas import (
         CaptureBundle, Frame, Pose, Intrinsics, Gravity, Depth,
         Device, CaptureTier, RoomPlanModel,
     )
-    from roomstudio_schemas.pose_math import (
+    from thegoodguest_schemas.pose_math import (
         rotate_vec_by_quat, conjugate_quat, rotmat_to_quat,
         pose_quat, pose_position, quat_norm,
     )

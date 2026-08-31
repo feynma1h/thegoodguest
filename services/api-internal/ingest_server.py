@@ -74,7 +74,7 @@ for _pkg in ("packages/schemas", "packages/api-core"):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from roomstudio_schemas import CaptureBundle  # noqa: E402
+from thegoodguest_schemas import CaptureBundle  # noqa: E402
 from validation import validate_bundle  # noqa: E402
 from scene import SceneStatus, new_scene  # noqa: E402
 from repository import SceneRepository, InMemorySceneRepository  # noqa: E402
@@ -82,7 +82,7 @@ import blob_validator  # noqa: E402
 import gcs_client  # noqa: E402
 from dispatcher import TaskDispatcher, InMemoryTaskDispatcher  # noqa: E402
 from fcm import FcmNotifier, NullFcmNotifier  # noqa: E402
-from roomstudio_api_core.upload_session_repo import (  # noqa: E402
+from thegoodguest_api_core.upload_session_repo import (  # noqa: E402
     UploadSessionRepository,
     InMemoryUploadSessionRepository,
 )
@@ -214,7 +214,7 @@ def _get_upload_session_repo() -> UploadSessionRepository:
     if _upload_session_repo is None:
         project = os.environ.get("FIRESTORE_PROJECT")
         if project:
-            from roomstudio_api_core.upload_session_repo import FirestoreUploadSessionRepository
+            from thegoodguest_api_core.upload_session_repo import FirestoreUploadSessionRepository
             _upload_session_repo = FirestoreUploadSessionRepository(project=project)
             logger.info("Using Firestore UploadSessionRepository")
         else:

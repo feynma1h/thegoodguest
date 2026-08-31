@@ -22,7 +22,7 @@ import shell_observation
 import shell_receiver
 from PIL import Image
 from process_receiver import EnvironmentalError, PoisonError
-from roomstudio_schemas import PLANE_HORIZONTAL, PLANE_VERTICAL, CaptureBundle
+from thegoodguest_schemas import PLANE_HORIZONTAL, PLANE_VERTICAL, CaptureBundle
 from shell_receiver import (
     ShellRequest,
     build_shell_json,

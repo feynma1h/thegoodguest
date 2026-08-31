@@ -1,4 +1,4 @@
-"""Unit tests for roomstudio_api_core.upload_session_repo.
+"""Unit tests for thegoodguest_api_core.upload_session_repo.
 
 Tests the module directly — no FastAPI, no HTTP, no GCS credentials.
 
@@ -38,7 +38,7 @@ import pytest
 
 from datetime import datetime, timezone
 
-from roomstudio_api_core.upload_session_repo import (
+from thegoodguest_api_core.upload_session_repo import (
     ForeignBundleError,
     InMemoryUploadSessionRepository,
     CaptureLimitError,
@@ -665,7 +665,7 @@ class TestForceRemintImplementationParity:
     def test_both_implementations_accept_the_same_arguments(self) -> None:
         import inspect
 
-        from roomstudio_api_core.upload_session_repo import (
+        from thegoodguest_api_core.upload_session_repo import (
             FirestoreUploadSessionRepository,
             UploadSessionRepository,
         )
@@ -685,7 +685,7 @@ class TestForceRemintImplementationParity:
         import inspect
         import textwrap
 
-        from roomstudio_api_core.upload_session_repo import (
+        from thegoodguest_api_core.upload_session_repo import (
             FirestoreUploadSessionRepository,
         )
 
@@ -748,7 +748,7 @@ class TestMintSessionCache:
         return counts
 
     def test_same_thread_constructs_one_session(self, monkeypatch) -> None:
-        from roomstudio_api_core import upload_session_repo as usr
+        from thegoodguest_api_core import upload_session_repo as usr
 
         counts = self._patch_auth(monkeypatch)
         monkeypatch.setattr(usr, "_mint_thread_local", threading.local())
@@ -760,7 +760,7 @@ class TestMintSessionCache:
         assert counts["session"] == 1
 
     def test_distinct_threads_get_distinct_sessions(self, monkeypatch) -> None:
-        from roomstudio_api_core import upload_session_repo as usr
+        from thegoodguest_api_core import upload_session_repo as usr
 
         counts = self._patch_auth(monkeypatch)
         monkeypatch.setattr(usr, "_mint_thread_local", threading.local())

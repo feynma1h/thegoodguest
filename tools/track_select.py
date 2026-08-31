@@ -35,7 +35,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, "..", "services", "perception-obj"))
 sys.path.insert(0, os.path.join(_HERE, "..", "packages", "schemas"))
 
-from roomstudio_schemas import CaptureBundle  # noqa: E402
+from thegoodguest_schemas import CaptureBundle  # noqa: E402
 from track_selection import (  # noqa: E402
     Detection,
     apply_key_map,
