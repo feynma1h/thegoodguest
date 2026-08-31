@@ -1,6 +1,6 @@
 /**
  * SceneStatus display semantics, mirroring the iOS ScenePollState
- * classification (ios/TheGoodGuestCapture/TheGoodGuestCapture/Scene/ScenePoller.swift):
+ * classification (ios/TheGoodGuest/TheGoodGuest/Scene/ScenePoller.swift):
  * in-flight states keep
  * polling, failed_incomplete is recoverable (re-upload of missing files),
  * ready/failed/failed_invalid are terminal.

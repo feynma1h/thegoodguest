@@ -26,11 +26,11 @@ missing, read directly from the SDK source at `GIDSignIn.m:740`.
   CLIENT_ID and REVERSED_CLIENT_ID — so the blocker was a stale local file,
   not missing provisioning. The same call is the programmatic equivalent of
   the console re-download and refreshed the worktree's gitignored plist.
-- **Putting the partial Info.plist inside the TheGoodGuestCapture/ synchronized
+- **Putting the partial Info.plist inside the TheGoodGuest/ synchronized
   folder** with a membership exception. Rejected: that is the exact
   "multiple commands produce Info.plist" trap the Live Activity hit (its
   exception set exists to escape it); a top-level file referenced only by
-  build setting — the TheGoodGuestCapture.entitlements precedent — avoids the
+  build setting — the TheGoodGuest.entitlements precedent — avoids the
   trap instead of managing it.
 - **Failing (vs skipping) the drift test on a stale plist.** Rejected: on a
   machine whose plist predates the OAuth client, runtime already degrades
@@ -39,7 +39,7 @@ missing, read directly from the SDK source at `GIDSignIn.m:740`.
 
 ## What we chose
 
-- `TheGoodGuestCapture-Info.plist` at the project top level, containing ONLY
+- `TheGoodGuest-Info.plist` at the project top level, containing ONLY
   `CFBundleURLTypes` with the reversed-client-ID scheme (a public identifier
   — it ships in every app bundle; the web committed its Firebase config on
   the same reasoning). Wired via `INFOPLIST_FILE` alongside
@@ -73,11 +73,11 @@ ID + redirect scheme ("Sign in to continue to roomstudio").
 ## What would change this decision
 
 - **The OAuth client is regenerated** (new client ID): the drift pin goes
-  red naming the fix — update TheGoodGuestCapture-Info.plist's scheme and
+  red naming the fix — update TheGoodGuest-Info.plist's scheme and
   re-download the plist. That is the designed failure, not a re-open.
 - **A second URL scheme joins the app** (deep links, the QR bridge's real
   handoff): CFBundleURLTypes grows a sibling entry in the same file; the
-  onOpenURL handler in TheGoodGuestCaptureApp then needs routing beyond the
+  onOpenURL handler in TheGoodGuestApp then needs routing beyond the
   unconditional GIDSignIn handoff comment it carries today.
 - **GoogleSignIn stops raising and starts throwing** on a missing scheme:
   preflight's schemeNotRegistered leg becomes defense-in-depth rather than

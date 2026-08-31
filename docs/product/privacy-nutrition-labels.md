@@ -58,7 +58,7 @@ $ grep -rniE "ASIdentifierManager|AdSupport|AppTrackingTransparency|advertisingI
 
 The linked SPM products are exactly `FirebaseCore`, `FirebaseAuth`,
 `GoogleSignIn`, `GoogleSignInSwift`, `SwiftProtobuf`
-(`ios/TheGoodGuestCapture/TheGoodGuestCapture.xcodeproj/project.pbxproj`,
+(`ios/TheGoodGuest/TheGoodGuest.xcodeproj/project.pbxproj`,
 `XCSwiftPackageProductDependency` section). `GoogleAppMeasurement` and
 `google-ads-on-device-conversion-ios-sdk` appear in `Package.resolved` because
 they are in the Firebase package graph's transitive closure; **neither is linked
@@ -481,7 +481,7 @@ its shape:
 
 ```
 httpRequest.remoteIp    "103.139.xx.xx"
-httpRequest.userAgent   "TheGoodGuestCapture/1 CFNetwork/3860.600.12 Darwin/25.5.0"
+httpRequest.userAgent   "TheGoodGuest/1 CFNetwork/3860.600.12 Darwin/25.5.0"
 httpRequest.requestUrl  ".../captures/<bundle_id>/upload_session"
 timestamp               2026-08-23T20:05:50Z
 ```
@@ -591,7 +591,7 @@ with Apple or Google."* Both scope Google to the web.
 **Google linking shipped on iOS** (decision 0118):
 `AuthManager.linkGoogleAccount`, `SignInSheet.startGoogleSignIn` with its
 preflight, the `CFBundleURLTypes` reversed-client-id scheme in
-`TheGoodGuestCapture-Info.plist`, and `GoogleSignIn` + `GoogleSignInSwift` linked
+`TheGoodGuest-Info.plist`, and `GoogleSignIn` + `GoogleSignInSwift` linked
 in the project.
 
 This matters to the labels because it changes *when* Name and Email are

@@ -5,7 +5,7 @@
 live drive all merged and deployed by 2026-08-06 (`perception-obj-00036-xer`).
 The code is `roomplan_room.py`, `shell_envelope.py`, `box_placement.py`, and
 `census_sampling.py` in perception-obj, plus the RoomPlan co-run and live floor
-plan in `ios/TheGoodGuestCapture/`. Operator walk verdicts are decision 0080.
+plan in `ios/TheGoodGuest/`. Operator walk verdicts are decision 0080.
 Supersedes the shell **geometry source** on the LIDAR_ROOMPLAN tier (0066's
 plane-anchor derivation and 0069's closure pass retire there); 0069's
 materials layer and the /shell stage architecture survive retargeted.

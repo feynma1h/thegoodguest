@@ -76,7 +76,7 @@ def check_privacy_manifest():
 
 def check_web_base_url():
     """G1-05 — NetworkConfig.webBaseURL must stop being nil."""
-    src = _read("ios/TheGoodGuestCapture/TheGoodGuestCapture/Networking/NetworkConfig.swift")
+    src = _read("ios/TheGoodGuest/TheGoodGuest/Networking/NetworkConfig.swift")
     m = re.search(r"webBaseURL\s*:\s*URL\?\s*=\s*(.+)", src)
     if not m:
         raise RuntimeError("could not find the webBaseURL declaration")

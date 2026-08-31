@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Partial Info.plist for the TheGoodGuest app target, merged into the
+  generated Info.plist at build time (GENERATE_INFOPLIST_FILE = YES +
+  INFOPLIST_FILE — the same merge the Live Activity extension relies on).
+  It exists because CFBundleURLTypes is an array-of-dicts no INFOPLIST_KEY_*
+  build setting can express.
+
+  The one URL scheme is Google Sign-In's redirect back into the app: the
+  REVERSED_CLIENT_ID of the project's iOS OAuth client (a public identifier —
+  it ships in every app bundle's Info.plist; the web committed its Firebase
+  config on the same reasoning). GoogleSignIn raises at sign-in time if this
+  scheme is missing; SignInWithGoogle.preflight checks the registration
+  against the live GoogleService-Info.plist first and refuses with a readable
+  message instead, and a test pins that the two files agree.
+
+  Kept OUTSIDE the TheGoodGuest/ synchronized folder deliberately: a
+  file named into INFOPLIST_FILE that is also swept up as a bundle resource
+  is the "multiple commands produce Info.plist" failure the Live Activity
+  needed a membership exception to escape.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.502805861152-0p9vjhaf50ecb46j2n8djg7vgrqoale6</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -181,7 +181,7 @@ terminal; `crossLaunchRetryCount` persisted and bounded.
 
 **Unit (a) built + verified in suite (commits 27672d0 + test-pin 5da5784):**
 `rehydrateAllUnfinishedBundles()` + `rehydrateBundle(bundleId:record:)` on
-`BlobUploadManager`; trigger = a `.task` modifier in `TheGoodGuestCaptureApp`
+`BlobUploadManager`; trigger = a `.task` modifier in `TheGoodGuestApp`
 (foreground/swipe-up path); record-driven (no live `CaptureManager`). On every
 launch: loads all `UploadSessionStore` records via `allBundleIds()` (scans
 `upload_sessions/` for UUID-named `.json` files), skips `uploadPhase == .failed`/
