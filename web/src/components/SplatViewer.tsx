@@ -34,6 +34,12 @@
  * timing, ordering and naming is a pure function there, pinned by tests,
  * because the pacing cannot be judged in a throttled automation browser.
  *
+ * The "Assembling the room…" notice follows the same split: lib/loadingNotice
+ * owns when it may be on screen, and this file only supplies the clock. It
+ * appears once a load has outrun the delay and then stays for a minimum, so
+ * a scene with nothing to fetch — the landing hero's zero-splat fixture —
+ * never narrates a wait it is not having.
+ *
  * Shell rendering (decisions 0069/0077): single-sided PARAMETRIC
  * surfaces — MeshStandardMaterial built from each plane's measured albedo
  * + family roughness (no textures exist in the shell contract; the bake
@@ -54,6 +60,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PositionedSplat, ShellPlane } from "@/lib/api/types";
 import { viewerYawRad } from "@/lib/clipSign";
+import { useLoadingNotice } from "@/lib/loadingNotice";
 import {
   SETTLE_DROP_M,
   SETTLE_FADE_FRACTION,
@@ -450,6 +457,8 @@ export default function SplatViewer({
       ? outcome.phase
       : "loading";
   const error = outcome?.key === key && outcome.phase === "error" ? outcome.error : null;
+  // A wait is narrated only once there is one to narrate (lib/loadingNotice).
+  const showLoadingNotice = useLoadingNotice(phase === "loading");
 
   useEffect(() => {
     if (splats.length === 0 && (shell?.length ?? 0) === 0) return;
@@ -1290,7 +1299,7 @@ export default function SplatViewer({
         className="pointer-events-none absolute inset-0"
         style={{ boxShadow: "inset 0 0 110px 32px rgba(18, 12, 6, 0.5)" }}
       />
-      {phase === "loading" && (
+      {showLoadingNotice && (
         <Overlay>
           <p className="animate-pulse text-sm text-paper/60">Assembling the room…</p>
         </Overlay>
