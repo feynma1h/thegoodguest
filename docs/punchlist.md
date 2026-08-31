@@ -54,38 +54,6 @@ support URL is expensive to change once filed. The icon and privacy labels are
 already done.
 **Check:** manual — operator.
 
-### G1-08 · The bridge QR is blocked on a capture path that does not exist
-**State:** open · **Blocks:** nothing shipping — a designed future surface
-**The direction is WEB → PHONE**, not phone → web: design spec §9 labels it
-`FUTURE · QR / DEEP-LINK BRIDGE (WEB → PHONE)` and decision 0218 spells out the
-flow — the desk shows a code, the phone scans it and opens straight into a
-targeted rescan of the one room the desk named. `NetworkConfig.webRoomURL` is
-for the opposite direction and does not help here.
-
-Three things are missing, and the third is the one that matters:
-
-- **The transport is a universal link the app must CLAIM**, so this genuinely
-  does need the associated-domains entitlement — unlike the doorway handoff,
-  which is a plain `open(_:)` and never did. The entitlement is not in
-  `TheGoodGuest.entitlements`.
-- **The hosted AASA claims no app.** `thegoodguest.web.app` serves Firebase
-  Hosting's empty default, `{"applinks":{"apps":[],"details":[]}}` — a real 200
-  with `application/json`, which is why it does not read as missing.
-- **There is no append path, and that is the blocker.**
-  `CaptureManager.startCapture()` mints a new `bundleId` and clears frames,
-  anchors and the output dir; `capture_bundle.proto` has no append concept; and
-  api-public claims a bundle_id atomically and refuses a second claim. So the
-  link's destination does not exist. Building the transport first yields an app
-  that opens on a scan and can only offer a full rescan of a room nobody asked
-  to have rescanned — `ReviewView`'s docstring already refuses to imply
-  additive behaviour for exactly this reason.
-
-Build the append path before the bridge, or leave both. **And `QRBridgeView` is
-reachable from nothing but the screenshot gallery**, which is the state decision
-0237 ruled on for `WhySignInSheet`: give it a route or delete it, do not tidy
-it.
-**Check:** manual — the append path is the gate, not the entitlement.
-
 ### G1-06 · Gate A — Apple sign-in link on device, UID unchanged
 **State:** open · **Blocks:** trusting that a phone capture and a browser session
 are the same person
