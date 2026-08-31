@@ -43,7 +43,7 @@
  * to a canvas by code with no React in it. That copy imports BRAND_NAME from
  * here rather than retyping it.
  *
- * The "roomstudio:"-prefixed localStorage keys in app/page.tsx, lib/seen.ts and
+ * The "thegoodguest:"-prefixed localStorage keys in app/page.tsx, lib/seen.ts and
  * components/NewRoomSheet.tsx are identifiers, not presentation, and stay —
  * renaming them silently resets returning visitors.
  */

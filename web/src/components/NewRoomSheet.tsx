@@ -21,7 +21,7 @@ import { createPortal } from "react-dom";
 
 import { SPRING } from "@/components/ui/spring";
 
-const OPEN_EVENT = "roomstudio:open-new-room";
+const OPEN_EVENT = "thegoodguest:open-new-room";
 
 export function openNewRoomSheet() {
   window.dispatchEvent(new Event(OPEN_EVENT));

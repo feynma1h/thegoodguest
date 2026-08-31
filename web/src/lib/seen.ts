@@ -6,7 +6,7 @@
  * failures read as "not seen", which just means the reveal plays again.
  */
 
-const KEY_PREFIX = "roomstudio:reveal-seen:";
+const KEY_PREFIX = "thegoodguest:reveal-seen:";
 
 export function hasSeenReveal(sceneId: string): boolean {
   if (typeof window === "undefined") return false;
