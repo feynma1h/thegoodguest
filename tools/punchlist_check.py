@@ -86,6 +86,34 @@ def check_web_base_url():
     return True, f"set to {value}"
 
 
+def check_ios_account_deletion():
+    """G1-08 — the app must offer a route into DELETE /account.
+
+    App Review 5.1.1(v) requires an app supporting account creation to let the
+    user initiate deletion from inside it, and this app creates accounts the
+    moment an anonymous UID is linked to Apple or Google. The backend half has
+    been complete since account_deletion.py landed; what is missing is a call
+    site, so the only deletion route a person has is one they cannot reach from
+    the app that made their rooms.
+
+    Looks for the method and the path in ONE file, not merely both somewhere
+    under ios/: a client that deletes the account has to build both.
+    """
+    hits = []
+    for path in (REPO / "ios").rglob("*.swift"):
+        if any("Tests" in part for part in path.parts):
+            continue  # a test referencing the route is not a route a person has
+        src = path.read_text(encoding="utf-8", errors="replace")
+        if '"DELETE"' in src and re.search(r"/account\b", src):
+            hits.append(path.relative_to(REPO).as_posix())
+    if hits:
+        return True, "reaches DELETE /account from " + ", ".join(sorted(hits))
+    return False, (
+        "no shipping Swift file issues DELETE /account — the route is live and "
+        "the app cannot reach it (App Review 5.1.1(v))"
+    )
+
+
 # ── Gate 2 ───────────────────────────────────────────────────────────────────
 
 def check_live_site_name():
@@ -226,6 +254,7 @@ check_unrestricted_api_key.tag = NET
 CHECKS = {
     "G1-02": check_privacy_manifest,
     "G1-05": check_web_base_url,
+    "G1-08": check_ios_account_deletion,
     "G2-01": check_live_site_name,
     "G2-05": check_ios_fcm_registration,
     "G3-01": check_retention_claim,
