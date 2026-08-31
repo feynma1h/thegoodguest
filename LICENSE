@@ -1,0 +1,16 @@
+All rights reserved.
+
+Copyright (c) 2026 Utkarsh Singh
+
+The source in this repository is published for evaluation and reference only.
+No licence is granted to use, copy, modify, distribute, or create derivative
+works from it, in whole or in part, for any purpose, commercial or otherwise.
+
+This reservation does not extend to third-party components vendored into this
+repository, which remain under their own terms and are not covered by the
+paragraph above. In particular, the SAM sources under
+services/perception-obj/upstream/sam3/ and
+services/perception-obj/upstream/sam3d/ are distributed by Meta under the SAM
+License, a copy of which accompanies each of them in its own directory.
+
+For licensing enquiries, contact 23singhutkarsh@gmail.com.
