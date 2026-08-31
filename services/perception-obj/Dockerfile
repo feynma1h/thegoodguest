@@ -8,7 +8,7 @@
 #
 # Why this split: SAM 3D Objects pins torch==2.5.1+cu121 while VGGT pins
 # torch==2.3.1. They cannot coexist in one pip env. perception-obj uses
-# CUDA 12.1 / torch 2.5.1; perception-geom uses CUDA 12.1 / torch 2.3.1.
+# CUDA 12.1 / torch 2.5.1.
 # Composition happens client-side in tools/call_perception.py.
 #
 # Build strategy: follow Meta's setup.md exactly. Use mamba to create the

@@ -5,10 +5,11 @@ GPU service running SAM 3 (open-vocabulary segmentation) and SAM 3D Objects
 
 Deployed to Cloud Run with an L4 GPU in `asia-southeast1`.
 
-## Why split from perception-geom
+## Why this service is split
 
 SAM 3D Objects pins `torch==2.5.1+cu121` while VGGT pins `torch==2.3.1`. These
-cannot coexist in a single pip environment. See `services/perception-geom/`
+cannot coexist in a single pip environment. The VGGT service that motivated
+the split was retired in 2026-08 (decision 0192)
 for the other half and `tools/call_perception.py` for the composition step.
 
 ## Endpoints

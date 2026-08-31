@@ -79,7 +79,6 @@ services/
                                     and track_receiver.py (0274; BUILT, candidate-only, NOT flipped)
                                     and track_selection.py, per-object best-frame choice over the
                                     tracked segments (BUILT, no call site in the service yet)
-  perception-geom/                VGGT for the photo-upload path (source only — the service and its image were retired 2026-08-20, decision 0192)
 
 web/                              Next.js static-export web app (decision 0050); Spark splat viewer
                                   contained in src/components/SplatViewer.tsx (decision 0053)
@@ -1568,9 +1567,9 @@ It is a single checkbox in the console.
 and is applied to the `thegoodguest` repository: keep anything tagged `serving`
 or `buildcache`, keep the 3 newest `perception-obj` and the 10 newest `api-*`
 versions, delete everything else under those prefixes at any age.
-`perception-geom` is outside every prefix and cannot be touched by it — which
-is inert now that it is retired (0192), and is a hole to close if it is ever
-revived. The DELETE carries no age condition on purpose — that is what makes
+(`perception-geom` was outside every prefix; it was retired in 0192 and its
+source removed 2026-08-31, so the hole is closed by deletion rather than by
+policy.) The DELETE carries no age condition on purpose — that is what makes
 the steady state exactly 3 + 10 + 10 images rather than "that plus whatever is
 recent".
 
