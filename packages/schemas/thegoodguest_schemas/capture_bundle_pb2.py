@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14\x63\x61pture_bundle.proto\x12\x15roomstudio.capture.v1\"\xb8\x04\n\rCaptureBundle\x12\x16\n\x0eschema_version\x18\x01 \x01(\t\x12\x11\n\tbundle_id\x18\x02 \x01(\t\x12\x0f\n\x07user_id\x18\x03 \x01(\t\x12-\n\x06\x64\x65vice\x18\x04 \x01(\x0b\x32\x1d.roomstudio.capture.v1.Device\x12\x30\n\x04tier\x18\x05 \x01(\x0e\x32\".roomstudio.capture.v1.CaptureTier\x12\x1c\n\x14started_at_device_us\x18\x06 \x01(\x03\x12\x1a\n\x12\x65nded_at_device_us\x18\x07 \x01(\x03\x12\x1a\n\x12started_at_wall_us\x18\x0b \x01(\x03\x12,\n\x06\x66rames\x18\x08 \x03(\x0b\x32\x1c.roomstudio.capture.v1.Frame\x12<\n\troom_plan\x18\t \x01(\x0b\x32$.roomstudio.capture.v1.RoomPlanModelH\x00\x88\x01\x01\x12K\n\x0c\x63lient_notes\x18\n \x03(\x0b\x32\x35.roomstudio.capture.v1.CaptureBundle.ClientNotesEntry\x12\x39\n\rplane_anchors\x18\x0c \x03(\x0b\x32\".roomstudio.capture.v1.PlaneAnchor\x1a\x32\n\x10\x43lientNotesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x0c\n\n_room_plan\"l\n\x06\x44\x65vice\x12\x13\n\x0bhardware_id\x18\x01 \x01(\t\x12\x12\n\nos_version\x18\x02 \x01(\t\x12\x13\n\x0b\x61pp_version\x18\x03 \x01(\t\x12\x11\n\thas_lidar\x18\x04 \x01(\x08\x12\x11\n\tdevice_id\x18\x05 \x01(\t\"\xb0\x02\n\x05\x46rame\x12\x13\n\x0b\x66rame_index\x18\x01 \x01(\r\x12\x14\n\x0ctimestamp_us\x18\x02 \x01(\x03\x12\x14\n\x0crgb_gcs_path\x18\x03 \x01(\t\x12\x30\n\x0b\x63\x61mera_pose\x18\x04 \x01(\x0b\x32\x1b.roomstudio.capture.v1.Pose\x12\x35\n\nintrinsics\x18\x05 \x01(\x0b\x32!.roomstudio.capture.v1.Intrinsics\x12/\n\x07gravity\x18\x06 \x01(\x0b\x32\x1e.roomstudio.capture.v1.Gravity\x12\x30\n\x05\x64\x65pth\x18\x07 \x01(\x0b\x32\x1c.roomstudio.capture.v1.DepthH\x00\x88\x01\x01\x42\x08\n\x06_depthJ\x04\x08\x08\x10\tJ\x04\x08\t\x10\nJ\x04\x08\n\x10\x0b\"s\n\x04Pose\x12\r\n\x05pos_x\x18\x01 \x01(\x02\x12\r\n\x05pos_y\x18\x02 \x01(\x02\x12\r\n\x05pos_z\x18\x03 \x01(\x02\x12\x0e\n\x06quat_x\x18\x04 \x01(\x02\x12\x0e\n\x06quat_y\x18\x05 \x01(\x02\x12\x0e\n\x06quat_z\x18\x06 \x01(\x02\x12\x0e\n\x06quat_w\x18\x07 \x01(\x02\"[\n\nIntrinsics\x12\n\n\x02\x66x\x18\x01 \x01(\x02\x12\n\n\x02\x66y\x18\x02 \x01(\x02\x12\n\n\x02\x63x\x18\x03 \x01(\x02\x12\n\n\x02\x63y\x18\x04 \x01(\x02\x12\r\n\x05width\x18\x05 \x01(\r\x12\x0e\n\x06height\x18\x06 \x01(\r\"*\n\x07Gravity\x12\t\n\x01x\x18\x01 \x01(\x02\x12\t\n\x01y\x18\x02 \x01(\x02\x12\t\n\x01z\x18\x03 \x01(\x02\"\xaf\x01\n\x05\x44\x65pth\x12\x16\n\x0e\x64\x65pth_gcs_path\x18\x01 \x01(\t\x12 \n\x13\x63onfidence_gcs_path\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\r\n\x05width\x18\x03 \x01(\r\x12\x0e\n\x06height\x18\x04 \x01(\r\x12\x35\n\nintrinsics\x18\x05 \x01(\x0b\x32!.roomstudio.capture.v1.IntrinsicsB\x16\n\x14_confidence_gcs_path\"\x9d\x02\n\x0bPlaneAnchor\x12)\n\x04pose\x18\x01 \x01(\x0b\x32\x1b.roomstudio.capture.v1.Pose\x12\x10\n\x08\x63\x65nter_x\x18\x02 \x01(\x02\x12\x10\n\x08\x63\x65nter_y\x18\x03 \x01(\x02\x12\x10\n\x08\x63\x65nter_z\x18\x04 \x01(\x02\x12\x14\n\x0c\x65xtent_width\x18\x05 \x01(\x02\x12\x15\n\rextent_height\x18\x06 \x01(\x02\x12\x19\n\x11rotation_on_y_rad\x18\x07 \x01(\x02\x12\x38\n\talignment\x18\x08 \x01(\x0e\x32%.roomstudio.capture.v1.PlaneAlignment\x12\x16\n\x0e\x63lassification\x18\t \x01(\t\x12\x13\n\x0b\x62oundary_xz\x18\n \x03(\x02\"f\n\rRoomPlanModel\x12\x15\n\rusdz_gcs_path\x18\x01 \x01(\t\x12\x18\n\x10roomplan_version\x18\x02 \x01(\t\x12\x15\n\rjson_gcs_path\x18\x04 \x01(\tJ\x04\x08\x03\x10\x04R\x07summary*`\n\x0b\x43\x61ptureTier\x12\x1c\n\x18\x43\x41PTURE_TIER_UNSPECIFIED\x10\x00\x12\x0e\n\nARKIT_ONLY\x10\x01\x12\x0f\n\x0bLIDAR_ARKIT\x10\x02\x12\x12\n\x0eLIDAR_ROOMPLAN\x10\x03*O\n\x0ePlaneAlignment\x12\x1f\n\x1bPLANE_ALIGNMENT_UNSPECIFIED\x10\x00\x12\x0e\n\nHORIZONTAL\x10\x01\x12\x0c\n\x08VERTICAL\x10\x02\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14\x63\x61pture_bundle.proto\x12\x17thegoodguest.capture.v1\"\xc4\x04\n\rCaptureBundle\x12\x16\n\x0eschema_version\x18\x01 \x01(\t\x12\x11\n\tbundle_id\x18\x02 \x01(\t\x12\x0f\n\x07user_id\x18\x03 \x01(\t\x12/\n\x06\x64\x65vice\x18\x04 \x01(\x0b\x32\x1f.thegoodguest.capture.v1.Device\x12\x32\n\x04tier\x18\x05 \x01(\x0e\x32$.thegoodguest.capture.v1.CaptureTier\x12\x1c\n\x14started_at_device_us\x18\x06 \x01(\x03\x12\x1a\n\x12\x65nded_at_device_us\x18\x07 \x01(\x03\x12\x1a\n\x12started_at_wall_us\x18\x0b \x01(\x03\x12.\n\x06\x66rames\x18\x08 \x03(\x0b\x32\x1e.thegoodguest.capture.v1.Frame\x12>\n\troom_plan\x18\t \x01(\x0b\x32&.thegoodguest.capture.v1.RoomPlanModelH\x00\x88\x01\x01\x12M\n\x0c\x63lient_notes\x18\n \x03(\x0b\x32\x37.thegoodguest.capture.v1.CaptureBundle.ClientNotesEntry\x12;\n\rplane_anchors\x18\x0c \x03(\x0b\x32$.thegoodguest.capture.v1.PlaneAnchor\x1a\x32\n\x10\x43lientNotesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x0c\n\n_room_plan\"l\n\x06\x44\x65vice\x12\x13\n\x0bhardware_id\x18\x01 \x01(\t\x12\x12\n\nos_version\x18\x02 \x01(\t\x12\x13\n\x0b\x61pp_version\x18\x03 \x01(\t\x12\x11\n\thas_lidar\x18\x04 \x01(\x08\x12\x11\n\tdevice_id\x18\x05 \x01(\t\"\xb8\x02\n\x05\x46rame\x12\x13\n\x0b\x66rame_index\x18\x01 \x01(\r\x12\x14\n\x0ctimestamp_us\x18\x02 \x01(\x03\x12\x14\n\x0crgb_gcs_path\x18\x03 \x01(\t\x12\x32\n\x0b\x63\x61mera_pose\x18\x04 \x01(\x0b\x32\x1d.thegoodguest.capture.v1.Pose\x12\x37\n\nintrinsics\x18\x05 \x01(\x0b\x32#.thegoodguest.capture.v1.Intrinsics\x12\x31\n\x07gravity\x18\x06 \x01(\x0b\x32 .thegoodguest.capture.v1.Gravity\x12\x32\n\x05\x64\x65pth\x18\x07 \x01(\x0b\x32\x1e.thegoodguest.capture.v1.DepthH\x00\x88\x01\x01\x42\x08\n\x06_depthJ\x04\x08\x08\x10\tJ\x04\x08\t\x10\nJ\x04\x08\n\x10\x0b\"s\n\x04Pose\x12\r\n\x05pos_x\x18\x01 \x01(\x02\x12\r\n\x05pos_y\x18\x02 \x01(\x02\x12\r\n\x05pos_z\x18\x03 \x01(\x02\x12\x0e\n\x06quat_x\x18\x04 \x01(\x02\x12\x0e\n\x06quat_y\x18\x05 \x01(\x02\x12\x0e\n\x06quat_z\x18\x06 \x01(\x02\x12\x0e\n\x06quat_w\x18\x07 \x01(\x02\"[\n\nIntrinsics\x12\n\n\x02\x66x\x18\x01 \x01(\x02\x12\n\n\x02\x66y\x18\x02 \x01(\x02\x12\n\n\x02\x63x\x18\x03 \x01(\x02\x12\n\n\x02\x63y\x18\x04 \x01(\x02\x12\r\n\x05width\x18\x05 \x01(\r\x12\x0e\n\x06height\x18\x06 \x01(\r\"*\n\x07Gravity\x12\t\n\x01x\x18\x01 \x01(\x02\x12\t\n\x01y\x18\x02 \x01(\x02\x12\t\n\x01z\x18\x03 \x01(\x02\"\xb1\x01\n\x05\x44\x65pth\x12\x16\n\x0e\x64\x65pth_gcs_path\x18\x01 \x01(\t\x12 \n\x13\x63onfidence_gcs_path\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\r\n\x05width\x18\x03 \x01(\r\x12\x0e\n\x06height\x18\x04 \x01(\r\x12\x37\n\nintrinsics\x18\x05 \x01(\x0b\x32#.thegoodguest.capture.v1.IntrinsicsB\x16\n\x14_confidence_gcs_path\"\xa1\x02\n\x0bPlaneAnchor\x12+\n\x04pose\x18\x01 \x01(\x0b\x32\x1d.thegoodguest.capture.v1.Pose\x12\x10\n\x08\x63\x65nter_x\x18\x02 \x01(\x02\x12\x10\n\x08\x63\x65nter_y\x18\x03 \x01(\x02\x12\x10\n\x08\x63\x65nter_z\x18\x04 \x01(\x02\x12\x14\n\x0c\x65xtent_width\x18\x05 \x01(\x02\x12\x15\n\rextent_height\x18\x06 \x01(\x02\x12\x19\n\x11rotation_on_y_rad\x18\x07 \x01(\x02\x12:\n\talignment\x18\x08 \x01(\x0e\x32\'.thegoodguest.capture.v1.PlaneAlignment\x12\x16\n\x0e\x63lassification\x18\t \x01(\t\x12\x13\n\x0b\x62oundary_xz\x18\n \x03(\x02\"f\n\rRoomPlanModel\x12\x15\n\rusdz_gcs_path\x18\x01 \x01(\t\x12\x18\n\x10roomplan_version\x18\x02 \x01(\t\x12\x15\n\rjson_gcs_path\x18\x04 \x01(\tJ\x04\x08\x03\x10\x04R\x07summary*`\n\x0b\x43\x61ptureTier\x12\x1c\n\x18\x43\x41PTURE_TIER_UNSPECIFIED\x10\x00\x12\x0e\n\nARKIT_ONLY\x10\x01\x12\x0f\n\x0bLIDAR_ARKIT\x10\x02\x12\x12\n\x0eLIDAR_ROOMPLAN\x10\x03*O\n\x0ePlaneAlignment\x12\x1f\n\x1bPLANE_ALIGNMENT_UNSPECIFIED\x10\x00\x12\x0e\n\nHORIZONTAL\x10\x01\x12\x0c\n\x08VERTICAL\x10\x02\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,28 +33,28 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_CAPTUREBUNDLE_CLIENTNOTESENTRY']._loaded_options = None
   _globals['_CAPTUREBUNDLE_CLIENTNOTESENTRY']._serialized_options = b'8\001'
-  _globals['_CAPTURETIER']._serialized_start=1859
-  _globals['_CAPTURETIER']._serialized_end=1955
-  _globals['_PLANEALIGNMENT']._serialized_start=1957
-  _globals['_PLANEALIGNMENT']._serialized_end=2036
-  _globals['_CAPTUREBUNDLE']._serialized_start=48
-  _globals['_CAPTUREBUNDLE']._serialized_end=616
-  _globals['_CAPTUREBUNDLE_CLIENTNOTESENTRY']._serialized_start=552
-  _globals['_CAPTUREBUNDLE_CLIENTNOTESENTRY']._serialized_end=602
-  _globals['_DEVICE']._serialized_start=618
-  _globals['_DEVICE']._serialized_end=726
-  _globals['_FRAME']._serialized_start=729
-  _globals['_FRAME']._serialized_end=1033
-  _globals['_POSE']._serialized_start=1035
-  _globals['_POSE']._serialized_end=1150
-  _globals['_INTRINSICS']._serialized_start=1152
-  _globals['_INTRINSICS']._serialized_end=1243
-  _globals['_GRAVITY']._serialized_start=1245
-  _globals['_GRAVITY']._serialized_end=1287
-  _globals['_DEPTH']._serialized_start=1290
-  _globals['_DEPTH']._serialized_end=1465
-  _globals['_PLANEANCHOR']._serialized_start=1468
-  _globals['_PLANEANCHOR']._serialized_end=1753
-  _globals['_ROOMPLANMODEL']._serialized_start=1755
-  _globals['_ROOMPLANMODEL']._serialized_end=1857
+  _globals['_CAPTURETIER']._serialized_start=1887
+  _globals['_CAPTURETIER']._serialized_end=1983
+  _globals['_PLANEALIGNMENT']._serialized_start=1985
+  _globals['_PLANEALIGNMENT']._serialized_end=2064
+  _globals['_CAPTUREBUNDLE']._serialized_start=50
+  _globals['_CAPTUREBUNDLE']._serialized_end=630
+  _globals['_CAPTUREBUNDLE_CLIENTNOTESENTRY']._serialized_start=566
+  _globals['_CAPTUREBUNDLE_CLIENTNOTESENTRY']._serialized_end=616
+  _globals['_DEVICE']._serialized_start=632
+  _globals['_DEVICE']._serialized_end=740
+  _globals['_FRAME']._serialized_start=743
+  _globals['_FRAME']._serialized_end=1055
+  _globals['_POSE']._serialized_start=1057
+  _globals['_POSE']._serialized_end=1172
+  _globals['_INTRINSICS']._serialized_start=1174
+  _globals['_INTRINSICS']._serialized_end=1265
+  _globals['_GRAVITY']._serialized_start=1267
+  _globals['_GRAVITY']._serialized_end=1309
+  _globals['_DEPTH']._serialized_start=1312
+  _globals['_DEPTH']._serialized_end=1489
+  _globals['_PLANEANCHOR']._serialized_start=1492
+  _globals['_PLANEANCHOR']._serialized_end=1781
+  _globals['_ROOMPLANMODEL']._serialized_start=1783
+  _globals['_ROOMPLANMODEL']._serialized_end=1885
 # @@protoc_insertion_point(module_scope)

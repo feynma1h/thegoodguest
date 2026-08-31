@@ -1,4 +1,4 @@
-// roomstudio capture bundle — the contract between the iOS capture app and
+// thegoodguest capture bundle — the contract between the iOS capture app and
 // the perception backend.
 //
 // This file is the source of truth. Generated Python lives in
@@ -46,7 +46,7 @@
 
 syntax = "proto3";
 
-package roomstudio.capture.v1;
+package thegoodguest.capture.v1;
 
 // -----------------------------------------------------------------------------
 // Top-level
