@@ -198,10 +198,16 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   (decision 0051) or Google (0118) — the UID is asserted unchanged on link, and
   a conflict is an explicit switch/keep choice, stated in two alerts with the
   real cost and no counts — the designed conflict screen was deleted because
-  the counts it wanted cannot be obtained (0216). There is deliberately no iOS
-  sign-out. `IdentityContinuity` classifies each launch (`continuous` /
-  `firstRun` / `credentialLost` / `keychainUnavailable`) and logs it at fault
-  level without changing behaviour (0141).
+  the counts it wanted cannot be obtained (0216). **The Apple half is CLIENT-side
+  only and may not work at all**: the sheet offers it first and the entitlement
+  ships, but `docs/PARKED.md` records Firebase Auth's `appleSignInConfig` as
+  empty on this project and never configured on the retired one. Unverified —
+  it wants `gcloud`, and it is a submission blocker if it holds (see the iOS
+  defects). Google is live and verified. There is deliberately no iOS
+  sign-out, and **no account deletion either**, which is its own defect below.
+  `IdentityContinuity` classifies each launch (`continuous` / `firstRun` /
+  `credentialLost` / `keychainUnavailable`) and logs it at fault level without
+  changing behaviour (0141).
 - **Upload.** Background `URLSession`, whole-blob PUTs, `bundle.pb` enqueued
   last (0040) and gated on every other blob completing. Honours GCS
   `Retry-After`. Session expiry re-mints; a re-mint that returns identical URIs
@@ -884,6 +890,15 @@ re-argued here.
 
 **iOS**
 
+- **The app cannot delete the account it creates, and that is an automatic App
+  Store rejection.** Guideline 5.1.1(v) requires an app supporting account
+  creation to let the user INITIATE deletion from within it, and this app
+  creates an account the moment an anonymous UID is linked to Apple or Google.
+  `DELETE /account` is live and complete on api-public; **no Swift file calls
+  it**, so the only deletion route a person has is one they cannot reach from
+  the app that made their rooms. **Not the same work as per-room deletion** —
+  that is a different gap, does not satisfy this, and is not needed by it. What
+  is missing is a call site and a screen to put it on. (punchlist G1-08)
 - **The mark's fill rule is guarded on the Python side only.** `gen_mark.py`
   warns that even-odd across both rings punches holes where the bands cross and
   `test_gen_mark.py` pins it, but nothing pins the Swift or TypeScript
@@ -1031,9 +1046,15 @@ re-argued here.
   the support URL are simply unstarted, and the support URL is expensive to change
   once filed. The privacy nutrition labels are FILLED IN and TRACED at
   `docs/product/privacy-nutrition-labels.md` against the live system, with eight
-  policy/label disagreements flagged. Four things block the filing, all in its
+  policy/label disagreements flagged. Four things block the FILING, all in its
   §10 — including a **`PrivacyInfo.xcprivacy` landed in the app**, which does not
-  exist and is required for submission. (0242)
+  exist and is required for submission. (0242) **Those four are the labels'
+  blockers, not the submission's**: read them beside punchlist Gate 1, which is
+  the authority for the whole set and carries at least two more that no §10
+  covers — the missing account-deletion route above, and Sign in with Apple,
+  which the sheet offers first while `docs/PARKED.md` records the provider as
+  never configured in Firebase Auth. **That last one is unverified here** and
+  wants `gcloud`; if it holds, a reviewer taps a button that cannot work.
 
 ### Deliberately not doing
 
