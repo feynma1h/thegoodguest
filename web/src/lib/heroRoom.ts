@@ -5,8 +5,8 @@
  * plays the first two movements of the reveal choreography (lib/reveal,
  * decision 0097) — the measured boundary drawing itself, then the
  * surfaces materializing in place — against a REAL captured room's
- * GEOMETRY. No object splats. The copy lands in the quiet beat the score
- * already provides.
+ * GEOMETRY. No object splats. The copy beside it waits for none of it:
+ * the page's words and the room's first frame arrive together.
  *
  * The fixture is one static file: public/hero/room.json, a `SceneAssets`
  * document carrying a real shell.json v3 verbatim with an EMPTY objects
@@ -44,15 +44,6 @@ import type { AssembledScene, FusedObject, SceneAssets } from "@/lib/api/types";
 export const HERO_ROOM_URL = "/hero/room.json";
 /** The variant-B probe's piece. Gitignored; absent in the shipped build. */
 export const HERO_PIECE_URL = "/hero/piece.json";
-
-/**
- * How long the copy will wait for the reveal's quiet beat before landing
- * anyway. The beat is ~3.4 s into the score for a four-wall room, plus
- * fetch and renderer start-up; this is the ceiling that guarantees a slow
- * GPU, a stalled fetch or a renderer that never reports never leaves the
- * landing page wordless.
- */
-export const HERO_COPY_FALLBACK_MS = 6000;
 
 export type HeroVariant = "a" | "b";
 
