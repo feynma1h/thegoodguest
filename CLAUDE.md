@@ -560,8 +560,11 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
   no paths and no colours: `tools/gen_mark.py` is the mark's one source across
   the app icons, the tab icon, both wordmarks and the share card (0193), and
   `tone` picks only which ink plate it sits on. The tab icon ships twice —
-  `icon.svg` answers `prefers-color-scheme`, `favicon.ico` is the legacy
-  fallback and is framed, the variant that survives a light tab strip.
+  `icon.svg` answers `prefers-color-scheme` and is drawn from the 16 px
+  master, because a browser draws it at tab size whatever its viewBox says.
+  `favicon.ico` is the legacy fallback and cannot answer a media query, so it
+  ships three entries on a transparent field — 16 from the 16 px master, 32
+  and 48 from the regular one — each the drawing that survives at its size.
 - **The calling card** — rung 0 of the sharing ladder
   (`docs/product/social-layer.md` §6), BUILT and undeployed. `lib/card/` is
   measurement → display list → canvas, split the way `lib/reveal.ts` splits the
