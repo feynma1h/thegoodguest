@@ -8,7 +8,7 @@
 The ingester container (`services/api/`) needs two things that have mutually
 exclusive pip dependency constraints:
 
-- `roomstudio-schemas` requires `protobuf>=7.35.0` — enforced by
+- `thegoodguest-schemas` requires `protobuf>=7.35.0` — enforced by
   `ValidateProtobufRuntimeVersion` in the generated `capture_bundle_pb2.py`,
   which calls `ValidateProtobufRuntimeVersion(PUBLIC, 7, 35, 0, ...)` at import
   time and raises `VersionError` if the runtime version is lower.
@@ -18,7 +18,7 @@ exclusive pip dependency constraints:
 ## What we tried
 
 **Schemas first, google-cloud second (original Dockerfile layer order):**
-pip installed roomstudio-schemas fine (protobuf 7.35.0). Then the google-cloud
+pip installed thegoodguest-schemas fine (protobuf 7.35.0). Then the google-cloud
 install ran, resolved the proto-plus constraint, and *downgraded* protobuf from
 7.35.0 to 6.33.6. Symptom at container startup: `VersionError: Detected
 incompatible Protobuf Gencode/Runtime versions when loading
@@ -34,7 +34,7 @@ forces the resolver to satisfy both constraints simultaneously. Symptom: pip
 ## What we chose
 
 Install google-cloud-* first (pip resolves to protobuf 6.x), then
-force-reinstall protobuf to >=7.35.0 before installing roomstudio-schemas:
+force-reinstall protobuf to >=7.35.0 before installing thegoodguest-schemas:
 
 ```dockerfile
 RUN pip install --no-cache-dir \
@@ -48,7 +48,7 @@ RUN pip install --no-cache-dir --no-deps --force-reinstall "protobuf>=7.35.0" \
 
 `--no-deps` prevents pip from re-resolving proto-plus's constraint when
 upgrading protobuf. `--force-reinstall` bypasses the installed-version check.
-After this, protobuf is at 7.35.0; roomstudio-schemas imports successfully;
+After this, protobuf is at 7.35.0; thegoodguest-schemas imports successfully;
 google-cloud-* packages operate normally at runtime.
 
 ## Why

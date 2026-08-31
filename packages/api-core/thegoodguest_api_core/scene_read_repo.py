@@ -23,7 +23,7 @@ import copy
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from roomstudio_api_core.scene import Scene
+from thegoodguest_api_core.scene import Scene
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ class FirestoreSceneReadRepository(SceneReadRepository):
     @staticmethod
     def _from_doc(doc) -> Scene:
         """Deserialize a Firestore DocumentSnapshot into a Scene."""
-        from roomstudio_api_core.scene import SceneStatus
+        from thegoodguest_api_core.scene import SceneStatus
 
         data = doc.to_dict()
         return Scene(

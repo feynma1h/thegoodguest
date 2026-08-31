@@ -61,7 +61,7 @@ The fix, when it is worth doing, is already shaped by precedent and should be
 cheap: the identical serial-round-trip pattern in `_mint_all` was cured with a
 bounded order-preserving pool (`UPLOAD_SESSION_MINT_CONCURRENCY`) — no note
 records it, so the reasoning lives in that function's docstring in
-`packages/api-core/roomstudio_api_core/upload_session_repo.py`, with the
+`packages/api-core/thegoodguest_api_core/upload_session_repo.py`, with the
 measurement that forced it (an 878-path manifest at ~80 s serial, past the iOS
 client's 60 s timeout). Filtering to placed-only is a **separate**
 and independently correct change — but it narrows the response contract, so

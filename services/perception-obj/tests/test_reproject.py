@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 import reproject
-from roomstudio_schemas.pose_math import rotmat_to_quat
+from thegoodguest_schemas.pose_math import rotmat_to_quat
 
 
 @dataclass
@@ -115,7 +115,7 @@ def _mask_for_plate_filled(local_points, rotation_xyzw, translation, scale, intr
     """A filled (bbox) silhouette mask from the plate's OWN ground-truth
     projection -- independent of reproject's own rasterizer, so tier-1
     tests aren't circular."""
-    from roomstudio_schemas.placement_math import project_points
+    from thegoodguest_schemas.placement_math import project_points
 
     world = reproject.transform_points(local_points, rotation_xyzw, translation, scale)
     uv, _d, valid = project_points(world, intr, pose)
@@ -133,7 +133,7 @@ def _mask_for_plate_filled(local_points, rotation_xyzw, translation, scale, intr
 def _rgb_for_plate(local_points, colors, rotation_xyzw, translation, scale, intr, pose, image_wh=(640, 480)):
     """A ground-truth RGB render (nearest color per pixel) -- independent
     of reproject.render_splat, so tier-2 tests aren't circular."""
-    from roomstudio_schemas.placement_math import project_points
+    from thegoodguest_schemas.placement_math import project_points
 
     world = reproject.transform_points(local_points, rotation_xyzw, translation, scale)
     uv, depth, valid = project_points(world, intr, pose)
@@ -245,8 +245,8 @@ def test_score_tier2_true_orientation_beats_180_flip():
         mask=mask, intrinsics=intr, pose=pose, appearance=appearance, rgb=rgb,
     )
     # 180 degrees about the plate's local normal (+Z, world Z here).
-    from roomstudio_schemas.placement_math import rotation_about_axis
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.placement_math import rotation_about_axis
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
     R_flip = rotation_about_axis([0.0, 0.0, 1.0], math.pi) @ quat_to_rotmat(rot)
     flip_result = reproject.score_placement(
         local_points=positions, rotation_xyzw=tuple(rotmat_to_quat(R_flip)), translation=translation, scale=scale,
@@ -300,8 +300,8 @@ def test_in_plane_resolution_picks_true_orientation_via_tier2():
     rgb = _rgb_for_plate(positions, appearance.colors, true_rot, translation, scale, intr, pose)
 
     # Simulate a layout rotation that shipped 180 degrees off in-plane.
-    from roomstudio_schemas.placement_math import rotation_about_axis
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.placement_math import rotation_about_axis
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
     shipped_rot = tuple(rotmat_to_quat(rotation_about_axis([0, 0, 1], math.pi) @ quat_to_rotmat(true_rot)))
 
     candidates = reproject.in_plane_candidates(shipped_rot, positions)
@@ -328,7 +328,7 @@ def test_mirrored_twin_is_180_about_view_axis():
     rot = (0.0, 0.0, 0.0, 1.0)
     view_dir = np.array([0.0, 0.0, -1.0])
     twin = reproject.mirrored_twin(rot, view_dir)
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
     R_twin = quat_to_rotmat(twin)
     # 180 about Z: x,y flip sign, z fixed.
     assert np.allclose(R_twin @ np.array([1.0, 0.0, 0.0]), [-1.0, 0.0, 0.0], atol=1e-9)

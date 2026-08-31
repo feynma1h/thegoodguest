@@ -129,7 +129,7 @@ import numpy as np
 import object_color
 import reproject
 from placement import min_axis_to_vertical_deg
-from roomstudio_schemas.placement_math import (
+from thegoodguest_schemas.placement_math import (
     DegenerateGeometryError,
     MaskEvidence,
     mask_containment,
@@ -139,7 +139,7 @@ from roomstudio_schemas.placement_math import (
     robust_cloud_stats,
     triangulate_rays,
 )
-from roomstudio_schemas.pose_math import pose_quat, quat_to_rotmat, rotmat_to_quat
+from thegoodguest_schemas.pose_math import pose_quat, quat_to_rotmat, rotmat_to_quat
 
 logger = logging.getLogger(__name__)
 

@@ -91,8 +91,8 @@ from roomplan_room import (
     roomplan_wall_pairs,
     try_parse_captured_room,
 )
-from roomstudio_schemas import LIDAR_ARKIT, LIDAR_ROOMPLAN, CaptureBundle
-from roomstudio_schemas.placement_math import resize_mask_to
+from thegoodguest_schemas import LIDAR_ARKIT, LIDAR_ROOMPLAN, CaptureBundle
+from thegoodguest_schemas.placement_math import resize_mask_to
 from shell_envelope import (
     EnvelopeShell,
     derive_envelope,

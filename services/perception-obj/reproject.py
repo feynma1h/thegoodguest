@@ -17,7 +17,7 @@ explains that frame's evidence:
            tier 1 alone).
 
 No GPU, no model dependency, no new third-party packages: plain numpy over
-geometry placement.py and roomstudio_schemas.placement_math already
+geometry placement.py and thegoodguest_schemas.placement_math already
 compute (splat vertices, camera poses, projected pixels).
 
 Also home to the two other instrument uses from decision 0067: in-plane
@@ -39,7 +39,7 @@ from typing import Optional
 
 import numpy as np
 import placement
-from roomstudio_schemas.placement_math import (
+from thegoodguest_schemas.placement_math import (
     DegenerateGeometryError,
     MaskEvidence,
     prepare_mask,
@@ -52,7 +52,7 @@ from roomstudio_schemas.placement_math import (
     soft_iou,
     union_bbox,
 )
-from roomstudio_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
+from thegoodguest_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
 
 # Standard 3DGS SH0 -> RGB DC-term constant (1 / (2*sqrt(pi))): color =
 # clip(0.5 + C0 * f_dc, 0, 1). Same convention every 3DGS viewer uses.

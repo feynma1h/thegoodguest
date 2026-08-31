@@ -1,4 +1,4 @@
-"""Unit tests for roomstudio_api_core.manifest_validation (gaps c + F3).
+"""Unit tests for thegoodguest_api_core.manifest_validation (gaps c + F3).
 
 Pins the invariants, not the wording of error details:
   - every path shape the deployed clients emit is accepted
@@ -13,7 +13,7 @@ Run from repo root:
 """
 from __future__ import annotations
 
-from roomstudio_api_core.manifest_validation import (
+from thegoodguest_api_core.manifest_validation import (
     BUNDLE_PB_MAX_BYTES,
     validate_manifest,
 )

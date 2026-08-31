@@ -68,7 +68,7 @@ from roomplan_room import (  # noqa: E402
     roomplan_primary_floor,
     roomplan_wall_pairs,
 )
-from roomstudio_schemas import CaptureBundle  # noqa: E402
+from thegoodguest_schemas import CaptureBundle  # noqa: E402
 from shell_envelope import (  # noqa: E402
     derive_envelope,
     envelope_floor_geom,

@@ -67,7 +67,7 @@ from typing import Any, Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from roomstudio_schemas import CaptureBundle
+from thegoodguest_schemas import CaptureBundle
 
 logger = logging.getLogger(__name__)
 

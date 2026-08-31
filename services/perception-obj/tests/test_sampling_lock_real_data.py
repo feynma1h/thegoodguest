@@ -42,7 +42,7 @@ if str(_schemas_path) not in sys.path:
 import census_sampling  # noqa: E402
 import roomplan_room  # noqa: E402
 import sampling  # noqa: E402
-from roomstudio_schemas import capture_bundle_pb2  # noqa: E402
+from thegoodguest_schemas import capture_bundle_pb2  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sampling_lock"
 ROOMS = ("rp7", "rp6g1", "rp6g2", "spike")

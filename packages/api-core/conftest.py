@@ -1,7 +1,7 @@
 """Path setup for packages/api-core tests.
 
 Adds api-core, schemas, and api-internal to sys.path so that test files can
-import roomstudio_api_core, roomstudio_schemas, and the api-internal
+import thegoodguest_api_core, thegoodguest_schemas, and the api-internal
 ``validation`` module (used by test_capture_bundle_fixture.py) without
 installing packages.
 """

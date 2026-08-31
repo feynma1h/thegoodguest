@@ -12,7 +12,7 @@
 // the perception backend.
 //
 // This file is the source of truth. Generated Python lives in
-// `roomstudio_schemas/capture_bundle_pb2.py` (see `tools/gen_proto.sh`);
+// `thegoodguest_schemas/capture_bundle_pb2.py` (see `tools/gen_proto.sh`);
 // generated Swift lives in the iOS app's `Generated/capture_bundle.pb.swift`
 // (via SwiftProtobuf's protoc plugin).
 //

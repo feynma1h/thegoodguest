@@ -43,8 +43,8 @@ from design_spec import (
     Transform,
 )
 from public_server import InMemoryManifestFetcher
-from roomstudio_api_core.scene import Scene, SceneStatus
-from roomstudio_api_core.scene_read_repo import InMemorySceneReadRepository
+from thegoodguest_api_core.scene import Scene, SceneStatus
+from thegoodguest_api_core.scene_read_repo import InMemorySceneReadRepository
 
 _NOW = datetime(2026, 8, 9, 12, 0, 0, tzinfo=timezone.utc)
 _MANIFEST_URI = "gs://outputs/scenes/s1/manifest.json"

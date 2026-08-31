@@ -35,21 +35,21 @@ Frame of reference is **ARKit-native** end-to-end: right-handed, +Y up, camera l
 
 Pose is **position + unit quaternion (x, y, z, w)**, not a 4×4 matrix. ARKit-native, ARCore-native, glTF-native. 7 floats instead of 16. The proto file's docstring carries the full reasoning.
 
-Quaternion math is centralized in `packages/schemas/roomstudio_schemas/pose_math.py`. Any Python that touches a Pose imports from there. Do not re-implement.
+Quaternion math is centralized in `packages/schemas/thegoodguest_schemas/pose_math.py`. Any Python that touches a Pose imports from there. Do not re-implement.
 
 ## Repo layout
 
 ```
 packages/schemas/                 capture bundle proto + generated Python + pose/placement math
   capture_bundle.proto              source of truth
-  roomstudio_schemas/
+  thegoodguest_schemas/
     capture_bundle_pb2.py            generated; regen with ./tools/gen_proto.sh
     pose_math.py                     quaternion ops; one place to change
     placement_math.py                depth backprojection, single-view fits, ray triangulation
   tests/                              invariant tests for the proto, poses, and placement math
 
 packages/api-core/                shared logic consumed by both API services
-  roomstudio_api_core/
+  thegoodguest_api_core/
     scene.py                         Scene model, SceneStatus, state machine
     scene_read_repo.py               SceneReadRepository ABC + Firestore/in-memory read-only impls
     upload_session_repo.py           UploadSessionRepository ABC + Firestore/in-memory impls + gcs_mint_resumable_uri
@@ -1425,7 +1425,7 @@ root suite's 602 included 12 tests that were quietly resolving real Google
 credentials and taking ~4 s each to do it.
 
 Cause and fix (2026-08-08): `public_server.py` binds `gcs_mint_resumable_uri`
-by from-import, so the test's `patch("roomstudio_api_core.upload_session_repo.
+by from-import, so the test's `patch("thegoodguest_api_core.upload_session_repo.
 gcs_mint_resumable_uri", …)` rebound a different name and never took effect —
 the handler kept calling the real minter. Fixed by injection, the same seam
 pattern `UploadSessionRepository` already uses: `public_server._mint_uri_fn`
@@ -1459,7 +1459,7 @@ collection time, so a system-python run reports 4 collection ERRORS that look
 like a broken branch and are not.
 
 **A worktree's `packages/` edits are INVISIBLE to the shared `.venv`**, which
-carries the MAIN tree installed editable — so `import roomstudio_schemas` in a
+carries the MAIN tree installed editable — so `import thegoodguest_schemas` in a
 worktree resolves to `/Users/aubrey/projects/roomstudio/packages/schemas/...`,
 and a lane that adds a function there gets `ImportError` from its own service
 code while its own `packages/schemas` tests pass (that suite's conftest inserts

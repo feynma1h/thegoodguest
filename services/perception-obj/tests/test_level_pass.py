@@ -21,8 +21,8 @@ from __future__ import annotations
 import fusion
 import numpy as np
 import pytest
-from roomstudio_schemas.placement_math import minimal_rotation
-from roomstudio_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
+from thegoodguest_schemas.placement_math import minimal_rotation
+from thegoodguest_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
 
 
 class Ctx:

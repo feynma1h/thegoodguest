@@ -45,7 +45,7 @@ import box_placement
 import numpy as np
 import pytest
 from roomplan_room import RoomPlanBox
-from roomstudio_schemas.pose_math import quat_to_rotmat, rotation_angle_deg
+from thegoodguest_schemas.pose_math import quat_to_rotmat, rotation_angle_deg
 
 FIXTURE = Path(__file__).parent / "fixtures" / "facing_sign" / "walk_rooms.json"
 

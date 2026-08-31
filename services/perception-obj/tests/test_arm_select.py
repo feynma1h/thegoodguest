@@ -234,7 +234,7 @@ import numpy as np  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
 
 from roomplan_room import RoomPlanBox  # noqa: E402
-from roomstudio_schemas.placement_math import prepare_mask  # noqa: E402
+from thegoodguest_schemas.placement_math import prepare_mask  # noqa: E402
 
 TRUNCATED = "gs://o/truncated.ply"  # spans 0.4 of its box, residual 0.3
 COMPLETE = "gs://o/complete.ply"  # spans it exactly, residual 0.0

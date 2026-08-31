@@ -94,7 +94,7 @@ class _Ctx:
 
 
 def _tilt(rotation) -> float:
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
     R = quat_to_rotmat(tuple(rotation))
     return min(
         float(np.degrees(np.arccos(np.clip(s * R[1, i], -1.0, 1.0))))

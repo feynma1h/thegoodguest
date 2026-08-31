@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 
 import placement
-from roomstudio_schemas.placement_math import depth_pointmap, unproject_depth
+from thegoodguest_schemas.placement_math import depth_pointmap, unproject_depth
 
 
 class _Intrinsics:

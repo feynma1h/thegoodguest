@@ -48,8 +48,8 @@ import os
 from dataclasses import dataclass, field
 
 import numpy as np
-from roomstudio_schemas import PlaneAlignment
-from roomstudio_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
+from thegoodguest_schemas import PlaneAlignment
+from thegoodguest_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
 
 _HORIZONTAL = PlaneAlignment.Value("HORIZONTAL")
 _VERTICAL = PlaneAlignment.Value("VERTICAL")

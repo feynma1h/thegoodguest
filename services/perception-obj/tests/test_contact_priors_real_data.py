@@ -37,13 +37,13 @@ import contact_priors
 import fusion
 import numpy as np
 import pytest
-from roomstudio_schemas import CaptureBundle
-from roomstudio_schemas.placement_math import (
+from thegoodguest_schemas import CaptureBundle
+from thegoodguest_schemas.placement_math import (
     minimal_rotation,
     project_points,
     robust_cloud_stats,
 )
-from roomstudio_schemas.pose_math import (
+from thegoodguest_schemas.pose_math import (
     pose_position,
     pose_quat,
     quat_to_rotmat,

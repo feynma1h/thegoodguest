@@ -41,8 +41,8 @@ from auth import NullTokenVerifier
 from conversation_repo import InMemoryConversationRepository
 from design_spec import InMemoryDesignSpecRepository
 from public_server import GuestModelError, InMemoryManifestFetcher
-from roomstudio_api_core.scene import Scene, SceneStatus
-from roomstudio_api_core.scene_read_repo import InMemorySceneReadRepository
+from thegoodguest_api_core.scene import Scene, SceneStatus
+from thegoodguest_api_core.scene_read_repo import InMemorySceneReadRepository
 from scene_facts import FACTS_VERSION
 
 _NOW = datetime(2026, 7, 21, 12, 0, 0, tzinfo=timezone.utc)

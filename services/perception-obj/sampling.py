@@ -37,7 +37,7 @@ import os
 from collections.abc import Sequence
 
 import numpy as np
-from roomstudio_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
+from thegoodguest_schemas.pose_math import pose_position, pose_quat, quat_to_rotmat
 
 # Default cap on frames reconstructed per scene. ~12 pose-diverse frames give
 # fusion enough multi-view observations (triangulation needs >= 2 per object)

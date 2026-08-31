@@ -18,7 +18,7 @@ sides must stay in sync with.
 `ios/` directory in this monorepo. The Xcode project lives at
 `ios/RoomStudioCapture/`. The generated Swift proto output,
 `ios/RoomStudioCapture/RoomStudioCapture/Generated/capture_bundle.pb.swift`, is committed as
-version-controlled source, the same way `packages/schemas/roomstudio_schemas/
+version-controlled source, the same way `packages/schemas/thegoodguest_schemas/
 capture_bundle_pb2.py` is committed today. `tools/gen_proto.sh` already
 hardcodes this output path; it becomes functional once `protoc-gen-swift` is
 installed (`brew install swift-protobuf`).

@@ -27,7 +27,7 @@ import contact_priors
 import fusion
 import numpy as np
 import pytest
-from roomstudio_schemas import CaptureBundle
+from thegoodguest_schemas import CaptureBundle
 
 BUNDLE = Path(__file__).resolve().parent / "fixtures" / "scene_f3d70236" / "bundle.pb"
 

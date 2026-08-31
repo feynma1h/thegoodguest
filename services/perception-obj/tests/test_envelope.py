@@ -51,7 +51,7 @@ from process_receiver import (  # noqa: E402
     _process_frame,
     run_perception,
 )
-from roomstudio_schemas import ARKIT_ONLY, SCHEMA_VERSION, CaptureBundle  # noqa: E402
+from thegoodguest_schemas import ARKIT_ONLY, SCHEMA_VERSION, CaptureBundle  # noqa: E402
 
 _SCENE_ID = "scene-envelope-001"
 _BUNDLE_URI = "gs://bucket/captures/envtest/bundle.pb"

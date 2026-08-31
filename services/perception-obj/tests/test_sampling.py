@@ -18,7 +18,7 @@ _schemas_path = Path(__file__).resolve().parents[3] / "packages/schemas"
 if str(_schemas_path) not in sys.path:
     sys.path.insert(0, str(_schemas_path))
 
-from roomstudio_schemas import CaptureBundle  # noqa: E402
+from thegoodguest_schemas import CaptureBundle  # noqa: E402
 from sampling import select_frames  # noqa: E402  (conftest adds the service dir)
 
 

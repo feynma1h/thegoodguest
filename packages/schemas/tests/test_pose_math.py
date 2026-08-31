@@ -1,4 +1,4 @@
-"""Unit tests for roomstudio_schemas.pose_math.
+"""Unit tests for thegoodguest_schemas.pose_math.
 
 These pin down the rotation operations that interpret the Pose message's
 quaternion fields. Every Python consumer of the bundle imports from
@@ -15,7 +15,7 @@ import math
 
 import numpy as np
 import pytest
-from roomstudio_schemas.pose_math import (
+from thegoodguest_schemas.pose_math import (
     conjugate_quat,
     quat_mul,
     quat_norm,

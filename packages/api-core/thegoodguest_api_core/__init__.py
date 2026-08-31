@@ -1,4 +1,4 @@
-"""roomstudio-api-core — shared logic for api-public and api-internal.
+"""thegoodguest-api-core — shared logic for api-public and api-internal.
 
 Exposes the upload session repository (Firestore-backed and in-memory
 implementations) and the GCS resumable URI minting helper. Both API

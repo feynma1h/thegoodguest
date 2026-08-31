@@ -278,7 +278,7 @@ def test_deletion_covers_every_collection_the_source_declares():
         Path(__file__).resolve().parents[1],                       # api-public
         Path(__file__).resolve().parents[2] / "api-internal",
         Path(__file__).resolve().parents[3]
-        / "packages" / "api-core" / "roomstudio_api_core",
+        / "packages" / "api-core" / "thegoodguest_api_core",
     ]
     literal = re.compile(r'(?:COLLECTION[A-Z_]*\s*=\s*|\.collection\()"([a-z_]+)"')
     declared: set[str] = set()

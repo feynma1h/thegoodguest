@@ -48,7 +48,7 @@ import os
 from dataclasses import dataclass, field
 
 import numpy as np
-from roomstudio_schemas import placement_math as pm
+from thegoodguest_schemas import placement_math as pm
 
 # The pass itself. Off by default: turning it on changes what the model is
 # shown on every room, which wants the operator's eyes on more than the

@@ -26,7 +26,7 @@ import box_placement
 import fusion
 import numpy as np
 from roomplan_room import RoomPlanBox
-from roomstudio_schemas.placement_math import prepare_mask
+from thegoodguest_schemas.placement_math import prepare_mask
 
 
 @dataclass

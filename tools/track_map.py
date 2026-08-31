@@ -60,7 +60,7 @@ sys.path.insert(0, os.path.join(_HERE, "..", "packages", "schemas"))
 
 import box_placement as bp  # noqa: E402  (needs the sys.path lines above)
 import roomplan_room  # noqa: E402
-from roomstudio_schemas import CaptureBundle  # noqa: E402
+from thegoodguest_schemas import CaptureBundle  # noqa: E402
 
 # A box has to occupy a real part of the image before "which id owns it" is a
 # fair question; a sliver at the edge is a frame where any answer is luck. The

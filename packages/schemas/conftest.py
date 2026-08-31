@@ -1,7 +1,7 @@
 """Path setup for packages/schemas tests.
 
 Adds the schemas package root to sys.path so that test files can do
-``from roomstudio_schemas import ...`` without installing the package.
+``from thegoodguest_schemas import ...`` without installing the package.
 """
 
 import sys

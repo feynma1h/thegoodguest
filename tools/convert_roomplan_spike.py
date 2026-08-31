@@ -59,7 +59,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages/schemas"))
-from roomstudio_schemas import (  # noqa: E402
+from thegoodguest_schemas import (  # noqa: E402
     LIDAR_ARKIT,
     LIDAR_ROOMPLAN,
     PLANE_HORIZONTAL,
@@ -67,7 +67,7 @@ from roomstudio_schemas import (  # noqa: E402
     SCHEMA_VERSION,
     CaptureBundle,
 )
-from roomstudio_schemas.pose_math import quat_norm, rotmat_to_quat  # noqa: E402
+from thegoodguest_schemas.pose_math import quat_norm, rotmat_to_quat  # noqa: E402
 
 DEFAULT_RUN = Path("outputs/roomplan-spike/probe-20260728-143602")
 DEFAULT_OUT = Path("outputs/roomplan-spike-bundle")

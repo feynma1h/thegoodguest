@@ -1,5 +1,5 @@
 [project]
-name = "roomstudio-schemas"
+name = "thegoodguest-schemas"
 version = "0.1.0"
 description = "roomstudio capture-bundle schemas (proto + generated Python)"
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 # The proto source of truth is packages/schemas/capture_bundle.proto.
-# Generated Python lives in packages/schemas/roomstudio_schemas/.
+# Generated Python lives in packages/schemas/thegoodguest_schemas/.
 # Regenerate after edits with: ./tools/gen_proto.sh
 #
 # Install editable during dev:
@@ -29,4 +29,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["roomstudio_schemas*"]
+include = ["thegoodguest_schemas*"]

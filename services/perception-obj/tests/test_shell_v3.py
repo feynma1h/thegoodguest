@@ -23,7 +23,7 @@ import shell_receiver
 from PIL import Image
 from process_receiver import PoisonError
 from roomplan_room import parse_captured_room
-from roomstudio_schemas import (
+from thegoodguest_schemas import (
     ARKIT_ONLY,
     LIDAR_ARKIT,
     LIDAR_ROOMPLAN,

@@ -14,7 +14,7 @@ Or just:
 from __future__ import annotations
 
 import pytest
-from roomstudio_schemas import (
+from thegoodguest_schemas import (
     ARKIT_ONLY,
     LIDAR_ARKIT,
     LIDAR_ROOMPLAN,
@@ -183,7 +183,7 @@ def test_plane_alignment_enum_values_stable():
     """Plane-anchor alignment values are joined on by the shell stage; if
     the integers move, every archived bundle's planes silently flip
     meaning. Pin them (decision 0066)."""
-    from roomstudio_schemas import PlaneAlignment
+    from thegoodguest_schemas import PlaneAlignment
 
     assert PlaneAlignment.Value("PLANE_ALIGNMENT_UNSPECIFIED") == 0
     assert PlaneAlignment.Value("HORIZONTAL") == 1
@@ -204,7 +204,7 @@ def test_plane_anchors_absent_by_default():
 def test_plane_anchor_roundtrip():
     """Full PlaneAnchor round-trip: world_from_anchor pose, anchor-space
     center, extent + rotation, alignment, classification, boundary."""
-    from roomstudio_schemas import PLANE_VERTICAL
+    from thegoodguest_schemas import PLANE_VERTICAL
 
     b = _minimal_bundle()
     a = b.plane_anchors.add()
@@ -246,7 +246,7 @@ def test_plane_anchor_defaults_document_the_gotchas():
     as Frame.camera_pose."""
     b = _minimal_bundle()
     a = b.plane_anchors.add()
-    from roomstudio_schemas import PlaneAlignment
+    from thegoodguest_schemas import PlaneAlignment
 
     assert a.alignment == PlaneAlignment.Value("PLANE_ALIGNMENT_UNSPECIFIED")
     assert a.classification == ""

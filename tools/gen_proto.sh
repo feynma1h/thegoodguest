@@ -4,8 +4,8 @@
 #   ./tools/gen_proto.sh
 #
 # Outputs:
-#   packages/schemas/roomstudio_schemas/capture_bundle_pb2.py     (Python)
-#   packages/schemas/roomstudio_schemas/capture_bundle_pb2.pyi    (Python stubs, if mypy-protobuf present)
+#   packages/schemas/thegoodguest_schemas/capture_bundle_pb2.py     (Python)
+#   packages/schemas/thegoodguest_schemas/capture_bundle_pb2.pyi    (Python stubs, if mypy-protobuf present)
 #   ios/RoomStudioCapture/RoomStudioCapture/Generated/capture_bundle.pb.swift  (Swift, if protoc-gen-swift present)
 #
 # Tooling:
@@ -31,7 +31,7 @@ PROTO_DIR="packages/schemas"
 PROTO_FILES=("${PROTO_DIR}/capture_bundle.proto")
 
 # Python out
-PY_OUT="packages/schemas/roomstudio_schemas"
+PY_OUT="packages/schemas/thegoodguest_schemas"
 mkdir -p "${PY_OUT}"
 
 echo "=== Python ==="

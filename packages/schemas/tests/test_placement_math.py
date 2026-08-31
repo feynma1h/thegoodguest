@@ -1,4 +1,4 @@
-"""Unit tests for roomstudio_schemas.placement_math.
+"""Unit tests for thegoodguest_schemas.placement_math.
 
 These pin the geometry that places SAM 3D object splats into the ARKit
 world frame. A wrong transform here is silently wrong in production — the
@@ -17,8 +17,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
-from roomstudio_schemas import placement_math as pm
-from roomstudio_schemas.placement_math import (
+from thegoodguest_schemas import placement_math as pm
+from thegoodguest_schemas.placement_math import (
     MIN_CLOUD_POINTS,
     DegenerateGeometryError,
     camera_to_world,
@@ -44,7 +44,7 @@ from roomstudio_schemas.placement_math import (
     depth_pointmap,
     unproject_depth,
 )
-from roomstudio_schemas.pose_math import quat_average, quat_to_rotmat, rotmat_to_quat
+from thegoodguest_schemas.pose_math import quat_average, quat_to_rotmat, rotmat_to_quat
 
 SQRT2_2 = math.sqrt(2) / 2
 
@@ -96,7 +96,7 @@ def _rotmat(axis, angle_deg) -> np.ndarray:
 
 def test_quat_to_rotmat_matches_rotate_vec_by_quat():
     """R @ v must equal rotate_vec_by_quat(v, q) — same rotation, two forms."""
-    from roomstudio_schemas.pose_math import rotate_vec_by_quat
+    from thegoodguest_schemas.pose_math import rotate_vec_by_quat
 
     q = (0.1, 0.2, 0.3, math.sqrt(1 - 0.01 - 0.04 - 0.09))
     R = quat_to_rotmat(q)
@@ -507,7 +507,7 @@ def test_fit_single_view_recovers_transform():
     s_err ≈ 0.0017 on s=1.6, t_err ≈ 0.030 m with this deterministic
     fixture) so an accuracy regression fails the suite rather than hiding
     under a slack bound."""
-    from roomstudio_schemas.placement_math import fit_single_view
+    from thegoodguest_schemas.placement_math import fit_single_view
 
     src, dst, s_true, R_true, t_true = _single_view_fixture()
     s, t = fit_single_view(src, dst, R_true, VIEW_DIR)
@@ -520,7 +520,7 @@ def test_fit_single_view_robust_to_noise_and_bleed():
     fit — the percentile bands exist precisely to absorb these. Bounds
     pinned near achieved accuracy (s_err ≈ 0.0033, t_err ≈ 0.029 m,
     deterministic seeds) for the same regression-guard reason as above."""
-    from roomstudio_schemas.placement_math import fit_single_view
+    from thegoodguest_schemas.placement_math import fit_single_view
 
     src, dst, s_true, R_true, t_true = _single_view_fixture(
         noise=0.005, bleed_fraction=0.03
@@ -531,7 +531,7 @@ def test_fit_single_view_robust_to_noise_and_bleed():
 
 
 def test_fit_single_view_too_few_points_raises():
-    from roomstudio_schemas.placement_math import fit_single_view
+    from thegoodguest_schemas.placement_math import fit_single_view
 
     src, dst, _, R_true, _ = _single_view_fixture()
     with pytest.raises(DegenerateGeometryError):
@@ -546,7 +546,7 @@ def test_nn_translation_polish_improves_view_aware_fit():
     touch scale/rotation. (Full-mode refits from a poor init were found to
     converge to shell-sliding local minima — see the placement decision
     note — so full mode is not wired into the pipeline.)"""
-    from roomstudio_schemas.placement_math import fit_single_view, refine_similarity_nn
+    from thegoodguest_schemas.placement_math import fit_single_view, refine_similarity_nn
 
     src, dst, s_true, R_true, t_true = _single_view_fixture()
     s0, t0 = fit_single_view(src, dst, R_true, VIEW_DIR)
@@ -559,7 +559,7 @@ def test_nn_translation_polish_improves_view_aware_fit():
 
 
 def test_nn_refinement_too_few_points_raises():
-    from roomstudio_schemas.placement_math import refine_similarity_nn
+    from thegoodguest_schemas.placement_math import refine_similarity_nn
 
     with pytest.raises(DegenerateGeometryError):
         refine_similarity_nn(

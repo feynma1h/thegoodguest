@@ -28,8 +28,8 @@ steps:
       - python
       - -c
       - |
-        from roomstudio_schemas import CaptureBundle, CaptureTier
-        from roomstudio_api_core.scene import Scene
+        from thegoodguest_schemas import CaptureBundle, CaptureTier
+        from thegoodguest_api_core.scene import Scene
         print("import smoke: OK")
 
   - name: 'gcr.io/cloud-builders/docker'

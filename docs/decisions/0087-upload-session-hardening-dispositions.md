@@ -57,7 +57,7 @@ them from its blobs). No client change needed; none made.
 
 ## Gap F3 — semantic manifest validation
 
-New `roomstudio_api_core.manifest_validation`: path grammar pinned to the
+New `thegoodguest_api_core.manifest_validation`: path grammar pinned to the
 union of what deployed writers emit (`frames/*.jpg`, `depth/*.f32`,
 `confidence/*.png`, `roomplan/*.json|usdz`, root `bundle.pb`), exactly one
 bundle.pb (a manifest without it can never complete ingest — early 400 is

@@ -11,7 +11,7 @@ depth — to produce a world transform per object:
     frame orientation estimate), lifted camera→world with the frame's pose.
   * Scale and translation come from the LiDAR depth cloud under the
     object's mask (the metric authority), via the single-view-aware fit in
-    roomstudio_schemas.placement_math, plus a translation-only NN polish.
+    thegoodguest_schemas.placement_math, plus a translation-only NN polish.
   * Frames without depth (ARKIT_ONLY tier) get a world-space view ray per
     object instead; the scene-level fusion pass triangulates object
     centers from those rays across keyframes.
@@ -59,7 +59,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from roomstudio_schemas.placement_math import (
+from thegoodguest_schemas.placement_math import (
     MIN_CLOUD_POINTS,
     DegenerateGeometryError,
     camera_to_world,
@@ -70,7 +70,7 @@ from roomstudio_schemas.placement_math import (
     resize_mask_to,
     unproject_depth,
 )
-from roomstudio_schemas.pose_math import (
+from thegoodguest_schemas.pose_math import (
     pose_quat,
     quat_to_rotmat,
     rotmat_to_quat,
@@ -413,7 +413,7 @@ def compute_frame_placement(
             ]
             record["rotation_source"] = "sam3d_layout"
         try:
-            from roomstudio_schemas.placement_math import robust_cloud_stats
+            from thegoodguest_schemas.placement_math import robust_cloud_stats
             stats = robust_cloud_stats(parse_ply_vertices(ply_bytes))
             record["splat_max_extent"] = float(stats.extents[0])
         except Exception:

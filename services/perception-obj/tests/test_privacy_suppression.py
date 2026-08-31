@@ -44,7 +44,7 @@ from privacy import (  # noqa: E402
     suppressed_union,
 )
 from room_planes import ShellPlaneGeom  # noqa: E402
-from roomstudio_schemas import Intrinsics, Pose  # noqa: E402
+from thegoodguest_schemas import Intrinsics, Pose  # noqa: E402
 from shell_observation import FrameSample, observe_plane  # noqa: E402
 
 

@@ -53,7 +53,7 @@ from process_receiver import (
     _bundle_prefix,
 )
 from oidc import OIDCError, OIDCVerifier
-from roomstudio_schemas import CaptureBundle, ARKIT_ONLY, SCHEMA_VERSION
+from thegoodguest_schemas import CaptureBundle, ARKIT_ONLY, SCHEMA_VERSION
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ Gencode/Runtime versions when loading capture_bundle.proto: gencode 7.35.0
 runtime 6.33.6. Runtime version cannot be older than the linked gencode version.
 ```
 
-`packages/schemas/roomstudio_schemas/capture_bundle_pb2.py` is generated with
+`packages/schemas/thegoodguest_schemas/capture_bundle_pb2.py` is generated with
 gencode 7.35.0 (from whatever `protoc` is installed locally where
 `tools/gen_proto.sh` was last run). The api-internal image installs an older
 `protobuf` (6.33.6, presumably as a transitive of `google-cloud-firestore` or
@@ -81,8 +81,8 @@ and `infra/cloudbuild/api-public.yaml` between build and push:
 
 ```
 docker run --rm <image> python -c "
-  from roomstudio_schemas import CaptureBundle, CaptureTier
-  from roomstudio_api_core.scene import Scene
+  from thegoodguest_schemas import CaptureBundle, CaptureTier
+  from thegoodguest_api_core.scene import Scene
   print('import smoke: OK')
 "
 ```
@@ -107,7 +107,7 @@ failure. Both should land together.
 ## What would change this decision
 
 - The protobuf project changes its cross-version guarantee policy.
-- `roomstudio_schemas` stops shipping generated code and switches to a
+- `thegoodguest_schemas` stops shipping generated code and switches to a
   pure-runtime proto parser (unlikely; would lose static typing).
 - A different runtime dependency mandates an older `protobuf` upper bound,
   making the pin direction non-trivial; in that case `tools/gen_proto.sh` would

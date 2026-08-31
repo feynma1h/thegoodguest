@@ -58,7 +58,7 @@ from room_geometry import (
     footprint_inside_floor,
     footprints_overlap,
 )
-from roomstudio_schemas.pose_math import quat_mul
+from thegoodguest_schemas.pose_math import quat_mul
 
 # A half turn about world +Y. RoomPlan boxes are pure-yaw (0076), so the box's
 # own vertical axis IS world up and this is the flip about the box's centre

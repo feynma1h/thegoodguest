@@ -306,7 +306,7 @@ async def handle_segment(
         _download_gcs_uri,
         _gcs_upload_for_scene,
     )
-    from roomstudio_schemas import CaptureBundle
+    from thegoodguest_schemas import CaptureBundle
 
     # verify() takes the HEADER VALUE and raises; it is not async and does not
     # take the Request. Same shape as /process, /shell and /compress.

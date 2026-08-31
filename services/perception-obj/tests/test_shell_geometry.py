@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import room_planes
 import shell_geometry
-from roomstudio_schemas import PLANE_HORIZONTAL, PLANE_VERTICAL, CaptureBundle
+from thegoodguest_schemas import PLANE_HORIZONTAL, PLANE_VERTICAL, CaptureBundle
 from shell_geometry import assemble_shell, close_shell
 
 # ---------------------------------------------------------------------------

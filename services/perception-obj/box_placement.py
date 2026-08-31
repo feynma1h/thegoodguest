@@ -80,12 +80,12 @@ from dataclasses import dataclass
 
 import numpy as np
 import reproject
-from roomstudio_schemas.placement_math import (
+from thegoodguest_schemas.placement_math import (
     mask_containment,
     project_points,
     trimmed_nn_rms,
 )
-from roomstudio_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
+from thegoodguest_schemas.pose_math import quat_to_rotmat, rotmat_to_quat
 
 logger = logging.getLogger(__name__)
 
@@ -782,7 +782,7 @@ def splat_layout_rotation(obs: dict) -> np.ndarray | None:
         q = pl["world_rotation_xyzw"]
     if q is None:
         return None
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
 
     return quat_to_rotmat(tuple(q))
 
@@ -797,7 +797,7 @@ def splat_up_local(obs: dict) -> np.ndarray | None:
 def axis_up_angle_deg(cand: AxisCandidate, up_local: np.ndarray) -> float:
     """Angle of the candidate's mapped layout-up to the vertical AXIS LINE
     (sign-agnostic: min of the angles to +Y and −Y)."""
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
 
     R = quat_to_rotmat(tuple(cand.rotation_xyzw))
     up_world = R @ np.asarray(up_local, dtype=np.float64)
@@ -928,12 +928,12 @@ def score_candidates_cloud(
     misalignment that defeats appearance scoring on truncated splats
     (measured — no appearance-scorer variant separated any box's axis
     mapping, across every view set tried (decision 0081); this does)."""
-    from roomstudio_schemas.placement_math import (
+    from thegoodguest_schemas.placement_math import (
         DegenerateGeometryError,
         refine_similarity_nn,
         robust_cloud_stats,
     )
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
 
     try:
         c_local = robust_cloud_stats(local_points).center
@@ -1046,7 +1046,7 @@ def resolve_facing_sign(
     Abstention is the default everywhere: no layout, no partner candidate,
     or a residual past the gate all leave `chosen` exactly as it arrived.
     """
-    from roomstudio_schemas.pose_math import quat_to_rotmat, rotation_angle_deg
+    from thegoodguest_schemas.pose_math import quat_to_rotmat, rotation_angle_deg
 
     if layout_rotation is None or not candidates:
         return (chosen, False, None, None)
@@ -1651,7 +1651,7 @@ def splat_clip_block(
     yaw fully determine the volume for any consumer; the block repeats them
     rather than making the renderer re-derive them from `roomplan_box`.
     """
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
 
     if local_points is None or local_points.shape[0] == 0:
         return None
@@ -1720,7 +1720,7 @@ def vertical_seat_offset(box, local_points: np.ndarray, rotation_xyzw, scale: fl
 def _rendered_span(local_points, rotation_xyzw, scale, box):
     """(lo, hi) world heights of a placed splat, percentile-clipped at both
     ends for the reason extents are everywhere else."""
-    from roomstudio_schemas.pose_math import quat_to_rotmat
+    from thegoodguest_schemas.pose_math import quat_to_rotmat
 
     if local_points is None or local_points.shape[0] < 8:
         return None

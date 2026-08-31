@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from room_planes import ShellPlaneGeom
 from roomplan_room import RoomPlanBox, RoomPlanSurface
-from roomstudio_schemas.pose_math import rotmat_to_quat
+from thegoodguest_schemas.pose_math import rotmat_to_quat
 
 
 @dataclass

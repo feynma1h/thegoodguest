@@ -169,7 +169,7 @@ if os.environ.get("ENVIRONMENT") != "production":
         if _p not in sys.path:
             sys.path.insert(0, _p)
 
-from roomstudio_api_core.upload_session_repo import (  # noqa: E402
+from thegoodguest_api_core.upload_session_repo import (  # noqa: E402
     UploadSessionRepository,
     InMemoryUploadSessionRepository,
     CaptureLimitError,
@@ -178,8 +178,8 @@ from roomstudio_api_core.upload_session_repo import (  # noqa: E402
     UriMintFn,
     gcs_mint_resumable_uri,
 )
-from roomstudio_api_core.manifest_validation import validate_manifest  # noqa: E402
-from roomstudio_api_core.scene_read_repo import (  # noqa: E402
+from thegoodguest_api_core.manifest_validation import validate_manifest  # noqa: E402
+from thegoodguest_api_core.scene_read_repo import (  # noqa: E402
     SceneReadRepository,
     InMemorySceneReadRepository,
     SceneNotFoundError,
@@ -349,7 +349,7 @@ def _get_upload_session_repo() -> UploadSessionRepository:
     if _upload_session_repo is None:
         project = os.environ.get("FIRESTORE_PROJECT")
         if project:
-            from roomstudio_api_core.upload_session_repo import FirestoreUploadSessionRepository
+            from thegoodguest_api_core.upload_session_repo import FirestoreUploadSessionRepository
             _upload_session_repo = FirestoreUploadSessionRepository(project=project)
             logger.info("Using Firestore UploadSessionRepository")
         else:
@@ -421,7 +421,7 @@ def _get_scene_read_repo() -> SceneReadRepository:
     if _scene_read_repo is None:
         project = os.environ.get("FIRESTORE_PROJECT")
         if project:
-            from roomstudio_api_core.scene_read_repo import FirestoreSceneReadRepository
+            from thegoodguest_api_core.scene_read_repo import FirestoreSceneReadRepository
             _scene_read_repo = FirestoreSceneReadRepository(project=project)
             logger.info("Using Firestore SceneReadRepository")
         else:
@@ -549,7 +549,7 @@ class UnsignedDevUrlSigner:
 # not to fix it while the payload was the 99% term). The compressed tier is
 # that decision's own named trigger: at ~47 MB a 2 s stall is no longer 1%.
 # Bounded and order-preserving, the precedent being `_mint_all` in
-# packages/api-core/roomstudio_api_core/upload_session_repo.py -- see its
+# packages/api-core/thegoodguest_api_core/upload_session_repo.py -- see its
 # docstring for the serial measurement (an 878-path manifest at ~80 s, past
 # the iOS client's 60 s timeout). Modest by default on purpose -- the mint
 # OOM recorded above that module's per-thread credential cache came from
@@ -927,7 +927,7 @@ def _load_owned_ready_scene(scene_id: str, user_id: str):
             content={"error": "forbidden", "detail": "scene is owned by a different user"},
         )
 
-    from roomstudio_api_core.scene import SceneStatus
+    from thegoodguest_api_core.scene import SceneStatus
     if scene.status != SceneStatus.READY or not scene.result_uri:
         return None, JSONResponse(
             status_code=409,
@@ -996,7 +996,7 @@ def create_upload_session(
     Manifest rules (gaps c + F3, decisions 0015/0018): every entry carries a
     real expected_size_bytes (>= 1, capped), paths match the capture clients'
     known shapes, exactly one bundle.pb — see
-    roomstudio_api_core.manifest_validation for the grammar and caps.
+    thegoodguest_api_core.manifest_validation for the grammar and caps.
 
     Errors:
       400 invalid_bundle_id   — bundle_id is not a UUIDv4
