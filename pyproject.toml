@@ -46,5 +46,6 @@ testpaths = [
     "tools/test_backfill_scene_expiry.py",
     "tools/test_gen_mark.py",
     "tools/test_upstream_hook.py",
+    "tools/test_punchlist_check.py",
 ]
 addopts = "--import-mode=importlib"

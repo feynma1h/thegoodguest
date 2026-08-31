@@ -221,30 +221,6 @@ def check_unrestricted_api_key():
 check_unrestricted_api_key.tag = NET
 
 
-def check_dev_fixtures_location():
-    """G4-06 — dev-fixtures must not sit inside web/public/."""
-    p = REPO / "web" / "public" / "dev-fixtures"
-    if p.exists():
-        return False, "present under web/public/ — next build copies it into out/"
-    return True, "not under web/public/"
-
-
-def check_rollback_tag():
-    """G4-07 — the serving-rollback hold should be dropped once the flip is trusted."""
-    out = _run([
-        "gcloud", "artifacts", "docker", "images", "list",
-        "asia-southeast1-docker.pkg.dev/thegoodguest/thegoodguest/perception-obj",
-        "--include-tags", "--format=value(tags)",
-    ])
-    holds = [t for line in out.splitlines() for t in line.split(",") if t.startswith("serving-rollback")]
-    if holds:
-        return False, "still held: " + ", ".join(holds)
-    return True, "no serving-rollback holds pinning an image"
-
-
-check_rollback_tag.tag = NET
-
-
 # ── registry ─────────────────────────────────────────────────────────────────
 
 CHECKS = {
@@ -257,8 +233,6 @@ CHECKS = {
     "G4-01": check_alerting,
     "G4-02": check_python_ci,
     "G4-05": check_unrestricted_api_key,
-    "G4-06": check_dev_fixtures_location,
-    "G4-07": check_rollback_tag,
 }
 
 
@@ -267,12 +241,24 @@ def punchlist_ids() -> list[str]:
     return re.findall(r"^### (G\d-\d\d) ", PUNCHLIST.read_text(encoding="utf-8"), re.M)
 
 
+def orphaned_checks() -> list[str]:
+    """IDs with a probe but no punchlist entry.
+
+    The loop below walks the punchlist, so a probe whose entry has been deleted
+    is never called again — it does not fail, it just stops existing. Two sat
+    that way for weeks. Reported rather than tolerated: either the entry came
+    back, or the probe should go.
+    """
+    return sorted(set(CHECKS) - set(punchlist_ids()))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("filter", nargs="?", help="an ID (G3-01) or gate prefix (G3)")
     ap.add_argument("--offline", action="store_true", help="skip checks that hit the network")
     args = ap.parse_args()
 
+    orphans = orphaned_checks()
     ids = punchlist_ids()
     if not ids:
         print("no punchlist entries found — is docs/punchlist.md intact?", file=sys.stderr)
@@ -314,13 +300,22 @@ def main() -> int:
     if manual:
         print(f"\nMANUAL — no automated check ({len(manual)}): {', '.join(manual)}")
 
+    if orphans:
+        print(
+            f"\nSTALE — {len(orphans)} probe(s) registered for entries the punchlist no "
+            f"longer declares: {', '.join(orphans)}\n"
+            "  Delete the probe, or restore the entry it was written for.",
+            file=sys.stderr,
+        )
+
     print(
         f"\n{len(done)} done · {len(open_)} open · {len(unknown)} unknown · "
         f"{len(manual)} manual · {len(ids)} entries"
     )
     # Exit 0 whenever every check ran. Outstanding work is the expected state of a
-    # punchlist, not an error; only a probe that could not run is worth a non-zero.
-    return 1 if unknown else 0
+    # punchlist, not an error; a probe that could not run, or one registered for
+    # an entry that no longer exists, is worth a non-zero.
+    return 1 if unknown or orphans else 0
 
 
 if __name__ == "__main__":

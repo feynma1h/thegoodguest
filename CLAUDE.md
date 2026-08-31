@@ -1433,23 +1433,31 @@ The criteria for "is this worth a note?" live in the session-end housekeeping se
 ## The punchlist
 
 **`docs/punchlist.md` is the working list of what is left before "finished."**
-Thirty entries in six gates, in dependency order, written 2026-08-26 from a
-full review that RAN every suite and checked the live system rather than reading
-this file. Start there for "what should I do next"; this section below is
-narrative and historical, and it decays — the punchlist is the part maintained
-as a list.
+Entries are grouped into six gates in dependency order, written from a full
+review that RAN every suite and checked the live system rather than reading this
+file. Start there for "what should I do next" — the punchlist is the part
+maintained as a list, and it is the only place in this repo that tracks
+remaining work.
 
 **Its rules are this repo's rules.** An entry that is done or ruled gets
 DELETED, never annotated — a punchlist that accumulates closed items becomes the
 retired 207-entry tracker again. New entries are added freely in the same shape.
 IDs are stable and never reused.
 
-**Eleven of the thirty carry an automated check.** Run
-`python3 tools/punchlist_check.py` (add `--offline` to skip the five that hit the
+**Some entries carry an automated check; the rest say `Check: manual` and name
+who decides.** Run `python3 tools/punchlist_check.py` for the counts rather than
+trusting a number written here (add `--offline` to skip the ones that hit the
 network, or a filter like `G3` for one gate). It re-derives status from the live
 system and prints DONE / OPEN / UNKNOWN / MANUAL. **UNKNOWN is never DONE** — a
 probe that could not run reports as its own state, because "I could not tell" and
 "it is finished" are different answers.
+
+**The checker reconciles itself against the punchlist.** A probe registered for
+an entry that no longer exists is never called — it does not fail, it stops
+existing while still reading like coverage. Two sat that way for weeks. The tool
+now reports them as STALE and exits non-zero, and
+`tools/test_punchlist_check.py` pins it, along with the inverse: a `Check:` line
+claiming `automated` with no probe behind it.
 
 This exists because the failure mode here is documents going quietly out of date
 rather than work being forgotten. On 2026-08-26 this file asserted CI was green
