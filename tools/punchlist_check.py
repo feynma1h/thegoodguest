@@ -95,7 +95,7 @@ def check_live_site_name():
     if not m:
         raise RuntimeError("could not find the title in layout.tsx")
     expected = m.group(1)
-    html = _fetch("https://roomstudio.web.app/")
+    html = _fetch("https://thegoodguest.web.app/")
     m2 = re.search(r"<title>([^<]*)</title>", html, re.I)
     live = m2.group(1).strip() if m2 else "(none)"
     if live == expected:
@@ -215,7 +215,7 @@ def check_rollback_tag():
     """G4-07 — the serving-rollback hold should be dropped once the flip is trusted."""
     out = _run([
         "gcloud", "artifacts", "docker", "images", "list",
-        "asia-southeast1-docker.pkg.dev/roomstudio/roomstudio/perception-obj",
+        "asia-southeast1-docker.pkg.dev/thegoodguest/roomstudio/perception-obj",
         "--include-tags", "--format=value(tags)",
     ])
     holds = [t for line in out.splitlines() for t in line.split(",") if t.startswith("serving-rollback")]

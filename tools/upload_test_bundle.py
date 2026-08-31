@@ -590,7 +590,7 @@ def do_cleanup(
     Cleanup never affects the process exit code.
     """
     out.progress("Cleanup: removing artifacts (best-effort)")
-    _outputs_bucket = "roomstudio-perception-outputs"
+    _outputs_bucket = "thegoodguest-perception-outputs"
 
     # 1. GCS captures bucket
     try:

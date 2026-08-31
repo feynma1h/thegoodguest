@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the roomstudio internal API (services/api-internal/) to Cloud Run.
+# Deploy the thegoodguest internal API (services/api-internal/) to Cloud Run.
 #
 # This service runs --no-allow-unauthenticated. Cloud Run IAM validates the
 # Eventarc service account's OIDC token at the platform boundary. No in-app
@@ -13,16 +13,16 @@
 # Cloud Tasks queue) that both services depend on.
 #
 # Prerequisites:
-#   - gcloud authenticated and project set to "roomstudio"
+#   - gcloud authenticated and project set to "thegoodguest"
 
 set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-PROJECT_ID="roomstudio"
+PROJECT_ID="thegoodguest"
 REGION="asia-southeast1"
 SERVICE_NAME="api-internal"
-REPO="roomstudio"
+REPO="thegoodguest"
 IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE_NAME}:${IMAGE_TAG}"
 
@@ -37,7 +37,7 @@ INVOKER_SA="${INVOKER_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 TASKS_QUEUE="perception-dispatch"
 TASKS_LOCATION="${REGION}"
 
-BUNDLE_BUCKET="roomstudio-captures"
+BUNDLE_BUCKET="thegoodguest-captures"
 
 PERCEPTION_OBJ_SERVICE="perception-obj"
 
@@ -45,7 +45,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
-echo "=== roomstudio api-internal deploy ==="
+echo "=== thegoodguest api-internal deploy ==="
 echo "Project:  ${PROJECT_ID}"
 echo "Region:   ${REGION}"
 echo "Image:    ${IMAGE_URI}"
@@ -84,7 +84,7 @@ _ensure_sa() {
     fi
 }
 
-_ensure_sa "${RUNTIME_SA_NAME}" "${RUNTIME_SA}" "roomstudio API internal runtime"
+_ensure_sa "${RUNTIME_SA_NAME}" "${RUNTIME_SA}" "thegoodguest API internal runtime"
 _ensure_sa "${INVOKER_SA_NAME}" "${INVOKER_SA}" "Cloud Tasks OIDC invoker for perception-obj"
 
 # ── Step 3: Bind IAM roles ────────────────────────────────────────────────────
@@ -209,7 +209,7 @@ gcloud artifacts repositories describe "${REPO}" \
         --repository-format=docker \
         --location="${REGION}" \
         --project="${PROJECT_ID}" \
-        --description="roomstudio container images"
+        --description="thegoodguest container images"
 echo "  Artifact Registry repo ready."
 
 # ── Step 8: Build container via Cloud Build ────────────────────────────────────

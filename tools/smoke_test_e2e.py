@@ -41,8 +41,8 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 DEFAULT_BUNDLE = "outputs/test_bundle/bundle.pb"
-DEFAULT_BUCKET = "roomstudio-captures"
-GCP_PROJECT = "roomstudio"
+DEFAULT_BUCKET = "thegoodguest-captures"
+GCP_PROJECT = "thegoodguest"
 GCP_REGION = "asia-southeast1"
 INGESTER_SERVICE = "api"
 FIRESTORE_COLLECTION = "scenes"

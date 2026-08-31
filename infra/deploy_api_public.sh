@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the roomstudio public API (services/api-public/) to Cloud Run.
+# Deploy the thegoodguest public API (services/api-public/) to Cloud Run.
 #
 # This service runs --allow-unauthenticated. Firebase ID token verification
 # is handled in-app by FirebaseTokenVerifier. Cloud Run IAM does NOT gate
@@ -12,7 +12,7 @@
 # refresh IAM bindings after a change.
 #
 # Prerequisites:
-#   - gcloud authenticated and project set to "roomstudio"
+#   - gcloud authenticated and project set to "thegoodguest"
 #   - See infra/deploy_api_internal.sh for steps that must run first
 #     (Firestore database, GCS bucket).
 
@@ -20,34 +20,34 @@ set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-PROJECT_ID="roomstudio"
+PROJECT_ID="thegoodguest"
 REGION="asia-southeast1"
 SERVICE_NAME="api-public"
-REPO="roomstudio"
+REPO="thegoodguest"
 IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE_NAME}:${IMAGE_TAG}"
 
 RUNTIME_SA_NAME="api-public-runtime"
 RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-BUNDLE_BUCKET="roomstudio-captures"
+BUNDLE_BUCKET="thegoodguest-captures"
 # Account deletion (decision 0095) erases a user's rendered rooms as well as
 # their raw captures, so the runtime SA needs delete on BOTH buckets. Must
 # match PERCEPTION_OUTPUTS_BUCKET in infra/api-public.env.yaml.
-OUTPUTS_BUCKET="roomstudio-perception-outputs"
+OUTPUTS_BUCKET="thegoodguest-perception-outputs"
 
 # Secret Manager secret holding the Anthropic API key for the conversation
 # guest model (decision 0058). The secret VALUE is operator-managed; this
 # script only checks existence and binds access. Create it once with:
 #   printf '%s' "$THE_KEY" | gcloud secrets create anthropic-api-key \
-#       --project=roomstudio --replication-policy=automatic --data-file=-
+#       --project=thegoodguest --replication-policy=automatic --data-file=-
 ANTHROPIC_SECRET_NAME="anthropic-api-key"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
-echo "=== roomstudio api-public deploy ==="
+echo "=== thegoodguest api-public deploy ==="
 echo "Project:  ${PROJECT_ID}"
 echo "Region:   ${REGION}"
 echo "Image:    ${IMAGE_URI}"
@@ -75,7 +75,7 @@ if gcloud iam service-accounts describe "${RUNTIME_SA}" \
 else
     echo "  Creating SA: ${RUNTIME_SA}"
     gcloud iam service-accounts create "${RUNTIME_SA_NAME}" \
-        --display-name="roomstudio API public runtime" \
+        --display-name="thegoodguest API public runtime" \
         --project="${PROJECT_ID}"
 fi
 
@@ -183,7 +183,7 @@ gcloud artifacts repositories describe "${REPO}" \
         --repository-format=docker \
         --location="${REGION}" \
         --project="${PROJECT_ID}" \
-        --description="roomstudio container images"
+        --description="thegoodguest container images"
 echo "  Artifact Registry repo ready."
 
 # ── Step 5: Build container via Cloud Build ────────────────────────────────────

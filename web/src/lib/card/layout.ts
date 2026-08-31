@@ -404,7 +404,7 @@ export const CARD_SUBTITLE = "Every line here was measured, not drawn.";
 /** The true hosting URL, printed on the card. NOT the product name and not a
  * stand-in for it: changing this string without moving hosting would print a
  * falsehood on an artifact that leaves the browser and reaches other people. */
-export const DOMAIN = "roomstudio.web.app";
+export const DOMAIN = "thegoodguest.web.app";
 
 export function layoutCard(input: CardInput): CardLayout {
   const { measure, title } = input;

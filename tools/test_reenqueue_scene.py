@@ -87,7 +87,7 @@ class TestEnvFileParser:
             "PERCEPTION_OBJ_PROCESS_URL: https://x.a.run.app/process\n"
         )
         env = parse_env_file(p)
-        assert env["CLOUD_TASKS_PROJECT"] == "roomstudio"
+        assert env["CLOUD_TASKS_PROJECT"] == "thegoodguest"
         assert env["PERCEPTION_OBJ_PROCESS_URL"] == "https://x.a.run.app/process"
         assert "# comment" not in env
 

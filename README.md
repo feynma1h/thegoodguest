@@ -5,10 +5,10 @@ AI-readable, navigable 3D reconstruction of *that* room to reason about and
 redesign.
 
 The product, the repo and the app are all **The Good Guest**. The **GCP project
-id stays `roomstudio`**, and so do the bucket names, the service-account
-addresses and the `roomstudio.web.app` hosting URL: GCP project ids are
+id stays `thegoodguest`**, and so do the bucket names, the service-account
+addresses and the `thegoodguest.web.app` hosting URL: GCP project ids are
 immutable and bucket names are globally unique, so those can only change by
-migrating to a new project. Where you see `roomstudio` below, it is naming a
+migrating to a new project. Where you see `thegoodguest` below, it is naming a
 live cloud resource, not the product.
 
 The always-current state of the project — what works, what does not, and what
@@ -32,7 +32,7 @@ outputs/             local scratch for run artifacts (gitignored)
 
 ## Services
 
-All four run on Cloud Run in `asia-southeast1`, project `roomstudio`.
+All four run on Cloud Run in `asia-southeast1`, project `thegoodguest`.
 
 | Service           | State  | Purpose                                                          |
 |-------------------|--------|------------------------------------------------------------------|

@@ -73,7 +73,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # GCS bucket for perception outputs. /process (process_receiver.py) writes
 # per-scene splats and manifests under scenes/{scene_id}/ in this bucket.
 PERCEPTION_OUTPUTS_BUCKET = os.environ.get(
-    "PERCEPTION_OUTPUTS_BUCKET", "roomstudio-perception-outputs"
+    "PERCEPTION_OUTPUTS_BUCKET", "thegoodguest-perception-outputs"
 )
 
 # Wall-clock budget for one /process request. Must mirror the Cloud Run

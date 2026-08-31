@@ -201,16 +201,16 @@ mechanism fires on wall-clock time, not build completion. Instead:
    (`Created [https://cloudbuild.googleapis.com/...builds/<BUILD_ID>]`).
 2. Poll directly at 2–3 minute intervals:
    ```
-   gcloud builds describe <BUILD_ID> --project=roomstudio --region=asia-southeast1 \
+   gcloud builds describe <BUILD_ID> --project=thegoodguest --region=asia-southeast1 \
      --format='value(status,finishTime)'
    ```
    Loop until `status` is `SUCCESS`, `FAILURE`, or `CANCELLED`.
 3. If the build succeeded but the local deploy step never ran, trigger it manually:
    ```
    gcloud run deploy <service> \
-     --image=$(gcloud builds describe <BUILD_ID> --project=roomstudio \
+     --image=$(gcloud builds describe <BUILD_ID> --project=thegoodguest \
                --region=asia-southeast1 --format='value(images)') \
-     --project=roomstudio --region=asia-southeast1
+     --project=thegoodguest --region=asia-southeast1
    ```
 
 This pattern failed twice in the same session before the rule was written. Don't retry it.

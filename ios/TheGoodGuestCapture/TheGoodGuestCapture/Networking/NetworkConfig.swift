@@ -1,7 +1,7 @@
 /// Static network configuration for TheGoodGuest Capture.
 ///
 /// One place to change service URLs. The api-public URL is the Cloud Run
-/// service URL for project "roomstudio", region asia-southeast1.
+/// service URL for project "thegoodguest", region asia-southeast1.
 ///
 /// Read by: UploadSessionClient (default baseURL).
 

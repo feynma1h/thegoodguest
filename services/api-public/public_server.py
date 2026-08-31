@@ -304,7 +304,7 @@ _scene_read_repo: Optional[SceneReadRepository] = None
 # None → the production minter (see _get_mint_uri_fn). Tests patch this.
 _mint_uri_fn: Optional[UriMintFn] = None
 
-_GCS_CAPTURES_BUCKET: str = os.environ.get("GCS_CAPTURES_BUCKET", "roomstudio-captures")
+_GCS_CAPTURES_BUCKET: str = os.environ.get("GCS_CAPTURES_BUCKET", "thegoodguest-captures")
 
 # Per-UID daily mint quota for /upload_session (gap b, decisions 0015/0018).
 # One unit = one call that actually mints GCS session URIs; idempotent

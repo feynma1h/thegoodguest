@@ -58,7 +58,7 @@
     }
    },
    "score": 0.52734375,
-   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0398/splats/04_cabinet.ply",
+   "splat_gcs_uri": "gs://thegoodguest-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0398/splats/04_cabinet.ply",
    "view_ray": {
     "angular_extent_rad": 0.6080247301469518,
     "direction": [
@@ -134,7 +134,7 @@
     }
    },
    "score": 0.92578125,
-   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0010/splats/00_bed.ply",
+   "splat_gcs_uri": "gs://thegoodguest-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0010/splats/00_bed.ply",
    "view_ray": {
     "angular_extent_rad": 1.077616864510997,
     "direction": [
@@ -204,7 +204,7 @@
     ]
    },
    "score": 0.65234375,
-   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0142/splats/02_desk.ply",
+   "splat_gcs_uri": "gs://thegoodguest-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0142/splats/02_desk.ply",
    "view_ray": {
     "angular_extent_rad": 0.9851525668321115,
     "direction": [
@@ -280,7 +280,7 @@
     }
    },
    "score": 0.703125,
-   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0171/splats/01_desk.ply",
+   "splat_gcs_uri": "gs://thegoodguest-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0171/splats/01_desk.ply",
    "view_ray": {
     "angular_extent_rad": 0.5866617053183218,
     "direction": [
@@ -356,7 +356,7 @@
     }
    },
    "score": 0.7578125,
-   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0142/splats/00_chair.ply",
+   "splat_gcs_uri": "gs://thegoodguest-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0142/splats/00_chair.ply",
    "view_ray": {
     "angular_extent_rad": 0.7256271366598369,
     "direction": [
@@ -432,7 +432,7 @@
     }
    },
    "score": 0.92578125,
-   "splat_gcs_uri": "gs://roomstudio-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0171/splats/00_chair.ply",
+   "splat_gcs_uri": "gs://thegoodguest-perception-outputs/scenes/a7e073ae-d3c6-4f5d-8137-a6a47028cd0a/frames/0171/splats/00_chair.ply",
    "view_ray": {
     "angular_extent_rad": 0.8777533911632908,
     "direction": [

@@ -1,6 +1,6 @@
 # Cloud Tasks queue — perception-dispatch
 
-`perception-dispatch` (location `asia-southeast1`, project `roomstudio`) is the
+`perception-dispatch` (location `asia-southeast1`, project `thegoodguest`) is the
 one queue in the system. Three producers enqueue onto it and one service
 receives from it:
 
@@ -38,7 +38,7 @@ To repair out of band, the same command the deploy script runs:
 ```bash
 gcloud tasks queues create perception-dispatch \
   --location=asia-southeast1 \
-  --project=roomstudio \
+  --project=thegoodguest \
   --max-attempts=3 \
   --min-backoff=30s \
   --max-backoff=300s \
@@ -64,7 +64,7 @@ production one.
 Two bindings make the chain work, both asserted on every run of the deploy
 scripts that own them:
 
-- `tasks-invoker@roomstudio.iam.gserviceaccount.com` needs `roles/run.invoker`
+- `tasks-invoker@thegoodguest.iam.gserviceaccount.com` needs `roles/run.invoker`
   on `perception-obj` (`infra/deploy_api_internal.sh`, step 3/10 — it skips the
   binding with a notice if `perception-obj` does not exist yet, so a first-time
   deploy runs it again afterwards).

@@ -15,7 +15,7 @@ must pass Phase 0 preflight. tools/upload_test_bundle.py is already written.
 
 **Services:** `api-public` (client-facing) + `api-internal` (Eventarc-triggered)  
 **Region:** `asia-southeast1`  
-**Project:** `roomstudio`  
+**Project:** `thegoodguest`  
 **Operator role:** human, step-by-step — no parent script wraps this runbook.
 
 Do not skip phases. Each phase's "expect this" block must pass before proceeding.
@@ -40,17 +40,17 @@ naively — follow the recovery guidance in Phase 5's block.
 gcloud auth list
 # Expect: one ACTIVE account listed. The account must be authenticated.
 
-gcloud projects describe roomstudio --format='value(projectId)'
-# Expect: roomstudio
+gcloud projects describe thegoodguest --format='value(projectId)'
+# Expect: thegoodguest
 ```
 
-The active account needs the following IAM roles on project `roomstudio`:
+The active account needs the following IAM roles on project `thegoodguest`:
 - `roles/run.admin`
-- `roles/iam.serviceAccountUser` on `api-internal-runtime@roomstudio.iam.gserviceaccount.com`
-  and `api-public-runtime@roomstudio.iam.gserviceaccount.com`
+- `roles/iam.serviceAccountUser` on `api-internal-runtime@thegoodguest.iam.gserviceaccount.com`
+  and `api-public-runtime@thegoodguest.iam.gserviceaccount.com`
 - `roles/eventarc.admin`
 - `roles/datastore.indexAdmin`
-- `roles/storage.admin` on `gs://roomstudio-captures` and `gs://roomstudio-perception-outputs`
+- `roles/storage.admin` on `gs://thegoodguest-captures` and `gs://thegoodguest-perception-outputs`
 - Firestore write access to `upload_sessions` and `scenes` (for smoke `--cleanup`)
 
 Effective-permission check — proves the caller actually has the permissions, not just
@@ -108,13 +108,13 @@ echo "OK: all project-level permissions confirmed."
 # Bucket-level storage.admin grants cannot be verified via testIamPermissions —
 # that API only tests permissions on the project resource, not resource-scoped
 # (bucket-level) bindings. Probe with objects.list instead.
-gcloud storage ls gs://roomstudio-captures/ > /dev/null 2>&1 \
-  && echo "OK: storage access confirmed for gs://roomstudio-captures." \
-  || { echo "FAIL: cannot list gs://roomstudio-captures — storage.admin on bucket missing."; exit 1; }
+gcloud storage ls gs://thegoodguest-captures/ > /dev/null 2>&1 \
+  && echo "OK: storage access confirmed for gs://thegoodguest-captures." \
+  || { echo "FAIL: cannot list gs://thegoodguest-captures — storage.admin on bucket missing."; exit 1; }
 
-gcloud storage ls gs://roomstudio-perception-outputs/ > /dev/null 2>&1 \
-  && echo "OK: storage access confirmed for gs://roomstudio-perception-outputs." \
-  || { echo "FAIL: cannot list gs://roomstudio-perception-outputs — storage.admin on bucket missing."; exit 1; }
+gcloud storage ls gs://thegoodguest-perception-outputs/ > /dev/null 2>&1 \
+  && echo "OK: storage access confirmed for gs://thegoodguest-perception-outputs." \
+  || { echo "FAIL: cannot list gs://thegoodguest-perception-outputs — storage.admin on bucket missing."; exit 1; }
 ```
 
 **If any check fails:** grant the missing role or bucket-level binding before continuing.
@@ -129,12 +129,12 @@ This requires Firebase to be configured for the project and a web app registered
 
 **Step 1: Add Firebase to the GCP project.**
 Firebase console (`console.firebase.google.com`) → "Add project" → select the existing
-GCP project `roomstudio` → "Add Firebase to an existing Google Cloud project". Complete
+GCP project `thegoodguest` → "Add Firebase to an existing Google Cloud project". Complete
 the wizard.
 
 **Step 2: Register a web app.**
 Firebase console → Project settings (gear icon, top-left sidebar) → "Your apps" tab →
-"Add app" → Web (`</>` icon). Nickname: `roomstudio-smoke-test`. Register without
+"Add app" → Web (`</>` icon). Nickname: `thegoodguest-smoke-test`. Register without
 Firebase Hosting. Note the `appId`; current registered value:
 `1:502805861152:web:095d7e3b331e0e0ddcbd45`.
 
@@ -144,7 +144,7 @@ Enable → Save.
 
 **Step 4: Verify required APIs are enabled.**
 ```bash
-gcloud services list --enabled --project=roomstudio \
+gcloud services list --enabled --project=thegoodguest \
   --filter="name:firebase.googleapis.com OR name:identitytoolkit.googleapis.com" \
   --format="value(name)"
 # Expect: both firebase.googleapis.com and identitytoolkit.googleapis.com
@@ -153,7 +153,7 @@ gcloud services list --enabled --project=roomstudio \
 If either is missing:
 ```bash
 gcloud services enable firebase.googleapis.com identitytoolkit.googleapis.com \
-  --project=roomstudio
+  --project=thegoodguest
 ```
 
 **Set env vars** (required in every shell session before reaching Phase 7):
@@ -161,22 +161,22 @@ gcloud services enable firebase.googleapis.com identitytoolkit.googleapis.com \
 ```bash
 export FIREBASE_API_KEY="<Web API key>"        # Firebase console → Project settings
                                                 # → General → Your apps → Web API key
-export FIREBASE_PROJECT_ID="roomstudio"
+export FIREBASE_PROJECT_ID="thegoodguest"
 ```
 
 `FIREBASE_API_KEY` is not in `infra/secrets.md` (it's a client-side key, not a server secret).
 Find it in the Firebase console under Project settings → General → Your apps → Web API key.
-The project ID is always `roomstudio`.
+The project ID is always `thegoodguest`.
 
 **Set ADC quota project** (required for smoke `--cleanup`):
 
 ```bash
-gcloud auth application-default set-quota-project roomstudio
+gcloud auth application-default set-quota-project thegoodguest
 ```
 
 The smoke tool's `--cleanup` flag uses Application Default Credentials for direct
 Firestore and GCS calls (decision 0020). Without the quota project set, ADC calls are
-routed through the ADC credential's own quota project — which may differ from `roomstudio`
+routed through the ADC credential's own quota project — which may differ from `thegoodguest`
 if the credential was originally created for a different project — causing billing errors
 or rejected requests.
 
@@ -238,7 +238,7 @@ grep -n "def ingest\|ingest/eventarc\|health" services/api-internal/ingest_serve
 grep "INGESTER_SERVICE\|INGESTER_SA" infra/eventarc_setup.sh
 # Expect:
 #   INGESTER_SERVICE="api-internal"
-#   INGESTER_SA="api-internal-runtime@roomstudio.iam.gserviceaccount.com"
+#   INGESTER_SA="api-internal-runtime@thegoodguest.iam.gserviceaccount.com"
 ```
 
 **If the output shows `roomstudio-api`:** the stale-reference patch has not landed.
@@ -252,7 +252,7 @@ test -d services/api && echo "FAIL: services/api/ still exists" || echo "OK: ser
 ### 0g. Infrastructure preconditions: captures bucket
 
 ```bash
-gcloud storage buckets describe gs://roomstudio-captures --project=roomstudio
+gcloud storage buckets describe gs://thegoodguest-captures --project=thegoodguest
 # Expect: bucket details printed (location, storageClass, etc.)
 ```
 
@@ -271,20 +271,20 @@ decision 0024.
 
 ```bash
 DESCRIBE_OUT=$(gcloud run services describe perception-obj \
-  --region=asia-southeast1 --project=roomstudio \
+  --region=asia-southeast1 --project=thegoodguest \
   --format='value(status.conditions[0].type,status.conditions[0].status)' 2>/dev/null)
 echo "${DESCRIBE_OUT}" | grep -qE "^Ready[[:space:]]+True" \
   && echo "OK: perception-obj Cloud Run revision is Ready." \
   || { echo "FAIL: perception-obj is not ready (got: '${DESCRIBE_OUT}')."; \
        echo "  If empty: service does not exist. Fix perception-obj first."; \
        echo "  If non-empty: container revision failed to start. Check startup logs:"; \
-       echo "  gcloud logging read 'resource.type=\"cloud_run_revision\" resource.labels.service_name=\"perception-obj\" severity>=ERROR' --project=roomstudio --limit=50"; \
+       echo "  gcloud logging read 'resource.type=\"cloud_run_revision\" resource.labels.service_name=\"perception-obj\" severity>=ERROR' --project=thegoodguest --limit=50"; \
        exit 1; }
 ```
 
 ```bash
 PERCEPTION_URL=$(gcloud run services describe perception-obj \
-  --region=asia-southeast1 --project=roomstudio \
+  --region=asia-southeast1 --project=thegoodguest \
   --format='value(status.url)')
 
 # Liveness check: any HTTP response (200/503/500/403) confirms the service is invokable.
@@ -313,12 +313,12 @@ fi
 
 ```bash
 gcloud tasks queues describe perception-dispatch \
-  --location=asia-southeast1 --project=roomstudio \
+  --location=asia-southeast1 --project=thegoodguest \
   --format='value(name,state)'
 # Expect: the queue name and state=RUNNING (not PAUSED or DISABLED)
 ```
 
-**If paused:** `gcloud tasks queues resume perception-dispatch --location=asia-southeast1 --project=roomstudio`
+**If paused:** `gcloud tasks queues resume perception-dispatch --location=asia-southeast1 --project=thegoodguest`
 **If absent:** the queue is created by `deploy_api_internal.sh` step 4. Run that script first.
 
 ### 0j. Infrastructure preconditions: Eventarc API, Service Agent, and IAM grants
@@ -329,29 +329,29 @@ explicitly (decision 0023).
 
 ```bash
 # 1. Verify the Eventarc API is enabled.
-gcloud services list --enabled --project=roomstudio \
+gcloud services list --enabled --project=thegoodguest \
   --filter="name:eventarc.googleapis.com" --format="value(name)"
 # Expect: eventarc.googleapis.com
 
 # 2. Resolve the project number (needed for service agent addresses).
-PROJECT_NUMBER=$(gcloud projects describe roomstudio --format='value(projectNumber)')
+PROJECT_NUMBER=$(gcloud projects describe thegoodguest --format='value(projectNumber)')
 echo "Project number: ${PROJECT_NUMBER}"
 
 # 3. Verify the Eventarc Service Agent exists.
 gcloud iam service-accounts describe \
   "service-${PROJECT_NUMBER}@gcp-sa-eventarc.iam.gserviceaccount.com" \
-  --project=roomstudio --format="value(email)"
+  --project=thegoodguest --format="value(email)"
 # Expect: service-<PROJECT_NUMBER>@gcp-sa-eventarc.iam.gserviceaccount.com
 
 # 4. Verify roles/eventarc.eventReceiver is granted to the trigger SA.
-gcloud projects get-iam-policy roomstudio \
+gcloud projects get-iam-policy thegoodguest \
   --flatten="bindings[].members" \
-  --filter="bindings.role=roles/eventarc.eventReceiver AND bindings.members=serviceAccount:api-internal-runtime@roomstudio.iam.gserviceaccount.com" \
+  --filter="bindings.role=roles/eventarc.eventReceiver AND bindings.members=serviceAccount:api-internal-runtime@thegoodguest.iam.gserviceaccount.com" \
   --format="table(bindings.members,bindings.role)"
-# Expect: one row with api-internal-runtime@roomstudio.iam.gserviceaccount.com
+# Expect: one row with api-internal-runtime@thegoodguest.iam.gserviceaccount.com
 
 # 5. Verify roles/pubsub.publisher is granted to the GCS service agent.
-gcloud projects get-iam-policy roomstudio \
+gcloud projects get-iam-policy thegoodguest \
   --flatten="bindings[].members" \
   --filter="bindings.role=roles/pubsub.publisher AND bindings.members=serviceAccount:service-${PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com" \
   --format="table(bindings.members,bindings.role)"
@@ -377,12 +377,12 @@ service. Run them first so they take effect immediately rather than after traffi
 
 Lifecycle rule output ends with:
 ```
-Lifecycle rule applied to gs://roomstudio-captures.
+Lifecycle rule applied to gs://thegoodguest-captures.
 ```
 
 Verify:
 ```bash
-gsutil lifecycle get gs://roomstudio-captures
+gsutil lifecycle get gs://thegoodguest-captures
 # Expect: JSON output showing a Delete rule with age=1 and matchesPrefix=["captures/"]
 ```
 
@@ -411,12 +411,12 @@ automatic index:
 ```bash
 gcloud firestore indexes fields list \
   --collection-group=scenes \
-  --project=roomstudio 2>/dev/null | grep bundle_id || echo "No exemption — automatic index active"
+  --project=thegoodguest 2>/dev/null | grep bundle_id || echo "No exemption — automatic index active"
 # Expect: "No exemption — automatic index active"
 # If bundle_id appears in the output, check whether the listed config includes
 # order=ASCENDING. If it explicitly excludes ASCENDING, re-enable:
 #   gcloud firestore indexes fields update bundle_id \
-#     --collection-group=scenes --project=roomstudio \
+#     --collection-group=scenes --project=thegoodguest \
 #     --index=order=ASCENDING,scope=COLLECTION \
 #     --index=order=DESCENDING,scope=COLLECTION \
 #     --clear-exemption
@@ -481,7 +481,7 @@ curl -s -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
 Check the build ID from the submission output and poll:
 ```bash
 # From .claude/WORKFLOW.md Cloud Build pattern:
-gcloud builds describe <BUILD_ID> --project=roomstudio --region=asia-southeast1 \
+gcloud builds describe <BUILD_ID> --project=thegoodguest --region=asia-southeast1 \
   --format='value(status,finishTime)'
 ```
 
@@ -552,7 +552,7 @@ and the platform is not blocking the request before it reaches the app.
 **If HTTP 200 or 403 from the platform:** `--allow-unauthenticated` may not be set, or
 the env var is missing. Check the revision's env config:
 ```bash
-gcloud run revisions describe <REVISION_NAME> --region=asia-southeast1 --project=roomstudio \
+gcloud run revisions describe <REVISION_NAME> --region=asia-southeast1 --project=thegoodguest \
   --format='yaml(spec.containers[0].env)'
 ```
 
@@ -587,23 +587,23 @@ are deferred until the abuse-surface gap set closes, per decisions 0015/0018.)
 gcloud run services update-traffic api-internal \
   --to-latest \
   --region=asia-southeast1 \
-  --project=roomstudio
+  --project=thegoodguest
 
 # Then flip api-public
 gcloud run services update-traffic api-public \
   --to-latest \
   --region=asia-southeast1 \
-  --project=roomstudio
+  --project=thegoodguest
 ```
 
 **Expect:**
 
 ```bash
-gcloud run services describe api-internal --region=asia-southeast1 --project=roomstudio \
+gcloud run services describe api-internal --region=asia-southeast1 --project=thegoodguest \
   --format='value(status.traffic[0].percent,status.traffic[0].latestRevision)'
 # Expect: 100    True
 
-gcloud run services describe api-public --region=asia-southeast1 --project=roomstudio \
+gcloud run services describe api-public --region=asia-southeast1 --project=thegoodguest \
   --format='value(status.traffic[0].percent,status.traffic[0].latestRevision)'
 # Expect: 100    True
 ```
@@ -611,9 +611,9 @@ gcloud run services describe api-public --region=asia-southeast1 --project=rooms
 Record the service URLs (now pointing at the new revisions):
 ```bash
 API_PUBLIC_URL=$(gcloud run services describe api-public \
-  --region=asia-southeast1 --project=roomstudio --format='value(status.url)')
+  --region=asia-southeast1 --project=thegoodguest --format='value(status.url)')
 API_INTERNAL_URL=$(gcloud run services describe api-internal \
-  --region=asia-southeast1 --project=roomstudio --format='value(status.url)')
+  --region=asia-southeast1 --project=thegoodguest --format='value(status.url)')
 echo "api-public:   ${API_PUBLIC_URL}"
 echo "api-internal: ${API_INTERNAL_URL}"
 ```
@@ -631,18 +631,18 @@ services have flipped and a real problem appears.
 Cloud Run retains the prior revision. Flip back:
 ```bash
 # Get the prior revision name
-gcloud run revisions list --service=api-public --region=asia-southeast1 --project=roomstudio \
+gcloud run revisions list --service=api-public --region=asia-southeast1 --project=thegoodguest \
   --format='table(name,status.conditions[0].status)' --limit=5
 
 # Roll back to the prior revision (replace <PRIOR_REVISION> with the actual name)
 gcloud run services update-traffic api-public \
   --to-revisions=<PRIOR_REVISION>=100 \
-  --region=asia-southeast1 --project=roomstudio
+  --region=asia-southeast1 --project=thegoodguest
 
 # Same for api-internal if needed
 gcloud run services update-traffic api-internal \
   --to-revisions=<PRIOR_REVISION>=100 \
-  --region=asia-southeast1 --project=roomstudio
+  --region=asia-southeast1 --project=thegoodguest
 ```
 
 ---
@@ -657,7 +657,7 @@ before creating the trigger, then creates or updates the trigger.
 
 ```bash
 gcloud eventarc triggers describe captures-bundle-pb-finalized \
-  --location=asia-southeast1 --project=roomstudio 2>/dev/null \
+  --location=asia-southeast1 --project=thegoodguest 2>/dev/null \
   | grep "destination\|service" || echo "No trigger exists yet"
 ```
 
@@ -668,7 +668,7 @@ gcloud eventarc triggers describe captures-bundle-pb-finalized \
   this trigger is stale. Delete and recreate:
   ```bash
   gcloud eventarc triggers delete captures-bundle-pb-finalized \
-    --location=asia-southeast1 --project=roomstudio --quiet
+    --location=asia-southeast1 --project=thegoodguest --quiet
   # The Eventarc delivery gap during recreate is acceptable. Per decision 0014,
   # the iOS client retains local capture data until Scene state reaches `ready`,
   # so any events that fire during the gap are not lost — they are re-triggered
@@ -685,14 +685,14 @@ gcloud eventarc triggers describe captures-bundle-pb-finalized \
 
 ```bash
 gcloud eventarc triggers describe captures-bundle-pb-finalized \
-  --location=asia-southeast1 --project=roomstudio
+  --location=asia-southeast1 --project=thegoodguest
 # Expect all of:
 #   destination.cloudRun.service: api-internal
 #   destination.cloudRun.region:  asia-southeast1
 #   destination.cloudRun.path:    /ingest/eventarc
 #   eventFilters: type=google.cloud.storage.object.v1.finalized
-#   eventFilters: bucket=roomstudio-captures
-#   serviceAccount: api-internal-runtime@roomstudio.iam.gserviceaccount.com
+#   eventFilters: bucket=thegoodguest-captures
+#   serviceAccount: api-internal-runtime@thegoodguest.iam.gserviceaccount.com
 ```
 
 **If the trigger was created but the SA binding was missed** (e.g. the grant step failed
@@ -710,7 +710,7 @@ Run all four modes against the production service URLs (post-traffic-flip). The
 `FIREBASE_API_KEY` and `FIREBASE_PROJECT_ID` env vars must be set (Phase 0b).
 
 ```bash
-GCS_BUCKET="roomstudio-captures"
+GCS_BUCKET="thegoodguest-captures"
 ```
 
 ### Mode 1: happy-path
@@ -809,7 +809,7 @@ TTL check returns EXISTS.
   ```bash
   gcloud logging read \
     'resource.type="cloud_run_revision" resource.labels.service_name="<service>" severity>=ERROR' \
-    --project=roomstudio --limit=50
+    --project=thegoodguest --limit=50
   ```
   Inspect the first error at container start. First suspects:
   (a) **Protobuf gencode/runtime `VersionError`** — see decision 0021; root cause was
@@ -834,7 +834,7 @@ TTL check returns EXISTS.
   1. **Ingest layer** (api-internal, Eventarc, Cloud Tasks): fast failures, pre-GPU. The
      scene reaches a terminal state in seconds (`failed_incomplete`, `failed_invalid`) or
      gets stuck in `queued`/`processing` without ever reaching perception-obj.
-     Check: `gcloud logging read 'resource.type="cloud_run_revision" resource.labels.service_name="api-internal"' --project=roomstudio --limit=50`
+     Check: `gcloud logging read 'resource.type="cloud_run_revision" resource.labels.service_name="api-internal"' --project=thegoodguest --limit=50`
      Also check Eventarc trigger delivery metrics in the GCP console.
   2. **Reconstruction layer** (perception-obj): slow failures, post-model-load (94–138 s
      after Cloud Tasks delivers the task). The scene was enqueued and processing started,
@@ -860,7 +860,7 @@ with some or all traffic. Check:
 
 ```bash
 gcloud run services describe roomstudio-api \
-  --region=asia-southeast1 --project=roomstudio 2>/dev/null \
+  --region=asia-southeast1 --project=thegoodguest 2>/dev/null \
   | grep -E "traffic|url" || echo "roomstudio-api not found — nothing to do"
 ```
 
@@ -869,7 +869,7 @@ gcloud run services describe roomstudio-api \
   After 2 days of smoke tool runs going green, delete:
   ```bash
   gcloud run services delete roomstudio-api \
-    --region=asia-southeast1 --project=roomstudio --quiet
+    --region=asia-southeast1 --project=thegoodguest --quiet
   ```
 - **Found with traffic:** the Eventarc trigger may still be pointing at it (pre-Phase 6
   state). Confirm Phase 6 is complete (trigger points at `api-internal`), then move

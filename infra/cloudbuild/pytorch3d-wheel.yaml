@@ -85,5 +85,5 @@ options:
 timeout: 5400s
 
 substitutions:
-  _BUCKET: 'roomstudio-build-cache'
+  _BUCKET: 'thegoodguest-build-cache'
   _REGION: 'asia-southeast1'
