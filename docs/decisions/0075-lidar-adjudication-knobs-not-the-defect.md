@@ -1,7 +1,7 @@
 # 0075 — LiDAR adjudication: merge knobs measured correct; the defects are admission, closure, and instrument variance
 
 **Date:** 2026-07-28
-**Status:** Decided
+**Status:** Refuted
 
 ## Context
 

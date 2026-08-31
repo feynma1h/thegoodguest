@@ -1,7 +1,7 @@
 # 0156 — the vision model cannot settle the facing either
 
 **Date:** 2026-08-13
-**Status:** Decided — refuted, with one named confound
+**Status:** Refuted — at the same noise floor as the other four instrument families, with one named confound
 
 ## Context
 

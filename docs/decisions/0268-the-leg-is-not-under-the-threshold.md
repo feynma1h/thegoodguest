@@ -1,7 +1,7 @@
 # 0268 — the leg is not hiding under the 0.5 threshold
 
 **Date:** 2026-08-28
-**Status:** Decided (measured; hypothesis refuted)
+**Status:** Refuted — measured; the model is not uncertain about the second leg, it does not see it
 
 ## Context
 

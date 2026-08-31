@@ -1,7 +1,7 @@
 # 0165 — what the missing surface is missing to
 
 **Date:** 2026-08-19
-**Status:** Decided — closes the de-occlusion lane's gate as a negative
+**Status:** Refuted — closes the de-occlusion lane's gate as a negative
 
 ## Context
 

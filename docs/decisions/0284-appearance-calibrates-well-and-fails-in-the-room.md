@@ -1,7 +1,7 @@
 # 0284 — appearance separates the objects that have boxes, and merges the ones that do not
 
 **Date:** 2026-08-31
-**Status:** Decided (measured; the box-free merge is still open, and the reason is now specific)
+**Status:** Refuted — measured; the box-free merge is still open, and the reason is now specific
 
 ## Context
 

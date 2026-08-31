@@ -1,7 +1,7 @@
 # 0146 — view selection does not predict reconstruction quality
 
 **Date:** 2026-08-13
-**Status:** Decided — the "view selection is dead ground" conclusion is
+**Status:** Amended by 0153 — the "view selection is dead ground" conclusion is
 PARTIALLY WITHDRAWN by 0153. What survives: where the camera WAS does not
 predict quality. What was never tested and does matter: whether the
 picture was SHARP. Read 0153 before acting on this note.

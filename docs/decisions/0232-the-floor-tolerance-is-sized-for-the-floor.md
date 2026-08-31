@@ -1,7 +1,7 @@
 # 0232 — the floor tolerance is sized for the floor
 
 **Date:** 2026-08-23
-**Status:** Decided (refused; the parameter ships, the switch does not)
+**Status:** Refuted — refused; the parameter ships, the switch does not
 
 ## Context
 

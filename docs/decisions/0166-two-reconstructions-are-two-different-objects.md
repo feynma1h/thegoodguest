@@ -1,7 +1,7 @@
 # 0166 — two reconstructions of one object are two different objects
 
 **Date:** 2026-08-19
-**Status:** Decided — the multi-view union is measured and not built
+**Status:** Refuted — the multi-view union is measured and not built
 
 ## Context
 

@@ -1,7 +1,7 @@
 # 0259 — disqualify a frame, do not rank it
 
 **Date:** 2026-08-27
-**Status:** Decided
+**Status:** Amended by 0270 — the three disqualifications below are the visibility veto rediscovered, and 0270 replaces the proposal with a pass that RESERVES rather than rejects. The measurements stand.
 
 ## Context
 

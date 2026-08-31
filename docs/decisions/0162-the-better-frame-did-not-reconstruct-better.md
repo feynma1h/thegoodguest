@@ -1,7 +1,7 @@
 # 0162 — the better frame did not reconstruct better
 
 **Date:** 2026-08-14
-**Status:** Decided — settles the experiment 0153 and 0154 both named
+**Status:** Refuted — settles the experiment 0153 and 0154 both named
 
 ## Context
 
