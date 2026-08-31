@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "web", "run", "dev"],
+      "port": 3000
+    },
+    {
       "name": "walk",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8731", "--directory", "outputs/sam31/selection/walk"],
