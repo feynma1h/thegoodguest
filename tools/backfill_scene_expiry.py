@@ -11,9 +11,8 @@ What it stamps: scenes with status in {failed, failed_invalid,
 failed_incomplete} AND no expire_at field. The deadline is now + --ttl-days
 (default 90, mirroring SCENES_FAILED_TTL_DAYS).
 
-What it never touches: queued / processing / ready scenes (including the
-deliberate stuck-scene reference f077e9ed, which is processing), and any
-scene already carrying an expire_at.
+What it never touches: queued / processing / ready scenes, and any scene
+already carrying an expire_at.
 
 Default is a DRY RUN that lists what would change. Pass --apply to write.
 
