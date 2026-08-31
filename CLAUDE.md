@@ -153,10 +153,10 @@ test fixtures.
 Suites, measured on `main` 2026-08-31 after the three lane merges and after
 `web/public/dev-fixtures` and every preserved capture were DELETED at parking —
 so these are the fixtures-ABSENT figures, and they are the only ones that
-describe this tree: perception **1198 + 41**, web **276**, schemas **126**
+describe this tree: perception **1205 + 34**, web **287**, schemas **126**
 (`pytest packages/schemas/tests`);
-root **844 + 102** by bare `pytest` (which uses `testpaths` in `pyproject.toml`);
-root **849 + 102** by `pytest packages services tools
+root **849 + 102** by bare `pytest` (which uses `testpaths` in `pyproject.toml`);
+root **867 + 102** by `pytest packages services tools
 --ignore=services/perception-obj`, which collects 18 tests `testpaths` does
 not. **Those two commands are both called "root" in this repo and differ by
 18 tests** — "always say which" was never enough on its own, because the
@@ -616,16 +616,11 @@ uses `--accent-deep` at 5.52:1 instead (0249). Do not set body-sized text in
   Server request logs (client IP, user agent, URL) sit outside all of it at
   30 d in Cloud Logging `_Default`, and `DELETE /account` does not reach them.
 - **CI** (`.github/workflows/`): python and web are push-triggered; iOS is
-  `workflow_dispatch`-only on purpose — see the iOS test policy. **Web is green;
-  PYTHON IS RED and has been since 2026-08-21** (measured 2026-08-26). The root
-  suite dies at COLLECTION with `ModuleNotFoundError: No module named 'PIL'`:
-  `tools/test_gen_mark.py` landed that day importing Pillow, which is declared
-  only in the two perception pyprojects and so is absent from what the root job
-  installs via `tools/ci_deps.py`. The other three jobs pass, so the run fails
-  on one red job among four. **Nothing gates on CI, which is why five days
-  passed unnoticed** — and it means the root suite has not actually executed on
-  Linux since then, however green it is locally. The fix is one declared
-  dependency, not a test change.
+  `workflow_dispatch`-only on purpose — see the iOS test policy. **Both are
+  green** (measured 2026-08-31: the last five `python.yml` runs on `main` all
+  succeeded). The root job gets Pillow from the root pyproject's `dev` extra,
+  which `tools/test_gen_mark.py` needs at collection. **Nothing gates on CI**,
+  so its state has to be checked rather than assumed.
 - **Tooling.** `tools/upload_test_bundle.py` is the substitute iOS client with
   four smoke modes; `tools/reenqueue_scene.py` is the out-of-band cure for
   stranded scenes and the warm re-drive driver.
@@ -1163,8 +1158,8 @@ satisfied by a change that breaks the other (defaulting the seam to a fake
 would turn CI green and ship an api-public handing clients fabricated URIs).
 
 **The local `.venv` is not the perception container.** `services/perception-obj/pyproject.toml`
-declares `numpy<2`; the shared `.venv` carries **2.4.4**, and perception's 746
-tests pass on it. So a green local perception run says less about production
+declares `numpy<2`; the shared `.venv` carries **2.5.2**, and perception's
+1205 tests pass on it. So a green local perception run says less about production
 than it looks like, and CLAUDE.md's "cannot share an environment" is about the
 DECLARED constraints (which is why CI splits the jobs), not about what actually
 runs — they do share one here. This also explains why the numpy-1.26
