@@ -35,7 +35,24 @@ verified 2026-08-25, so most of this is newly unblocked rather than newly found.
 
 ### G1-01 · No TestFlight build and no App Store submission
 **State:** open · **Blocks:** literally every user other than the operator
-TestFlight needs only an app record. Submission needs the rest of Gate 1.
+**The build side is ready and was verified end to end on 2026-09-01**: Release
+compiles warning-free, `xcodebuild archive` succeeds at version 1.0 build 1, and
+`ITSAppUsesNonExemptEncryption` is declared so App Store Connect stops asking the
+export question on every upload.
+
+**Two things remain, both requiring the operator's Apple account:**
+
+1. **An App Store Connect app record** for `com.thegoodguest.TheGoodGuest`.
+2. **Distribution signing.** The machine holds an *Apple Development* identity
+   and **zero** provisioning profiles, so the archive signs as development and
+   `-exportArchive` refuses: `No profiles for 'com.thegoodguest.TheGoodGuest'`
+   and the same for `…​.LiveActivity` — two bundle IDs, two App Store profiles.
+   Xcode creates both with `-allowProvisioningUpdates` or via Archive →
+   Distribute; **deliberately not run from a session**, because it mints an
+   Apple Distribution certificate on the account.
+
+Then upload — also the operator's, since it needs an App Store Connect API key
+or app-specific password.
 **Check:** manual — operator, in App Store Connect.
 
 ### G1-03 · The privacy nutrition labels cannot be filed

@@ -19,9 +19,26 @@
   file named into INFOPLIST_FILE that is also swept up as a bundle resource
   is the "multiple commands produce Info.plist" failure the Live Activity
   needed a membership exception to escape.
+
+  ITSAppUsesNonExemptEncryption lives here rather than in an INFOPLIST_KEY_*
+  build setting because that block is duplicated across Debug and Release and
+  an export declaration that differed between them would be worse than absent.
+  Without it, App Store Connect asks the export-compliance question on EVERY
+  TestFlight upload and holds the build until it is answered.
+
+  THE DECLARATION, and what it rests on: this app uses no proprietary or
+  non-exempt encryption. Everything cryptographic in it is either a standard
+  algorithm used for authentication (CryptoKit's SHA-256, hashing the Sign in
+  with Apple nonce — a hash, not a cipher), the platform Keychain, or HTTPS
+  provided by the OS. All three fall under the standard exemptions. If that
+  ever stops being true — a bundled cipher, a custom protocol, anything
+  encrypting user data with keys the app manages — this value has to change
+  and the CCATS question becomes real.
 -->
 <plist version="1.0">
 <dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
