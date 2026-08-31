@@ -9,9 +9,13 @@
  * the first two movements of the reveal choreography against a real
  * capture's GEOMETRY: the measured boundary drawing itself, then the
  * surfaces materializing in place. No object splats — the reasoning, and
- * the ?hero=b taste probe, live in lib/heroRoom. The copy lands in the
- * quiet beat the score already provides; HeroRoom guarantees that signal
- * arrives even when the room cannot play at all.
+ * the ?hero=b taste probe, live in lib/heroRoom.
+ *
+ * THE COPY AND THE ROOM ARRIVE TOGETHER. Both enter on the same stagger
+ * from the page's first frame, so the claim is readable while the
+ * boundary is still being traced. Neither waits on the other: a landing
+ * page whose words are held behind a renderer reads as slow, however
+ * good the beat it is waiting for.
  *
  * A returning visitor — anyone whose scene list isn't empty — never sees
  * the pitch: the guest greets them and points at their newest room. A
@@ -38,22 +42,14 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 const HAS_ROOMS_KEY = "thegoodguest:has-rooms";
 const emptySubscribe = () => () => {};
 
-/** Shared load-entrance: rise + fade, staggered by `order`. */
+/** The page's one load-entrance: rise + fade, staggered by `order`. The
+ * greeting and the pitch both use it, so whichever a visitor gets arrives
+ * the same way and at the same moment. */
 function enter(order: number) {
   return {
     initial: { opacity: 0, y: 20 },
     animate: { opacity: 1, y: 0 },
     transition: { duration: 0.7, ease: EASE, delay: 0.1 + order * 0.12 },
-  };
-}
-
-/** The pitch copy's entrance, held until the room has settled. `order`
- * keeps the same stagger the greeting uses; `landed` is the gate. */
-function land(order: number, landed: boolean) {
-  return {
-    initial: { opacity: 0, y: 20 },
-    animate: landed ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 },
-    transition: { duration: 0.7, ease: EASE, delay: landed ? order * 0.12 : 0 },
   };
 }
 
@@ -97,8 +93,6 @@ function greetingFor(latest: SceneSummary): {
 
 export default function Home() {
   const [state, setState] = useState<HomeState>({ phase: "deciding" });
-  // The room measures itself first; the copy lands in the beat after.
-  const [landed, setLanded] = useState(false);
   const variant = useSyncExternalStore(
     emptySubscribe,
     () => heroVariant(window.location.search),
@@ -176,17 +170,16 @@ export default function Home() {
 
   return (
     <section className="mx-auto grid max-w-6xl gap-10 px-6 pb-16 pt-14 lg:min-h-[calc(100vh-3.5rem)] lg:grid-cols-[minmax(0,42fr)_minmax(0,58fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-8 lg:pb-8">
-      {/* On one column the room goes first: it is the hero, and the copy
-          lands under it when the room has settled. */}
+      {/* On one column the room goes first: it is the hero. */}
       <div className="order-2 flex flex-col justify-center lg:order-1 lg:pr-6">
         <motion.h1
-          {...land(0, landed)}
+          {...enter(0)}
           className="max-w-2xl text-balance font-serif text-[clamp(2.1rem,3.4vw,2.85rem)] font-normal leading-[1.24] tracking-[-0.01em]"
         >
           Every home contains a version of itself its owner has never seen.
         </motion.h1>
         <motion.p
-          {...land(1, landed)}
+          {...enter(1)}
           className="mt-6 max-w-[430px] text-pretty text-base leading-relaxed text-ink/70"
         >
           Scan a room with your phone. Meet it again on your desk — real, in
@@ -194,29 +187,23 @@ export default function Home() {
           talks it through with you.
         </motion.p>
         <motion.div
-          {...land(2, landed)}
+          {...enter(2)}
           className="mt-9 flex flex-wrap items-center gap-3"
         >
           <PillLink href="/new" className="!px-7 !py-3">
             Scan your first room
           </PillLink>
         </motion.div>
-        <motion.p {...land(3, landed)} className="mt-7 text-xs text-ink/45">
+        <motion.p {...enter(3)} className="mt-7 text-xs text-ink/45">
           No photos generated. No feed. Your rooms are yours.
         </motion.p>
       </div>
 
       {/* Deliberately NOT inside a motion fade: the stage is the page's
-          first frame. Fading it in would leave a landing page that is
-          briefly blank in both columns — copy not landed, stage not yet
-          arrived — which reads as broken rather than as a room about to
-          measure itself. The room's own arrival is SplatViewer's job. */}
+          first frame, arriving WITH the copy rather than instead of it.
+          The room's own arrival is SplatViewer's job. */}
       <div className="order-1 lg:order-2 lg:my-2">
-        <HeroRoom
-          variant={variant}
-          onSettled={() => setLanded(true)}
-          className="lg:h-full"
-        />
+        <HeroRoom variant={variant} className="lg:h-full" />
       </div>
     </section>
   );
