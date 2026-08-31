@@ -236,7 +236,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --env-vars-file="infra/api-public.env.yaml" \
     --set-secrets="ANTHROPIC_API_KEY=${ANTHROPIC_SECRET_NAME}:latest" \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
-    "${TRAFFIC_FLAGS[@]}" --tag=candidate
+    ${TRAFFIC_FLAGS[@]+"${TRAFFIC_FLAGS[@]}"} --tag=candidate
 
 # ── Step 7: Print candidate revision URL ──────────────────────────────────────
 echo ""
