@@ -198,12 +198,13 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   (decision 0051) or Google (0118) — the UID is asserted unchanged on link, and
   a conflict is an explicit switch/keep choice, stated in two alerts with the
   real cost and no counts — the designed conflict screen was deleted because
-  the counts it wanted cannot be obtained (0216). **The Apple half is CLIENT-side
-  only and may not work at all**: the sheet offers it first and the entitlement
-  ships, but `docs/PARKED.md` records Firebase Auth's `appleSignInConfig` as
-  empty on this project and never configured on the retired one. Unverified —
-  it wants `gcloud`, and it is a submission blocker if it holds (see the iOS
-  defects). Google is live and verified. There is deliberately no iOS
+  the counts it wanted cannot be obtained (0216). **Both providers are
+  configured on this project**, verified from the admin API 2026-09-01: Google,
+  and Apple with Services ID `com.thegoodguest.signin` and a complete
+  `codeFlowConfig` on team `3HU2SP8346`. Apple was created 31 minutes AFTER
+  `docs/PARKED.md` said it never had been — read that file's Apple paragraph,
+  not its history. **Configured is not verified**: neither link has been
+  exercised on a device (punchlist G1-06). There is deliberately no iOS
   sign-out, and **no account deletion either**, which is its own defect below.
   `IdentityContinuity` classifies each launch (`continuous` / `firstRun` /
   `credentialLost` / `keychainUnavailable`) and logs it at fault level without
@@ -1050,11 +1051,8 @@ re-argued here.
   §10 — including a **`PrivacyInfo.xcprivacy` landed in the app**, which does not
   exist and is required for submission. (0242) **Those four are the labels'
   blockers, not the submission's**: read them beside punchlist Gate 1, which is
-  the authority for the whole set and carries at least two more that no §10
-  covers — the missing account-deletion route above, and Sign in with Apple,
-  which the sheet offers first while `docs/PARKED.md` records the provider as
-  never configured in Firebase Auth. **That last one is unverified here** and
-  wants `gcloud`; if it holds, a reviewer taps a button that cannot work.
+  the authority for the whole set and carries at least one more that no §10
+  covers — the missing account-deletion route above.
 
 ### Deliberately not doing
 

@@ -79,11 +79,22 @@ recoverable until roughly 30 September 2026; after that it is gone.
 
 Live and verified: `https://thegoodguest.web.app`, plus `api-public`,
 `api-internal` and `perception-obj` in `asia-southeast1`. Firebase Auth has
-**Anonymous and Google enabled** (Google's OAuth client belongs to the new
-project, 94380440502, and its consent screen resolves). **Apple is NOT
-configured** — and it never was: the retired project had `apple.com` toggled on
-with an EMPTY `appleSignInConfig`, so Apple sign-in has never worked here. It
-needs a Services ID, Team ID, Key ID and `.p8` from Apple Developer.
+**Anonymous, Google and Apple enabled** (Google's OAuth client belongs to the
+new project, 94380440502, and its consent screen resolves).
+
+**The Apple sentence that stood here was true for 31 minutes.** It said Apple
+was not configured and never had been. The audit log dates the fix to
+2026-08-31 13:35:14 UTC, when the operator created the `apple.com` IdP config;
+this file was committed at 13:04:17 UTC. Apple now carries Services ID
+`com.thegoodguest.signin` and a complete `codeFlowConfig` — team `3HU2SP8346`,
+matching the build's `DEVELOPMENT_TEAM` — and the iOS app
+`com.thegoodguest.TheGoodGuest` is registered in the project, which is what the
+NATIVE flow validates its ID token against. **Still never exercised on a
+device** (punchlist G1-06); configured is not verified.
+
+The correction is left visible rather than quietly overwritten, because half an
+hour is the shortest this repo's documents have ever taken to go out of date
+and the interval is the point.
 
 `autodeleteAnonymousUsers` is OFF on the new project and must stay off
 (decision 0139).
