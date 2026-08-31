@@ -1,11 +1,15 @@
-# roomstudio
+# The Good Guest
 
 A spatial intelligence product: capture a room with an iPhone, and get an
 AI-readable, navigable 3D reconstruction of *that* room to reason about and
 redesign.
 
-`roomstudio` is a working name for the repo and the GCP project. No product
-name has been chosen.
+The product, the repo and the app are all **The Good Guest**. The **GCP project
+id stays `roomstudio`**, and so do the bucket names, the service-account
+addresses and the `roomstudio.web.app` hosting URL: GCP project ids are
+immutable and bucket names are globally unique, so those can only change by
+migrating to a new project. Where you see `roomstudio` below, it is naming a
+live cloud resource, not the product.
 
 The always-current state of the project — what works, what does not, and what
 is next — is `CLAUDE.md`. This file covers layout, local setup, and deploys.

@@ -1,4 +1,4 @@
-"""Root conftest: collection hygiene for the roomstudio test suite.
+"""Root conftest: collection hygiene for the The Good Guest test suite.
 
 When pytest is invoked from a subdirectory, testpaths in pyproject.toml is
 bypassed — pytest treats the invocation directory as the collection root

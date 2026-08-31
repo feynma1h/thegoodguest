@@ -1,4 +1,4 @@
-# The Good Guest (repo and infrastructure still named `roomstudio`)
+# The Good Guest (GCP project id still `roomstudio` — immutable)
 
 **PARKED 2026-08-31 — read `docs/PARKED.md` first, then `docs/NOT-FINAL.md`,
 which lists everything in this tree that is not finished and says which parts
@@ -1691,7 +1691,7 @@ because a human bus was the only path between them.
 ## Git conventions
 
 This repo is tracked with git. The remote is `origin` =
-github.com/feynma1h/roomstudio (private), and `main` tracks `origin/main`. The
+github.com/feynma1h/thegoodguest (private), and `main` tracks `origin/main`. The
 repo is now a single branch: `main`, tracking `origin/main`.
 
 **Claude Code's role with git:**
