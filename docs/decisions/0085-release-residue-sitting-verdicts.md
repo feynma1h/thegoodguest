@@ -42,7 +42,7 @@ reconciliation did their job against a task that already existed.
 ```
 08:23:52Z staging staged-os-kill after 25 completions
 08:25:17Z app-init
-08:25:17Z appdelegate-handleEvents com.roomstudio.capture.blobUpload
+08:25:17Z appdelegate-handleEvents com.thegoodguest.capture.blobUpload
 08:25:18Z app-task-rehydrate-fired
 08:25:18Z reaper-scan ids=12 acked=10
 ```

@@ -9,7 +9,7 @@
 # WHY IT DOES NOT RUN ON PUSH (decision 0099):
 #
 #   1. THE LIVE TESTS WOULD SPEND THE OPERATOR'S PRODUCTION QUOTA. The only
-#      scheme in this project, RoomStudioCapture-Integration, bakes
+#      scheme in this project, TheGoodGuestCapture-Integration, bakes
 #      RUN_INTEGRATION_TESTS=1, so the four UploadSessionClientTests execute
 #      live against deployed api-public on every run. Since decisions
 #      0087/0098 that endpoint charges a per-UID daily mint quota (50) and a
@@ -64,20 +64,20 @@ jobs:
       #   run: |
       #     test -n "$PLIST_B64" || { echo "secret not set"; exit 1; }
       #     echo "$PLIST_B64" | base64 --decode \
-      #       > ios/RoomStudioCapture/RoomStudioCapture/GoogleService-Info.plist
+      #       > ios/TheGoodGuestCapture/TheGoodGuestCapture/GoogleService-Info.plist
 
       - name: Show toolchain
         run: xcodebuild -version && xcrun simctl list devicetypes | tail -20
 
       - name: Build and test
-        working-directory: ios/RoomStudioCapture
+        working-directory: ios/TheGoodGuestCapture
         # CODE_SIGNING_ALLOWED=NO: simulator tests need no signing, and the
         # project carries an entitlements workaround that is deliberately
         # never committed (see CLAUDE.md on the personal-team constraint).
         run: |
           xcodebuild test \
-            -project RoomStudioCapture.xcodeproj \
-            -scheme RoomStudioCapture-Integration \
+            -project TheGoodGuestCapture.xcodeproj \
+            -scheme TheGoodGuestCapture-Integration \
             -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
-            -skip-testing:RoomStudioCaptureTests/UploadSessionClientTests \
+            -skip-testing:TheGoodGuestCaptureTests/UploadSessionClientTests \
             CODE_SIGNING_ALLOWED=NO

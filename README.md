@@ -16,7 +16,7 @@ is next — is `CLAUDE.md`. This file covers layout, local setup, and deploys.
 packages/schemas/    capture-bundle proto + generated Python + pose/placement math
 packages/api-core/   shared logic imported by both API services
 services/            one folder per Cloud Run deploy unit
-ios/                 the Swift capture app (RoomStudioCapture)
+ios/                 the Swift capture app (TheGoodGuestCapture)
 web/                 Next.js static-export web app
 infra/               deploy scripts, Cloud Build configs, runbooks
 tools/               local scripts: fixture builders, smoke clients, converters
@@ -103,9 +103,9 @@ See `web/README.md` for data modes and the app's structure.
 
 ### iOS
 
-Open `ios/RoomStudioCapture/RoomStudioCapture.xcodeproj`. The app needs a
+Open `ios/TheGoodGuestCapture/TheGoodGuestCapture.xcodeproj`. The app needs a
 `GoogleService-Info.plist`, which is gitignored — copy it in before building.
-`RoomStudioCapture-Integration` is the only scheme, and it runs four live
+`TheGoodGuestCapture-Integration` is the only scheme, and it runs four live
 integration tests against deployed `api-public`; see the iOS test policy in
 `CLAUDE.md` before running the suite.
 

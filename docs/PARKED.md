@@ -63,7 +63,7 @@ fatal blob error's `reason=` survives redaction in the log. The branch is gone;
 the line is here:
 
 ```swift
-// ios/RoomStudioCapture/RoomStudioCapture/Upload/BlobUploadManager.swift
+// ios/TheGoodGuestCapture/TheGoodGuestCapture/Upload/BlobUploadManager.swift
 logger.info("[BlobUploadManager] \u{2717} fatal blob error: \(bundleId, privacy: .public)/\(relativePath, privacy: .public) reason=\(reason, privacy: .public)")
 ```
 

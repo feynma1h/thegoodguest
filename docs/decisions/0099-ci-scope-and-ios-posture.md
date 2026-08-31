@@ -11,7 +11,7 @@ Every suite in this project has been run by hand since May: root Python
 push. Python and web were straightforward. iOS was not, and this note is
 mostly about iOS.
 
-The complication is structural, not incidental. `RoomStudioCapture-Integration`
+The complication is structural, not incidental. `TheGoodGuestCapture-Integration`
 is the *only* scheme in the project, and it bakes `RUN_INTEGRATION_TESTS=1`, so
 the four `UploadSessionClientTests` execute live against deployed api-public on
 every single run. That is a deliberate posture — CLAUDE.md's iOS test policy
@@ -33,7 +33,7 @@ can deny its author access to the product is a broken arrangement regardless of
 how green it is.
 
 **(b) Run unit tests only, via `-skip-testing`.** Mechanically sound —
-`-skip-testing:RoomStudioCaptureTests/UploadSessionClientTests` cleanly drops
+`-skip-testing:TheGoodGuestCaptureTests/UploadSessionClientTests` cleanly drops
 the one class holding the live tests, needs no source change, and leaves the
 device build pinned to exactly what is on the phone. Two things still block it
 from being a push-triggered gate: `GoogleService-Info.plist` is gitignored, so a

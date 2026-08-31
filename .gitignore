@@ -65,4 +65,4 @@ ios/**/*.xcuserstate
 ios/**/Pods/
 
 # Firebase config — contains API keys; provide manually for each dev/CI environment
-ios/RoomStudioCapture/RoomStudioCapture/GoogleService-Info.plist
+ios/TheGoodGuestCapture/TheGoodGuestCapture/GoogleService-Info.plist
