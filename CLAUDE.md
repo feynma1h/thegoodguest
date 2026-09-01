@@ -1539,13 +1539,17 @@ human has looked at any of them.** The list is here so the next session does not
 have to re-derive it. Photograph with `-rs.gallery.screen <id>`; the ids are
 exactly these.
 
-**What is already settled, so do not re-check it:** layout. All twenty were shot
-at the default size and AX5 and measured by `tools/ios_layout_audit.py` —
-**0 of 15 enforced screens deviate at either size**, inside the app's usual
-ranges. The five unenforced are the doorway (ceremonial, full-bleed) and the
-states with no primary button, where the audit abstains rather than inventing a
-reading. **What is owed is COPY and PROMINENCE**, which no instrument here
-measures.
+**SHOW ALL TWENTY. What is settled is the measurement, not the looking.** Every
+one of them was already shot at the default size and AX5 and measured by
+`tools/ios_layout_audit.py` — **0 of 15 enforced screens deviate at either
+size**, inside the app's usual ranges — so there is nothing to gain from running
+the audit again. That is the only thing this paragraph excuses. **What is owed
+is COPY and PROMINENCE**, which no instrument in this repo measures, and it is
+owed on all twenty.
+
+(The other five of the twenty are the doorway, which is full-bleed, and the
+states with no primary button. The audit abstains on those rather than inventing
+a reading — they are not screens to skip, and each still carries a reason below.)
 
 | screen | ids | why it needs an eye |
 |---|---|---|
