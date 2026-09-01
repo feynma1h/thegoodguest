@@ -1532,6 +1532,37 @@ evidence for a human deleting an entry, not authority to.
 `docs/PARKED.md` for why and for the state of the tree, then `docs/NOT-FINAL.md`
 for what in here is unfinished and which parts of it go live on the next deploy.
 
+### Owed on return: the operator's eyes on 20 screen states
+
+Twenty states across six screens were added or changed on 2026-09-01 and **no
+human has looked at any of them.** The list is here so the next session does not
+have to re-derive it. Photograph with `-rs.gallery.screen <id>`; the ids are
+exactly these.
+
+**What is already settled, so do not re-check it:** layout. All twenty were shot
+at the default size and AX5 and measured by `tools/ios_layout_audit.py` —
+**0 of 15 enforced screens deviate at either size**, inside the app's usual
+ranges. The five unenforced are the doorway (ceremonial, full-bleed) and the
+states with no primary button, where the audit abstains rather than inventing a
+reading. **What is owed is COPY and PROMINENCE**, which no instrument here
+measures.
+
+| screen | ids | why it needs an eye |
+|---|---|---|
+| **Delete everything** (NEW) | `delete-confirm`, `delete-working`, `delete-done`, `delete-done-empty`, `delete-done-notrevoked`, `delete-partial`, `delete-noid` | Every word is new and unreviewed. `DeleteAccountWording` is a pure table — read all seven side by side rather than one at a time, which is what it is a table for. |
+| **You** (changed) | `profile`, `profile-linked`, `profile-noid` | Gained the "Delete everything" row. **The judgment is prominence**: App Review must find it, and nobody should tap it by accident. It is deliberately quiet — a hairline and muted ink, not a button. |
+| **The doorway** (changed) | `doorway`, `doorway-noweb` | Was four states, now two, and both captions were rewritten. The unlinked one points at signing in rather than promising a desk that would turn the person away. |
+| **Review** (changed) | `review`, `review-sketch`, `review-preparing`, `review-cannot-send` | The thin-coverage branch was deleted (0294). Confirm nothing reads as though an "add more" path still exists. |
+| **The house** (changed) | `rooms-openable`, `rooms-list` | Rows now open on the web, but only for a linked identity. Pixels are unchanged; the behaviour is not. |
+| **Notes** (changed) | `notes-news-open`, `notes-news` | The arrival card inherits the same gate as the rows. |
+
+**Two worth looking at first.** `delete-done-notrevoked` at AX5 is where this
+pass found its one real defect — the manual Apple-revocation instruction sat
+below the fold under a fully visible button that ends the interaction, which a
+green suite and a passing audit both missed (0293). And the `doorway` /
+`doorway-noweb` pair reads best side by side, because the whole point is that
+the two can no longer disagree.
+
 **`docs/punchlist.md` is the forward list** — 38 entries in six gates, in
 dependency order, each carrying a `Check:` line. Start there for "what should I
 do next", and run `python3 tools/punchlist_check.py` to have the checkable
