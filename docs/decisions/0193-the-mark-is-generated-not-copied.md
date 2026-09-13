@@ -9,7 +9,7 @@ The product mark — the room corner — appeared on five surfaces: the three iO
 app-icon appearances, the browser tab icon, the web wordmark, the iOS in-app
 lockup, and the share card's eyebrow. Nothing generated any of them. The 1024
 icons were exports of a design-session file that was never committed; the
-favicon's "re-export from the app icon's geometry" (`6af4661`) was done by a
+favicon's "re-export from the app icon's geometry" (`c2e5124`) was done by a
 script that was not committed either; the web and iOS wordmarks each drew their
 own.
 

@@ -14,7 +14,7 @@
 ## Context
 
 `test_data/photos/` held nine HEIC photographs of a real bedroom, added in the
-repo's first commit (`84b6cf7`) and present in every tree since. They fed
+repo's first commit (`d3be458`) and present in every tree since. They fed
 `tools/build_test_bundle.py`, which synthesizes a `CaptureBundle` for
 contract-level backend testing without a phone.
 

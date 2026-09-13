@@ -82,7 +82,7 @@ enum, so that is one number to change rather than six.
 
 `MorphingRings` shipped putting BOTH rings into one `Path` and filling that
 even-odd, which knocked the intersection out at the two crossings: white notches
-on every frame. Diagnosed and fixed by the ui-organisation lane in `ab64eec`,
+on every frame. Diagnosed and fixed by the ui-organisation lane in `68b4ad2`,
 recorded in **0255**, which carries the full account.
 
 Read carefully what that does and does not overturn. The geometry claim in 0250
