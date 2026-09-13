@@ -107,7 +107,16 @@ nav and footer withdraw entirely.
 
 ## A quirk worth knowing before you edit copy
 
-SWC drops the leading space when a JSX text run follows an element or an
-`{expression}` and begins with an escaped entity. It is invisible to vitest,
-tsc, eslint, and the build — the first time it was caught, the deployed page
-read "room.The app keeps". Verify rendered copy in a browser, not in source.
+SWC drops the leading space of a JSX text chunk that contains an escaped
+entity such as `&rsquo;`, after an `{expression}` or after an element, and the
+entity does not have to sit next to the space it costs. It is invisible to
+vitest, tsc, eslint, and the build: the first time it was caught, the deployed
+page read "room.The app keeps". Two ways around it, both in use:
+
+1. Write the literal character (`’ “ ” ×`) and a real space instead of
+   `&nbsp;`. `react/no-unescaped-entities` only forbids ASCII `' " > }`, so
+   typographic characters pass lint; `app/privacy` and `app/terms` do this.
+2. Fold the phrase into one expression, a template literal with real `’`
+   characters, as `RoomCard`'s elapsed line does.
+
+Either way, verify rendered copy in a browser, not in source.
