@@ -15,7 +15,7 @@ npm run dev        # http://localhost:3000, mock data by default
 npm test           # vitest
 npx tsc --noEmit   # types
 npx eslint .       # lint
-npm run build      # static export to out/
+npm run build      # static export to out/, then out/third-party-notices.txt
 ```
 
 Data modes (`NEXT_PUBLIC_API_MODE`, see `.env.example`):
@@ -88,13 +88,17 @@ cannot prerender unknown segments.
   `connect-src` must allow api-public and `storage.googleapis.com` (splats) and
   `data:` (Spark's wasm); `script-src` needs `'wasm-unsafe-eval'` for that wasm
   to compile at all; `frame-src` and `apis.google.com` carry the sign-in popup.
+- `scripts/third-party-notices.mjs`: writes `out/third-party-notices.txt`, the
+  licences of the packages, vendored libraries and fonts the export ships, which
+  the footer links as Licences. `npm run build` runs it after `next build`, so
+  deploy from `npm run build` rather than a bare `next build`.
 
 ## Design language
 
 The Good Guest system (decision 0057, superseding 0056): warm and light-first —
 parchment and cream surfaces, warm-brown ink, rust for primary actions, and
 muted gold used ONLY as a light semantic, never as decoration. Source Serif 4
-is the guest's voice and the display face, Instrument Sans is the UI, IBM Plex
+is the guest's voice and the display face, Instrument Sans is the UI, JetBrains
 Mono is eyebrows and machine data. All three are `next/font`, self-hosted at
 build, which is why the CSP needs no font host.
 

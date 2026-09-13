@@ -4,11 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/third-party-notices.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "deploy:preview": "next build && firebase hosting:channel:deploy preview --expires 30d"
+    "deploy:preview": "npm run build && firebase hosting:channel:deploy preview --expires 30d"
   },
   "dependencies": {
     "@sparkjsdev/spark": "^2.1.0",

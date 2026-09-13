@@ -83,6 +83,9 @@ export default function LegalPage({
           <Link href="/terms" className="transition-colors hover:text-ink">
             Terms
           </Link>
+          <a href="/third-party-notices.txt" className="transition-colors hover:text-ink">
+            Licences
+          </a>
         </div>
       </div>
     </div>

@@ -32,6 +32,9 @@ export default function SiteFooter() {
           <Link href="/terms" className="transition-colors hover:text-ink">
             Terms
           </Link>
+          <a href="/third-party-notices.txt" className="transition-colors hover:text-ink">
+            Licences
+          </a>
         </nav>
       </div>
     </footer>
