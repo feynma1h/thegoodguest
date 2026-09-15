@@ -14,13 +14,16 @@ declares EXACTLY the categories that are actually used — neither fewer (an
 undeclared call is a rejection) nor more (a declared category with no call is a
 claim about the app that is not true).
 
-REASON CODES ARE CHECKED BY IDENTITY, NOT JUST VALIDITY. Every code below was
-wrong in the draft this manifest was written from, in the specific way that is
-easy to miss: the codes are per-category and several are plausible for any given
-category, so a copied example lints, parses, and is refused at upload as
-ITMS-91055. Two of the three shipped here differ from that draft — see the
-comments on each — and pinning the exact string is what stops a future edit
-reverting to the plausible one.
+REASON CODES ARE CHECKED TWICE: AGAINST APPLE'S TABLE, AND BY IDENTITY. Apple
+publishes every code under exactly one category, and upload refuses a code that
+is not valid for the category it is declared under (ITMS-91055) however well its
+description seems to fit. Within a category the codes are neighbours with
+different terms — who may declare them, what may leave the device — and upload
+cannot tell whether the one declared is what the app does, so each is also
+pinned to its use with the reason it fits and its neighbours do not. The table
+is taken from Apple's page, never recalled or copied from a summary: a
+description read against the wrong line of that list is plausible, lints,
+parses, and is exactly the error this guards against (decision 0298).
 
 Read by: CI's root job, via `testpaths` in pyproject.toml.
 """
@@ -57,20 +60,26 @@ API_FAMILIES = {
 }
 
 # The reason each category is declared WITH, and why that code and not a
-# neighbour. Changing the app's behaviour means changing these together.
+# neighbour in the same category. Changing the app's behaviour means changing
+# these together; VALID_REASONS below is what each code covers.
 EXPECTED_REASONS = {
-    # 54BD.1 is "only accessible to the app itself". NOT CA92.1, which is the
-    # App Group case — this app has no app-groups entitlement and no
-    # UserDefaults(suiteName:), only `.standard`.
-    "NSPrivacyAccessedAPICategoryUserDefaults": {"54BD.1"},
-    # Both uses are real: absolute in-app timestamps on the capture bundle
-    # (35F9.1) and elapsed time in the camera-pose throttle (0A2A.1).
-    "NSPrivacyAccessedAPICategorySystemBootTime": {"35F9.1", "0A2A.1"},
-    # DDA9.1 is "files inside the app container". NOT C617.1, which is for
-    # files the user granted access to through a document picker — there is no
-    # document picker in this app, and the swept directory is
-    # applicationSupportDirectory.
-    "NSPrivacyAccessedAPICategoryFileTimestamp": {"DDA9.1"},
+    # CA92.1: information only the app itself reads and writes. Every call is
+    # on `UserDefaults.standard` — no app-groups entitlement, no
+    # UserDefaults(suiteName:) — so NOT 1C8F.1, the App Group reason.
+    "NSPrivacyAccessedAPICategoryUserDefaults": {"CA92.1"},
+    # 35F9.1: elapsed time between events in the app, and timers — and of what
+    # is read under it, only that elapsed time may leave the device. Both uses
+    # are that: the capture window, which BundleAssembler writes counted from
+    # capture start rather than as read, and the camera-pose throttle's 20 Hz
+    # gate. NOT 8FFB.1, which is for computing absolute timestamps: those may
+    # leave the device, but boot time and anything else derived from it may not.
+    "NSPrivacyAccessedAPICategorySystemBootTime": {"35F9.1"},
+    # C617.1: metadata of files inside the app's own container, which is what
+    # CaptureStorageSweeper reads to age out captures in
+    # applicationSupportDirectory. NOT DDA9.1, which is for showing a file's
+    # timestamp to the person — the sweeper shows nothing — and NOT 3B52.1,
+    # for files the user granted access to through a picker.
+    "NSPrivacyAccessedAPICategoryFileTimestamp": {"C617.1"},
 }
 
 
@@ -184,6 +193,45 @@ def test_disk_space_and_keyboards_stay_absent(used_categories):
 
 # ── Reason codes ─────────────────────────────────────────────────────────────
 
+# Apple's reason codes, under the one category each is published in: the
+# NSPrivacyAccessedAPIType page, read 2026-09-15 rather than recalled. The notes
+# are summaries so a failure reads without a browser; the page is the authority,
+# and it also says what each code lets leave the device.
+VALID_REASONS = {
+    "NSPrivacyAccessedAPICategoryFileTimestamp": {
+        "DDA9.1": "display file timestamps to the person using the device",
+        "C617.1": "metadata of files in the app, App Group or CloudKit container",
+        "3B52.1": "metadata of files the user granted access to",
+        "0A2A.1": "a third-party SDK's wrapper around the API",
+    },
+    "NSPrivacyAccessedAPICategorySystemBootTime": {
+        "35F9.1": "elapsed time between events in the app, or timers",
+        "8FFB.1": "absolute timestamps for events in the app",
+        "3D61.1": "an optional bug report the person chooses to submit",
+    },
+    "NSPrivacyAccessedAPICategoryDiskSpace": {
+        "85F4.1": "display disk space to the person using the device",
+        "E174.1": "check there is room to write, or delete files when space is low",
+        "7D9E.1": "an optional bug report the person chooses to submit",
+        "B728.1": "a health research app warning participants of low space",
+    },
+    "NSPrivacyAccessedAPICategoryActiveKeyboards": {
+        "3EC4.1": "a custom keyboard app",
+        "54BD.1": "customize the interface for the active keyboard",
+    },
+    "NSPrivacyAccessedAPICategoryUserDefaults": {
+        "CA92.1": "information only the app itself can access",
+        "1C8F.1": "information shared within the app's App Group",
+        "C56D.1": "a third-party SDK's wrapper around the API",
+        "AC6B.1": "MDM managed configuration and feedback keys",
+    },
+}
+
+# "This reason may only be declared by third-party SDKs." An app that wraps an
+# API for its own use — DismissedBundles over UserDefaults, say — is not one.
+SDK_ONLY_REASONS = {"0A2A.1", "C56D.1"}
+
+
 def test_each_category_carries_the_reason_that_matches_its_use(manifest):
     by_category = {
         e["NSPrivacyAccessedAPIType"]: set(e["NSPrivacyAccessedAPITypeReasons"])
@@ -196,27 +244,58 @@ def test_each_category_carries_the_reason_that_matches_its_use(manifest):
         )
 
 
-def test_reason_codes_are_well_formed(manifest):
-    for entry in manifest["NSPrivacyAccessedAPITypes"]:
-        for code in entry["NSPrivacyAccessedAPITypeReasons"]:
-            assert re.fullmatch(r"[0-9A-F]{2}[0-9A-Z]{2}\.\d", code), (
-                f"{code!r} is not Apple's reason-code shape"
-            )
+def test_every_declared_code_is_one_its_category_publishes(manifest):
+    """A code from another category is refused at upload, however apt it reads.
 
-
-def test_the_two_corrected_codes_do_not_come_back(manifest):
-    """CA92.1 and C617.1 both lint, both parse, and both are wrong here.
-
-    They are what the drafted manifest carried, so they are exactly what a
-    future edit working from that draft would restore.
+    Codes from every category share one shape, so only Apple's table can tell
+    which category a code belongs to. The failure names that category, since
+    a code that reads right under the wrong one is the usual way in.
     """
-    all_codes = {
+    home = {code: cat for cat, reasons in VALID_REASONS.items() for code in reasons}
+    wrong = []
+    for entry in manifest["NSPrivacyAccessedAPITypes"]:
+        category = entry["NSPrivacyAccessedAPIType"]
+        valid = VALID_REASONS.get(category, {})
+        for code in entry["NSPrivacyAccessedAPITypeReasons"]:
+            if code in valid:
+                continue
+            where = (
+                f"belongs to {home[code]} ({VALID_REASONS[home[code]][code]})"
+                if code in home else "is not a reason code Apple publishes"
+            )
+            wrong.append(
+                f"{category} declares {code}, which {where}; "
+                f"this category's codes are {sorted(valid)}"
+            )
+    assert not wrong, "refused at upload as ITMS-91055:\n" + "\n".join(wrong)
+
+
+def test_no_reason_reserved_for_third_party_sdks_is_declared(manifest):
+    declared = {
         code
         for entry in manifest["NSPrivacyAccessedAPITypes"]
         for code in entry["NSPrivacyAccessedAPITypeReasons"]
     }
-    assert "CA92.1" not in all_codes, "CA92.1 is the App Group reason; this app has none"
-    assert "C617.1" not in all_codes, "C617.1 is the document-picker reason; there is no picker"
+    assert not declared & SDK_ONLY_REASONS, (
+        f"{sorted(declared & SDK_ONLY_REASONS)} may only be declared by a "
+        "third-party SDK, in its own manifest — never by the app"
+    )
+
+
+def test_the_reason_table_gives_every_code_one_category():
+    """The table has the shape of Apple's, which is what makes it a lookup.
+
+    The five categories API_FAMILIES scans for, every code in Apple's format,
+    no code under two categories, and the SDK-only codes among them.
+    """
+    assert set(VALID_REASONS) == set(API_FAMILIES)
+    codes = [code for reasons in VALID_REASONS.values() for code in reasons]
+    assert len(codes) == len(set(codes)), "a code is listed under two categories"
+    for code in codes:
+        assert re.fullmatch(r"[0-9A-F]{2}[0-9A-Z]{2}\.\d", code), (
+            f"{code!r} is not Apple's reason-code shape"
+        )
+    assert SDK_ONLY_REASONS <= set(codes)
 
 
 # ── Collected data types ─────────────────────────────────────────────────────

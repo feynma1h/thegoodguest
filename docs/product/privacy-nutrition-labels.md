@@ -683,29 +683,33 @@ the call sites:
 
 | Category | Where | Reason code |
 |---|---|---|
-| `NSPrivacyAccessedAPICategoryUserDefaults` | `Home/BundleRestore.swift`, `Identity/WhySignInSheet.swift`, `Support/StagingHooks.swift`, `Support/ScreenGallery.swift`, `Upload/CaptureReaper.swift` | `54BD.1` — accessible to the app itself |
-| `NSPrivacyAccessedAPICategorySystemBootTime` | `Capture/CaptureManager.swift` — `CACurrentMediaTime()` at `:259`, `:315` (absolute) and `:782` (elapsed) | `35F9.1` **and** `0A2A.1` |
-| `NSPrivacyAccessedAPICategoryFileTimestamp` | `Capture/CaptureStorageSweeper.swift:100`, `:119` — `contentModificationDateKey` | `DDA9.1` — files inside the app container |
+| `NSPrivacyAccessedAPICategoryUserDefaults` | `Home/BundleRestore.swift` (`DismissedBundles`, which `Upload/CaptureReaper.swift` also reads through), `Identity/WhySignInSheet.swift`, and the DEBUG-only `Support/StagingHooks.swift` and `Support/ScreenGallery.swift` | `CA92.1` — information only the app itself can access |
+| `NSPrivacyAccessedAPICategorySystemBootTime` | `Capture/CaptureManager.swift` — `CACurrentMediaTime()` at `:259`, `:315` (the capture window) and `:782` (the camera-pose throttle) | `35F9.1` — elapsed time between events in the app, and timers |
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | `Capture/CaptureStorageSweeper.swift:100`, `:119` — `contentModificationDateKey` | `C617.1` — metadata of files inside the app's own container |
 
-**Two of those codes changed when the manifest was actually written, and the
-draft this section used to carry had both wrong.** They are recorded here
-because the failure mode is silent: a wrong-but-valid code lints, parses, and
-is refused at upload as ITMS-91055.
+**Apple publishes every reason code under exactly one category, and within a
+category the codes are neighbours with different terms.** A code from another
+category is refused at upload as ITMS-91055. A wrong code from the right
+category passes upload and is simply untrue. `tools/test_privacy_manifest.py`
+carries Apple's table and fails on both: the first by category, the second by
+pinning each code to its use. Why these three and not their neighbours:
 
-- **UserDefaults was drafted as `CA92.1`**, whose published description is the
-  **App Group** case — "accessible to the apps, app extensions, and App Clips
-  that are members of the same App Group". This app has no app-groups
-  entitlement and no `UserDefaults(suiteName:)`; all five call sites are
-  `.standard`. The app-itself code is `54BD.1`.
-- **FileTimestamp was drafted as `C617.1`**, which is for files "the user
-  specifically granted access to, such as using a document picker view
-  controller". There is no document picker in this app, and the swept directory
-  is `applicationSupportDirectory` in `.userDomainMask` — the app's own
-  container, which is `DDA9.1`.
-- **SystemBootTime gained a second code.** `CACurrentMediaTime()` is used both
-  for absolute in-app timestamps on the capture bundle (`35F9.1`) and for
-  elapsed time in the camera-pose throttle (`0A2A.1`). Both are real, the array
-  takes several, and declaring one would have described half the usage.
+- **UserDefaults: `CA92.1`, not `1C8F.1`.** `1C8F.1` is the App Group case. This
+  app has no app-groups entitlement and no `UserDefaults(suiteName:)`; every
+  call is on `.standard`.
+- **SystemBootTime: `35F9.1` alone.** Both uses are elapsed time — the capture
+  window and the throttle — and of what is read under `35F9.1`, only elapsed
+  time between events in the app may leave the device. So the capture bundle
+  carries the capture window and every frame timestamp counted from capture
+  start, never as read (§3.1g, decision 0298). `8FFB.1` is for computing
+  absolute timestamps, which may leave the device while boot time and anything
+  else derived from it may not; the bundle's absolute time is
+  `started_at_wall_us`, from `Date()`.
+- **FileTimestamp: `C617.1`, not `DDA9.1` or `3B52.1`.** `DDA9.1` is for
+  displaying a file's timestamp to the person, which the sweeper never does, and
+  `3B52.1` is for files the user granted access to, such as through a document
+  picker, of which there are none. The swept directory is
+  `applicationSupportDirectory` in `.userDomainMask` — the app's own container.
 
 **No disk-space API is used** — no `volumeAvailableCapacity`, `statfs`,
 `systemFreeSize` or equivalent appears anywhere in the app source, so
@@ -792,6 +796,12 @@ change and how to check it in one command.
     Every rung above it moves room data off our systems to a third party and is
     a new disclosure — and is gated behind per-room deletion regardless
     (`docs/product/social-layer.md` §7).
+16. **A new timestamp on the capture bundle.** A device-clock reading reaches
+    the wire only through `BundleAssembler`, counted from capture start, or
+    `35F9.1` stops describing the app (§9).
+    `grep -rn 'CACurrentMediaTime\|systemUptime\|\.timestamp\b' ios/TheGoodGuest/TheGoodGuest`
+    lists the readings; `BundleClockTests` pins the fields that carry them
+    today, not new ones.
 
 ---
 
