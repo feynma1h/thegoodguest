@@ -1,8 +1,8 @@
 # Decision notes
 
-278 notes. **234 of them are `Decided`** -- those govern code that
+279 notes. **234 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
-other 44 record decisions that were carried out, replaced, or
+other 45 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
 because they constrain you.
 
@@ -19,7 +19,7 @@ The status vocabulary and the numbering rule live in
 |---|---|---|
 | `Refuted` | 16 | a measured negative -- read before proposing it again |
 | `Superseded` | 7 | replaced by a later note |
-| `Amended` | 5 | partly corrected by a later note |
+| `Amended` | 6 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
 | `Decided` | 234 | governs code that ships today |
 
@@ -60,12 +60,13 @@ The status vocabulary and the numbering rule live in
 | [0263](0263-precision-is-a-gate-not-a-ranking.md) | precision against the box is a gate, not a ranking | Superseded by 0266 |
 | [0265](0265-five-instruments-one-unrun-experiment.md) | five instruments for one choice, and the experiment none of them needs | Superseded by 0266 |
 
-## Amended (5)
+## Amended (6)
 
 *Partly corrected by a later note.*
 
 | # | title | status |
 |---|---|---|
+| [0013](0013-capture-bundle-monotonic-timestamps.md) | Capture-bundle timestamps: device-monotonic, with wall-clock alongside | Amended by 0298 |
 | [0099](0099-ci-scope-and-ios-posture.md) | CI scope, and why iOS CI is manual-only | Amended by measurement |
 | [0146](0146-view-selection-does-not-predict-reconstruction-quality.md) | view selection does not predict reconstruction quality | Amended by 0153 |
 | [0152](0152-every-view-is-a-partial-view.md) | every view is a partial view, and that is the regime | Amended by 0153 |
@@ -110,7 +111,6 @@ The status vocabulary and the numbering rule live in
 | [0010](0010-every-fastapi-route-needs-a-testclient-test.md) | Every FastAPI route needs a TestClient test, not just a handler test | Decided |
 | [0011](0011-perception-obj-stuck-scene-lease-semantics.md) | perception-obj lease semantics: fix the stuck-scene bug | Decided |
 | [0012](0012-perception-obj-lease-release-on-shutdown.md) | perception-obj lease release on shutdown | Decided |
-| [0013](0013-capture-bundle-monotonic-timestamps.md) | Capture-bundle timestamps: device-monotonic, with wall-clock alongside | Decided |
 | [0014](0014-ios-upload-auth-architecture.md) | iOS upload + auth architecture | Decided |
 | [0016](0016-two-service-api-split.md) | Two-service split for API trust-boundary separation | Decided |
 | [0017](0017-smoke-tool-manifest-and-upload-contract.md) | Smoke tool: manifest derivation and upload contract (pass 3) | Decided |
@@ -333,3 +333,4 @@ The status vocabulary and the numbering rule live in
 | [0292](0292-the-survivor-inherits-the-pairs-score.md) | collapsing a nested pair must not re-rank it against everything else | Decided |
 | [0293](0293-a-passing-audit-and-a-green-suite-both-miss-the-fold.md) | a passing audit and a green suite both miss the fold | Decided |
 | [0294](0294-the-append-path-is-two-features-and-neither-ships.md) | the append path is two features and neither ships | Decided |
+| [0298](0298-a-reason-code-belongs-to-one-category-and-the-clock-starts-at-capture.md) | a reason code belongs to one category, and the bundle's clock starts at capture | Decided |

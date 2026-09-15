@@ -1,7 +1,7 @@
 # 0013 — Capture-bundle timestamps: device-monotonic, with wall-clock alongside
 
 **Date:** 2026-05-26
-**Status:** Decided
+**Status:** Amended by 0298 — the clock stands; on the wire its values count from capture start rather than device boot, so no reading leaves the device as taken.
 
 ## Context
 
