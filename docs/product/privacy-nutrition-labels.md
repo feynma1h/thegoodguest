@@ -202,9 +202,12 @@ Functionality**, not Analytics. It is disclosed under Diagnostics because
 telemetry and debugging are among the stated uses and the honest category is the
 one the code's own words point at.
 
-Also in the bundle: `started_at_device_us` / `ended_at_device_us` (device
-monotonic) and `started_at_wall_us` (wall clock) — when the capture started and
-ended.
+Also in the bundle: `started_at_wall_us` (wall clock) — when the capture
+started — and `started_at_device_us` / `ended_at_device_us` with every frame's
+`timestamp_us`, on the device's monotonic clock and counted from capture start.
+The capture's length and each frame's place in it travel; how long the phone has
+been awake since it last restarted, which is what a raw reading of that clock
+is, does not (§9).
 
 **No crash or performance data is collected by us.** There is no Crashlytics and
 no `FirebasePerformance`. Crash reports users opt into sharing through iOS reach

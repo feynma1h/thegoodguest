@@ -7,6 +7,15 @@
 /// (UploadCoordinator → BlobUploadManager). Its GCS paths are relative
 /// (e.g. "frames/000000.jpg"), matching the proto convention and the
 /// backend's path-relative expectations.
+///
+/// THE TIMELINE ON THE WIRE STARTS AT CAPTURE START. The capture window and
+/// every frame's timestamp are device-monotonic readings, and a reading of
+/// that clock counts from device boot. The privacy manifest declares
+/// SystemBootTime with 35F9.1, which lets only elapsed time between events in
+/// the app leave the device, so each one is written as microseconds since
+/// `startedAtDeviceUs` and `started_at_device_us` is always 0. Every reader
+/// works in differences — durations and frame offsets — which come out the
+/// same to the microsecond. Decision 0298.
 
 import ARKit
 import Darwin
@@ -18,6 +27,9 @@ struct BundleAssembler {
 
     let bundleId:          UUID
     let tier:              RSCaptureTier
+    /// Device-monotonic readings as CaptureManager took them, in the clock of
+    /// ARFrame.timestamp — as is each frame's `timestampUs`. None is written
+    /// as taken; see the file header.
     let startedAtDeviceUs: Int64
     let endedAtDeviceUs:   Int64
     let startedAtWallUs:   Int64
@@ -48,14 +60,14 @@ struct BundleAssembler {
         bundle.userID            = userId
         bundle.device            = makeDevice()
         bundle.tier              = tier
-        bundle.startedAtDeviceUs = startedAtDeviceUs
-        bundle.endedAtDeviceUs   = endedAtDeviceUs
+        bundle.startedAtDeviceUs = sinceCaptureStart(startedAtDeviceUs)
+        bundle.endedAtDeviceUs   = sinceCaptureStart(endedAtDeviceUs)
         bundle.startedAtWallUs   = startedAtWallUs
 
         for kf in frames {
             var frame            = RSFrame()
             frame.frameIndex     = kf.index
-            frame.timestampUs    = kf.timestampUs
+            frame.timestampUs    = sinceCaptureStart(kf.timestampUs)
             frame.rgbGcsPath     = kf.rgbRelativePath
             frame.cameraPose     = kf.pose
             frame.intrinsics     = kf.intrinsics
@@ -72,6 +84,12 @@ struct BundleAssembler {
         // CAFUFA: consistent with frame/depth blobs and the session record (decisions 0042, 0043).
         try data.write(to: url, options: .completeFileProtectionUntilFirstUserAuthentication)
         return url
+    }
+
+    /// A device-monotonic reading as the bundle carries it: the time elapsed
+    /// since capture start, never the reading itself.
+    private func sinceCaptureStart(_ deviceUs: Int64) -> Int64 {
+        deviceUs - startedAtDeviceUs
     }
 
     // MARK: - Device info
