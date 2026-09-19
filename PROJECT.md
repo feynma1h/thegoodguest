@@ -1,12 +1,13 @@
 # The Good Guest (GCP project id still `thegoodguest` — immutable)
 
-**PARKED 2026-08-31 — read `docs/PARKED.md` first, then `docs/NOT-FINAL.md`,
-which lists everything in this tree that is not finished and says which parts
-of it go live on the next deploy.** The tree is one branch (`main`), one
-worktree, and carries no room data: every capture, fixture and cloud scene was
-deleted at parking. **`main` is pushed and `origin/main` matches it** — the
-one-disk risk this line used to state was already false when it was written
-(see `docs/PARKED.md`).
+**Parked 2026-08-31, and work has continued since** — iOS App Store
+preparation on 2026-09-01 and the web share card on 2026-09-13/14. `docs/PARKED.md`
+records the state at parking; **read `docs/NOT-FINAL.md` before any deploy**, since
+it lists what is unfinished and which parts of it go live on the next one. The
+tree is one branch (`main`, pushed to `origin/main`) and carries no room data:
+every capture, fixture and cloud scene was deleted at parking. **There are no real
+users yet**, so traffic splits and revision history matter only as far as they
+cost money — and every service scales to zero (verified 2026-09-19).
 
 A spatial intelligence product that helps people discover the best version of their home: AI-powered room analysis, conversational redesign, and an immersive 3D representation of *their own* space.
 
@@ -23,7 +24,7 @@ This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction 
 Three technical surfaces today:
 
 - **iOS capture app** (Swift + ARKit + RoomPlan) — capture-only, no viewer. The app's only job is producing a high-quality capture bundle and uploading it. Users come to the web for everything else.
-- **Backend perception pipeline** (FastAPI on Cloud Run, `asia-southeast1`) — ingests bundles, runs SAM 3 segmentation + SAM 3D Objects reconstruction, places objects in the room's gravity-aligned metric frame using ARKit data (decision 0052), renders the room shell — walls/floor as textured quads from measured ARKit planes (decision 0066; BUILT, deploy pending). This is the modern substrate for the draft's perception + spatial-reasoning layers; the spatial relationship graph and design-generation layers above it are unbuilt.
+- **Backend perception pipeline** (FastAPI on Cloud Run, `asia-southeast1`) — ingests bundles, runs SAM 3 segmentation + SAM 3D Objects reconstruction, places objects in the room's gravity-aligned metric frame using ARKit data (decision 0052), renders the room shell — walls/floor as textured quads from measured ARKit planes (decision 0066). This is the modern substrate for the draft's perception + spatial-reasoning layers; the spatial relationship graph and design-generation layers above it are unbuilt.
 - **Web app** (Next.js, static export + web splat rendering — WebGL2 via Spark, decision 0053 — hosted on Firebase Hosting) — the product surface: today rooms + viewer; next analysis, conversation, and redesign. Capture path is one screen: "Open the iOS app." Auth: same Firebase identity as iOS — requires upgrading iOS's anonymous auth to a real sign-in linked to the existing anonymous credential (see "Next on the board"); anonymous UIDs don't carry across devices.
 
 Photo-upload (Android, no-iPhone users) is a deferred concern. Until the iOS path is solid we don't build the web-fallback capture.
@@ -77,7 +78,7 @@ services/
   api-internal/                   internal API (--no-allow-unauthenticated, Cloud Run IAM)
   perception-obj/                 SAM 3 + SAM 3D Objects + placement/fusion (deployed pre-placement)
                                     plus SAM 3.1's video tracker behind /track — models/sam3_video.py
-                                    and track_receiver.py (0274; BUILT, candidate-only, NOT flipped)
+                                    and track_receiver.py (0274; BUILT, in the serving image, not called by /process)
                                     and track_selection.py, per-object best-frame choice over the
                                     tracked segments (BUILT, no call site in the service yet)
 
@@ -120,17 +121,15 @@ the wipe.
 
 ## What works right now
 
-**EVERY Cloud Run revision number below other than the three service headers
+**Every Cloud Run revision number below other than the three service headers
 refers to the RETIRED `roomstudio` project and no longer exists.** The stack
-was migrated to the `thegoodguest` project on 2026-08-31; all three services
-are at their first revision there. Read revision numbers in the narrative as
-history, and derive live state from `gcloud run services describe <svc>
---region asia-southeast1 --project thegoodguest`.
+moved to the `thegoodguest` project on 2026-08-31, where revision numbering
+restarted at 00001. Read revision numbers in the narrative as history, and
+derive live state from `gcloud run services describe <svc> --region
+asia-southeast1 --project thegoodguest`.
 
-
-State, not history. Every claim here is about the live system; the story of how
-it got this way is in `docs/decisions/`. Serving revisions and suite counts were
-last verified 2026-08-20.
+State, not history; the story of how it got this way is in `docs/decisions/`.
+The service headers and the suite counts below were re-verified 2026-09-19.
 
 ### The contract and shared packages
 
@@ -151,22 +150,24 @@ state machine, the scene read/write repositories, `UploadSessionRepository` +
 `gcs_mint_resumable_uri`, semantic manifest validation, and the capture-bundle
 test fixtures.
 
-Suites, measured on `main` 2026-08-31 after the three lane merges and after
-`web/public/dev-fixtures` and every preserved capture were DELETED at parking —
-so these are the fixtures-ABSENT figures, and they are the only ones that
-describe this tree: perception **1205 + 34**, web **287**, schemas **126**
-(`pytest packages/schemas/tests`);
-root **862 + 102** by bare `pytest` (which uses `testpaths` in `pyproject.toml`) — measured 2026-09-01 in TWO parts, because a `.venv`-less tree runs system python and `tools/test_gen_mark.py` needs Pillow at collection: **836 + 102** for everything else and **26** for that module under an interpreter that has PIL;
-root **867 + 102** by `pytest packages services tools
---ignore=services/perception-obj`, which collects 18 tests `testpaths` does
-not. **Those two commands are both called "root" in this repo and differ by
-18 tests** — "always say which" was never enough on its own, because the
-figures were recorded without the command that produced them. Write the
-command. Without fixtures the second form is **811 + 102** (review worktree,
-2026-08-24); on `brand-identity` with fixtures ABSENT bare `pytest` read
-**822 + 102**, the eleven added being `tools/test_gen_mark.py` growing from 15
-to 26 (0248-0251). The fixture-backed set skips silently, so a lower number
-from a worktree is correct rather than regressed. re-enqueue **18**.
+Suites, measured on `main` 2026-09-19 with the main tree's `.venv` interpreter
+(which has Pillow) and no fixtures — the only state this tree can be in, since
+`web/public/dev-fixtures` and every preserved capture were deleted at parking:
+
+| suite | command | result |
+|---|---|---|
+| root | bare `pytest` (uses `testpaths` in `pyproject.toml`) | **840 passed + 102 skipped** |
+| perception | `PYTHONPATH=<tree>/packages/schemas pytest services/perception-obj/tests` | **1205 passed + 34 skipped** |
+| schemas | `pytest packages/schemas/tests` | **126 passed** |
+| web | `npm test` in `web/` | **287 passed** |
+| re-enqueue | its own job in CI | **18** (not re-measured) |
+
+**"Root" has meant two different commands in this repo** — bare `pytest`, and
+`pytest packages services tools --ignore=services/perception-obj`, which collects
+tests `testpaths` does not. Write the command next to any count. System `python3`
+has no Pillow, so it fails collecting `tools/test_gen_mark.py` and reads lower;
+fixture-backed tests skip silently, so a lower count is not by itself a
+regression.
 
 ### iOS capture app — `ios/TheGoodGuest/`
 
@@ -254,8 +255,8 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   `WhySignInSheet`'s invitation. The load state is four-way and its accessors
   are Optional, so "no rooms" and "could not ask" cannot be collapsed (0206);
   a failed fetch never renders as zero. Rows offer a tap only where one can
-  land — gated on `NetworkConfig.webBaseURL`, which is nil, exactly as the
-  doorway's CTA is.
+  land — gated on `RoomHistory.webHandoffLands`, exactly as the doorway's CTA
+  is (see "The way to the web" above).
 - **The mark.** `DesignSystem/Wordmark.swift` draws the same two interlocking
   rings as the app icon, from the generated `MarkGeometry.swift` (0193/0248).
   `RSBrand.name` stays the one-file swap for the name. **The mark and the name
@@ -360,7 +361,7 @@ Suite **666**: 660 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
-### api-public — `api-public-00001-pid`, image `20260831-152649`
+### api-public — `api-public-00003-dfq`, image `20260831-152649`
 
 Client-facing, `--allow-unauthenticated`, with in-app Firebase JWT verification
 as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
@@ -404,21 +405,17 @@ is never stamped.
 
 ### perception-obj — `perception-obj-00001-dw6`, image `20260831-160150`
 
-**Serving 100%, carrying both ruled-on flags** (flipped 2026-08-25, 0243;
-re-verified from `gcloud` 2026-08-25). `perception-obj-00074-var` pins
-`sha256:c538f699…` — an image whose layers are the same objects as the ship
-lane's `b19434de…`, rebuilt in 39 s off the buildx cache — and its env carries
-`PERCEPTION_MASK_REFINE=1` and `PERCEPTION_ARM_SELECT=1`, with all three parked
-flags absent. `/health` answers 200 and `/process`, `/shell` and `/compress`
-are all registered. The `serving` registry tag moved onto that digest at the
-flip (0200), so the image a scale-to-zero GPU service boots from is pinned by
-name rather than by recency.
+**Carries both ruled-on flags** (ruled 2026-08-25, 0243; verified from `gcloud`
+2026-09-19): the env has `PERCEPTION_MASK_REFINE=1` and `PERCEPTION_ARM_SELECT=1`,
+with all three parked flags absent. The image was built from `main` after the
+2026-08-31 lane merges, so it registers `/process`, `/shell`, `/compress`,
+`/segment` and `/track`. It is the one image in the registry tagged `serving`
+(0200), so the image a scale-to-zero GPU service boots from is pinned by name
+rather than by recency.
 
-**The revision still carries its `candidate` tag, and that is the normal
-post-flip shape.** A candidate deploy names the revision; the flip moves
-traffic and does not rename it. So `tag: candidate` sitting beside
-`percent: 100` is NOT a parked revision — read the traffic split, which is the
-authority, never the tag.
+**A post-flip revision keeps the `candidate` tag it was deployed under** — the
+flip moves traffic and does not rename it. `tag: candidate` beside
+`percent: 100` is not a parked revision; read the traffic split, never the tag.
 
 Runs as `perception-obj-runtime@` under least privilege (0090) and is
 platform-gated — only `tasks-invoker@` holds `run.invoker` (0106). Scales to
@@ -443,11 +440,9 @@ Three pipeline stages plus a probe, all Cloud Tasks driven:
   0%-traffic candidates** (0211/0212), and what that measured is that they are
   not three independent switches: refine and select flip TOGETHER, refine
   first, because refinement changes what the chooser is choosing between.
-  **Refine and arm-select are RULED ON and SERVING** since 2026-08-25 on
-  `perception-obj-00074-var` (0243) — verified from `gcloud` after the flip:
-  both flags present, all three forbidden flags absent, and the `serving` tag
-  moved onto `sha256:c538f699…`, the digest the revision itself pins rather
-  than the timestamped tag (0200). The residue is parked (0202/0212).
+  **Refine and arm-select are RULED ON and SERVING** (ruled 2026-08-25, 0243;
+  both flags present on the serving revision, verified 2026-09-19). The
+  residue is parked (0202/0212).
   **Two more ship OFF and byte-identical off, from `selection-supply`** —
   `PERCEPTION_CONDITIONAL_SECOND_ARM` skips a box's planned second view when
   its FIRST arm already renders well (0229; 4 of 8 multi-arm boxes, and never
@@ -481,11 +476,9 @@ Three pipeline stages plus a probe, all Cloud Tasks driven:
   that hands the box to whoever was photographed first (0292). It does NOT fix
   0262's flat metric and a reading that says so is wrong.
 - **`/segment`** — a segmentation-only probe, built on `segment-quality` and
-  deployed only to 0%-traffic candidates. **The candidate live on 2026-08-31 is
-  `perception-obj-00093-pav`** (image `b21408a5`, the SAM 3.1 / `/track` build);
-  the earlier `00088-vot` carried `PERCEPTION_SAM3_INTERACTIVE=1` and is
-  superseded — read the traffic split from `gcloud`, never this line. **The serving revision does not carry this
-  route.** It takes an EXPLICIT frame list, runs pass 1 only and never loads
+  registered in the serving image since the 2026-08-31 rebuild, with no
+  candidate revision alongside it (verified 2026-09-19). Nothing in the
+  pipeline calls it; it is an operator probe. It takes an EXPLICIT frame list, runs pass 1 only and never loads
   SAM 3D — "what does SAM 3 actually see there?" costs ~4 s a frame against
   ~25 s an object, and `/process` cannot answer it, because its request carries
   only `{scene_id, bundle_uri}` and it re-runs the census sampler, so a frame
@@ -504,8 +497,9 @@ Three pipeline stages plus a probe, all Cloud Tasks driven:
   which loads the tracker onto a card 0228 measured at ~5.26 GiB headroom.
 - **`/track`** — SAM 3.1's multiplex VIDEO tracker across a capture's frames,
   producing an object→frame map: per frame, per instance, an `obj_id`, a box, an
-  area and a stride-4 mask. **BUILT and exercised on a 0%-traffic candidate;
-  NOT flipped, and production has not moved.** It is a different model from
+  area and a stride-4 mask. **BUILT, exercised, and registered in the serving
+  image — but nothing in `/process` calls it**, so the room pipeline has not
+  moved. It is a different model from
   `/segment`'s, not a newer one — SAM 3.1 publishes only the tracker's
   checkpoint (0274). It carries `/segment`'s two containment invariants for the
   same reasons (writes only under `scenes/{id}/track_probe/`, never touches
@@ -557,17 +551,9 @@ neither direction can silently re-open, and `DEFAULT_OBJECT_PROMPT` now lives in
 `process_receiver.py` because `server.py` imports torch and no GPU-free test
 could read it there.
 
-Suite **1119 passed + 9 skipped** on `segment-quality` WITHOUT
-`web/public/dev-fixtures` (`PYTHONPATH=<tree>/packages/schemas pytest
-services/perception-obj/tests`, worktree 2026-08-30 — the PYTHONPATH is
-load-bearing, see the Python test policy). `test_segment_receiver.py` and `test_upstream_pins.py`
-contribute **64** of those, measured directly. The last recorded figure on the
-same command is `main`'s **1053 + 9** (review worktree, 2026-08-24), which the
-64 does not reconcile with by two — `main` has not been re-measured here, and
-the branch touches no existing test file, so the two belong to `main` having
-moved rather than to this work. The last with-fixtures figure is **1060 + 2**
-(2026-08-25); the with-fixtures figure for this branch is owed a measurement
-rather than an arithmetic guess, and the spread has been seven tests.
+Suite **1205 passed + 34 skipped** (`PYTHONPATH=<tree>/packages/schemas pytest
+services/perception-obj/tests`, `main`, 2026-09-19 — the PYTHONPATH is
+load-bearing, see the Python test policy).
 
 ### Web app — `web/`, live at https://thegoodguest.web.app
 
@@ -618,8 +604,7 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
   suppression-armed revision (0221) — a card ships the shell and a person
   contaminates a measured albedo, so this is the rung where 0089 binds hardest.
 
-Suite **276** vitest; lint, tsc, and the static-export build are green
-(re-measured on `brand-identity`, 2026-08-26, fixtures absent).
+Suite **287** vitest (`main`, 2026-09-19).
 
 The design tokens are the new identity's (0248): cream `--paper: #f9f2ec`, warm
 near-black `--ink: #282723`, terracotta `--accent: #c04d3e`. **There are two
@@ -1040,12 +1025,9 @@ re-argued here.
   because a lane iterating on builds pushes the live image out of the top three
   and exactly-3-by-recency would delete the image a scale-to-zero GPU service
   boots from. **The fix for a high count is to deploy or delete the surplus
-  builds, never to tighten the policy.** Measured 2026-08-31 after parking:
-  **three versions** — the live image, `buildcache`, and the parked candidate's.
-  **The rollback hold is gone**: revisions `00062-hum`, `00064-taz`, `00065-fab`
-  and `00066-hic` pin an image that no longer exists and cannot boot. They hold 0%
-  traffic, but **there is no rollback image any more; recovery from a bad flip is
-  a rebuild.** (0190)
+  builds, never to tighten the policy.** Measured 2026-09-19: **two versions** —
+  the serving image and `buildcache`. **There is no rollback image; recovery from
+  a bad flip is a rebuild.** (0190)
 - **Terms §9–§11 need an Indian lawyer.** Consumer Protection Act 2019 §2(46) can
   void the §11 liability cap against a consumer.
 - **Apple Developer Program enrollment CLEARED 2026-08-23.** Gate A, APNs,
@@ -1161,9 +1143,8 @@ ever done or ruled, delete it — do not annotate it.
   proto has no append concept, and api-public refuses a second claim on a
   bundle_id. `ReviewView`'s docstring says so directly and names its own
   secondary action `rescan` rather than "add more" to avoid implying otherwise.
-  **The web-handoff link this line called the remaining follow-up is done**; the
-  append path is what is actually outstanding, and the QR bridge is behind it
-  (punchlist G1-08).
+  The append path itself is ruled out (0294), and the QR bridge was deleted
+  with it.
 
 ### Standing facts that look like bugs
 
@@ -1208,7 +1189,7 @@ pattern `UploadSessionRepository` already uses: `public_server._mint_uri_fn`
 credential failure in CI by supplying credentials** — that turns the tests
 green while leaving them non-hermetic, which is the actual defect.
 
-Current: **root 839 passed + 26 skipped** (dev-fixtures staged), verified BOTH with ADC present and
+The property was verified (2026-08-08) BOTH with ADC present and
 with ADC made unavailable (`GOOGLE_APPLICATION_CREDENTIALS` unset,
 `CLOUDSDK_CONFIG` → empty dir, `GCE_METADATA_HOST` → unroutable). The
 credential-free run is also 25× faster (1.3 s vs 33 s), which is itself the
@@ -1259,15 +1240,11 @@ silently certify shipped code against itself, and test collection in a worktree
 depends on the main tree's state. Measured by lane E, 2026-08-14. Repoint REPO
 before trusting any number from it.
 
-**Suite counts depend on whether `web/public/dev-fixtures` is staged**, and two
-lanes have now reported numbers that read like regressions and were not:
-root is **862+27** with it, and perception is **952+2** with it against
-**945+9** without — both re-measured 2026-08-21, which closes the gap this
-paragraph carried for weeks (the last fixtures-staged perception figure on
-record was 793+0). The seven-test spread IS the fixture-backed set, and it
-skips silently, so a worktree lane reporting the lower number is correct
-rather than regressed — two lanes have now reported exactly that and been
-misread. Always say which invocation a count came from.
+**Fixture-backed tests skip silently.** `web/public/dev-fixtures` was deleted at
+parking, so every suite now runs fixtures-absent and the real-data tests report
+as skips. If fixtures are ever re-staged, counts rise by that set — a lane
+reporting the lower number is correct rather than regressed. Always say which
+invocation a count came from.
 
 Other Python jobs at that CI run: perception-obj **passed on Linux** — the
 `test_shell_observation.py::TestMedianSelect::test_closer_frame_outweighs_far`
@@ -1303,7 +1280,7 @@ by moving to a fresh branch rather than committing to `main`, which was right.
 **Give every session its own worktree, including main-tree-bound ones — symlink
 what is main-bound instead of borrowing the tree.**
 
-**Concurrent sessions MUST use separate worktrees, not the same tree.** Two iOS sessions ran in the main tree on 2026-07-25 and nearly produced a false green: one stashed two files to unblock a branch checkout while the other was mid-edit on them, so for the length of a merge the tree held the pre-edit content. Any build, test run, or `git add` in that window would have silently captured stale source, and BOTH sessions would have reported a green suite for a tree neither of them had. Nothing warns you — the suite passes, the diff looks right, and the commit that lands is whatever happened to be on disk. `git worktree` is the fix (one is already in use for `placement-quality-build`); the plist note above is its one gotcha.
+**Concurrent sessions MUST use separate worktrees, not the same tree.** Two iOS sessions ran in the main tree on 2026-07-25 and nearly produced a false green: one stashed two files to unblock a branch checkout while the other was mid-edit on them, so for the length of a merge the tree held the pre-edit content. Any build, test run, or `git add` in that window would have silently captured stale source, and BOTH sessions would have reported a green suite for a tree neither of them had. Nothing warns you — the suite passes, the diff looks right, and the commit that lands is whatever happened to be on disk. `git worktree` is the fix; the plist note in the iOS test policy is its one gotcha.
 
 **Contract/CI note:** the `/upload_session` contract is frozen (decision 0035), so the live integration tests assert against a stable shape. (The earlier fail-open rationale — that fail-closed-without-CI trains operators to ignore red — is superseded: the sole-scheme decision already made these intentionally fail-closed-live.)
 
@@ -1330,7 +1307,7 @@ app then silently mints a new anonymous uid, and every room captured under the
 old one is orphaned. Auto-cleanup would fire that for every user on a schedule.
 It is a single checkbox in the console.
 
-**Cloud Run revision numbers are NOT chronological on `perception-obj`.** The service has produced two revisions numbered 00036 (`-xer`, RP-8; `-l9l`, the 0089/0090 security+privacy deploy), one numbered 00038 (`-ses`, the 0081/0082 wave), and `perception-obj-00037-sd9` (image `20260808-200124`, the 0104 walk-classes deploy), which served 100% for two days despite a LOWER number than 00038. Do NOT read a lower revision number as a rollback — check the image tag and the traffic split (`gcloud run services describe perception-obj --region asia-southeast1`), which are the authorities. Serving now: **`perception-obj-00074-var`**, digest `sha256:c538f699…` (the refine + arm-select flip, 2026-08-25), re-verified from `gcloud` 2026-08-25 — and note it still carries the `candidate` tag it was deployed under, which is what a post-flip candidate looks like rather than a parked revision. Its predecessor **`00062-hum`** ran `sha256:faa005c8…` (the colour deploy, 2026-08-20) and is the rollback target, held in the registry by a `serving-rollback-00062-hum` tag; it no longer carries its `20260821-010928` tag, so identify it by digest.
+**Cloud Run revision numbers are NOT chronological on `perception-obj`.** The service has produced two revisions numbered 00036 (`-xer`, RP-8; `-l9l`, the 0089/0090 security+privacy deploy), one numbered 00038 (`-ses`, the 0081/0082 wave), and `perception-obj-00037-sd9` (image `20260808-200124`, the 0104 walk-classes deploy), which served 100% for two days despite a LOWER number than 00038. Do NOT read a lower revision number as a rollback — check the image tag and the traffic split (`gcloud run services describe perception-obj --region asia-southeast1`), which are the authorities. Those revisions belong to the retired `roomstudio` project; numbering restarted at 00001 in `thegoodguest`, and the service header under "What works right now" names the one serving.
 
 **SAM 3.1 is a TRACKER release, and the image path has nowhere to move to (0274).** Its only published checkpoint is `sam3.1_multiplex.pt`; `build_sam3_image_model` hardcodes the 3.0 weights and takes no version argument, so "bump SAM 3 to 3.1" is not an available action for the path `/process` and `/segment` use. `facebook/sam3.1` is a SEPARATE gated HuggingFace repo — access to `facebook/sam3` does not imply it, and the build now downloads both. **Bypassing SAM 3.1's session layer means replicating what it ENTERS, not only what it calls (0276):** `reset_state` carries no decorator and requires its caller to be inside `torch.inference_mode()`, which `handle_request` supplies; `start_session` cannot start a multiplex session at all; and the recommended entry point defaults `use_fa3=True`, a path that imports `flash_attn_interface` and casts to float8 — Hopper only, where this service is an L4. **And torch cannot move to meet it (0277):** the image is torch 2.5.1+cu121 because SAM 3D Objects pins it, so one dtype shim in `models/sam3_video.py` covers the tracker's bool CUDA sort. **A second incompatibility is the signal to split the tracker into its own service, not to add a second patch** — it needs no SAM 3D, pytorch3d, kaolin or gsplat.
 
@@ -1519,11 +1496,11 @@ evidence for a human deleting an entry, not authority to.
 
 ## Next on the board
 
-**The project is PARKED as of 2026-08-31, so there is no board.** Read
-`docs/PARKED.md` for why and for the state of the tree, then `docs/NOT-FINAL.md`
-for what in here is unfinished and which parts of it go live on the next deploy.
+**No board is kept in this file** — the forward list is `docs/punchlist.md`
+(below). `docs/NOT-FINAL.md` lists what is unfinished and which parts of it go
+live on the next deploy.
 
-### Owed on return: the operator's eyes on 20 screen states
+### Owed: the operator's eyes on 20 screen states
 
 Twenty states across six screens were added or changed on 2026-09-01 and **no
 human has looked at any of them.** The list is here so the next session does not
