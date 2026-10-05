@@ -28,14 +28,21 @@
 //       (e.g. SAM 3D's per-object frame).
 //
 //   TIMESTAMPS
-//     CaptureBundle.started_at_device_us / ended_at_device_us are
-//     device-monotonic microseconds (CACurrentMediaTime / mach_absolute_time
-//     on iOS), the same clock as ARFrame.timestamp. Frame deltas and
-//     capture-window durations are computed entirely within this domain:
+//     CaptureBundle.started_at_device_us / ended_at_device_us and
+//     Frame.timestamp_us are device-monotonic microseconds (CACurrentMediaTime
+//     / mach_absolute_time on iOS), the same clock as ARFrame.timestamp,
+//     counted from capture start — started_at_device_us is 0. A reading of
+//     that clock counts from device boot, and the reason the app's privacy
+//     manifest declares for it (35F9.1) lets only elapsed time between events
+//     in the app leave the device, so the client never sends one as taken.
+//     Frame deltas and capture-window durations are computed entirely within
+//     this domain, as differences:
 //       elapsed_s = (frame.timestamp_us - bundle.started_at_device_us) / 1e6
+//     Read the values only that way; it holds for any origin, including
+//     device boot on bundles written before decision 0298.
 //     CaptureBundle.started_at_wall_us is wall-clock epoch µs, set once at
 //     capture start. Use it for display and cross-device sorting only — not
-//     for inter-frame math. See docs/decisions/0013.
+//     for inter-frame math. See docs/decisions/0013 and 0298.
 //
 //   IMAGES AND DEPTH BY REFERENCE, NOT INLINE
 //     The bundle is metadata; pixel data lives in GCS. Each `Frame` carries
@@ -200,8 +207,9 @@ public nonisolated struct Thegoodguest_Capture_V1_CaptureBundle: @unchecked Send
 
   /// Capture window — device-monotonic clock (same domain as ARFrame.timestamp,
   /// i.e. CACurrentMediaTime / mach_absolute_time on iOS). Microseconds since
-  /// device boot. Use these for duration and frame-offset math; they cannot
-  /// jump due to NTP or DST. start <= end.
+  /// capture start: start is 0 and end is the capture's duration. Use these for
+  /// duration and frame-offset math; they cannot jump due to NTP or DST.
+  /// start <= end.
   public var startedAtDeviceUs: Int64 {
     get {_storage._startedAtDeviceUs}
     set {_uniqueStorage()._startedAtDeviceUs = newValue}
@@ -314,10 +322,10 @@ public nonisolated struct Thegoodguest_Capture_V1_Frame: @unchecked Sendable {
     set {_uniqueStorage()._frameIndex = newValue}
   }
 
-  /// Device-monotonic microseconds (same clock as CaptureBundle.started_at_device_us /
-  /// ended_at_device_us and ARFrame.timestamp). Deltas within a bundle are
-  /// meaningful; comparison across bundles or to wall-clock requires
-  /// started_at_wall_us as a reference.
+  /// Device-monotonic microseconds since capture start (same clock and origin as
+  /// CaptureBundle.started_at_device_us / ended_at_device_us; the clock of
+  /// ARFrame.timestamp). Deltas within a bundle are meaningful; comparison
+  /// across bundles or to wall-clock requires started_at_wall_us as a reference.
   public var timestampUs: Int64 {
     get {_storage._timestampUs}
     set {_uniqueStorage()._timestampUs = newValue}
