@@ -34,7 +34,7 @@ outputs/             local scratch for run artifacts (gitignored)
 
 ## Services
 
-All four run on Cloud Run in `asia-southeast1`, project `thegoodguest`.
+All three run on Cloud Run in `asia-southeast1`, project `thegoodguest`.
 
 | Service           | State  | Purpose                                                          |
 |-------------------|--------|------------------------------------------------------------------|
@@ -50,12 +50,6 @@ serves them to the web app over signed URLs.
 `packages/schemas/capture_bundle.proto` is the contract between iOS and the
 backend, and its docstring is the reference for the frame and pose
 conventions. Read it before touching anything that crosses that boundary.
-
-### Why perception is split into two services
-
-SAM 3D Objects pins `torch==2.5.1+cu121`; VGGT pins `torch==2.3.1`. They cannot
-coexist in one pip environment. The split also gives each its own scaling
-lifecycle.
 
 ## Local development
 
@@ -130,7 +124,6 @@ idempotent and are run from the repo root:
 ./infra/deploy_api_internal.sh        # run first on a fresh project
 ./infra/deploy_api_public.sh
 ./infra/deploy_perception.sh obj      # SAM 3 + SAM 3D
-./infra/deploy_perception.sh geom     # VGGT (parked)
 ```
 
 The web app deploys to Firebase Hosting from `web/` (`npm run deploy:preview`
