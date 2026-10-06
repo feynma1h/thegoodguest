@@ -12,7 +12,9 @@ migrating to a new project. Where you see `thegoodguest` below, it is naming a
 live cloud resource, not the product.
 
 The always-current state of the project — what works, what does not, and what
-is next — is `PROJECT.md`. This file covers layout, local setup, and deploys.
+is next — is `PROJECT.md`. How the parts fit together is `ARCHITECTURE.md`,
+the place to start if you are new. This file covers layout, local setup, and
+deploys.
 
 ## Repository layout
 
