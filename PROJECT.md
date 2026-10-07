@@ -86,6 +86,7 @@ web/                              Next.js static-export web app (decision 0050);
                                   contained in src/components/SplatViewer.tsx (decision 0053)
 
 infra/                            Cloud Build configs, deploy scripts
+ARCHITECTURE.md                   how the parts fit together, written for someone new to the code
 docs/punchlist.md                 the remaining-work list — see "The punchlist" below
 docs/decisions/                   short notes on dead-ends — see "When to write a decision note"
 test_data/photos/                 9 synthetic rendered room views, for synthesis testing
