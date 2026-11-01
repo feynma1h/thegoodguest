@@ -233,7 +233,7 @@ gcloud run deploy "${SERVICE}" \
     --no-cpu-throttling \
     --cpu-boost \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
-    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=thegoodguest-perception-outputs,FIRESTORE_PROJECT=thegoodguest,CLOUD_TASKS_INVOKER_SA=tasks-invoker@thegoodguest.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-q62kcditqa-as.a.run.app,CLOUD_TASKS_PROJECT=thegoodguest,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15,SHELL_MATERIAL_MODEL=claude-sonnet-5,PERCEPTION_MASK_REFINE=1,PERCEPTION_ARM_SELECT=1 \
+    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=thegoodguest-perception-outputs,FIRESTORE_PROJECT=thegoodguest,CLOUD_TASKS_INVOKER_SA=tasks-invoker@thegoodguest.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-o4dhc34kqq-as.a.run.app,CLOUD_TASKS_PROJECT=thegoodguest,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15,SHELL_MATERIAL_MODEL=claude-sonnet-5,PERCEPTION_MASK_REFINE=1,PERCEPTION_ARM_SELECT=1 \
     --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
     # PERCEPTION_MASK_REFINE and PERCEPTION_ARM_SELECT are ON by operator
     # ruling (2026-08-23). They flip TOGETHER and refine goes first —
