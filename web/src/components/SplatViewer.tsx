@@ -72,6 +72,7 @@ import {
   windowProgress,
 } from "@/lib/reveal";
 import { openingRect, projectToWallPlane, wallFrame } from "@/lib/shell3d";
+import { finishSignature, shellFinishEnabled, type ShellFinish } from "@/lib/shellFinish";
 import { labelsKey, outlinesKey, rendererKey } from "@/lib/viewerKey";
 
 interface SplatViewerProps {
@@ -83,6 +84,9 @@ interface SplatViewerProps {
    * correctly against depthWrite:true meshes both ways). Absent/null
    * keeps the grid. */
   shell?: ShellPlane[] | null;
+  /** LOCAL-ONLY finish override (lib/shellFinish): draws designed walls and
+   * floor over the flat shell. Inert unless NEXT_PUBLIC_SHELL_FINISH=1. */
+  finish?: ShellFinish | null;
   className?: string;
   /** Slow auto-orbit until the user grabs the scene (landing demo). */
   idleOrbit?: boolean;
@@ -380,6 +384,7 @@ const OPENING_OFFSET_M = 0.006;
 export default function SplatViewer({
   splats,
   shell = null,
+  finish = null,
   className,
   idleOrbit = false,
   frameless = false,
@@ -402,7 +407,12 @@ export default function SplatViewer({
   // GEOMETRY of the same file (a new SDF edit), not a placement of it —
   // and because a clip volume is parented to its mesh, so it follows a
   // move for free rather than needing to be rebuilt by one.
-  const key = useMemo(() => rendererKey({ splats, shell }), [splats, shell]);
+  // Empty unless the local finish flag is on, so a normal build keys exactly as before.
+  const finishSig = shellFinishEnabled() ? finishSignature(finish) : "";
+  const key = useMemo(
+    () => rendererKey({ splats, shell }) + (finishSig ? `|finish:${finishSig}` : ""),
+    [splats, shell, finishSig],
+  );
   // Decoration signatures: a caller handing us an equal-but-fresh array
   // must not rebuild anything, for the same reason the renderer key is a
   // string rather than an identity.
@@ -491,8 +501,12 @@ export default function SplatViewer({
 
         // alpha:true — the backdrop is the container's CSS gradient, which
         // gives the scene atmosphere no flat clear-color can.
+        // Local finish override: the designed finish wants filmic tone and
+        // clean edges (and nothing else in the viewer changes with it).
+        const dressShell = Boolean(finish && shellFinishEnabled());
         const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        if (dressShell) renderer.toneMapping = THREE.NeutralToneMapping;
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, dressShell ? 1.5 : 2));
         renderer.setSize(container.clientWidth, container.clientHeight);
         renderer.domElement.style.opacity = "0";
         renderer.domElement.style.transition = "opacity 900ms ease";
@@ -658,6 +672,20 @@ export default function SplatViewer({
           return { mesh, plane: p, extras };
         });
 
+        // Local-only finish override (lib/shellFinish): swaps the flat walls
+        // and floor for the designed finish. A finish that does not fit this
+        // shell never reaches here (parseFinish returns null).
+        const finishMods = dressShell
+          ? await Promise.all([
+              import("@/components/shellFinishScene"),
+              import("@/components/finishCompareHarness"),
+            ])
+          : null;
+        if (disposed) return;
+        const finishCtl = finishMods
+          ? finishMods[0].applyShellFinish(THREE, scene, shellMeshes, finish as ShellFinish, renderer)
+          : null;
+
         // Uniform scale is the shipped contract; a per-axis triple is the
         // staged-fixture A/B side (see PositionedSplat.scale). Size-ordering
         // and camera-framing consumers reduce a triple to its largest axis.
@@ -765,6 +793,20 @@ export default function SplatViewer({
         );
 
         const controls = new OrbitControls(camera, renderer.domElement);
+        // Local-only (finish flag): expose the live view so a comparison
+        // harness can pose the camera exactly where a real frame was taken
+        // (tools/finish_compare). Absent in production builds.
+        if (finishMods) {
+          (window as unknown as { __shellFinishView?: unknown }).__shellFinishView = {
+            camera,
+            controls,
+            renderer,
+            scene,
+            harness: finishMods[1].makeCompareHarness(THREE, camera, controls, renderer, scene, (c) => {
+              finishCtl?.update(c);
+            }),
+          };
+        }
         controls.enableDamping = true;
         controls.dampingFactor = 0.08;
         controls.target.copy(target);
@@ -772,6 +814,21 @@ export default function SplatViewer({
         controls.maxPolarAngle = Math.PI / 2 - 0.05;
         controls.minDistance = radius * 0.5;
         controls.maxDistance = fitDistance * 3;
+        // Local finish: the fixed diorama camera (lib/shellFinishViews).
+        const staged = finishCtl?.stage({
+          camera,
+          controls,
+          domParent: container.parentElement,
+          boxes: splats.flatMap((s) =>
+            s.clip
+              ? [{ center: s.clip.center_world, half: s.clip.half_extents_m, yaw: s.clip.yaw_rad }]
+              : [],
+          ),
+          onChange: () => {
+            lastDirty = performance.now();
+          },
+        });
+        if (staged) finalOffset.copy(staged);
 
         controls.autoRotate = idleOrbit;
         controls.autoRotateSpeed = 0.5;
@@ -1057,6 +1114,8 @@ export default function SplatViewer({
         camera.position.copy(target).add(fromOffset);
 
         let raf = 0;
+        let lastDirty = performance.now();
+        let lastDrawn = 0;
         const renderLoop = () => {
           raf = requestAnimationFrame(renderLoop);
           const now = performance.now();
@@ -1147,7 +1206,16 @@ export default function SplatViewer({
               revealDoneRef.current?.();
             }
           }
+          // Local finish: draw on demand. Idle (no camera motion for 0.8 s)
+          // drops to a 2 fps heartbeat so splat sorting can settle without
+          // keeping the GPU pinned.
+          if (finishCtl) {
+            finishCtl.tick(now);
+            if (now - lastDirty > 800 && now - lastDrawn < 500) return;
+            lastDrawn = now;
+          }
           controls.update();
+          finishCtl?.update(camera);
           renderer.render(scene, camera);
         };
         renderLoop();
@@ -1192,6 +1260,7 @@ export default function SplatViewer({
             mesh.geometry.dispose();
             mesh.material.dispose();
           }
+          finishCtl?.dispose();
           ground.geometry.dispose();
           (ground.material as { map?: { dispose(): void } }).map?.dispose();
           (ground.material as { dispose(): void }).dispose();
@@ -1288,8 +1357,12 @@ export default function SplatViewer({
         // The stage's atmosphere: warm lamplight dark (the palette's
         // ambient register — §11's family, dimmed). CSS, not clear-color,
         // so it can be a gradient.
+        // Local finish override: a seamless warm studio grey (the diorama
+        // look), not the dark stage.
         background:
-          "radial-gradient(120% 90% at 50% 42%, #36342f 0%, #23221e 55%, #181715 100%)",
+          finish && shellFinishEnabled()
+            ? "radial-gradient(120% 95% at 50% 40%, #f1eee9 0%, #e2ddd5 60%, #cfc9c0 100%)"
+            : "radial-gradient(120% 90% at 50% 42%, #36342f 0%, #23221e 55%, #181715 100%)",
       }}
     >
       <div ref={containerRef} className="absolute inset-0" />
@@ -1297,7 +1370,12 @@ export default function SplatViewer({
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
-        style={{ boxShadow: "inset 0 0 110px 32px rgba(18, 12, 6, 0.5)" }}
+        style={{
+          boxShadow:
+            finish && shellFinishEnabled()
+              ? "inset 0 0 120px 30px rgba(110, 100, 85, 0.16)"
+              : "inset 0 0 110px 32px rgba(18, 12, 6, 0.5)",
+        }}
       />
       {showLoadingNotice && (
         <Overlay>
