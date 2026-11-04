@@ -197,6 +197,19 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
 - **Live floor plan** drawn from the RoomPlan delegate stream, replacing the old
   placeholder sketch. Confidence gates naming: a low-confidence object renders
   unlabelled and the guest hedges.
+- **Live boxes (Debug builds only).** The Scan screen shows the camera with a
+  dot on every object a prompt-free YOLOE-26 detector found; a tap boxes the
+  object, and the box glides to each better fit as the person walks round it.
+  The detector rides the capture's own ARSession (`CaptureManager.frameTap`), so
+  the bundle is exactly what a scan without it records, and no box or still ever
+  enters it (0301). Depth is LiDAR, or Depth Anything v2 Small on a phone without
+  it. One constant, `LiveBoxesFeature.isEnabled`, gates the camera layer and the
+  detector start, default ON; off, the Scan screen is stock and the floor plan
+  shows (0302). The code is compiled only under `#if DEBUG` and the AGPL model
+  is never in git (0295); `tools/test_live_boxes_boundaries.py` pins both. How a
+  mask becomes a box is 0296; glass, boxed from its outlines and the floor, 0299
+  amended by 0300; Depth Anything v3 and the RoomPlan comparison, kept and off,
+  0303.
 - **Identity.** Firebase anonymous auth, upgraded in place by linking Apple
   (decision 0051) or Google (0118) — the UID is asserted unchanged on link, and
   a conflict is an explicit switch/keep choice, stated in two alerts with the
@@ -962,6 +975,12 @@ re-argued here.
   failure and blob-failure banners.
 - **The 401 recovery-*success* leaf is untested.** The live test used a garbage
   token, exercising the give-up branch.
+- **Live boxes have not been walked on a phone in this form.** Offline: the
+  engine, the dot rules, the hiding and the scene are pinned, and the screen
+  builds. Not verified on hardware: a real walk, heat and memory beside RoomPlan,
+  RoomPlan's early stop (its 10 s tracking abort, 0076) with the camera layer up,
+  a non-Pro iPhone with a depth model, and the normal scan unchanged. Glass is
+  green on synthetic scenes only (0299, 0300). (0301)
 
 **Web / product**
 
@@ -1270,6 +1289,8 @@ The iOS suite is **667 tests total** (was 666; `BundleClockTests` added 1, the c
 **No known flakes.** The one that was recorded here — `BlobUploadManagerTests.test_gate_lastDecrement_afterDrain_firesHandler` at roughly 1 run in 15 — was a production defect rather than a test defect, and is fixed (0239): the drain gate's last-decrement trigger hopped onto the actor through an unstructured `Task` that nothing held a handle on, so the test's `await Task.yield()` was a guess at how long the hop takes. The decrement is actor-isolated now and fires the gate inside `handleTaskCompletion`'s own defer, so awaiting that call IS the signal. Measured 2026-08-24 by holding the yield-less tests fixed and swapping only `BlobUploadManager.swift`: **2 failures in 16** with the hop, **0 in 22** without it. **A red suite is now a finding, not a re-run.**
 
 **Two measurement traps found alongside it, both cheap to hit.** `CODE_SIGNING_ALLOWED=NO` — which `.github/workflows/ios.yml` passes — makes the 4 live tests fail with `SecItemAdd (-34018) A required entitlement isn't present`: Firebase cannot reach the keychain unsigned, so anonymous auth throws and it reads as a backend outage. Build signed, or skip those 4 the way CI does. And **back-to-back `test-without-building` runs wedge one booted simulator** — 6 of 16 unpaced runs died on `Test crashed with signal kill`, 3 of them before any test ran. `xcrun simctl terminate <dev> com.thegoodguest.TheGoodGuest` plus a 3 s settle between runs removed it across 42 subsequent runs.
+
+**A third: `xcodebuild test` can run a stale test bundle already on the simulator.** A full run executed 838 tests from a probe build installed three minutes earlier, when the tree held 837 (found on the live-boxes lane); nothing in the output says so. `xcrun simctl uninstall <dev> com.thegoodguest.TheGoodGuest` before any run whose count matters removes it. The live-boxes synthetic scenes are slow in a Debug build: the whole suite takes about eight minutes of test time, not the seconds it took before them.
 
 **Parallel-worktree note:** `GoogleService-Info.plist` is gitignored, so a fresh git worktree lacks it and the 4 live tests fail with a Firebase configure error that mimics a backend failure. Copy it from the main tree (`ios/TheGoodGuest/TheGoodGuest/`) before running the suite in a worktree; a rebuild picks it into the app bundle.
 
