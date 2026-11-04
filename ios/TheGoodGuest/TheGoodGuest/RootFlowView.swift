@@ -170,10 +170,12 @@ struct RootFlowView: View {
     }
 
     /// Live boxes: the camera behind the Scan screen (decision 0301). Debug
-    /// builds only, until the detector's licence allows more (decision 0295).
+    /// builds only, until the detector's licence allows more (decision 0295), and
+    /// only while the feature switch is on; off, the Scan screen is the stock one.
     private var liveBoxesCameraLayer: AnyView? {
         #if DEBUG
-        AnyView(LiveBoxesCamera(capture: capture))
+        guard LiveBoxesFeature.isEnabled else { return nil }
+        return AnyView(LiveBoxesCamera(capture: capture))
         #else
         nil
         #endif

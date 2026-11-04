@@ -207,7 +207,7 @@ final class LiveBoxesSession: NSObject, ObservableObject {
     // MARK: Lifecycle
 
     func start() {
-        guard !isRunning else { return }
+        guard LiveBoxesFeature.isEnabled, !isRunning else { return }
         isRunning = true
         startedAt = CACurrentMediaTime()
         roomPlanTime.note("off", at: 0)
