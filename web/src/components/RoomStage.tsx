@@ -71,7 +71,7 @@ type AssetsResult =
        * it (lib/card/measure.ts explains why both matter). */
       shellDoc: ShellDoc | null;
       /** The optional designed finish and furniture twins (decision 0313):
-       * null unless the finish flag is on and the scene has files that fit. */
+       * null unless the finish switch is on and the scene has files that fit. */
       finish: ShellFinish | null;
       furniture: FurnitureBundle | null;
     };

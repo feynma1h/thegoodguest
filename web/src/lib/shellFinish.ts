@@ -261,12 +261,24 @@ export const DEFAULT_EXPOSURE = 0.82;
 // ------------------------------------------------------------ the flag --
 
 /**
- * The finish is a developer's local override, off unless the build says so
- * (NEXT_PUBLIC_SHELL_FINISH=1 — the app/shell-finish page sets it in dev).
- * A production build has the flag absent, so the hook points in the viewer
- * are inert and this path ships nothing.
+ * The room page's runtime switch for the designed finish, the furniture twins
+ * and their day and night (decision 0340). On in the product build: a scene
+ * whose assets link a finish that fits is drawn finished, and a scene without
+ * those files is exactly what it always was. Set it false to take the whole
+ * path out again (no request is made, nothing is drawn) without removing code.
  */
+export const ROOM_FINISH_ENABLED = true;
+
 export function shellFinishEnabled(): boolean {
+  return ROOM_FINISH_ENABLED;
+}
+
+/**
+ * The developer-only preview page (app/shell-finish) loads arbitrary local
+ * files by URL, so it stays behind a build flag of its own and is absent from
+ * a production build: NEXT_PUBLIC_SHELL_FINISH=1, set for `next dev`.
+ */
+export function shellFinishPreviewEnabled(): boolean {
   return process.env.NEXT_PUBLIC_SHELL_FINISH === "1";
 }
 

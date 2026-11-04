@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ROOM_FINISH_ENABLED } from "./shellFinish";
 import { loadShellExtras, NO_EXTRAS, shellExtras } from "./shellExtras";
 
 const hex = "#c9c4bb";
@@ -50,6 +51,14 @@ describe("loadShellExtras", () => {
       if (!(url in docs)) throw new Error("404");
       return docs[url];
     });
+
+  it("is on by default in the product build, so a linked finish is fetched", async () => {
+    expect(ROOM_FINISH_ENABLED).toBe(true);
+    const get = serve({ [urls.finish_url]: finish(4), [urls.furniture_url]: furniture });
+    const got = await loadShellExtras(urls, 4, get);
+    expect(got.finish).not.toBeNull();
+    expect(got.furniture?.objects).toHaveLength(1);
+  });
 
   it("makes no request when the flag is off or there are no links", async () => {
     const get = serve({});

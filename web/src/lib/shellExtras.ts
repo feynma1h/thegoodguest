@@ -5,8 +5,9 @@
  * api-public signs links to two optional siblings of shell.json in the scene's
  * folder — `finish_url` (lib/shellFinish) and `furniture_url` (lib/furniture),
  * each null when the file is not there (decision 0313). Nothing here runs unless
- * the finish flag is on (NEXT_PUBLIC_SHELL_FINISH=1): without it no request is
- * made and the room is exactly what it was. With it, each file is fetched and
+ * the room's finish switch is on (ROOM_FINISH_ENABLED, decision 0340): without
+ * it, or without a finish link, no request is made and the room is exactly what
+ * it was. With them, each file is fetched and
  * validated against the shell it would dress, and anything that fails — a
  * network error, bad JSON, a finish for a different wall count — comes back
  * null, so the room draws as before.

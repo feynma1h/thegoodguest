@@ -92,10 +92,10 @@ interface SplatViewerProps {
    * correctly against depthWrite:true meshes both ways). Absent/null
    * keeps the grid. */
   shell?: ShellPlane[] | null;
-  /** LOCAL-ONLY finish override (lib/shellFinish): draws designed walls and
-   * floor over the flat shell. Inert unless NEXT_PUBLIC_SHELL_FINISH=1. */
+  /** The designed finish (lib/shellFinish): draws designed walls and floor
+   * over the flat shell. Inert unless ROOM_FINISH_ENABLED. */
   finish?: ShellFinish | null;
-  /** LOCAL-ONLY furniture twins (lib/furniture), drawn with the finish. */
+  /** Furniture twins (lib/furniture), drawn with the finish. */
   furniture?: FurnitureBundle | null;
   className?: string;
   /** Slow auto-orbit until the user grabs the scene (landing demo). */
@@ -422,7 +422,7 @@ export default function SplatViewer({
   // GEOMETRY of the same file (a new SDF edit), not a placement of it —
   // and because a clip volume is parented to its mesh, so it follows a
   // move for free rather than needing to be rebuilt by one.
-  // Empty unless the local finish flag is on, so a normal build keys exactly as before.
+  // Empty without a finish, so a room with no finish files keys exactly as before.
   const finishSig = shellFinishEnabled()
     ? finishSignature(finish) + (furniture ? `+furn:${hashStr(JSON.stringify(furniture))}` : "")
     : "";
@@ -518,7 +518,7 @@ export default function SplatViewer({
 
         // alpha:true — the backdrop is the container's CSS gradient, which
         // gives the scene atmosphere no flat clear-color can.
-        // Local finish override: the designed finish wants filmic tone and
+        // Designed finish: it wants filmic tone and
         // clean edges (and nothing else in the viewer changes with it).
         const dressShell = Boolean(finish && shellFinishEnabled());
         const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
@@ -689,7 +689,7 @@ export default function SplatViewer({
           return { mesh, plane: p, extras };
         });
 
-        // Local-only finish override (lib/shellFinish): swaps the flat walls
+        // Designed finish (lib/shellFinish): swaps the flat walls
         // and floor for the designed finish. A finish that does not fit this
         // shell never reaches here (parseFinish returns null).
         const finishMods = dressShell
@@ -704,7 +704,7 @@ export default function SplatViewer({
         const finishCtl = finishMods
           ? finishMods[0].applyShellFinish(THREE, scene, shellMeshes, finish as ShellFinish, renderer)
           : null;
-        // Local-only furniture twins, in the finished room's light.
+        // Furniture twins, in the finished room's light.
         const furn =
           finishMods?.[2] && finishMods[3]
             ? finishMods[2].buildFurniture(
@@ -826,9 +826,9 @@ export default function SplatViewer({
         );
 
         const controls = new OrbitControls(camera, renderer.domElement);
-        // Local-only (finish flag): expose the live view so a comparison
+        // Finished rooms only: expose the live view so a comparison
         // harness can pose the camera exactly where a real frame was taken
-        // (tools/finish_compare). Absent in production builds.
+        // (tools/finish_compare). Absent in a room without a finish.
         // `ready` flips to true once the view has stopped changing by itself
         // (entrance dolly, staging transition and the canvas fade all done, a
         // few frames drawn since). A headless driver waits for it before its
@@ -855,7 +855,7 @@ export default function SplatViewer({
         controls.maxPolarAngle = Math.PI / 2 - 0.05;
         controls.minDistance = radius * 0.5;
         controls.maxDistance = fitDistance * 3;
-        // Local finish: the fixed diorama camera (lib/shellFinishViews).
+        // Finished room: the fixed diorama camera (lib/shellFinishViews).
         const staged = finishCtl?.stage({
           camera,
           controls,
@@ -1248,7 +1248,7 @@ export default function SplatViewer({
               revealDoneRef.current?.();
             }
           }
-          // Local finish: draw on demand. Idle (no camera motion for 0.8 s)
+          // Finished room: draw on demand. Idle (no camera motion for 0.8 s)
           // drops to a 2 fps heartbeat so splat sorting can settle without
           // keeping the GPU pinned.
           let rigMoving = false;
@@ -1411,7 +1411,7 @@ export default function SplatViewer({
         // The stage's atmosphere: warm lamplight dark (the palette's
         // ambient register — §11's family, dimmed). CSS, not clear-color,
         // so it can be a gradient.
-        // Local finish override: a seamless warm studio grey (the diorama
+        // Finished room: a seamless warm studio grey (the diorama
         // look), not the dark stage.
         background:
           finish && shellFinishEnabled()

@@ -12,7 +12,7 @@
  *
  * Conventions the viewer reads: a part named `lamp-shade` is the room's light
  * at night; meshes named `glass-*` in a twin of category `window` are panes
- * that glow by day. Drawn only with the finish (NEXT_PUBLIC_SHELL_FINISH=1).
+ * that glow by day. Drawn only with the finish (ROOM_FINISH_ENABLED).
  */
 
 export type Vec3 = [number, number, number];

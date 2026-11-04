@@ -24,7 +24,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import SplatViewer from "@/components/SplatViewer";
 import { assembleScene, type PositionedSplat, type SceneAssets, type ShellPlane } from "@/lib/api/types";
 import { parseFurniture, type FurnitureBundle } from "@/lib/furniture";
-import { parseFinish, shellFinishEnabled, type ShellFinish } from "@/lib/shellFinish";
+import { parseFinish, shellFinishPreviewEnabled, type ShellFinish } from "@/lib/shellFinish";
 
 type Loaded =
   | { key: string; phase: "ready"; shell: ShellPlane[]; splats: PositionedSplat[]; finish: ShellFinish | null; furniture: FurnitureBundle | null; note: string }
@@ -101,7 +101,7 @@ function Preview() {
     return e && e > 0 ? { ...state.finish, exposure: e } : state.finish;
   }, [state, plain, exposure]);
 
-  if (!shellFinishEnabled())
+  if (!shellFinishPreviewEnabled())
     return <p className="p-8 text-sm text-ink/55">Shell finish preview is off in this build.</p>;
   if (!shellUrl)
     return (
