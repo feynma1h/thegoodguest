@@ -120,6 +120,15 @@ message CaptureBundle {
   // downstream and the bundle stays valid (additive field, schema_version
   // unchanged).
   repeated PlaneAnchor plane_anchors = 12;
+
+  // The boxes the person made and kept on the phone (live boxes, decisions
+  // 0295+) — the ONLY object source downstream. FINAL set only, serialized
+  // once at capture stop, in the same world frame as the camera poses (the
+  // detector rides the capture's own ARSession). No pixels, no masks, no
+  // detector internals. Named person_boxes, not boxes, so these can never be
+  // confused with the RoomPlan `room_plan` objects. Bundles from clients that
+  // predate this field carry none (additive, schema_version unchanged).
+  repeated PersonBox person_boxes = 13;
 }
 
 // -----------------------------------------------------------------------------
@@ -341,6 +350,29 @@ message PlaneAnchor {
   // projected onto the plane, flattened as (x, z) pairs
   // [x0, z0, x1, z1, ...]. Even length; empty when the client omits it.
   repeated float boundary_xz = 10;
+}
+
+// One box the person confirmed on the phone, around one object.
+//
+//   - `box_id` is client-generated (UUID) and stable within the bundle.
+//   - `detector_label` is the detector's own class name ("chair", "dining
+//     table", ...), advisory: a hint for what the object is, never trusted.
+//   - `center_*` is the box centre in the world frame (meters); `yaw_rad` is
+//     the rotation about world +Y; `size_*` are the box-local extents in
+//     meters (x lies along the yaw direction, y is up, z is across).
+//   - `created_at_device_us` is on the device-monotonic clock, the same
+//     domain as Frame.timestamp_us.
+message PersonBox {
+  string box_id = 1;
+  string detector_label = 2;
+  float center_x = 3;
+  float center_y = 4;
+  float center_z = 5;
+  float yaw_rad = 6;
+  float size_x = 7;
+  float size_y = 8;
+  float size_z = 9;
+  int64 created_at_device_us = 10;
 }
 
 enum PlaneAlignment {

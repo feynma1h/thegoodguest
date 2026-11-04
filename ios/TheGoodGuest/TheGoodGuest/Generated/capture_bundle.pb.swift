@@ -271,6 +271,18 @@ public nonisolated struct Thegoodguest_Capture_V1_CaptureBundle: @unchecked Send
     set {_uniqueStorage()._planeAnchors = newValue}
   }
 
+  /// The boxes the person made and kept on the phone (live boxes, decisions
+  /// 0295+) — the ONLY object source downstream. FINAL set only, serialized
+  /// once at capture stop, in the same world frame as the camera poses (the
+  /// detector rides the capture's own ARSession). No pixels, no masks, no
+  /// detector internals. Named person_boxes, not boxes, so these can never be
+  /// confused with the RoomPlan `room_plan` objects. Bundles from clients that
+  /// predate this field carry none (additive, schema_version unchanged).
+  public var personBoxes: [Thegoodguest_Capture_V1_PersonBox] {
+    get {_storage._personBoxes}
+    set {_uniqueStorage()._personBoxes = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -606,6 +618,46 @@ public nonisolated struct Thegoodguest_Capture_V1_PlaneAnchor: Sendable {
   fileprivate var _pose: Thegoodguest_Capture_V1_Pose? = nil
 }
 
+/// One box the person confirmed on the phone, around one object.
+///
+///   - `box_id` is client-generated (UUID) and stable within the bundle.
+///   - `detector_label` is the detector's own class name ("chair", "dining
+///     table", ...), advisory: a hint for what the object is, never trusted.
+///   - `center_*` is the box centre in the world frame (meters); `yaw_rad` is
+///     the rotation about world +Y; `size_*` are the box-local extents in
+///     meters (x lies along the yaw direction, y is up, z is across).
+///   - `created_at_device_us` is on the device-monotonic clock, the same
+///     domain as Frame.timestamp_us.
+public nonisolated struct Thegoodguest_Capture_V1_PersonBox: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var boxID: String = String()
+
+  public var detectorLabel: String = String()
+
+  public var centerX: Float = 0
+
+  public var centerY: Float = 0
+
+  public var centerZ: Float = 0
+
+  public var yawRad: Float = 0
+
+  public var sizeX: Float = 0
+
+  public var sizeY: Float = 0
+
+  public var sizeZ: Float = 0
+
+  public var createdAtDeviceUs: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 /// The wire contract is Apple's CapturedRoom Codable JSON, VERBATIM, by
 /// reference (decision 0077): the client serializes the RoomBuilder output
 /// with JSONEncoder and ships it as an ordinary manifest blob. No proto
@@ -658,7 +710,7 @@ nonisolated extension Thegoodguest_Capture_V1_PlaneAlignment: SwiftProtobuf._Pro
 
 nonisolated extension Thegoodguest_Capture_V1_CaptureBundle: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CaptureBundle"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}schema_version\0\u{3}bundle_id\0\u{3}user_id\0\u{1}device\0\u{1}tier\0\u{3}started_at_device_us\0\u{3}ended_at_device_us\0\u{1}frames\0\u{3}room_plan\0\u{3}client_notes\0\u{3}started_at_wall_us\0\u{3}plane_anchors\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}schema_version\0\u{3}bundle_id\0\u{3}user_id\0\u{1}device\0\u{1}tier\0\u{3}started_at_device_us\0\u{3}ended_at_device_us\0\u{1}frames\0\u{3}room_plan\0\u{3}client_notes\0\u{3}started_at_wall_us\0\u{3}plane_anchors\0\u{3}person_boxes\0")
 
   fileprivate class _StorageClass {
     var _schemaVersion: String = String()
@@ -673,6 +725,7 @@ nonisolated extension Thegoodguest_Capture_V1_CaptureBundle: SwiftProtobuf.Messa
     var _roomPlan: Thegoodguest_Capture_V1_RoomPlanModel? = nil
     var _clientNotes: Dictionary<String,String> = [:]
     var _planeAnchors: [Thegoodguest_Capture_V1_PlaneAnchor] = []
+    var _personBoxes: [Thegoodguest_Capture_V1_PersonBox] = []
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -695,6 +748,7 @@ nonisolated extension Thegoodguest_Capture_V1_CaptureBundle: SwiftProtobuf.Messa
       _roomPlan = source._roomPlan
       _clientNotes = source._clientNotes
       _planeAnchors = source._planeAnchors
+      _personBoxes = source._personBoxes
     }
   }
 
@@ -725,6 +779,7 @@ nonisolated extension Thegoodguest_Capture_V1_CaptureBundle: SwiftProtobuf.Messa
         case 10: try { try decoder.decodeMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufString,SwiftProtobuf.ProtobufString>.self, value: &_storage._clientNotes) }()
         case 11: try { try decoder.decodeSingularInt64Field(value: &_storage._startedAtWallUs) }()
         case 12: try { try decoder.decodeRepeatedMessageField(value: &_storage._planeAnchors) }()
+        case 13: try { try decoder.decodeRepeatedMessageField(value: &_storage._personBoxes) }()
         default: break
         }
       }
@@ -773,6 +828,9 @@ nonisolated extension Thegoodguest_Capture_V1_CaptureBundle: SwiftProtobuf.Messa
       if !_storage._planeAnchors.isEmpty {
         try visitor.visitRepeatedMessageField(value: _storage._planeAnchors, fieldNumber: 12)
       }
+      if !_storage._personBoxes.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._personBoxes, fieldNumber: 13)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -794,6 +852,7 @@ nonisolated extension Thegoodguest_Capture_V1_CaptureBundle: SwiftProtobuf.Messa
         if _storage._roomPlan != rhs_storage._roomPlan {return false}
         if _storage._clientNotes != rhs_storage._clientNotes {return false}
         if _storage._planeAnchors != rhs_storage._planeAnchors {return false}
+        if _storage._personBoxes != rhs_storage._personBoxes {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -1248,6 +1307,81 @@ nonisolated extension Thegoodguest_Capture_V1_PlaneAnchor: SwiftProtobuf.Message
     if lhs.alignment != rhs.alignment {return false}
     if lhs.classification != rhs.classification {return false}
     if lhs.boundaryXz != rhs.boundaryXz {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Thegoodguest_Capture_V1_PersonBox: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PersonBox"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}box_id\0\u{3}detector_label\0\u{3}center_x\0\u{3}center_y\0\u{3}center_z\0\u{3}yaw_rad\0\u{3}size_x\0\u{3}size_y\0\u{3}size_z\0\u{3}created_at_device_us\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.boxID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.detectorLabel) }()
+      case 3: try { try decoder.decodeSingularFloatField(value: &self.centerX) }()
+      case 4: try { try decoder.decodeSingularFloatField(value: &self.centerY) }()
+      case 5: try { try decoder.decodeSingularFloatField(value: &self.centerZ) }()
+      case 6: try { try decoder.decodeSingularFloatField(value: &self.yawRad) }()
+      case 7: try { try decoder.decodeSingularFloatField(value: &self.sizeX) }()
+      case 8: try { try decoder.decodeSingularFloatField(value: &self.sizeY) }()
+      case 9: try { try decoder.decodeSingularFloatField(value: &self.sizeZ) }()
+      case 10: try { try decoder.decodeSingularInt64Field(value: &self.createdAtDeviceUs) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.boxID.isEmpty {
+      try visitor.visitSingularStringField(value: self.boxID, fieldNumber: 1)
+    }
+    if !self.detectorLabel.isEmpty {
+      try visitor.visitSingularStringField(value: self.detectorLabel, fieldNumber: 2)
+    }
+    if self.centerX.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.centerX, fieldNumber: 3)
+    }
+    if self.centerY.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.centerY, fieldNumber: 4)
+    }
+    if self.centerZ.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.centerZ, fieldNumber: 5)
+    }
+    if self.yawRad.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.yawRad, fieldNumber: 6)
+    }
+    if self.sizeX.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.sizeX, fieldNumber: 7)
+    }
+    if self.sizeY.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.sizeY, fieldNumber: 8)
+    }
+    if self.sizeZ.bitPattern != 0 {
+      try visitor.visitSingularFloatField(value: self.sizeZ, fieldNumber: 9)
+    }
+    if self.createdAtDeviceUs != 0 {
+      try visitor.visitSingularInt64Field(value: self.createdAtDeviceUs, fieldNumber: 10)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Thegoodguest_Capture_V1_PersonBox, rhs: Thegoodguest_Capture_V1_PersonBox) -> Bool {
+    if lhs.boxID != rhs.boxID {return false}
+    if lhs.detectorLabel != rhs.detectorLabel {return false}
+    if lhs.centerX != rhs.centerX {return false}
+    if lhs.centerY != rhs.centerY {return false}
+    if lhs.centerZ != rhs.centerZ {return false}
+    if lhs.yawRad != rhs.yawRad {return false}
+    if lhs.sizeX != rhs.sizeX {return false}
+    if lhs.sizeY != rhs.sizeY {return false}
+    if lhs.sizeZ != rhs.sizeZ {return false}
+    if lhs.createdAtDeviceUs != rhs.createdAtDeviceUs {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

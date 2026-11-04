@@ -271,6 +271,51 @@ def test_bundle_with_planes_parses_under_plane_naive_reader():
     assert b.schema_version == SCHEMA_VERSION  # still "1" — no bump
 
 
+def test_person_boxes_absent_by_default():
+    """Every bundle in GCS predates person boxes. Parsing one must yield an
+    EMPTY person_boxes list, and the cloud's no-box fallback depends on
+    absence being clean."""
+    b = _minimal_bundle()
+    b2 = CaptureBundle()
+    b2.ParseFromString(b.SerializeToString())
+    assert len(b2.person_boxes) == 0
+
+
+def test_person_box_roundtrip():
+    """Every PersonBox field survives the wire, in order."""
+    b = _minimal_bundle()
+    for i, label in enumerate(["chair", "dining table"]):
+        pb = b.person_boxes.add()
+        pb.box_id = f"00000000-0000-4000-8000-00000000000{i}"
+        pb.detector_label = label
+        pb.center_x, pb.center_y, pb.center_z = 1.5 + i, 0.45, -2.25
+        pb.yaw_rad = 0.5
+        pb.size_x, pb.size_y, pb.size_z = 0.5, 0.9, 0.5 + i
+        pb.created_at_device_us = 4_000_000_000_000 + i
+    b2 = CaptureBundle()
+    b2.ParseFromString(b.SerializeToString())
+    assert [p.detector_label for p in b2.person_boxes] == ["chair", "dining table"]
+    p = b2.person_boxes[1]
+    assert p.box_id.endswith("1")
+    assert (p.center_x, p.center_y, p.center_z) == pytest.approx((2.5, 0.45, -2.25))
+    assert p.yaw_rad == 0.5
+    assert (p.size_x, p.size_y, p.size_z) == pytest.approx((0.5, 0.9, 1.5))
+    assert p.created_at_device_us == 4_000_000_000_001
+    assert b2.schema_version == SCHEMA_VERSION  # additive: still "1"
+
+
+def test_bundle_with_boxes_leaves_other_fields_alone():
+    """Adding person_boxes (field 13) must not disturb planes (field 12) or
+    frames: both sets ride the same bundle."""
+    b = _minimal_bundle()
+    b.plane_anchors.add().extent_width = 2.0
+    b.person_boxes.add().box_id = "a"
+    b2 = CaptureBundle()
+    b2.ParseFromString(b.SerializeToString())
+    assert len(b2.plane_anchors) == 1 and b2.plane_anchors[0].extent_width == 2.0
+    assert len(b2.person_boxes) == 1
+
+
 def test_paths_are_relative_not_gs_uris():
     """rgb_gcs_path et al. are documented as paths WITHIN the bundle
     prefix, not full gs:// URIs. The schema can't enforce this, but

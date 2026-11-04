@@ -30,6 +30,7 @@ from .capture_bundle_pb2 import (  # noqa: F401
     Gravity,
     Intrinsics,
     PlaneAlignment,
+    PersonBox,
     PlaneAnchor,
     Pose,
     RoomPlanModel,
