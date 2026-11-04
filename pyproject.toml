@@ -47,5 +47,6 @@ testpaths = [
     "tools/test_gen_mark.py",
     "tools/test_punchlist_check.py",
     "tools/test_privacy_manifest.py",
+    "tools/test_live_boxes_boundaries.py",
 ]
 addopts = "--import-mode=importlib"
