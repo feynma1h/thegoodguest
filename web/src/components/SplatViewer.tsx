@@ -59,6 +59,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PositionedSplat, ShellPlane } from "@/lib/api/types";
+import type { FurnitureBundle } from "@/lib/furniture";
 import { viewerYawRad } from "@/lib/clipSign";
 import { useLoadingNotice } from "@/lib/loadingNotice";
 import {
@@ -75,6 +76,13 @@ import { openingRect, projectToWallPlane, wallFrame } from "@/lib/shell3d";
 import { finishSignature, shellFinishEnabled, type ShellFinish } from "@/lib/shellFinish";
 import { labelsKey, outlinesKey, rendererKey } from "@/lib/viewerKey";
 
+/** Cheap string hash for a render key (local furniture preview only). */
+function hashStr(x: string): string {
+  let h = 5381;
+  for (let i = 0; i < x.length; i++) h = ((h << 5) + h + x.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 interface SplatViewerProps {
   splats: PositionedSplat[];
   /** Room shell (decisions 0066/0069): parametric world-space surfaces
@@ -87,6 +95,8 @@ interface SplatViewerProps {
   /** LOCAL-ONLY finish override (lib/shellFinish): draws designed walls and
    * floor over the flat shell. Inert unless NEXT_PUBLIC_SHELL_FINISH=1. */
   finish?: ShellFinish | null;
+  /** LOCAL-ONLY furniture twins (lib/furniture), drawn with the finish. */
+  furniture?: FurnitureBundle | null;
   className?: string;
   /** Slow auto-orbit until the user grabs the scene (landing demo). */
   idleOrbit?: boolean;
@@ -385,6 +395,7 @@ export default function SplatViewer({
   splats,
   shell = null,
   finish = null,
+  furniture = null,
   className,
   idleOrbit = false,
   frameless = false,
@@ -408,7 +419,9 @@ export default function SplatViewer({
   // and because a clip volume is parented to its mesh, so it follows a
   // move for free rather than needing to be rebuilt by one.
   // Empty unless the local finish flag is on, so a normal build keys exactly as before.
-  const finishSig = shellFinishEnabled() ? finishSignature(finish) : "";
+  const finishSig = shellFinishEnabled()
+    ? finishSignature(finish) + (furniture ? `+furn:${hashStr(JSON.stringify(furniture))}` : "")
+    : "";
   const key = useMemo(
     () => rendererKey({ splats, shell }) + (finishSig ? `|finish:${finishSig}` : ""),
     [splats, shell, finishSig],
@@ -679,12 +692,28 @@ export default function SplatViewer({
           ? await Promise.all([
               import("@/components/shellFinishScene"),
               import("@/components/finishCompareHarness"),
+              furniture ? import("@/components/furnitureScene") : null,
+              furniture ? import("three/addons/geometries/RoundedBoxGeometry.js") : null,
             ])
           : null;
         if (disposed) return;
         const finishCtl = finishMods
           ? finishMods[0].applyShellFinish(THREE, scene, shellMeshes, finish as ShellFinish, renderer)
           : null;
+        // Local-only furniture twins, in the finished room's light.
+        const furn =
+          finishMods?.[2] && finishMods[3]
+            ? finishMods[2].buildFurniture(
+                THREE,
+                finishMods[3].RoundedBoxGeometry,
+                scene,
+                furniture as FurnitureBundle,
+                finish,
+                renderer,
+                shellMeshes.find((m) => m.plane.kind === "floor")?.mesh ?? null,
+                { domParent: container.parentElement, onChange: () => { lastDirty = performance.now(); } },
+              )
+            : null;
 
         // Uniform scale is the shipped contract; a per-axis triple is the
         // staged-fixture A/B side (see PositionedSplat.scale). Size-ordering
@@ -798,12 +827,14 @@ export default function SplatViewer({
         // (tools/finish_compare). Absent in production builds.
         if (finishMods) {
           (window as unknown as { __shellFinishView?: unknown }).__shellFinishView = {
+            furniture: furn,
             camera,
             controls,
             renderer,
             scene,
             harness: finishMods[1].makeCompareHarness(THREE, camera, controls, renderer, scene, (c) => {
               finishCtl?.update(c);
+              furn?.update(c);
             }),
           };
         }
@@ -1216,6 +1247,7 @@ export default function SplatViewer({
           }
           controls.update();
           finishCtl?.update(camera);
+          furn?.update(camera);
           renderer.render(scene, camera);
         };
         renderLoop();
@@ -1261,6 +1293,7 @@ export default function SplatViewer({
             mesh.material.dispose();
           }
           finishCtl?.dispose();
+          furn?.dispose();
           ground.geometry.dispose();
           (ground.material as { map?: { dispose(): void } }).map?.dispose();
           (ground.material as { dispose(): void }).dispose();

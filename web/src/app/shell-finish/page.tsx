@@ -7,6 +7,10 @@
  * under public/ — and renders the walls and floor as the designed finish.
  *
  *   /shell-finish?shell=<url>&finish=<url>
+ *     &furniture=<url>  furniture twins (tools/furniture_models.py -> furniture.json)
+ *     &furniture=0    leave the twins out
+ *     &mode=night     open the room at night (twins only)
+ *     &look=photo     keep the light the render-vs-photo loop is calibrated in
  *     &plain=1        the flat measured shell, for an A/B
  *     &exposure=1.6   override the finish's colour gain while calibrating
  *
@@ -19,22 +23,27 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 
 import SplatViewer from "@/components/SplatViewer";
 import { assembleScene, type PositionedSplat, type SceneAssets, type ShellPlane } from "@/lib/api/types";
+import { parseFurniture, type FurnitureBundle } from "@/lib/furniture";
 import { parseFinish, shellFinishEnabled, type ShellFinish } from "@/lib/shellFinish";
 
 type Loaded =
-  | { key: string; phase: "ready"; shell: ShellPlane[]; splats: PositionedSplat[]; finish: ShellFinish | null; note: string }
+  | { key: string; phase: "ready"; shell: ShellPlane[]; splats: PositionedSplat[]; finish: ShellFinish | null; furniture: FurnitureBundle | null; note: string }
   | { key: string; phase: "error"; note: string };
 
 function Preview() {
   const params = useSearchParams();
   const shellUrl = params.get("shell");
   const finishUrl = params.get("finish");
+  const furnitureUrl = params.get("furniture");
+  const noFurniture = params.get("furniture") === "0";
   // ?assets=<url>: an assets-shaped doc (manifest placements + signed/local
   // splat urls), so splat clip boxes can steer the staging.
   const assetsUrl = params.get("assets");
   const plain = params.get("plain") === "1";
   const exposure = params.get("exposure");
-  const key = `${shellUrl}|${finishUrl}|${assetsUrl}`;
+  const look = params.get("look");
+  const mode = params.get("mode");
+  const key = `${shellUrl}|${finishUrl}|${assetsUrl}|${furnitureUrl}|${look}|${mode}`;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
 
   useEffect(() => {
@@ -67,7 +76,14 @@ function Preview() {
             ? "finish drawn"
             : `finish file does not fit this shell (${wallCount} walls) — showing the flat shell`;
         }
-        if (!cancelled) setLoaded({ key, phase: "ready", shell, splats, finish, note });
+        let furniture: FurnitureBundle | null = null;
+        if (furnitureUrl && !noFurniture) {
+          furniture = parseFurniture(await (await fetch(furnitureUrl)).json());
+          if (furniture && look === "photo") furniture.look = "photo";
+          if (furniture && mode === "night") furniture.mode = "night";
+          note += furniture ? `; ${furniture.objects.length} furniture twins` : "; furniture file not understood";
+        }
+        if (!cancelled) setLoaded({ key, phase: "ready", shell, splats, finish, furniture, note });
       } catch (e) {
         if (!cancelled)
           setLoaded({ key, phase: "error", note: e instanceof Error ? e.message : String(e) });
@@ -76,7 +92,7 @@ function Preview() {
     return () => {
       cancelled = true;
     };
-  }, [key, shellUrl, finishUrl, assetsUrl]);
+  }, [key, shellUrl, finishUrl, assetsUrl, furnitureUrl, noFurniture, look, mode]);
 
   const state = loaded && loaded.key === key ? loaded : null;
   const finish = useMemo(() => {
@@ -97,7 +113,7 @@ function Preview() {
   if (state.phase === "error") return <p className="p-8 text-sm text-ink/55">{state.note}</p>;
   return (
     <div className="fixed inset-0 z-50">
-      <SplatViewer splats={state.splats} shell={state.shell} finish={finish} className="h-full w-full" />
+      <SplatViewer splats={state.splats} shell={state.shell} finish={finish} furniture={state.furniture} className="h-full w-full" />
       <span className="pointer-events-none absolute left-3 top-3 font-mono text-[10px] text-ink/35">
         {plain ? "flat shell (plain=1)" : state.note}
       </span>

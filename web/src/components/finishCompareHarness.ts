@@ -99,6 +99,48 @@ export function makeCompareHarness(
     await fetch(`http://127.0.0.1:${port}/renders/${name}.png`, { method: "POST", body: dataUrl });
   };
 
+  /** Furniture mask pass: every twin flat in its own id (red = 30 x (index+1),
+   * linear), shell and contact shadows hidden. Lets the python side measure
+   * the photo's colours exactly where the render says the piece is. */
+  const maskPass = async (f: HarnessFrame, port: number) => {
+    const root = scene.getObjectByName("furniture-twins");
+    if (!root) return;
+    const saved: Array<[THREE_NS.Mesh, THREE_NS.Material | THREE_NS.Material[], boolean]> = [];
+    scene.traverse((o) => {
+      const mesh = o as THREE_NS.Mesh;
+      if (mesh.isMesh) saved.push([mesh, mesh.material, mesh.visible]);
+    });
+    const tmp: THREE_NS.Material[] = [];
+    for (const [mesh] of saved) mesh.visible = false;
+    root.children.forEach((g, idx) => {
+      const m = new THREE.MeshBasicMaterial({
+        color: new THREE.Color().setRGB((30 * (idx + 1)) / 255, 0, 0, THREE.LinearSRGBColorSpace),
+        toneMapped: false,
+      });
+      tmp.push(m);
+      g.traverse((o) => {
+        const mesh = o as THREE_NS.Mesh;
+        if (mesh.isMesh && mesh.name !== "contact-shadow") {
+          mesh.material = m;
+          mesh.visible = true;
+        }
+      });
+    });
+    const bg = scene.background;
+    scene.background = null;
+    const prev = renderer.getClearAlpha();
+    renderer.setClearColor(0x000000, 0);
+    renderer.render(scene, camera);
+    await post(port, `mask_${f.id}`, renderer.domElement.toDataURL("image/png"));
+    renderer.setClearAlpha(prev);
+    scene.background = bg;
+    for (const [mesh, mat, vis] of saved) {
+      mesh.material = mat;
+      mesh.visible = vis;
+    }
+    for (const m of tmp) m.dispose();
+  };
+
   const run = async (frames: HarnessFrame[], port: number) => {
     const done: number[] = [];
     for (const f of frames) {
@@ -145,10 +187,18 @@ export function makeCompareHarness(
         }
       }
       scene.background = bg;
+      await maskPass(f, port);
       done.push(f.id);
     }
     return done;
   };
 
-  return { run, pose };
+  /** Run the frames listed in a poses.json the scene server hands out
+   * (tools/furniture_compare.py poses writes it), so a loop step is one short call. */
+  const runFrom = async (port: number) => {
+    const frames = (await (await fetch(`http://127.0.0.1:${port}/poses.json`, { cache: "no-store" })).json()) as HarnessFrame[];
+    return run(frames, port);
+  };
+
+  return { run, runFrom, pose };
 }
