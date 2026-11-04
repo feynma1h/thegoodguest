@@ -169,6 +169,16 @@ struct RootFlowView: View {
         capture.startCapture()
     }
 
+    /// Live boxes: the camera behind the Scan screen (decision 0301). Debug
+    /// builds only, until the detector's licence allows more (decision 0295).
+    private var liveBoxesCameraLayer: AnyView? {
+        #if DEBUG
+        AnyView(LiveBoxesCamera(capture: capture))
+        #else
+        nil
+        #endif
+    }
+
     // MARK: - Flow
 
     @ViewBuilder
@@ -186,7 +196,8 @@ struct RootFlowView: View {
                     // Don't fire the peak joyful beat ("I've got the room") for a
                     // capture that got nothing — review tells the truth instead.
                     stage = capture.frameCount == 0 ? .review : .gotRoom
-                }
+                },
+                cameraLayer: liveBoxesCameraLayer
             )
             // RoomPlan's 10 s tracking-failure self-abort (decision 0076) ends the
             // capture from the MODEL side — route exactly as a user Finish would,

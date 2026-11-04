@@ -148,3 +148,17 @@ def test_the_reference_check_sees_an_unguarded_reference():
     text = ("#if DEBUG\nlet a = LiveBoxesView.self\n#else\nlet b = LiveBoxesView.self\n#endif\n"
             "let c = LiveBoxesEntry.self // LiveBoxesView in a comment\n// LiveBoxesView\n")
     assert _unguarded_references(text, {"LiveBoxesView", "LiveBoxesEntry"}) == [4, 6]
+
+
+def test_the_capture_flow_reaches_live_boxes_only_inside_debug_blocks():
+    """Live boxes ride the capture (decision 0301): CaptureManager forwards frames to the
+    frame driver and RootFlowView builds the camera layer. Both name LiveBoxes types, and
+    both do it inside #if DEBUG. The references must exist, or the check above is vacuous
+    for the two files that matter most."""
+    names = _declared_types()
+    assert {"BoxFusion", "LiveBoxesFrameDriver", "LiveBoxesCamera"} <= names
+    for relative, name in [("Capture/CaptureManager.swift", "LiveBoxesFrameDriver"),
+                           ("RootFlowView.swift", "LiveBoxesCamera")]:
+        text = (APP / relative).read_text(encoding="utf-8")
+        assert re.search(rf"\b{name}\b", "\n".join(_code(text))), f"{relative} no longer names {name}"
+        assert _unguarded_references(text, {name}) == [], f"{relative} names {name} outside #if DEBUG"

@@ -165,7 +165,15 @@ final class CaptureManager: NSObject, ObservableObject {
     /// Wall-clock microseconds (Unix epoch) at capture start. Display/sort only.
     private(set) var startedAtWallUs: Int64 = 0
 
-    private let arSession   = ARSession()
+    /// The capture's ARSession. The Scan screen's camera layer draws from it;
+    /// nothing else runs, pauses or configures it.
+    let arSession   = ARSession()
+    #if DEBUG
+    /// The live-boxes frame driver that rides this capture's ARSession (decision
+    /// 0301). Frames and tracking-state changes are forwarded to it from the
+    /// session's delegate callbacks; it reads them and records nothing in the bundle.
+    nonisolated(unsafe) var frameTap: LiveBoxesFrameDriver?
+    #endif
     private var accumulator = KeyframeAccumulator()
 
     // RoomPlan co-run state (decisions 0076/0077). All MainActor-mutated.
@@ -733,6 +741,9 @@ final class CaptureManager: NSObject, ObservableObject {
 extension CaptureManager: ARSessionDelegate {
 
     nonisolated func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        #if DEBUG
+        frameTap?.ride(frame: frame)
+        #endif
         // Skip frames with unreliable tracking — pose and gravity data invalid.
         switch frame.camera.trackingState {
         case .normal:                 break
@@ -821,6 +832,9 @@ extension CaptureManager: ARSessionDelegate {
         _ session: ARSession,
         cameraDidChangeTrackingState camera: ARCamera
     ) {
+        #if DEBUG
+        frameTap?.ride(tracking: camera)
+        #endif
         let state = camera.trackingState
         DispatchQueue.main.async { [weak self] in
             self?.trackingState = state

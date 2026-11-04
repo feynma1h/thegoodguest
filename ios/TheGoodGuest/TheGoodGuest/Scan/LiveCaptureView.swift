@@ -57,23 +57,33 @@ struct LiveCaptureView: View {
     /// renders empty and the overlay carries the screen.
     var feed: FloorPlanFeed? = nil
     var onFinish: () -> Void = {}
+    /// A live camera with boxes the person can take, in place of the ink-on-dark
+    /// backdrop and the floor plan (live boxes, decision 0301).
+    var cameraLayer: AnyView? = nil
 
     var body: some View {
         ZStack {
             captureBackdrop
 
-            // The live floor plan — the room drawing itself.
-            LiveMeshHost(feed: feed,
-                         paused: state.tracking != .good,
-                         dimmed: state.tracking == .tooDark)
+            if let cameraLayer {
+                cameraLayer
+            } else {
+                // The live floor plan — the room drawing itself.
+                LiveMeshHost(feed: feed,
+                             paused: state.tracking != .good,
+                             dimmed: state.tracking == .tooDark)
+            }
 
             // Vignette to seat the mesh in the room's darkness.
             RadialGradient(
-                colors: [.clear, Color.rsBlack.opacity(0.55)],
+                colors: [.clear, Color.rsBlack.opacity(cameraLayer == nil ? 0.55 : 0.2)],
                 center: .init(x: 0.5, y: 0.45),
                 startRadius: 120, endRadius: 460
             )
             .ignoresSafeArea()
+            // A filled gradient takes taps: without this it swallowed every touch
+            // meant for the camera layer beneath the HUD.
+            .allowsHitTesting(false)
 
             overlay
         }
