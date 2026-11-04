@@ -39,6 +39,7 @@ ignore = ["E501"]  # line length handled by formatter
 testpaths = [
     "packages/schemas/tests",
     "packages/api-core/tests",
+    "packages/room-look/tests",
     "services/api-internal/tests",
     "services/api-public/tests",
     "tools/test_upload_test_bundle.py",

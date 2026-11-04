@@ -13,13 +13,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import furniture_boxes as fb
-import furniture_clearance as fcl
-import furniture_geometry as fg
-import furniture_models as fm
-import furniture_placement as fp
+from thegoodguest_room_look import furniture_boxes as fb
+from thegoodguest_room_look import furniture_clearance as fcl
+from thegoodguest_room_look import furniture_geometry as fg
+from thegoodguest_room_look import furniture_models as fm
+from thegoodguest_room_look import furniture_placement as fp
 
-EXAMPLE = Path(__file__).resolve().parent / "furniture" / "example"
+EXAMPLE = Path(__file__).resolve().parent / "example"
 
 # A 4 m x 4 m room, x and z from 0 to 4, floor at y = 0, walls 2.5 m tall.
 POLY = np.array([[0, 0], [4, 0], [4, 4], [0, 4]], float)
@@ -341,8 +341,8 @@ def test_build_strict_fails_on_a_warning(tmp_path):
 
 # ----------------------------------------------------- evidence and compare --
 def test_evidence_and_compare_read_the_new_boxes(tmp_path):
-    import furniture_compare as fcmp
-    import furniture_evidence as fev
+    from thegoodguest_room_look import furniture_compare as fcmp
+    from thegoodguest_room_look import furniture_evidence as fev
 
     world, centre, _ = fb.box_corners(_box("a", (1, 0.5, 1), (1, 1, 1)))
     assert world.shape == (8, 3) and centre.tolist() == [1, 0.5, 1]

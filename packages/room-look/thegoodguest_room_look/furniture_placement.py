@@ -42,15 +42,12 @@ how far each piece is from its box and why.
 from __future__ import annotations
 
 import math
-import sys
-from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from furniture_boxes import box_pose  # noqa: E402
-from furniture_clearance import find_problems, twin_parts  # noqa: E402
-from furniture_geometry import corners, part_obb, polygon_sign, worst_edge, yaw_matrix  # noqa: E402
+from .furniture_boxes import box_pose
+from .furniture_clearance import find_problems, twin_parts
+from .furniture_geometry import corners, part_obb, polygon_sign, worst_edge, yaw_matrix
 
 RULES = ("floor", "wall", "over", "on", "opening")
 WALL_GAP_M = 0.005

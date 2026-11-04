@@ -43,7 +43,7 @@ env:
 
 jobs:
   root:
-    name: root suite (schemas, api-core, api-internal, api-public, tools)
+    name: root suite (schemas, api-core, room-look, api-internal, api-public, tools)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,11 +58,12 @@ jobs:
             pyproject.toml \
             packages/schemas/pyproject.toml \
             packages/api-core/pyproject.toml \
+            packages/room-look/pyproject.toml \
             services/api-internal/pyproject.toml \
             services/api-public/pyproject.toml \
             --extra dev)
       - name: Install local packages (editable)
-        run: python -m pip install -e packages/schemas -e packages/api-core
+        run: python -m pip install -e packages/schemas -e packages/api-core -e packages/room-look
       - name: Run root suite
         # testpaths + conftest.py decide collection; no path argument.
         run: python -m pytest -q

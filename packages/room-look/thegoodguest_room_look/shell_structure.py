@@ -11,9 +11,9 @@ import warnings
 
 import numpy as np
 
-import shell_atlas as atl
-import shell_measure as meas
-from shell_finish import lab_to_rgb, rgb_to_hex, rgb_to_lab, hex_to_rgb, wall_frame
+from . import shell_atlas as atl
+from . import shell_measure as meas
+from .shell_finish import lab_to_rgb, rgb_to_hex, rgb_to_lab, hex_to_rgb, wall_frame
 
 warnings.simplefilter("ignore", category=RuntimeWarning)
 

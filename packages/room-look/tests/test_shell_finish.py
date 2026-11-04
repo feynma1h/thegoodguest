@@ -1,4 +1,4 @@
-"""Pins for tools/shell_finish.py — the offline finish derivation.
+"""Pins for the room look's shell_finish module — the offline finish derivation.
 
 The derivation's job is to be repeatable and honest: the same scan gives the
 same finish, a bad measurement is replaced by the room's consensus rather than
@@ -13,8 +13,8 @@ import json
 import numpy as np
 import pytest
 
-import shell_finish as sf
-from finish_hints import HintsError, parse_hints
+from thegoodguest_room_look import shell_finish as sf
+from thegoodguest_room_look.finish_hints import HintsError, parse_hints
 
 
 def _wall(wall_id, poly, albedo, obs=0.2, openings=None):
@@ -135,7 +135,7 @@ def test_calibration_offsets_move_colours_and_are_recorded():
 
 
 def test_finish_compare_srgb_ids_and_erode():
-    import finish_compare as fc
+    from thegoodguest_room_look import finish_compare as fc
 
     assert fc._srgb(40) == 110 and fc._srgb(240) == 248  # the PNG carries sRGB-encoded ids
     m = np.zeros((20, 20), bool)
@@ -144,7 +144,7 @@ def test_finish_compare_srgb_ids_and_erode():
 
 
 def test_border_height_finds_a_long_horizontal_line_not_furniture():
-    import shell_structure as ss
+    from thegoodguest_room_look import shell_structure as ss
 
     dv = 0.015
     lab = np.full((200, 100, 3), 60.0)

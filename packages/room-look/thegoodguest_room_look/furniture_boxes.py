@@ -89,7 +89,7 @@ def parse_boxes(doc) -> dict[str, dict]:
 
 def opening_boxes(shell: dict) -> dict[str, dict]:
     """A flat box per window and door in the shell's walls, facing the room."""
-    from shell_finish import wall_frame
+    from .shell_finish import wall_frame
 
     out: dict[str, dict] = {}
     counts = {"window": 0, "door": 0}
@@ -146,7 +146,7 @@ def box_pose(box: dict) -> tuple[np.ndarray, float, np.ndarray]:
 
 def box_corners(box: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(corners 8x3 in world, centre, 3x3 rotation) of a box."""
-    from furniture_geometry import yaw_matrix
+    from .furniture_geometry import yaw_matrix
 
     rot = yaw_matrix(float(box["yaw"]))
     size = np.array(box["size"], float)

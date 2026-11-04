@@ -8,7 +8,7 @@ is offline and local; a twin carries parameters (parts, metres, materials), neve
   `yaw` (radians about +y), `size` (extents along the box's x, y, z). Format and loader: `furniture_boxes.py`.
   Windows and doors need no entry; they come from `shell.json`'s openings as `window_0`, `door_0`, ... in wall order.
 - `<scene>/shell.json` — the floor polygon is the walls' room side.
-- `<scene>/furniture/specs/<key>.json` — one parameter file per piece. `tools/furniture/example/` holds an invented
+- `<scene>/furniture/specs/<key>.json` — one parameter file per piece. `packages/room-look/tests/example/` holds an invented
   one (`specs/side-table.json`) and its `boxes.json`: the format fixture.
 
 ## The loop

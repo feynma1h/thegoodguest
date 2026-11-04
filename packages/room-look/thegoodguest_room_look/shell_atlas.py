@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from shell_finish import Camera, rgb_to_lab
+from .shell_finish import Camera, rgb_to_lab
 
 RES_M = 0.015  # atlas texel size, metres
 REDUCE = 4  # frames are box-averaged 4x before sampling (a texel is ~4 px)
@@ -111,7 +111,7 @@ def save_png(lab: np.ndarray, path, flip_v: bool = False) -> None:
     """Write a Lab atlas as an sRGB PNG (NaN = magenta), v-up if flip_v."""
     from PIL import Image
 
-    from shell_finish import lab_to_rgb
+    from .shell_finish import lab_to_rgb
 
     filled = np.nan_to_num(lab, nan=0.0)
     rgb = (lab_to_rgb(filled) * 255).clip(0, 255).astype(np.uint8)

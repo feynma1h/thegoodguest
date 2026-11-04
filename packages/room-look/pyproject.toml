@@ -1,0 +1,30 @@
+[project]
+name = "thegoodguest-room-look"
+version = "0.1.0"
+description = "The room look: measure a scan's finish, place furniture twins, render-and-compare (shared by tools/ and services/scene-finish)"
+requires-python = ">=3.11"
+dependencies = [
+    # Capture-bundle parsing (poses, intrinsics, frame paths) for the camera model.
+    "thegoodguest-schemas",
+    "numpy>=1.24",
+    "pillow>=10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+]
+
+# The code started life as scripts in tools/. Those scripts are now thin
+# wrappers over this package, and services/scene-finish imports it directly,
+# so the offline CLI and the cloud service cannot drift.
+#
+# Install editable during dev:
+#   pip install -e packages/schemas -e packages/room-look
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["thegoodguest_room_look*"]

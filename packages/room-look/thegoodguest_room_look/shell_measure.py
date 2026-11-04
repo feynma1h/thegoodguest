@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from shell_finish import AGREE_DELTA_E, lit, mean_shift_mode
+from .shell_finish import AGREE_DELTA_E, lit, mean_shift_mode
 
 
 def _interp_nan(x: np.ndarray) -> np.ndarray:
