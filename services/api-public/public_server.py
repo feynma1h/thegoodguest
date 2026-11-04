@@ -483,6 +483,17 @@ class GcsManifestFetcher:
             raise ManifestFetchError(f"fetch failed for {gs_uri}: {exc}") from exc
 
 
+    def exists(self, gs_uri: str) -> bool:
+        """True when the object is there. Non-404 failures raise ManifestFetchError."""
+        from google.cloud import storage  # deferred
+
+        try:
+            bucket, path = _split_gs_uri(gs_uri)
+            return bool(storage.Client().bucket(bucket).blob(path).exists())
+        except Exception as exc:
+            raise ManifestFetchError(f"exists check failed for {gs_uri}: {exc}") from exc
+
+
 class InMemoryManifestFetcher:
     """Test/dev fetcher: serves from a settable {gs_uri: bytes} store."""
 
@@ -496,6 +507,9 @@ class InMemoryManifestFetcher:
 
     def fetch_optional(self, gs_uri: str) -> bytes | None:
         return self.store.get(gs_uri)
+
+    def exists(self, gs_uri: str) -> bool:
+        return gs_uri in self.store
 
 
 class IamV4UrlSigner:
@@ -589,6 +603,19 @@ def _sign_assets(signer, items: list[tuple[str, str | None]]) -> tuple[dict, dic
         ply: url for (ply, _), url in zip(comp_items, signed[len(items):])
     }
     return asset_urls, asset_urls_compressed
+
+
+def _optional_sibling_url(gs_uri: str, scene_id: str) -> str | None:
+    """A signed link to an optional sibling blob, or None when it is absent
+    or anything about it fails. Blocking."""
+    try:
+        if not _get_manifest_fetcher().exists(gs_uri):
+            return None
+        return _get_url_signer().sign(gs_uri, _ASSET_URL_TTL_SECONDS)
+    except Exception as exc:
+        logger.warning("assets: %s degraded to null for scene %s: %s",
+                       gs_uri.rsplit("/", 1)[1], scene_id, exc)
+        return None
 
 
 _manifest_fetcher = None
@@ -1387,6 +1414,8 @@ def get_scene_assets(
     Response (200):
       {scene_id, manifest: <verbatim manifest.json>,
        shell: <verbatim shell.json> | null,
+       finish_url: <signed https url of finish.json> | null,
+       furniture_url: <signed https url of furniture.json> | null,
        asset_urls: {<gs_uri>: <signed https url>},
        asset_urls_compressed: {<gs_uri>: <signed https url>},
        expires_at: <ISO 8601>}
@@ -1410,6 +1439,15 @@ def get_scene_assets(
     fetchable blobs (0069 removed the texture bake from serving). A
     shell fetch ERROR degrades to null with a log — the optional shell
     never 502s the room.
+
+    finish_url and furniture_url (decision 0313) are signed links to two more
+    SIBLINGS of the shell, finish.json (a designed wall/floor finish) and
+    furniture.json (placed furniture twins), each its own file. null means
+    the file is not there, which is every scene's state until a producer
+    writes one; an existence-check or signing failure also degrades to null
+    with a log. The files are never read here and never touch asset_urls —
+    the client fetches and validates them, and anything it cannot use leaves
+    the room drawing as it always has.
 
     Errors:
       400 invalid_scene_id — scene_id is not a UUIDv4
@@ -1458,6 +1496,12 @@ def get_scene_assets(
         logger.warning("assets: shell fetch degraded to null for scene %s: %s",
                        scene_id, exc)
         shell = None
+
+    # Finish and furniture (decision 0313): optional siblings, signed when
+    # present. Optional means optional: any failure here is a null, never a 502.
+    scene_dir = scene.result_uri.rsplit("/", 1)[0]
+    finish_url = _optional_sibling_url(scene_dir + "/finish.json", scene_id)
+    furniture_url = _optional_sibling_url(scene_dir + "/furniture.json", scene_id)
 
     # The compressed tier (decision 0126): a sibling index, shell.json's
     # precedent. Absent = the tier was never built for this scene, which is
@@ -1516,6 +1560,8 @@ def get_scene_assets(
             "scene_id": scene_id,
             "manifest": manifest,
             "shell": shell,
+            "finish_url": finish_url,
+            "furniture_url": furniture_url,
             "asset_urls": asset_urls,
             "asset_urls_compressed": asset_urls_compressed,
             "expires_at": expires_at.isoformat(),

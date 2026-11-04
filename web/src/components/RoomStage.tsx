@@ -24,6 +24,9 @@ import CallingCardSheet, {
 } from "@/components/CallingCardSheet";
 import Conversation from "@/components/conversation/Conversation";
 import SplatViewer from "@/components/SplatViewer";
+import type { FurnitureBundle } from "@/lib/furniture";
+import type { ShellFinish } from "@/lib/shellFinish";
+import { loadShellExtras } from "@/lib/shellExtras";
 import { PillButton, SPRING } from "@/components/ui/spring";
 import { DisabledComposer, Eyebrow, GuestLine } from "@/components/ui/voice";
 import { getApiClient } from "@/lib/api";
@@ -67,6 +70,10 @@ type AssetsResult =
        * renders — `measured_polygon` and the openings' frame do not survive
        * it (lib/card/measure.ts explains why both matter). */
       shellDoc: ShellDoc | null;
+      /** The optional designed finish and furniture twins (decision 0313):
+       * null unless the finish flag is on and the scene has files that fit. */
+      finish: ShellFinish | null;
+      furniture: FurnitureBundle | null;
     };
 
 // Shell grace window (0066): the shell task lands a beat after `ready`,
@@ -133,7 +140,19 @@ export default function RoomStage({
           forScene: sceneId, phase: "ready", splats, shell, unrenderable,
           manifest: sceneAssets.manifest,
           shellDoc: sceneAssets.shell ?? null,
+          finish: null,
+          furniture: null,
         });
+        // The finish and twins ride in after the room is up, so they can never
+        // hold it back; with the flag off this makes no request and changes nothing.
+        const extras = await loadShellExtras(
+          sceneAssets,
+          (shell ?? []).filter((p) => p.kind === "wall").length,
+        );
+        if (cancelled || !extras.finish) return;
+        setResult((prev) =>
+          prev && prev.phase === "ready" && prev.forScene === sceneId ? { ...prev, ...extras } : prev,
+        );
       } catch (exc: unknown) {
         if (cancelled) return;
         if (exc instanceof SceneNotReadyError) {
@@ -240,6 +259,8 @@ export default function RoomStage({
         <SplatViewer
           splats={proposed.splats}
           shell={assets.shell}
+          finish={assets.finish}
+          furniture={assets.furniture}
           outlines={proposed.outlines}
           frameless
           reveal={phase === "assembling"}

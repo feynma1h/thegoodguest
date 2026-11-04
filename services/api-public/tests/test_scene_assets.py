@@ -12,6 +12,8 @@ Covers:
   - 401 / 400 / 403 / 404 mirroring the by-bundle contract
   - 502 upstream_error: manifest fetch failure, malformed JSON, signer
     failure
+  - finish_url / furniture_url (decision 0313): signed links to optional
+    siblings, null when absent or when anything about them fails
 
 InMemoryManifestFetcher + a fake signer are injected; no GCS.
 
@@ -96,6 +98,8 @@ def _manifest(objects: list[dict] | None = None) -> dict:
 
 _SHELL_URI = "gs://outputs/scenes/s1/shell.json"
 _COMPRESSED_URI = "gs://outputs/scenes/s1/compressed.json"
+_FINISH_URI = "gs://outputs/scenes/s1/finish.json"
+_FURNITURE_URI = "gs://outputs/scenes/s1/furniture.json"
 
 
 def _material(family: str | None = "painted") -> dict:
@@ -465,6 +469,76 @@ class TestAssetsShellSibling:
         )
         assert resp.status_code == 200
         assert resp.json()["shell"] is None
+
+
+class TestAssetsFinishAndFurnitureSiblings:
+    """finish_url / furniture_url (decision 0313): each file is its own
+    sibling of the shell, signed when present, null when not, and never
+    able to take the room down."""
+
+    def _get(self, client, fetcher=None, signer=None):
+        return _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            fetcher=fetcher,
+            signer=signer,
+        )
+
+    def test_absent_siblings_are_null_and_change_nothing_else(self, client) -> None:
+        body = self._get(client).json()
+        assert body["finish_url"] is None and body["furniture_url"] is None
+        assert set(body["asset_urls"]) == {
+            "gs://outputs/scenes/s1/frames/0000/splats/00_chair.ply",
+            "gs://outputs/scenes/s1/frames/0001/splats/00_lamp.ply",
+        }
+
+    def test_each_present_sibling_is_signed_on_its_own(self, client) -> None:
+        only_finish = InMemoryManifestFetcher({_FINISH_URI: b"{}"})
+        body = self._get(client, only_finish).json()
+        assert body["finish_url"] == "https://signed.example/scenes/s1/finish.json?sig=abc"
+        assert body["furniture_url"] is None
+
+        only_furniture = InMemoryManifestFetcher({_FURNITURE_URI: b"{}"})
+        body = self._get(client, only_furniture).json()
+        assert body["finish_url"] is None
+        assert body["furniture_url"] == "https://signed.example/scenes/s1/furniture.json?sig=abc"
+
+    def test_the_files_are_not_read_and_add_no_asset_urls(self, client) -> None:
+        class ReadCounting(InMemoryManifestFetcher):
+            reads: list[str] = []
+
+            def fetch_optional(self, gs_uri: str):
+                self.reads.append(gs_uri)
+                return super().fetch_optional(gs_uri)
+
+        fetcher = ReadCounting({_FINISH_URI: b"not even json", _FURNITURE_URI: b"{}"})
+        body = self._get(client, fetcher).json()
+        assert body["finish_url"] and body["furniture_url"]
+        assert _FINISH_URI not in fetcher.reads and _FURNITURE_URI not in fetcher.reads
+        assert not any("finish" in u or "furniture" in u for u in body["asset_urls"])
+
+    def test_an_existence_check_that_fails_degrades_to_null(self, client) -> None:
+        class Flaky(InMemoryManifestFetcher):
+            def exists(self, gs_uri: str) -> bool:
+                raise server.ManifestFetchError("gcs flaked")
+
+        resp = self._get(client, Flaky({_FINISH_URI: b"{}"}))
+        assert resp.status_code == 200
+        assert resp.json()["finish_url"] is None and resp.json()["furniture_url"] is None
+
+    def test_a_signer_that_fails_on_a_sibling_degrades_to_null(self, client) -> None:
+        class SiblingBreaks(FakeSigner):
+            def sign(self, gs_uri: str, ttl_seconds: int) -> str:
+                if gs_uri.endswith(("finish.json", "furniture.json")):
+                    raise RuntimeError("signblob unavailable")
+                return super().sign(gs_uri, ttl_seconds)
+
+        resp = self._get(client, InMemoryManifestFetcher({_FINISH_URI: b"{}"}), SiblingBreaks())
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["finish_url"] is None
+        assert set(body["asset_urls"])  # the room's own splats were still signed
 
 
 class TestAssetsUpstreamFailures:

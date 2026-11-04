@@ -209,6 +209,11 @@ export interface SceneAssets {
   manifest: SceneManifest;
   /** Room shell sibling (decision 0066). Absent/null = not yet. */
   shell?: ShellDoc | null;
+  /** Signed links to two optional siblings of the shell (decision 0313): a
+   * designed finish and furniture twins. null/absent = the file is not there,
+   * which is the normal state; lib/shellExtras reads them. */
+  finish_url?: string | null;
+  furniture_url?: string | null;
   asset_urls: Record<string, string>; // gs:// URI -> signed HTTPS URL
   /** The compressed tier (decision 0126), keyed by the SAME gs:// URI as
    * `asset_urls` so a lookup picks a format rather than an object. Present
