@@ -71,7 +71,8 @@ type AssetsResult =
        * it (lib/card/measure.ts explains why both matter). */
       shellDoc: ShellDoc | null;
       /** The optional designed finish and furniture twins (decision 0313):
-       * null unless the finish switch is on and the scene has files that fit. */
+       * null unless the finish switch is on and the scene has files that fit;
+       * with twins, `splats` and `unrenderable` above are empty. */
       finish: ShellFinish | null;
       furniture: FurnitureBundle | null;
     };
@@ -136,23 +137,26 @@ export default function RoomStage({
         }
         if (cancelled) return;
         const { splats, shell, unrenderable } = assembleScene(sceneAssets);
-        setResult({
-          forScene: sceneId, phase: "ready", splats, shell, unrenderable,
-          manifest: sceneAssets.manifest,
-          shellDoc: sceneAssets.shell ?? null,
-          finish: null,
-          furniture: null,
-        });
-        // The finish and twins ride in after the room is up, so they can never
-        // hold it back; with the flag off this makes no request and changes nothing.
+        // The finish and twins are read before the room is drawn, so a room
+        // with twins never shows its scanned objects first and then swaps
+        // (decision 0341). Never throws, is bounded by EXTRAS_TIMEOUT_MS, and
+        // with no finish files makes no request and comes back empty.
         const extras = await loadShellExtras(
           sceneAssets,
           (shell ?? []).filter((p) => p.kind === "wall").length,
         );
-        if (cancelled || !extras.finish) return;
-        setResult((prev) =>
-          prev && prev.phase === "ready" && prev.forScene === sceneId ? { ...prev, ...extras } : prev,
-        );
+        if (cancelled) return;
+        // Twins ARE the room's objects: when they are drawn, the scan's own
+        // objects (splats, the list of them) are not part of it.
+        const twins = extras.furniture !== null;
+        setResult({
+          forScene: sceneId, phase: "ready",
+          splats: twins ? [] : splats, shell,
+          unrenderable: twins ? [] : unrenderable,
+          manifest: sceneAssets.manifest,
+          shellDoc: sceneAssets.shell ?? null,
+          ...extras,
+        });
       } catch (exc: unknown) {
         if (cancelled) return;
         if (exc instanceof SceneNotReadyError) {
@@ -202,7 +206,8 @@ export default function RoomStage({
   const proposed: ProposedScene = useMemo(
     () =>
       assets.phase === "ready"
-        ? applyDesignSpec(assets.splats, assets.manifest, spec)
+        ? // A rearranged-room proposal moves scanned objects; a room of twins has none.
+          applyDesignSpec(assets.splats, assets.manifest, assets.furniture ? null : spec)
         : { splats: [], states: [], outlines: [], applied: [], orphaned: [] },
     [assets, spec],
   );

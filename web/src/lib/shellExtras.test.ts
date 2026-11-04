@@ -60,6 +60,24 @@ describe("loadShellExtras", () => {
     expect(got.furniture?.objects).toHaveLength(1);
   });
 
+  it("bounds each request, and a file that errors counts as absent", async () => {
+    const seen: (AbortSignal | null | undefined)[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      seen.push(init?.signal);
+      if (url === urls.furniture_url) throw new DOMException("timed out", "TimeoutError");
+      return { ok: true, json: async () => finish(4) };
+    }));
+    try {
+      const got = await loadShellExtras(urls, 4);
+      expect(got.finish).not.toBeNull();
+      expect(got.furniture).toBeNull();
+      expect(seen).toHaveLength(2);
+      expect(seen.every((sig) => sig instanceof AbortSignal)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("makes no request when the flag is off or there are no links", async () => {
     const get = serve({});
     expect(await loadShellExtras(urls, 4, get, false)).toEqual(NO_EXTRAS);

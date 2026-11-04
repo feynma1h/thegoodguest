@@ -37,8 +37,12 @@ export function shellExtras(wallCount: number, finishDoc: unknown, furnitureDoc:
   }
 }
 
+/** The room waits for these files before it is drawn, so one that hangs must not hold it: past this the
+ * file counts as absent and the room is drawn as if it were not there. */
+export const EXTRAS_TIMEOUT_MS = 10_000;
+
 async function fetchJson(url: string): Promise<unknown> {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(EXTRAS_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`${res.status}`);
   return res.json();
 }
