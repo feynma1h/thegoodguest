@@ -1,6 +1,6 @@
 # Decision notes
 
-287 notes. **238 of them are `Decided`** -- those govern code that
+291 notes. **242 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
 other 49 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
@@ -21,7 +21,7 @@ The status vocabulary and the numbering rule live in
 | `Superseded` | 8 | replaced by a later note |
 | `Amended` | 9 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
-| `Decided` | 238 | governs code that ships today |
+| `Decided` | 242 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -100,7 +100,7 @@ The status vocabulary and the numbering rule live in
 | [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (238)
+## Decided (242)
 
 | # | title | status |
 |---|---|---|
@@ -342,3 +342,7 @@ The status vocabulary and the numbering rule live in
 | [0301](0301-live-boxes-ride-the-captures-own-session.md) | live boxes ride the capture's own session | Decided |
 | [0302](0302-the-scan-screen-may-show-a-camera.md) | the Scan screen may show a camera behind the boxes | Decided |
 | [0303](0303-the-switches-live-boxes-keeps-off.md) | two things live boxes keeps in the code and leaves off | Decided |
+| [0310](0310-the-room-can-wear-a-designed-finish-that-only-a-local-flag-draws.md) | the room can wear a designed finish, drawn only behind a local flag | Decided |
+| [0311](0311-furniture-twins-are-placed-from-boxes-by-rules-that-record-their-fixes.md) | furniture twins are placed from boxes by rules that record their fixes | Decided |
+| [0312](0312-the-furniture-twin-room-has-a-day-and-a-night.md) | the furniture twin room has a day and a night | Decided |
+| [0313](0313-finish-and-furniture-are-separate-optional-files-beside-the-shell.md) | finish and furniture are separate optional files beside the shell | Decided |
