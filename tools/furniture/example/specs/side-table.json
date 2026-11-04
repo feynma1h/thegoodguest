@@ -1,0 +1,23 @@
+{
+  "key": "side-table",
+  "object": "box_0",
+  "label": "side table with a lamp",
+  "revision": 1,
+  "note": "An invented example that fixes the format; it is not any real room's piece. Parts are in metres in the box frame: origin at the centre of the footprint on the floor, +y up. A part named lamp-shade is the light the room switches on at night.",
+  "box_dims": [0.45, 0.55, 0.4],
+  "materials": {
+    "wood": {"color": "#b98b5e", "rough": 0.55, "tex": {"kind": "wood", "tile_m": 0.4, "seed": 3, "p": {"contrast": 0.1}}},
+    "brass": {"color": "#b8963e", "rough": 0.3, "metal": 0.85},
+    "shade": {"color": "#efe4cb", "rough": 0.9, "double": true, "opacity": 0.97, "emissive": "#f3dcab", "emissive_intensity": 0.18}
+  },
+  "parts": [
+    {"kind": "box", "name": "top", "mat": "wood", "size": [0.45, 0.04, 0.4], "at": [0, 0.53, 0], "bevel": 0.008},
+    {"kind": "cyl", "name": "leg-fl", "mat": "wood", "r": 0.02, "rTop": 0.016, "h": 0.51, "at": [-0.19, 0.255, 0.16]},
+    {"kind": "cyl", "name": "leg-fr", "mat": "wood", "r": 0.02, "rTop": 0.016, "h": 0.51, "at": [0.19, 0.255, 0.16]},
+    {"kind": "cyl", "name": "leg-bl", "mat": "wood", "r": 0.02, "rTop": 0.016, "h": 0.51, "at": [-0.19, 0.255, -0.16]},
+    {"kind": "cyl", "name": "leg-br", "mat": "wood", "r": 0.02, "rTop": 0.016, "h": 0.51, "at": [0.19, 0.255, -0.16]},
+    {"kind": "lathe", "name": "lamp-base", "mat": "brass", "profile": [[0.001, 0], [0.07, 0], [0.05, 0.03], [0.02, 0.12], [0.02, 0.2]], "at": [0, 0.55, 0]},
+    {"kind": "cyl", "name": "lamp-shade", "mat": "shade", "r": 0.11, "rTop": 0.08, "h": 0.16, "at": [0, 0.83, 0], "noShadow": true}
+  ],
+  "place": {"rule": "floor"}
+}

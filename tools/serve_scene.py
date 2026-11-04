@@ -6,7 +6,8 @@ outside web/public/; the page fetches shell.json and finish.json from here.
     python tools/serve_scene.py outputs/scene-<id> --port 9000
 
 Binds 127.0.0.1 only. Serves only the named directory's top-level
-`shell.json` and `finish.json`: nothing else (frames, bundle)
+`shell.json`, `finish.json`, `furniture.json` (parametric specs, no pixels) and
+`poses.json`: nothing else (frames, bundle)
 is reachable. It also accepts POST /renders/<name>.png (written to
 <scene>/renders/) so the viewer's comparison harness can hand back images.
 """
@@ -17,7 +18,7 @@ import functools
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ALLOWED = {"shell.json", "finish.json"}
+ALLOWED = {"shell.json", "finish.json", "furniture.json", "poses.json"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -74,7 +75,7 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
     handler = functools.partial(Handler, root=args.scene.resolve())
-    print(f"serving {args.scene} on http://127.0.0.1:{args.port}/ (shell.json, finish.json)")
+    print(f"serving {args.scene} on http://127.0.0.1:{args.port}/ (shell.json, finish.json, furniture.json)")
     ThreadingHTTPServer(("127.0.0.1", args.port), handler).serve_forever()
 
 

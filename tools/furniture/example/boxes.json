@@ -1,0 +1,7 @@
+{
+  "boxes_version": 1,
+  "boxes": [
+    {"id": "box_0", "category": "table", "label": "small side table",
+     "center": [1.0, 0.275, 1.0], "yaw": 0.0, "size": [0.45, 0.55, 0.4]}
+  ]
+}
