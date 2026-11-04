@@ -397,9 +397,12 @@ function partGeometry(THREE: T, RBG: RoundedBox, part: Part): THREE_NS.BufferGeo
   }
 }
 
+/** Emitters that cast a shadow at night; the rest light the room without one. */
+const MAX_SHADOWED_EMITTERS = 2;
+
 export interface ModeParams {
   day: { sun: number; ambient: number; hemi: number; key: number; radius: number };
-  night: { moon: number; lamp: number; ambient: number; hemi: number; key: number; exposure: number };
+  night: { moon: number; lamp: number; glow: number; ambient: number; hemi: number; key: number; exposure: number };
 }
 
 // ---------------------------------------------------------------- builder --
@@ -407,7 +410,7 @@ export type RoomMode = "day" | "night";
 
 export interface BuiltFurniture {
   root: THREE_NS.Group;
-  /** Day: window light, faint shadows. Night: the part named lamp-shade lights the room. */
+  /** Day: window light, faint shadows. Night: every part marked `emits` lights the room. */
   mode: () => RoomMode;
   setMode: (m: RoomMode) => void;
   /** Live-tunable light levels for the two modes (call setMode(mode()) after editing). */
@@ -552,6 +555,12 @@ export function buildFurniture(
       mesh.castShadow = !part.noShadow && !(mat as THREE_NS.MeshPhysicalMaterial).transparent;
       mesh.receiveShadow = true;
       mesh.name = part.name ?? part.kind;
+      if (part.emits) {
+        // Own copy of the material: the glow is this part's, whoever else uses the spec's material.
+        mesh.material = (mat as THREE_NS.MeshPhysicalMaterial).clone();
+        mesh.userData.emits = true;
+        disposables.push(mesh.material);
+      }
       g.add(mesh);
       disposables.push(geom);
     }
@@ -685,34 +694,36 @@ export function buildFurniture(
   // ---- Day and night (diorama look only) ----------------------------------------------
   const params: ModeParams = {
     day: { sun: 2.2, ambient: 0.6, hemi: 0.58, key: 0.5, radius: 12 },
-    night: { moon: 0.25, lamp: 5, ambient: 0.12, hemi: 0.14, key: 0.08, exposure: 1.0 },
+    night: { moon: 0.25, lamp: 5, glow: 0.55, ambient: 0.12, hemi: 0.14, key: 0.08, exposure: 1.0 },
   };
   root.updateMatrixWorld(true);
-  const lampMesh = ((): THREE_NS.Object3D | null => {
-    let found: THREE_NS.Object3D | null = null;
-    root.traverse((o) => { if (!found && o.name === "lamp-shade") found = o; });
-    return found;
-  })();
-  const lampLight = new THREE.PointLight(0xffc477, 0, 0, 0.9);
-  if (lampMesh) {
+  // Light emitters: every part a spec marks `emits` is lit at night, at the settled values
+  // (params.night.lamp for the point light, params.night.glow for the part's own glow).
+  const emitters: { mesh: THREE_NS.Mesh; mat: THREE_NS.MeshPhysicalMaterial; light: THREE_NS.PointLight }[] = [];
+  root.traverse((o) => {
+    if (!o.userData.emits) return;
+    const mesh = o as THREE_NS.Mesh;
+    const light = new THREE.PointLight(0xffc477, 0, 0, 0.9);
     const lp = new THREE.Vector3();
-    (lampMesh as THREE_NS.Object3D).getWorldPosition(lp);
-    lampLight.position.copy(lp).add(new THREE.Vector3(0, 0.06, 0));
-  }
-  lampLight.castShadow = true;
-  lampLight.shadow.mapSize.set(1024, 1024);
-  lampLight.shadow.camera.near = 0.08;
-  lampLight.shadow.camera.far = 14;
-  lampLight.shadow.bias = -0.002;
-  lampLight.shadow.normalBias = 0.03;
-  lampLight.shadow.radius = 6;
-  lampLight.visible = false;
+    mesh.getWorldPosition(lp);
+    light.position.copy(lp).add(new THREE.Vector3(0, 0.06, 0));
+    // A shadow map is six renders: only the first few emitters cast one.
+    light.castShadow = emitters.length < MAX_SHADOWED_EMITTERS;
+    light.shadow.mapSize.set(1024, 1024);
+    light.shadow.camera.near = 0.08;
+    light.shadow.camera.far = 14;
+    light.shadow.bias = -0.002;
+    light.shadow.normalBias = 0.03;
+    light.shadow.radius = 6;
+    light.visible = false;
+    scene.add(light);
+    emitters.push({ mesh, mat: mesh.material as THREE_NS.MeshPhysicalMaterial, light });
+  });
   const moon = new THREE.DirectionalLight(0x8da2d8, 0);
   moon.position.copy(sun.position);
   moon.target.position.copy(c);
   moon.visible = false;
-  scene.add(lampLight, moon, moon.target);
-  const shadeMat = lampMesh ? ((lampMesh as THREE_NS.Mesh).material as THREE_NS.MeshPhysicalMaterial) : null;
+  scene.add(moon, moon.target);
   const glassMats: THREE_NS.MeshPhysicalMaterial[] = [];
   for (const w of windows) {
     byKey[w.key]?.traverse((o) => {
@@ -735,8 +746,13 @@ export function buildFurniture(
     sun.shadow.radius = params.day.radius;
     moon.visible = !day;
     moon.intensity = params.night.moon;
-    lampLight.visible = !day && lampMesh !== null;
-    lampLight.intensity = params.night.lamp;
+    for (const e of emitters) {
+      e.light.visible = !day;
+      e.light.intensity = params.night.lamp;
+      e.mesh.castShadow = day; // an emitter's own bulb sits inside its shade
+      e.mat.emissive.set(0xffcf8a);
+      e.mat.emissiveIntensity = day ? 0 : params.night.glow;
+    }
     for (const s of shellLights) {
       const t = s.l.type;
       const k = day
@@ -745,11 +761,6 @@ export function buildFurniture(
       s.l.intensity = s.was * k;
       s.l.color.copy(s.color);
       if (!day) s.l.color.lerp(cool, 0.55);
-    }
-    if (lampMesh) (lampMesh as THREE_NS.Mesh).castShadow = day; // the lamp's own bulb sits inside the shade
-    if (shadeMat) {
-      shadeMat.emissive.set(0xffcf8a);
-      shadeMat.emissiveIntensity = day ? 0 : 0.65;
     }
     glassMats.forEach((g, i) => {
       g.emissiveIntensity = day ? glassDay[i] : 0.04;
@@ -801,7 +812,8 @@ export function buildFurniture(
       for (const w of walled) w.g.visible = w.nx * (camera.position.x - w.g.position.x) + w.nz * (camera.position.z - w.g.position.z) > 0;
     },
     dispose: () => {
-      scene.remove(root, sun, sun.target, lampLight, moon, moon.target);
+      scene.remove(root, sun, sun.target, moon, moon.target);
+      for (const e of emitters) scene.remove(e.light);
       toggle?.remove();
       if (bgEl) bgEl.style.background = bgWas;
       renderer.toneMappingExposure = exposureWas;

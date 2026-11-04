@@ -10,8 +10,9 @@
  * +y up, x/z = the box's axes. furniture.json carries each spec with its
  * world placement already resolved from the scan's boxes.
  *
- * Conventions the viewer reads: a part named `lamp-shade` is the room's light
- * at night; meshes named `glass-*` in a twin of category `window` are panes
+ * Conventions the viewer reads: a part marked `emits` is a light that is on
+ * at night (a part named `lamp-shade`, from before the property existed, is
+ * read as one); meshes named `glass-*` in a twin of category `window` are panes
  * that glow by day. Drawn only with the finish (ROOM_FINISH_ENABLED).
  */
 
@@ -53,6 +54,9 @@ interface PartBase {
   /** Swap the texture's u/v (turns wood grain by 90 degrees). */
   uvSwap?: boolean;
   noShadow?: boolean;
+  /** A light emitter: the part glows and puts a point light inside itself when the room is at night.
+   * Any number of parts, in any twin, may emit (the viewer's night values apply to each). */
+  emits?: boolean;
 }
 
 export type Part =
@@ -112,6 +116,9 @@ export interface FurnitureBundle {
   mode?: "day" | "night";
 }
 
+/** Twins written before `emits` existed marked their light by this part name. */
+const LEGACY_EMITTER = "lamp-shade";
+
 export function parseFurniture(raw: unknown): FurnitureBundle | null {
   if (!raw || typeof raw !== "object") return null;
   const b = raw as Partial<FurnitureBundle>;
@@ -119,6 +126,9 @@ export function parseFurniture(raw: unknown): FurnitureBundle | null {
   for (const o of b.objects) {
     if (!o || !o.spec || !Array.isArray(o.position) || typeof o.yaw !== "number") return null;
     if (!Array.isArray(o.spec.parts) || typeof o.spec.materials !== "object") return null;
+  }
+  for (const o of b.objects) {
+    for (const part of o.spec.parts) if (part.name === LEGACY_EMITTER && part.emits === undefined) part.emits = true;
   }
   return b as FurnitureBundle;
 }

@@ -45,7 +45,7 @@ A hand correction is `place.fix = {dx, dy, dz, dyaw_deg, why}` in the box's fram
 a fix or a rule, is written into the twin's `fixes` list with its reason; `source` says `boxes+fixed` when there is one.
 
 ## Conventions the viewer reads
-- A part named `lamp-shade` is the room's light at night (the viewer puts a point light in it).
+- A part with `"emits": true` is a light that is on at night: the viewer puts a point light inside it (intensity 5) and makes the part glow (0.55). Any number of parts may emit. Older specs named the part `lamp-shade`; the viewer still reads that name as an emitter.
 - Parts named `glow...` with `noShadow` are light sources drawn emissive and ignored by the clearance check.
 
 ## Lessons

@@ -51,3 +51,28 @@ describe("parseFurniture", () => {
     expect(parseFurniture(bundle([null]))).toBeNull();
   });
 });
+
+describe("parseFurniture emitters", () => {
+  const withParts = (parts: unknown[]) => {
+    const t = twin();
+    return bundle([{ ...t, spec: { ...t.spec, parts } }]);
+  };
+  const emits = (raw: unknown) =>
+    parseFurniture(raw)!.objects[0].spec.parts.map((p) => p.emits);
+
+  it("keeps a part's emits property, on any part", () => {
+    const got = emits(withParts([
+      { kind: "sphere", r: 0.1, mat: "wood", name: "bulb", emits: true },
+      { kind: "sphere", r: 0.1, mat: "wood", name: "ball" },
+    ]));
+    expect(got).toEqual([true, undefined]);
+  });
+
+  it("reads a part named lamp-shade as an emitter, as twins written before the property do", () => {
+    expect(emits(withParts([{ kind: "cyl", r: 0.1, h: 0.1, mat: "wood", name: "lamp-shade" }]))).toEqual([true]);
+  });
+
+  it("lets a part named lamp-shade opt out", () => {
+    expect(emits(withParts([{ kind: "cyl", r: 0.1, h: 0.1, mat: "wood", name: "lamp-shade", emits: false }]))).toEqual([false]);
+  });
+});
