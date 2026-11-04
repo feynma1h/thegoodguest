@@ -1,8 +1,8 @@
 # Decision notes
 
-279 notes. **234 of them are `Decided`** -- those govern code that
+287 notes. **238 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
-other 45 record decisions that were carried out, replaced, or
+other 49 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
 because they constrain you.
 
@@ -18,10 +18,10 @@ The status vocabulary and the numbering rule live in
 | status | count | means |
 |---|---|---|
 | `Refuted` | 16 | a measured negative -- read before proposing it again |
-| `Superseded` | 7 | replaced by a later note |
-| `Amended` | 6 | partly corrected by a later note |
+| `Superseded` | 8 | replaced by a later note |
+| `Amended` | 9 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
-| `Decided` | 234 | governs code that ships today |
+| `Decided` | 238 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -46,7 +46,7 @@ The status vocabulary and the numbering rule live in
 | [0280](0280-ray-convergence-does-not-separate-neighbours.md) | ray convergence does not separate a fragment from its neighbour | Refuted |
 | [0284](0284-appearance-calibrates-well-and-fails-in-the-room.md) | appearance separates the objects that have boxes, and merges the ones that do not | Refuted |
 
-## Superseded (7)
+## Superseded (8)
 
 *Replaced by a later note.*
 
@@ -59,19 +59,23 @@ The status vocabulary and the numbering rule live in
 | [0179](0179-sam3d-takes-a-pointmap-and-we-let-it-guess.md) | SAM 3D takes a LiDAR pointmap, and we let it guess one instead | Superseded by 0180 |
 | [0263](0263-precision-is-a-gate-not-a-ranking.md) | precision against the box is a gate, not a ranking | Superseded by 0266 |
 | [0265](0265-five-instruments-one-unrun-experiment.md) | five instruments for one choice, and the experiment none of them needs | Superseded by 0266 |
+| [0297](0297-the-review-opens-from-the-home-screen-and-asks-again-when-roomplan-withholds-depth.md) | the review opens from the Home Screen, and asks again when RoomPlan withholds depth | Superseded by 0301 |
 
-## Amended (6)
+## Amended (9)
 
 *Partly corrected by a later note.*
 
 | # | title | status |
 |---|---|---|
 | [0013](0013-capture-bundle-monotonic-timestamps.md) | Capture-bundle timestamps: device-monotonic, with wall-clock alongside | Amended by 0298 |
+| [0072](0072-ios-design-lidar-only-pivot.md) | iOS app design locked; LiDAR-only client pivot | Amended by 0302 |
+| [0077](0077-roomplan-integration-design.md) | RoomPlan integration: CapturedRoom as room + object skeleton, JSON verbatim on the wire, boxes carry placement | Amended by 0302 |
 | [0099](0099-ci-scope-and-ios-posture.md) | CI scope, and why iOS CI is manual-only | Amended by measurement |
 | [0146](0146-view-selection-does-not-predict-reconstruction-quality.md) | view selection does not predict reconstruction quality | Amended by 0153 |
 | [0152](0152-every-view-is-a-partial-view.md) | every view is a partial view, and that is the regime | Amended by 0153 |
 | [0173](0173-the-guest-cannot-tell-which-room-its-facts-describe.md) | the guest reads its own re-derived facts as stale, and says so | Amended by 0174 |
 | [0259](0259-disqualify-a-frame-do-not-rank-it.md) | disqualify a frame, do not rank it | Amended by 0270 |
+| [0299](0299-glass-is-boxed-from-its-outlines-and-covering-counts-four-times-filling.md) | glass is boxed from its outlines, and covering counts four times filling | Amended by 0300 |
 
 ## Spent (16)
 
@@ -96,7 +100,7 @@ The status vocabulary and the numbering rule live in
 | [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (234)
+## Decided (238)
 
 | # | title | status |
 |---|---|---|
@@ -160,11 +164,9 @@ The status vocabulary and the numbering rule live in
 | [0068](0068-placement-quality-build-verdicts.md) | placement-quality build verdicts: brief contracts vs measured reality | Decided |
 | [0069](0069-generated-shell-surfaces.md) | Shell surfaces: generated parametric materials replace the photographic bake | Decided |
 | [0070](0070-shell-surfaces-build-verdicts.md) | Shell-surfaces build verdicts: closure calibration, inference amendments, and the person-contamination finding | Decided |
-| [0072](0072-ios-design-lidar-only-pivot.md) | iOS app design locked; LiDAR-only client pivot | Decided |
 | [0073](0073-launch-restore-scope.md) | Relaunch recovery is launch-scoped and acknowledgement-aware | Decided |
 | [0074](0074-icloud-backup-migration-phantom-room.md) | iCloud-backup migration: what carries over, and the phantom-room row | Decided |
 | [0076](0076-roomplan-corun-spike.md) | RoomPlan co-run spike: verdicts (board 3 → board 7) | Decided |
-| [0077](0077-roomplan-integration-design.md) | RoomPlan integration: CapturedRoom as room + object skeleton, JSON verbatim on the wire, boxes carry placement | Decided |
 | [0078](0078-envelope-selection-height-reach.md) | Envelope-wall selection: height-reach, not classification (a measured amendment to 0077's brief) | Decided |
 | [0079](0079-corun-attach-depth-loss.md) | Same-turn RoomPlan co-run attach loses sceneDepth; frame-observed re-assert is the production guard | Decided |
 | [0080](0080-rp8-walk-verdicts.md) | RP-8 operator walk: verdicts, defect classes, fork resolutions | Decided |
@@ -333,4 +335,10 @@ The status vocabulary and the numbering rule live in
 | [0292](0292-the-survivor-inherits-the-pairs-score.md) | collapsing a nested pair must not re-rank it against everything else | Decided |
 | [0293](0293-a-passing-audit-and-a-green-suite-both-miss-the-fold.md) | a passing audit and a green suite both miss the fold | Decided |
 | [0294](0294-the-append-path-is-two-features-and-neither-ships.md) | the append path is two features and neither ships | Decided |
+| [0295](0295-the-detector-stays-out-of-git-and-this-is-how-to-rebuild-it.md) | the detector stays out of git, and this is how to rebuild it | Decided |
+| [0296](0296-a-box-is-the-surfaces-seen-and-seven-filters-decide-what-a-surface-is.md) | a box is the surfaces seen, and seven filters decide what a surface is | Decided |
 | [0298](0298-a-reason-code-belongs-to-one-category-and-the-clock-starts-at-capture.md) | a reason code belongs to one category, and the bundle's clock starts at capture | Decided |
+| [0300](0300-covering-counts-eight-times-filling-and-the-floor-shadow-says-nothing.md) | covering counts eight times filling, and the floor shadow says nothing | Decided |
+| [0301](0301-live-boxes-ride-the-captures-own-session.md) | live boxes ride the capture's own session | Decided |
+| [0302](0302-the-scan-screen-may-show-a-camera.md) | the Scan screen may show a camera behind the boxes | Decided |
+| [0303](0303-the-switches-live-boxes-keeps-off.md) | two things live boxes keeps in the code and leaves off | Decided |

@@ -1,7 +1,7 @@
 # 0072 — iOS app design locked; LiDAR-only client pivot
 
 **Date:** 2026-07-24
-**Status:** Decided
+**Status:** Amended by 0302 — the Scan screen may show a camera while live boxes are on; the rest stands
 
 ## Context
 

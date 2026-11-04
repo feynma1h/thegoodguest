@@ -1,7 +1,7 @@
 # 0077 — RoomPlan integration: CapturedRoom as room + object skeleton, JSON verbatim on the wire, boxes carry placement
 
 **Date:** 2026-07-28
-**Status:** Decided and SHIPPED — the wire, server, co-run, floor plan, and
+**Status:** Amended by 0302 — the live floor plan is hidden while the Scan screen shows a camera; the rest stands. Was: Decided and SHIPPED — the wire, server, co-run, floor plan, and
 live drive all merged and deployed by 2026-08-06 (`perception-obj-00036-xer`).
 The code is `roomplan_room.py`, `shell_envelope.py`, `box_placement.py`, and
 `census_sampling.py` in perception-obj, plus the RoomPlan co-run and live floor
