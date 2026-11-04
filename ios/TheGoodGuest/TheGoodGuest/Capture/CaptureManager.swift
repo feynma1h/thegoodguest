@@ -267,15 +267,9 @@ final class CaptureManager: NSObject, ObservableObject {
             lum.census.reset()
         }
 
-        let config = ARWorldTrackingConfiguration()
-        config.worldAlignment = .gravity
-        // Plane detection on every tier (decision 0066): ARKit measures
-        // floors and walls on all devices; the final anchor set is read at
-        // stopCapture() and shipped in the bundle as plane_anchors.
-        config.planeDetection = [.horizontal, .vertical]
-        if hasLidar, ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
-            config.frameSemantics.insert(.sceneDepth)
-        }
+        // The final plane-anchor set is read at stopCapture() and shipped in
+        // the bundle as plane_anchors (decision 0066).
+        let config = CaptureSessionSetup.worldTrackingConfiguration(hasLidar: hasLidar)
         // Production config FIRST, with reset — RoomPlan never resets tracking,
         // so this run is the session's tracking hygiene (0076 Q3).
         arSession.run(config, options: [.resetTracking, .removeExistingAnchors])
@@ -283,10 +277,7 @@ final class CaptureManager: NSObject, ObservableObject {
         // Attach the RoomPlan co-run to the SAME session (0076: its native
         // config is a superset of ours; depth and the keyframe path survive).
         // Not supported (non-LiDAR, simulator) → plain LIDAR_ARKIT/ARKIT_ONLY.
-        if hasLidar, RoomCaptureSession.isSupported {
-            let cs = RoomCaptureSession(arSession: arSession)
-            cs.delegate = self
-            cs.run(configuration: RoomCaptureSession.Configuration())
+        if let cs = CaptureSessionSetup.attachRoomPlan(to: arSession, hasLidar: hasLidar, delegate: self) {
             roomCaptureSession = cs
             // Attach-time observability (the spike's config instrument, kept):
             // the frame-semantics raw value says whether .sceneDepth (bit 8)
@@ -816,18 +807,14 @@ extension CaptureManager: ARSessionDelegate {
     /// re-run with no options — the scan continues through it and the room
     /// still builds (spike Q1's re-assert probe, verbatim).
     private func reassertSceneDepth() {
-        guard let cfg = arSession.configuration else {
+        switch CaptureSessionSetup.reassertSceneDepth(on: arSession) {
+        case .failure(.noInstalledConfiguration):
             logger.info("[CaptureManager] depth re-assert skipped: no installed configuration")
-            return
-        }
-        guard type(of: cfg).supportsFrameSemantics(.sceneDepth) else {
+        case .failure(.configurationLacksSceneDepth):
             logger.info("[CaptureManager] depth re-assert skipped: config class lacks sceneDepth support")
-            return
+        case .success(let semantics):
+            logger.info("[CaptureManager] sceneDepth re-asserted after \(self.depthlessFrameCount, privacy: .public) depthless frames (fs \(semantics.before, privacy: .public) → \(semantics.after, privacy: .public))")
         }
-        let before = cfg.frameSemantics.rawValue
-        cfg.frameSemantics.insert(.sceneDepth)
-        arSession.run(cfg, options: [])
-        logger.info("[CaptureManager] sceneDepth re-asserted after \(self.depthlessFrameCount, privacy: .public) depthless frames (fs \(before, privacy: .public) → \(cfg.frameSemantics.rawValue, privacy: .public))")
     }
 
     nonisolated func session(
