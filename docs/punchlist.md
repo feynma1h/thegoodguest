@@ -127,6 +127,11 @@ count (0114) has no remedy.
 
 ---
 
+### G2-06 · The privacy text for the furniture step is ahead of the deployed site
+**State:** open · **Blocks:** deploying the web app before the scene-finish pipeline is live
+`web/src/app/privacy/page.tsx` §5c and §6 describe the furniture step (decision 0360), which is built and not deployed. Deploying the web app first would make the live Privacy Policy describe something that does not run yet. Deploy the web app and the pipeline together, or not the web app.
+**Check:** manual — whoever deploys the web.
+
 ## Gate 3 — what users are told must be true
 
 ### G3-01 · The Privacy Policy overstates upload-bookkeeping retention
@@ -161,6 +166,11 @@ for any hosted share link: revoking a share and deleting a room are one mechanis
 seen from two angles, so a link shipped first would outlive every means of
 stopping it.
 **Check:** automated — a per-room delete route must exist in `public_server.py`.
+
+### G3-05 · Zero data retention with Anthropic is not requested
+**State:** open · **Blocks:** nothing today; strengthens what the Privacy Policy can say
+Photographs of rooms go to Anthropic's API in three places (`privacy-nutrition-labels.md` §4a, §4f; text only in §4b). By default Anthropic does not retain API content, except for "Covered Models", which the code refuses (decision 0360). Zero data retention is available by arrangement with the Anthropic account representative and has not been requested. The operator ruled on 2026-11-05 to ask later.
+**Check:** manual — operator, with the Anthropic account representative. Also confirm the organisation's retention setting in the Console.
 
 ### G3-04 · Terms §9–§11 need an Indian lawyer
 **State:** open

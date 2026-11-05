@@ -164,10 +164,11 @@ export default function PrivacyPage() {
       </Section>
 
       {/* Source: services/perception-obj/shell_material.py (0069/0089),
+          services/scene-finish/claude_layer/ (0352/0360),
           services/api-public/{scene_facts,guest_prompt}.py (0058/0059/0096) */}
       <Section n="5" title="What leaves the system, and to whom">
         <p>
-          Two things go to a third party beyond our cloud provider. Both go to{" "}
+          Three things go to a third party beyond our cloud provider. All go to{" "}
           <strong>Anthropic</strong>, and they send very different amounts of
           your room, so we describe them separately.
         </p>
@@ -190,6 +191,20 @@ export default function PrivacyPage() {
           in the room (“bed”, “desk”, “two
           chairs”), approximate distances and sizes, and the messages you
           type. No image, depth map, or coordinate ever enters that request.
+        </p>
+        <p>
+          <strong>c. Drawing your room’s furniture.</strong> For each object
+          you box while scanning, we send close-up crops of it (at most six per
+          request, none larger than 768 pixels on a side) to Anthropic’s API,
+          along with our own picture of the model we are building, and get back
+          a description of the object’s shape and colours. We also send
+          flattened views of your walls and floor, assembled from many
+          photographs. People detected in a photograph are blacked out first,
+          and a photograph we could not check is never sent. Altogether this
+          can be several hundred small images per room. Nothing in these
+          requests names you, your device or your scan. When this step ends we
+          delete every image it used; we keep the finished descriptions, which
+          hold shapes and colours but no pictures.
         </p>
         <p>
           We do not sell your data, we do not share it with advertisers, and we
@@ -219,6 +234,11 @@ export default function PrivacyPage() {
             A storage lifecycle rule enforces this; it is not a policy we have
             to remember to apply. This is the single most important retention
             fact on this page.
+          </li>
+          <li>
+            <strong>The working images from the furniture step (§5c)</strong>{" "}
+            are deleted when that step ends. The descriptions it produces stay
+            with your room.
           </li>
           <li>
             <strong>The room we build from it is kept until you delete it</strong>{" "}
@@ -294,7 +314,7 @@ export default function PrivacyPage() {
           <strong>excludes them</strong> from the room it builds. A detected
           person is never reconstructed as an object, never named in the
           inventory, never used as evidence of what a wall or floor looks like,
-          and is disqualified from the crops described in §5a. In testing, a
+          and is disqualified from the crops described in §5a and §5c. In testing, a
           third of one wall’s measured colour turned out to be a person
           standing in front of it; that measurement is now excluded.
         </p>

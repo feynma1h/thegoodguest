@@ -314,9 +314,10 @@ belong in the operator's head when they file:
 
 ## 4. What is sent to a model, and to whom
 
-Two calls go to a third party beyond the cloud provider. Both go to
+Three calls go to a third party beyond the cloud provider. All go to
 **Anthropic**. **They are different disclosures and must not be collapsed into
-one** — one sends pictures of the home, the other sends words about it.
+one** — two send pictures of the home (§4a, §4f), the other sends words about it
+(§4b).
 
 ### 4a. Material inference — the one that must be named
 
@@ -385,10 +386,11 @@ image block.
 ### 4c. What runs on our own hardware, and does not leave
 
 Worth recording because it is the natural next question and the answer is good:
-**SAM 3 segmentation and SAM 3D reconstruction run inside our own container on
-our own GPU.** They are not API calls. The room's photographs are read by our
-service in `asia-southeast1` and are not transmitted to a model vendor — with
-the single, bounded exception of §4a's crops.
+**SAM 3 segmentation runs inside our own container on our own GPU** (SAM 3D
+reconstruction was removed from `/process` on 2026-11-05, decision 0322). It is
+not an API call. The room's photographs are read by our services in
+`asia-southeast1` and are not transmitted to a model vendor — with the two
+bounded exceptions of §4a's crops and §4f's crops.
 
 ### 4d. The calling card sends nothing
 
@@ -410,6 +412,38 @@ them under its own published terms, and confirm those terms before submitting.
 Same for Google Cloud's DPA covering the buckets and Firestore — asserted in the
 Privacy Policy, not verifiable here.
 
+### 4f. Furniture models — pictures of objects in the room
+
+**Added 2026-11-05 from the code on `main` (`ec7a2d47` and the commit after it).
+Not yet verified against a live revision: the service is built and not deployed.**
+The operator ruled these limits on 2026-11-05 (decision 0360).
+
+| | |
+|---|---|
+| Where | `services/scene-finish/claude_layer/` — every request is built by `images.py` and checked by `client.check_privacy` |
+| Models | `claude-sonnet-5-5` or `claude-opus-5-5` only (`constants.ALLOWED_MODELS`); anything else is refused at startup and on every request. Sonnet 5.5 is the default for both stages |
+| Vendor | Anthropic, via the `anthropic` Python SDK |
+| Armed in production? | **No** — not deployed |
+| What is sent, furniture pass | For one boxed object: its size and category, the ids and categories of the other boxed pieces, **at most 6 person-masked photo crops** cut around the object (12% margin, long side **≤ 768 px**), and our own renders of the model being built |
+| What is sent, wall and floor pass | Up to 8 rectified wall/floor **atlases** (a median over frames, so furniture and people mostly drop out) and patches cut from them around doors and windows, long side ≤ 1024 px. **Never a camera frame** |
+| What comes back | A JSON description in a closed vocabulary (shapes, sizes, colours; wall and floor hints) — no pixels |
+| How often | One request chain per boxed object plus one for the finish: about 90 requests for a typical room (design estimate, not measured); **several hundred small images per room** in total |
+| What is not in the request | No user, device or scene identifier, no location, no depth, no poses or world coordinates, no other rooms |
+| Person handling | Person pixels are blacked out **before** a crop is shrunk; a crop more than 35% person is dropped; **a frame whose person mask is unknown is never used** (fails closed) |
+| Spend | A per-scan ceiling (`FINISH_MAX_USD`) is checked before every call |
+| Retention on our side | Every image the step derives lives in a temporary workspace deleted when the task ends, however it ends. The descriptions (JSON, no pixels) are kept with the room. The capture photographs keep the 1-day rule (§5) |
+
+**Limits worth stating.** The person mask misses anything SAM 3 did not label
+(screens, documents, photographs of people on walls). The 768 px cap limits how
+legible small text is; it is not a guarantee.
+
+**Anthropic's side.** See §4e. As of 2026-11-05, Anthropic's API documentation
+says conversation content is not retained by default except for its "Covered
+Models" (Claude Fable 5.1, Mythos 5.1, Fable 5, Mythos 5), which require 30-day
+retention and are not available under zero data retention. The two allowed
+models are not on that list, which is why the list is pinned in code. **Zero data
+retention has not been requested** (punchlist G3-05).
+
 ---
 
 ## 5. Retention, verified against live config
@@ -421,6 +455,8 @@ setup script.
 |---|---|---|---|
 | **Raw capture** — every JPEG frame, depth and confidence raster, RoomPlan JSON/USDZ, `bundle.pb` | `gs://thegoodguest-captures/captures/` | **Delete at age 1 day** | LIVE: the bucket's only lifecycle rule is `Delete` / `age: 1` / `matchesPrefix: ["captures/"]` |
 | **The room** — manifest, shell, per-object splats | `gs://thegoodguest-perception-outputs/scenes/` | **No age rule.** Kept until the user deletes it | LIVE: the outputs bucket's only rule is the masks rule below |
+| **Furniture-step working images** — crops, renders, atlases | the `scene-finish` task's temporary workspace | **Deleted when the task ends**, however it ends (not yet deployed) | Code: `workspace.py`, decision 0352 |
+| **Furniture descriptions** — JSON, no pixels | `gs://…-perception-outputs/scenes/` | Kept until the user deletes the room (not yet deployed) | Code |
 | **Segmentation intermediates** — `masks.npz`, including the person silhouette union | same bucket | **Delete at age 180 days** | LIVE: `Delete` / `age: 180` / prefix `scenes/` / suffix `/masks.npz` |
 | **Failed scenes** | Firestore `scenes` | TTL on `expire_at`; api-internal stamps terminal failures at 90 days, clears on revival, never stamps `ready` | LIVE: `ttlConfig.state = ACTIVE` |
 | **Upload bookkeeping** | Firestore `upload_sessions` | TTL on `created_at` → **swept promptly, not after 7 days** | LIVE: `ttlConfig.state = ACTIVE`; see F1 |
@@ -768,9 +804,11 @@ change and how to check it in one command.
 
 **Re-check whenever any of these changes.**
 
-7. **A new model call, or a change to what §4a sends.**
-   `grep -rn "anthropic" services/` — two call sites today. A third is a new
-   disclosure. Widening the crops (`SHELL_EVIDENCE_MAX_CROPS`,
+7. **A new model call, or a change to what §4a or §4f sends.**
+   `grep -rn "anthropic" services/` — three call sites today (§4a, §4b, §4f). A
+   fourth is a new disclosure; widening `PHOTO_CROPS_PER_REQUEST`,
+   `PHOTO_CROP_MAX_SIDE_PX` or `ALLOWED_MODELS` changes how much of a home is
+   sent or to whom. Widening the crops (`SHELL_EVIDENCE_MAX_CROPS`,
    `SHELL_EVIDENCE_CROP_M`) changes how much of a home is transmitted, and
    `SHELL_MATERIAL_MODEL` changes to whom.
 8. **Any new per-user Firestore collection or GCS prefix.** It must land in
