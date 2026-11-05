@@ -1,6 +1,6 @@
 # Decision notes
 
-304 notes. **255 of them are `Decided`** -- those govern code that
+310 notes. **261 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
 other 49 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
@@ -21,7 +21,7 @@ The status vocabulary and the numbering rule live in
 | `Superseded` | 8 | replaced by a later note |
 | `Amended` | 9 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
-| `Decided` | 255 | governs code that ships today |
+| `Decided` | 261 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -100,7 +100,7 @@ The status vocabulary and the numbering rule live in
 | [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (255)
+## Decided (261)
 
 | # | title | status |
 |---|---|---|
@@ -346,6 +346,12 @@ The status vocabulary and the numbering rule live in
 | [0311](0311-furniture-twins-are-placed-from-boxes-by-rules-that-record-their-fixes.md) | furniture twins are placed from boxes by rules that record their fixes | Decided |
 | [0312](0312-the-furniture-twin-room-has-a-day-and-a-night.md) | the furniture twin room has a day and a night | Decided |
 | [0313](0313-finish-and-furniture-are-separate-optional-files-beside-the-shell.md) | finish and furniture are separate optional files beside the shell | Decided |
+| [0320](0320-the-boxes-the-person-made-ride-in-the-capture-bundle.md) | the boxes the person made ride in the capture bundle | Decided |
+| [0321](0321-the-phone-writes-the-boxes-it-kept-when-the-capture-stops.md) | the phone writes the boxes it kept when the capture stops | Decided |
+| [0322](0322-process-writes-the-persons-boxes-and-picks-frames-by-them.md) | /process writes the person's boxes and picks frames by them | Decided |
+| [0323](0323-no-object-is-reconstructed-the-boxes-are-the-objects.md) | no object is reconstructed: the boxes are the objects | Decided |
+| [0324](0324-readers-of-object-splats-tolerate-a-scan-with-none.md) | readers of object splats tolerate a scan with none | Decided |
+| [0325](0325-what-the-persons-boxes-reveal-and-where-they-live.md) | what the person's boxes reveal, and where they live | Decided |
 | [0330](0330-the-room-look-code-is-an-importable-package-the-tools-wrap.md) | the room-look code is an importable package; the tools wrap it | Decided |
 | [0331](0331-the-finish-is-checked-against-headless-renders-with-software-gl.md) | the finish is checked against headless renders made with software GL | Decided |
 | [0332](0332-scene-finish-is-its-own-cpu-service-with-gate-numbers-from-the-renderer.md) | scene-finish is its own CPU service, with gate numbers taken from its renderer | Decided |
