@@ -364,6 +364,10 @@ function makeGroundTexture(): HTMLCanvasElement {
   return canvas;
 }
 
+/** The canvas fades in over this long once the room is up. */
+const CANVAS_FADE_MS = 900;
+/** Frames drawn with nothing still moving before `__shellFinishView.ready`. */
+const SETTLED_FRAMES = 3;
 const GROUND_SIZE = 16; // meters; also the grid line count (1m spacing)
 
 /* Reveal look (decision 0097; all timing lives in lib/reveal). The contour
@@ -522,7 +526,7 @@ export default function SplatViewer({
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, dressShell ? 1.5 : 2));
         renderer.setSize(container.clientWidth, container.clientHeight);
         renderer.domElement.style.opacity = "0";
-        renderer.domElement.style.transition = "opacity 900ms ease";
+        renderer.domElement.style.transition = `opacity ${CANVAS_FADE_MS}ms ease`;
         renderer.domElement.style.cursor = "grab";
         container.appendChild(renderer.domElement);
 
@@ -825,8 +829,14 @@ export default function SplatViewer({
         // Local-only (finish flag): expose the live view so a comparison
         // harness can pose the camera exactly where a real frame was taken
         // (tools/finish_compare). Absent in production builds.
+        // `ready` flips to true once the view has stopped changing by itself
+        // (entrance dolly, staging transition and the canvas fade all done, a
+        // few frames drawn since). A headless driver waits for it before its
+        // first measured render: before that, the id pass can still catch a
+        // surface mid-transition.
+        const finishView: { ready: boolean } | null = finishMods ? { ready: false } : null;
         if (finishMods) {
-          (window as unknown as { __shellFinishView?: unknown }).__shellFinishView = {
+          (window as unknown as { __shellFinishView?: unknown }).__shellFinishView = Object.assign(finishView!, {
             furniture: furn,
             camera,
             controls,
@@ -836,7 +846,7 @@ export default function SplatViewer({
               finishCtl?.update(c);
               furn?.update(c);
             }),
-          };
+          });
         }
         controls.enableDamping = true;
         controls.dampingFactor = 0.08;
@@ -1145,6 +1155,7 @@ export default function SplatViewer({
         camera.position.copy(target).add(fromOffset);
 
         let raf = 0;
+        let settledFrames = 0;
         let lastDirty = performance.now();
         let lastDrawn = 0;
         const renderLoop = () => {
@@ -1240,8 +1251,9 @@ export default function SplatViewer({
           // Local finish: draw on demand. Idle (no camera motion for 0.8 s)
           // drops to a 2 fps heartbeat so splat sorting can settle without
           // keeping the GPU pinned.
+          let rigMoving = false;
           if (finishCtl) {
-            finishCtl.tick(now);
+            rigMoving = finishCtl.tick(now);
             if (now - lastDirty > 800 && now - lastDrawn < 500) return;
             lastDrawn = now;
           }
@@ -1249,6 +1261,15 @@ export default function SplatViewer({
           finishCtl?.update(camera);
           furn?.update(camera);
           renderer.render(scene, camera);
+          if (finishView && !finishView.ready) {
+            const still =
+              entranceStart === null &&
+              !rigMoving &&
+              revealDoneFired &&
+              now - revealT0 >= CANVAS_FADE_MS;
+            settledFrames = still ? settledFrames + 1 : 0;
+            if (settledFrames >= SETTLED_FRAMES) finishView.ready = true;
+          }
         };
         renderLoop();
 
