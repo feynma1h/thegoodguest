@@ -285,6 +285,14 @@ class TestDerivation:
         assert g.walls == () and g.floor_polygon == () and g.floor_y is None
         assert len(g.objects) == len(doc["manifest"]["objects"])
 
+    def test_a_scene_with_no_objects_keeps_its_walls_and_floor(self):
+        """Scans made after decision 0323 reconstruct nothing: an empty objects
+        array leaves the shell's geometry intact and the solver with no pieces."""
+        doc = _assets("scene-spike-a7e073ae")
+        g = derive_room_geometry({**doc["manifest"], "objects": []}, doc["shell"])
+        assert g.objects == ()
+        assert len(g.walls) == 13 and len(g.floor_polygon) == 10
+
     def test_unavailable_shell_is_not_read(self):
         doc = _assets("scene-spike-a7e073ae")
         g = derive_room_geometry(

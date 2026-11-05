@@ -236,6 +236,22 @@ class TestAssetsHappyPath:
         assert resp.status_code == 200
         assert resp.json()["asset_urls"] == {}
 
+    def test_a_scene_with_no_objects_is_a_room_with_nothing_to_sign(self, client) -> None:
+        """Scans made after decision 0323 reconstruct nothing: the manifest's
+        objects array is empty, and the response is a normal 200 with no
+        object URLs and no signing."""
+        manifest = _manifest(objects=[])
+        manifest["frames"] = [{"frame_index": 0, "masks_gcs_uri": "gs://outputs/m.npz", "mask_count": 2}]
+        signer = FakeSigner()
+        resp = _get_assets(
+            client, _scene(), manifest_bytes=json.dumps(manifest).encode(), signer=signer
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["manifest"]["objects"] == []
+        assert body["asset_urls"] == {} and body["asset_urls_compressed"] == {}
+        assert signer.calls == []
+
 
 class TestAssetsPlacedOnlySigning:
     """The placed-only filter (decision 0124; its trigger fired when the

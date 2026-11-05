@@ -292,6 +292,8 @@ echo "=== (5) Perception-outputs lifecycle: masks.npz intermediates, 180d (gap F
 
 # Deliberately NARROW (decision 0086). Under scenes/{scene_id}/ live:
 #   manifest.json, shell.json          — served product (assets endpoint)
+#   boxes.json                         — the person's boxes, written by /process
+#                                        (decision 0322); never age-deleted
 #   frames/*/splats/*.ply (+ .layout.json sidecars)
 #                                      — the fused objects the viewer renders,
 #                                        plus their rotation sidecars
