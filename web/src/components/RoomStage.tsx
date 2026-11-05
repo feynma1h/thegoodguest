@@ -220,7 +220,11 @@ export default function RoomStage({
     }
   }, [sceneId, refreshSpec]);
 
-  const placed = assets.phase === "ready" ? assets.splats.length : 0;
+  // The guest's words and counts are about the pieces on screen: the twins
+  // when the room is drawn from them, else the scan's placed objects.
+  const scanned = assets.phase === "ready" ? assets.splats.length : 0;
+  const placed =
+    assets.phase === "ready" && assets.furniture ? assets.furniture.objects.length : scanned;
   const seen = assets.phase === "ready" ? assets.unrenderable.length : 0;
   const hasShell = assets.phase === "ready" && (assets.shell?.length ?? 0) > 0;
   const changed = arrangementNote(proposed.applied);
@@ -368,9 +372,9 @@ export default function RoomStage({
             </div>
           </div>
 
-          {assets.phase === "ready" && placed + seen > 0 && (
+          {assets.phase === "ready" && scanned + seen > 0 && (
             <div className="pointer-events-auto absolute bottom-7 left-6 hidden w-60 rounded-xl bg-paper/95 p-4 shadow-float lg:block">
-              <Eyebrow>In this room — {placed + seen}</Eyebrow>
+              <Eyebrow>In this room — {scanned + seen}</Eyebrow>
               <ul className="mt-2.5 max-h-[34vh] space-y-1.5 overflow-y-auto">
                 {proposed.splats.map((s, i) => {
                   // State reads as words, not a badge (0057 deleted
