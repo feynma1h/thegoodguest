@@ -31,7 +31,6 @@ import pytest
 sys.modules.setdefault("torch", MagicMock())
 sys.modules.setdefault("models", MagicMock())
 sys.modules.setdefault("models.sam3", MagicMock())
-sys.modules.setdefault("models.sam3d", MagicMock())
 
 import privacy  # noqa: E402
 import process_receiver  # noqa: E402
@@ -194,50 +193,6 @@ class _FakeSam3:
         ]
 
 
-_MINI_PLY = (
-    "ply\nformat ascii 1.0\nelement vertex 8\n"
-    "property float x\nproperty float y\nproperty float z\nend_header\n"
-    "0 0 0\n1 0 0\n0 1 0\n0 0 1\n1 1 0\n1 0 1\n0 1 1\n1 1 1\n"
-)
-
-
-class _FakeTensor:
-    def __init__(self, value):
-        self._v = np.asarray(value, dtype=np.float64)
-
-    def detach(self):
-        return self
-
-    def cpu(self):
-        return self
-
-    def numpy(self):
-        return self._v
-
-
-class _FakeGS:
-    def save_ply(self, path):
-        from pathlib import Path
-
-        Path(path).write_text(_MINI_PLY)
-
-
-class _RecordingSam3D:
-    """Records every mask handed to SAM 3D — the surface the pin watches."""
-
-    def __init__(self):
-        self.masks: list[np.ndarray] = []
-
-    def reconstruct(self, pil, mask, seed=42):
-        self.masks.append(np.asarray(mask, dtype=bool))
-        return {
-            "rotation": _FakeTensor([1.0, 0.0, 0.0, 0.0]),
-            "translation": _FakeTensor([0.0, 0.0, 1.0]),
-            "scale": _FakeTensor([1.0, 1.0, 1.0]),
-            "gs": _FakeGS(),
-        }
-
-
 class _FakeGcs:
     def __init__(self):
         self.blobs: dict[str, bytes] = {}
@@ -259,7 +214,7 @@ class _FakeGcs:
 
 
 class TestPersonNeverShips:
-    def _run_frame(self, sam3d):
+    def _run_frame(self):
         gcs = _FakeGcs()
         sam3 = _FakeSam3()
         with patch.object(process_receiver, "_download_gcs_uri", gcs.download), \
@@ -268,44 +223,44 @@ class TestPersonNeverShips:
             result = process_receiver._process_frame(
                 scene_id="scene-priv", frame_idx=0,
                 rgb_gcs_uri="gs://captures/x/frames/000000.jpg",
-                outputs_bucket="out", sam3_model=sam3, sam3d_model=sam3d,
+                outputs_bucket="out", sam3_model=sam3,
                 object_prompt="bed,rug",
             )
         return result, gcs, sam3
 
-    def test_sam3d_never_receives_a_suppressed_mask(self):
-        """The load-bearing pin: a person is segmented but never reconstructed."""
-        sam3d = _RecordingSam3D()
-
-        result, _gcs, sam3 = self._run_frame(sam3d)
+    def test_the_person_is_looked_for_but_never_kept(self):
+        """The load-bearing pin: a person is segmented, and what is kept (the
+        masks the shell reads, the frame entry) is only the furniture."""
+        result, gcs, sam3 = self._run_frame()
 
         assert "person" in sam3.prompts[0]  # it WAS looked for
-        assert len(sam3d.masks) == 2  # bed + rug only
-        person = _mask(rows=slice(3, 5))
-        assert not any(np.array_equal(m, person) for m in sam3d.masks)
-        assert [o["label"] for o in result["objects"]] == ["bed", "rug"]
+        assert result["mask_count"] == 2  # bed + rug only
+        raw = gcs.blobs["out/scenes/scene-priv/frames/0000/masks.npz"]
+        with np.load(io.BytesIO(raw)) as npz:
+            person = _mask(rows=slice(3, 5))
+            assert not any(np.array_equal(m, person) for m in npz["masks"])
 
     def test_no_suppressed_label_appears_anywhere_in_the_frame_outputs(self):
         """Scanned as text, not by field: a label leaking into ANY key —
         provenance, reasons, debug — is a leak into the manifest and from
         there into scene_facts."""
-        result, gcs, _sam3 = self._run_frame(_RecordingSam3D())
+        result, gcs, _sam3 = self._run_frame()
 
         assert "person" not in json.dumps(result).lower()
         cached = gcs.blobs["out/scenes/scene-priv/frames/0000/objects.json"]
         assert b"person" not in cached.lower()
 
     def test_masks_npz_carries_the_kept_stack_and_the_suppressed_union(self):
-        """Alignment pin: masks[i] must be the mask of objects[i] (fusion
-        reads it by detection order), with the person off to the side."""
-        result, gcs, _sam3 = self._run_frame(_RecordingSam3D())
+        """The kept stack holds the furniture in detection order, with the
+        person off to the side in the suppressed union."""
+        result, gcs, _sam3 = self._run_frame()
 
         raw = gcs.blobs["out/scenes/scene-priv/frames/0000/masks.npz"]
         with np.load(io.BytesIO(raw)) as npz:
             masks = npz["masks"]
             union = read_suppressed(npz)
 
-        assert masks.shape[0] == len(result["objects"]) == 2
+        assert masks.shape[0] == result["mask_count"] == 2
         assert np.array_equal(masks[0], _mask(rows=slice(0, 2)))  # bed
         assert np.array_equal(masks[1], _mask(rows=slice(6, 8)))  # rug
         assert np.array_equal(union, _mask(rows=slice(3, 5)))  # person

@@ -1,8 +1,8 @@
 """
 perception-obj server.
 
-Runs SAM 3 (open-vocabulary segmentation) and SAM 3D Objects (per-object Gaussian
-splat reconstruction). Endpoints:
+Runs SAM 3 (open-vocabulary segmentation) and the SAM 3.1 tracker. It no longer
+reconstructs objects (decision 0323). Endpoints:
 
   GET  /health    — Startup probe target. Always 200 as soon as uvicorn is up.
                     No model interaction. Fast timeout is intentional.
@@ -10,7 +10,8 @@ splat reconstruction). Endpoints:
                     loading / loaded / failed. Intended for Cloud Tasks to poll
                     before sending work (or for debugging cold-start timing).
   POST /process   — Cloud Tasks receiver. Accepts {scene_id, bundle_uri}, runs
-                    the full pipeline, updates Firestore Scene state, fires FCM.
+                    SAM 3 over the selected frames, writes boxes.json and the
+                    manifest, updates Firestore Scene state, fires FCM.
                     See process_receiver.py and docs/decisions/0004.
   POST /shell     — Cloud Tasks receiver, second stage (decision 0066).
                     Bakes the room shell from plane anchors + cached masks.
@@ -58,8 +59,8 @@ from segment_receiver import SegmentRequest  # noqa: E402  (same 0010 rule for /
 from shell_receiver import ShellRequest  # noqa: E402  (same 0010 rule for /shell)
 from track_receiver import TrackRequest  # noqa: E402  (same 0010 rule for /track)
 
-# Model classes are NOT imported at module level. Importing models.sam3 or
-# models.sam3d would immediately run the SAM 3 / SAM 3D CUDA initialisation
+# Model classes are NOT imported at module level. Importing models.sam3 would
+# immediately run the SAM 3 CUDA initialisation
 # (hundreds of seconds), blocking uvicorn from binding before the startup
 # probe fires. Imports are deferred to the accessor functions below so that
 # the process survives the startup probe and pays the load cost on first use.
@@ -103,23 +104,19 @@ COMPRESS_REQUEST_BUDGET_SECONDS = float(
 # -----------------------------------------------------------------------------
 # Lazy model registry
 # -----------------------------------------------------------------------------
-# Models are None until first use. Accessors (get_sam3 / get_sam3d) load on
+# Models are None until first use. Accessors (get_sam3) load on
 # demand with double-checked locking. Cloud Run runs concurrency=1, so the
 # pre-lock error/instance checks cannot race with a concurrent in-flight load;
 # the locking is defensive for the day concurrency is raised.
 # See docs/decisions/0007.
 
 _sam3 = None  # SAM3Model instance or None
-_sam3d = None  # SAM3DModel instance or None
 _sam3_video = None  # SAM3VideoModel instance or None (SAM 3.1 tracker, /track only)
 _sam3_error: str | None = None
-_sam3d_error: str | None = None
 _sam3_video_error: str | None = None
 _sam3_loading: bool = False
-_sam3d_loading: bool = False
 _sam3_video_loading: bool = False
 _sam3_lock = threading.Lock()
-_sam3d_lock = threading.Lock()
 _sam3_video_lock = threading.Lock()
 
 
@@ -157,43 +154,6 @@ def get_sam3():
         finally:
             _sam3_loading = False
     return _sam3
-
-
-def get_sam3d():
-    """Return the SAM3DModel singleton, loading it on first call.
-
-    Raises HTTPException(500) on load failure (cached — won't retry a broken
-    model). Blocks the calling thread while loading (~95s on first cold call,
-    including DINOv2 init from baked TORCH_HOME cache); call via
-    asyncio.to_thread from async handlers so the event loop stays responsive.
-    The pre-lock fast paths are race-free under concurrency=1; the
-    double-checked locking keeps them correct if concurrency is raised.
-    """
-    global _sam3d, _sam3d_error, _sam3d_loading
-    # Pre-lock fast paths — safe under concurrency=1.
-    if _sam3d_error is not None:
-        raise HTTPException(status_code=500, detail=f"SAM 3D failed to load: {_sam3d_error}")
-    if _sam3d is not None:
-        return _sam3d
-    with _sam3d_lock:
-        if _sam3d is not None:
-            return _sam3d
-        if _sam3d_error is not None:
-            raise HTTPException(status_code=500, detail=f"SAM 3D failed to load: {_sam3d_error}")
-        _sam3d_loading = True
-        try:
-            from models.sam3d import SAM3DModel  # noqa: PLC0415
-            logger.info("[model] Loading SAM 3D Objects...")
-            t = time.time()
-            _sam3d = SAM3DModel()
-            logger.info("[model] SAM 3D loaded in %.1fs", time.time() - t)
-        except Exception as e:
-            _sam3d_error = f"{type(e).__name__}: {e}"
-            logger.error("[model] SAM 3D FAILED: %s", _sam3d_error)
-            raise HTTPException(status_code=500, detail=f"SAM 3D failed to load: {_sam3d_error}")
-        finally:
-            _sam3d_loading = False
-    return _sam3d
 
 
 def get_sam3_video():
@@ -385,8 +345,8 @@ def ready() -> JSONResponse:
 
     status values: not_loaded | loading | loaded | failed
 
-    Returns 200 when both models are loaded, 503 while loading or not yet
-    triggered, 500 if either model failed. Intended for observability and for
+    Returns 200 when SAM 3 is loaded, 503 while loading or not yet
+    triggered, 500 if it failed. Intended for observability and for
     clients that want to know whether the next /process call will block.
     """
     def _model_status(instance, error, loading) -> str:
@@ -399,11 +359,10 @@ def ready() -> JSONResponse:
         return "not_loaded"
 
     sam3_status = _model_status(_sam3, _sam3_error, _sam3_loading)
-    sam3d_status = _model_status(_sam3d, _sam3d_error, _sam3d_loading)
     # Reported but NOT part of the 200/503 decision. The SAM 3.1 tracker is
     # loaded only by /track, so a container that has served the pipeline should
     # read not_loaded here, and a /track container should read not_loaded for
-    # sam3d. Folding it into readiness would make one route's cold start look
+    # sam3. Folding it into readiness would make one route's cold start look
     # like the service being unhealthy.
     sam3_video_status = _model_status(
         _sam3_video, _sam3_video_error, _sam3_video_loading
@@ -411,19 +370,16 @@ def ready() -> JSONResponse:
 
     body: dict[str, Any] = {
         "sam3": sam3_status,
-        "sam3d": sam3d_status,
         "sam3_video": sam3_video_status,
     }
     if _sam3_error:
         body["sam3_error"] = _sam3_error
-    if _sam3d_error:
-        body["sam3d_error"] = _sam3d_error
     if _sam3_video_error:
         body["sam3_video_error"] = _sam3_video_error
 
-    if sam3_status == "failed" or sam3d_status == "failed":
+    if sam3_status == "failed":
         return JSONResponse(body, status_code=500)
-    if sam3_status == "loaded" and sam3d_status == "loaded":
+    if sam3_status == "loaded":
         return JSONResponse(body, status_code=200)
     return JSONResponse(body, status_code=503)
 
@@ -450,8 +406,8 @@ async def process(
     """Cloud Tasks perception receiver.
 
     Accepts {scene_id, bundle_uri}, claims the scene atomically (with
-    lease-TTL crash recovery), runs SAM 3 + SAM 3D Objects on all frames,
-    writes outputs to GCS, and updates Scene state in Firestore.
+    lease-TTL crash recovery), runs SAM 3 on the selected frames,
+    writes boxes.json and the masks to GCS, and updates Scene state in Firestore.
 
     Cloud Run config: concurrency=1, request-timeout=900s
     (infra/deploy_perception.sh). The dispatching side sets a Cloud Tasks
@@ -467,12 +423,11 @@ async def process(
     # minutes of the same request window, and the budget must know that.
     deadline = time.monotonic() + PROCESS_REQUEST_BUDGET_SECONDS
 
-    # Accessors load models on first call (~195s combined on a cold container);
+    # Accessors load models on first call (~100s on a cold container);
     # run them off the event-loop thread so /health and /ready stay responsive
     # during the load. The accessors' locking already serializes concurrent
     # loads. Raises 500 (HTTPException) on cached load failure.
     sam3_model = await asyncio.to_thread(get_sam3)
-    sam3d_model = await asyncio.to_thread(get_sam3d)
 
     return await handle_process(
         request,
@@ -482,7 +437,6 @@ async def process(
         fcm_notifier=_get_fcm_notifier(),
         outputs_bucket=PERCEPTION_OUTPUTS_BUCKET,
         sam3_model=sam3_model,
-        sam3d_model=sam3d_model,
         object_prompt=DEFAULT_OBJECT_PROMPT,
         deadline=deadline,
     )
@@ -540,13 +494,10 @@ async def segment(
     """Run pass 1 only on an explicit frame list and return what SAM 3 saw.
 
     Exists because the cheap half of "would another frame reconstruct better"
-    is answerable without reconstructing: the mask IS SAM 3D's input, so a
-    truncated mask settles it for ~4s of GPU instead of ~25s an object.
-    /process cannot answer it — its payload names no frames and it always
-    reconstructs.
+    is answerable cheaply: it names the frames to segment, which /process
+    cannot (its payload names none).
 
-    Loads SAM 3 ONLY. SAM 3D is never touched here, which also skips its
-    ~124s cold load. Writes exclusively under scenes/{id}/segment_probe/ and
+    Loads SAM 3 ONLY. Writes exclusively under scenes/{id}/segment_probe/ and
     never to Firestore, so a probe cannot become pipeline state or regress a
     ready room (see segment_receiver's module docstring).
     """
@@ -586,7 +537,7 @@ async def track(
     video tracker, which is a different model with a different checkpoint
     (`sam3.1_multiplex.pt`), so this route loads its own.
 
-    Loads the SAM 3.1 tracker ONLY. SAM 3 and SAM 3D are never touched here.
+    Loads the SAM 3.1 tracker ONLY. SAM 3 is never touched here.
     Writes exclusively under scenes/{id}/track_probe/ and never to Firestore, so
     a probe cannot become pipeline state or regress a ready room — the same two
     invariants /segment carries, for the reasons in 0260.

@@ -154,11 +154,3 @@ class TestSeatedObjectStaysConsistent:
                 box, pts, IDENTITY, 1.0, box.center_world
             )
         )
-
-
-class TestSurfaceVocabularyIsShared:
-    def test_fusion_reads_box_placement_s_vocabulary(self):
-        """One question, one home: which categories have a top that things
-        rest on. A second copy would drift."""
-        import fusion
-        assert fusion._SUPPORT_BOX_CATEGORIES is box_placement.SURFACE_TOP_CATEGORIES

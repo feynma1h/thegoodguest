@@ -3,7 +3,7 @@
 Verifies:
   - /health always returns 200 without touching the model registry.
   - /ready reports the correct per-model status in each registry state.
-  - get_sam3() / get_sam3d() trigger deferred model import + construction.
+  - get_sam3() trigger deferred model import + construction.
   - Cached failure: a failed load raises HTTPException on every subsequent call.
   - POST /process body is parsed as a ProcessRequest model, not a query param.
 
@@ -38,7 +38,6 @@ _torch_stub.cuda.is_available.return_value = False
 sys.modules["torch"] = _torch_stub
 sys.modules.setdefault("models", MagicMock())
 sys.modules.setdefault("models.sam3", MagicMock())
-sys.modules.setdefault("models.sam3d", MagicMock())
 
 # Load by absolute path so we always get services/perception-obj/server.py,
 # regardless of which server.py pytest may have cached as sys.modules["server"]
@@ -58,16 +57,12 @@ _spec.loader.exec_module(server)
 def _reset_registry() -> None:
     """Zero out all server-level registry state between tests."""
     server._sam3 = None
-    server._sam3d = None
     server._sam3_error = None
-    server._sam3d_error = None
     server._sam3_loading = False
-    server._sam3d_loading = False
     # Re-initialise the locks so tests with injected failures don't leave
     # them in an unexpected state (threading.Lock() is always unlocked initially).
     import threading
     server._sam3_lock = threading.Lock()
-    server._sam3d_lock = threading.Lock()
 
 
 @pytest.fixture(autouse=True)
@@ -77,7 +72,6 @@ def clean_registry():
     # Also reset the model stubs so side_effect / return_value from one test
     # don't bleed into the next.
     sys.modules["models.sam3"] = MagicMock()
-    sys.modules["models.sam3d"] = MagicMock()
     yield
     _reset_registry()
 
@@ -101,7 +95,6 @@ class TestHealthz:
     def test_200_when_models_not_loaded(self):
         """/health is 200 even before any model has been touched."""
         assert server._sam3 is None
-        assert server._sam3d is None
         assert client.get("/health").status_code == 200
 
 
@@ -111,22 +104,19 @@ class TestHealthz:
 
 class TestReadyz:
     def test_not_loaded_state(self):
-        """/ready reports not_loaded for both models before any /process call."""
+        """/ready reports not_loaded before any /process call."""
         resp = client.get("/ready")
         assert resp.status_code == 503
         body = resp.json()
         assert body["sam3"] == "not_loaded"
-        assert body["sam3d"] == "not_loaded"
 
     def test_loaded_state(self):
-        """/ready reports loaded for both models after registry is populated."""
+        """/ready reports loaded after the registry is populated."""
         server._sam3 = MagicMock()
-        server._sam3d = MagicMock()
         resp = client.get("/ready")
         assert resp.status_code == 200
         body = resp.json()
         assert body["sam3"] == "loaded"
-        assert body["sam3d"] == "loaded"
 
     def test_failed_state(self):
         """/ready reports failed when an error is recorded."""
@@ -144,19 +134,9 @@ class TestReadyz:
         assert resp.status_code == 503
         assert resp.json()["sam3"] == "loading"
 
-    def test_partial_loaded(self):
-        """/ready is 503 when sam3 is loaded but sam3d is not yet."""
-        server._sam3 = MagicMock()
-        # sam3d still None
-        resp = client.get("/ready")
-        assert resp.status_code == 503
-        body = resp.json()
-        assert body["sam3"] == "loaded"
-        assert body["sam3d"] == "not_loaded"
-
 
 # ---------------------------------------------------------------------------
-# get_sam3 / get_sam3d accessors
+# get_sam3 accessors
 # ---------------------------------------------------------------------------
 
 class TestAccessors:
@@ -196,15 +176,6 @@ class TestAccessors:
         with pytest.raises(HTTPException):
             server.get_sam3()
 
-    def test_get_sam3d_constructs_on_first_call(self):
-        """get_sam3d() imports models.sam3d and constructs SAM3DModel on first call."""
-        fake_instance = MagicMock()
-        sys.modules["models.sam3d"].SAM3DModel.return_value = fake_instance
-
-        result = server.get_sam3d()
-        assert result is fake_instance
-        assert server._sam3d is fake_instance
-
 
 # ---------------------------------------------------------------------------
 # POST /process — route registration (TestClient level)
@@ -237,7 +208,6 @@ class TestProcessRoute:
         with (
             patch("process_receiver.handle_process", _fake_handle),
             patch.object(server, "get_sam3", return_value=MagicMock()),
-            patch.object(server, "get_sam3d", return_value=MagicMock()),
             patch.object(server, "_get_oidc_verifier", return_value=None),
             patch.object(server, "_get_receiver_repo", return_value=MagicMock()),
             patch.object(server, "_get_fcm_notifier", return_value=MagicMock()),
@@ -293,7 +263,6 @@ class TestShellRoute:
         with (
             patch("shell_receiver.handle_shell", _fake_handle),
             patch.object(server, "get_sam3", _model_access_forbidden),
-            patch.object(server, "get_sam3d", _model_access_forbidden),
             patch.object(server, "_get_shell_oidc_verifier", return_value=None),
         ):
             resp = client.post(

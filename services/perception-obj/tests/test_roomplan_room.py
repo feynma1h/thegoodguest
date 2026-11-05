@@ -21,13 +21,6 @@ is that probe's measured numbers, exact, at achieved accuracy:
     opening — the rect-from-dimensions fallback is the dominant real path;
     only wall_00 carries an explicit (6-corner) polygon.
 
-The adapter gate proves the single-view contact priors and the room-sanity
-gate consume RoomPlan-derived planes UNCHANGED: the same fusion path that
-places single-view objects against ARKit anchor planes places them against
-these (floor contact to <= 1 cm / bottom-on-floor <= 3 mm, wall contact
-with the normal aligned to dot >= 0.99 — the priors' achieved tolerances), and
-_position_outside_room gates against the RoomPlan floor rect + wall top.
-
 Run from repo root:
 
     python -m pytest services/perception-obj/tests/test_roomplan_room.py -v
@@ -39,8 +32,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import box_placement
-import contact_priors
-import fusion
 import numpy as np
 import pytest
 import roomplan_room as rr
@@ -64,14 +55,6 @@ _DOOR_SEG_H = 1.951
 @pytest.fixture(scope="module")
 def room() -> rr.RoomPlanRoom:
     return rr.parse_captured_room(FIXTURE.read_bytes())
-
-
-@pytest.fixture(scope="module")
-def planes(room) -> contact_priors.RoomPlanes:
-    return contact_priors.RoomPlanes(
-        floor=rr.roomplan_floor_geom(room),
-        walls=rr.roomplan_wall_geoms(room),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -397,184 +380,6 @@ class TestWallAdapter:
             ] == [
                 (o.classification, o.u0, o.v0, o.u1, o.v1) for o in gb.openings
             ]
-
-
-# ---------------------------------------------------------------------------
-# Chunk D + sanity gate consume RoomPlan planes UNCHANGED
-# ---------------------------------------------------------------------------
-
-@dataclass
-class FakeIntrinsics:
-    fx: float
-    fy: float
-    cx: float
-    cy: float
-
-
-@dataclass
-class FakePose:
-    pos_x: float
-    pos_y: float
-    pos_z: float
-    quat_x: float
-    quat_y: float
-    quat_z: float
-    quat_w: float
-
-
-def _box(half, n=15) -> np.ndarray:
-    hx, hy, hz = half
-    g = np.linspace(-1.0, 1.0, n)
-    xx, yy, zz = np.meshgrid(g * hx, g * hy, g * hz, indexing="ij")
-    return np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()])
-
-
-def _look_at(cam: np.ndarray, target: np.ndarray):
-    up = np.array([0.0, 1.0, 0.0])
-    fwd = target - cam
-    fwd = fwd / np.linalg.norm(fwd)
-    z = -fwd
-    x = np.cross(up, z)
-    x = x / np.linalg.norm(x)
-    y = np.cross(z, x)
-    R = np.column_stack([x, y, z])
-    qx, qy, qz, qw = rotmat_to_quat(R)
-    return FakePose(cam[0], cam[1], cam[2], qx, qy, qz, qw), fwd
-
-
-def _scaled_intrinsics(scale=0.25):
-    intr = FakeIntrinsics(1527.75 * scale, 1527.75 * scale, 923.94 * scale, 721.29 * scale)
-    return intr, int(1440 * scale), int(1920 * scale)
-
-
-def _bbox_mask(world_pts, intr, pose, H, W) -> np.ndarray:
-    uv, _depth, valid = project_points(world_pts, intr, pose)
-    uv = uv[valid]
-    mask = np.zeros((H, W), dtype=bool)
-    if uv.shape[0] == 0:
-        return mask
-    u0, v0 = int(max(0, uv[:, 0].min())), int(max(0, uv[:, 1].min()))
-    u1, v1 = int(min(W, uv[:, 0].max())), int(min(H, uv[:, 1].max()))
-    mask[v0:v1 + 1, u0:u1 + 1] = True
-    return mask
-
-
-def _frame_results(label, world_rot_xyzw, splat_max, cam, fwd, angular):
-    return [{
-        "frame_index": 0, "ok": True,
-        "objects": [{
-            "label": label, "score": 0.9, "mask_index": 0, "ok": True,
-            "splat_gcs_uri": "gs://bucket/obj.ply",
-            "placement": {
-                "placed": False, "method": None,
-                "reason": "no_depth_pending_triangulation",
-                "world_transform": None, "quality": {},
-                "world_rotation_xyzw": list(world_rot_xyzw),
-                "rotation_source": "sam3d_layout",
-                "splat_max_extent": float(splat_max),
-            },
-            "view_ray": {
-                "origin": list(cam), "direction": list(fwd),
-                "angular_extent_rad": float(angular),
-            },
-        }],
-    }]
-
-
-def _ctx(pose, intr, mask, splat, planes):
-    return fusion.RefinementContext(
-        get_camera=lambda fi: (pose, intr),
-        get_mask_stack=lambda fi: mask[None, :, :],
-        get_splat=lambda uri: splat,
-        get_room_planes=lambda: planes,
-    )
-
-
-class TestChunkDConsumesRoomPlanPlanes:
-    def test_floor_contact_places_on_roomplan_floor(self, planes):
-        """The full fusion single-view path places a floor-class object on
-        the RoomPlan floor — same code, same achieved tolerances as the
-        anchor-plane pins in test_contact_priors_real_data."""
-        floor_y = planes.floor_y
-        splat = _box((0.4, 0.3, 0.35))
-        stats = robust_cloud_stats(splat)
-        splat_max, c_local = float(stats.extents[0]), stats.center
-        yaw = 0.5
-        c, s = np.cos(yaw), np.sin(yaw)
-        R_gt = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
-        q = (splat - c_local) @ R_gt.T
-        m = float(q[:, 1].min())
-        s_gt = 0.8
-        # Room interior, near the floor centroid.
-        fl = planes.floor
-        interior = fl.origin + 0.5 * fl.width_m * fl.axis_u + 0.5 * fl.height_m * fl.axis_v
-        centroid = np.array([interior[0], floor_y - s_gt * m, interior[2]])
-        t_gt = centroid - s_gt * (R_gt @ c_local)
-        world_gt = s_gt * splat @ R_gt.T + t_gt
-        cam = centroid + np.array([0.6, 1.2, -1.5])
-        pose, fwd = _look_at(cam, centroid)
-        dist = float(np.linalg.norm(centroid - cam))
-        angular = s_gt * splat_max / dist
-        intr, H, W = _scaled_intrinsics()
-        mask = _bbox_mask(world_gt, intr, pose, H, W)
-        fr = _frame_results("chair", rotmat_to_quat(R_gt), splat_max, cam, fwd, angular)
-
-        obj = fusion.fuse_scene_objects_with_meta(fr, _ctx(pose, intr, mask, splat, planes))[0][0]
-        assert obj["placed"] is True
-        assert obj["method"] == "single_view_floor_contact"
-        assert obj["position_source"] == "single_view_floor_contact"
-        assert np.allclose(obj["world_transform"]["position"], t_gt, atol=1e-2)
-        wt = obj["world_transform"]
-        recon = wt["scale"] * splat @ quat_to_rotmat(tuple(wt["rotation_xyzw"])).T + np.asarray(wt["position"])
-        assert float(recon[:, 1].min()) == pytest.approx(floor_y, abs=3e-3)
-
-    def test_wall_contact_places_on_roomplan_wall(self, planes):
-        """A thin wall-class object hangs on a RoomPlan wall via the wall-
-        contact prior; the object's plane normal aligns to the adapter's
-        interior-oriented wall normal."""
-        wall = max(planes.walls, key=lambda w: w.width_m)  # the 3.67 m wall
-        n = wall.normal
-        splat = _box((0.35, 0.5, 0.02))
-        stats = robust_cloud_stats(splat)
-        splat_max, thin, c_local = float(stats.extents[0]), float(stats.extents[2]), stats.center
-        R_gt = minimal_rotation(stats.axes[:, 2], n)
-        wc = wall.origin + 0.5 * wall.width_m * wall.axis_u + 0.5 * wall.height_m * wall.axis_v
-        s_gt = 1.0
-        center = wc + 0.5 * s_gt * thin * n
-        t_gt = center - s_gt * (R_gt @ c_local)
-        world_gt = s_gt * splat @ R_gt.T + t_gt
-        cam = wc + n * 2.0
-        pose, fwd = _look_at(cam, center)
-        dist = float(np.linalg.norm(center - cam))
-        angular = s_gt * splat_max / dist
-        intr, H, W = _scaled_intrinsics()
-        mask = _bbox_mask(world_gt, intr, pose, H, W)
-        fr = _frame_results("door", rotmat_to_quat(R_gt), splat_max, cam, fwd, angular)
-
-        obj = fusion.fuse_scene_objects_with_meta(fr, _ctx(pose, intr, mask, splat, planes))[0][0]
-        assert obj["placed"] is True
-        assert obj["method"] == "single_view_wall_contact"
-        assert np.allclose(obj["world_transform"]["position"], t_gt, atol=1e-2)
-        R = quat_to_rotmat(tuple(obj["world_transform"]["rotation_xyzw"]))
-        assert float(np.dot(R @ stats.axes[:, 2], n)) > 0.99
-
-    def test_sanity_gate_reads_roomplan_planes(self, planes):
-        """_position_outside_room gates against the RoomPlan floor rect and
-        wall top exactly as against anchor-derived planes."""
-        fl = planes.floor
-        inside = fl.origin + 0.5 * fl.width_m * fl.axis_u + 0.5 * fl.height_m * fl.axis_v
-        inside = inside + np.array([0.0, 0.5, 0.0])
-        assert fusion._position_outside_room(inside, planes) is False
-        beyond = fl.origin - 3.0 * fl.axis_u
-        assert fusion._position_outside_room(beyond, planes) is True
-        above = inside + np.array([0.0, 4.0, 0.0])  # above the 1.63 wall top
-        assert fusion._position_outside_room(above, planes) is True
-        below = inside - np.array([0.0, 3.0, 0.0])
-        assert fusion._position_outside_room(below, planes) is True
-
-    def test_has_geometry_and_floor_y(self, planes):
-        assert planes.has_geometry
-        assert planes.floor_y == pytest.approx(_FLOOR_Y, abs=1e-3)
 
 
 class TestExtentAxesOnRealBoxes:

@@ -35,10 +35,8 @@ if str(_schemas_path) not in sys.path:
 sys.modules.setdefault("torch", MagicMock())
 sys.modules.setdefault("models", MagicMock())
 sys.modules.setdefault("models.sam3", MagicMock())
-sys.modules.setdefault("models.sam3d", MagicMock())
 
 _fake_sam3 = MagicMock()
-_fake_sam3d = MagicMock()
 
 # process_receiver imports CaptureBundle, OIDC helpers, and receiver_repo —
 # all are available. No server import needed; we test handle_process directly.
@@ -170,7 +168,6 @@ class TestHandleProcessOrchestration:
                     fcm_notifier=_null_fcm(),
                     outputs_bucket=_OUTPUTS_BUCKET,
                     sam3_model=_fake_sam3,
-                    sam3d_model=_fake_sam3d,
                     object_prompt="chair,sofa",
                 )
             )
@@ -480,7 +477,6 @@ class TestConcurrentClaimRaceViaHandler:
                 fcm_notifier=_null_fcm(),
                 outputs_bucket=_OUTPUTS_BUCKET,
                 sam3_model=_fake_sam3,
-                sam3d_model=_fake_sam3d,
                 object_prompt="chair",
             ))
             loop.close()
@@ -533,7 +529,6 @@ class TestSigtermHandler:
                 fcm_notifier=_null_fcm(),
                 outputs_bucket=_OUTPUTS_BUCKET,
                 sam3_model=_fake_sam3,
-                sam3d_model=_fake_sam3d,
                 object_prompt="chair",
             ))
         loop.close()
@@ -669,7 +664,6 @@ class TestConcurrentStaleReclaimViaHandler:
                 fcm_notifier=_null_fcm(),
                 outputs_bucket=_OUTPUTS_BUCKET,
                 sam3_model=_fake_sam3,
-                sam3d_model=_fake_sam3d,
                 object_prompt="chair",
             ))
             loop.close()

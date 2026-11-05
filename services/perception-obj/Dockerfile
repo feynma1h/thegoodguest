@@ -1,4 +1,6 @@
-# perception-obj: SAM 3 segmentation + SAM 3D Objects per-object reconstruction.
+# perception-obj: SAM 3 segmentation (decision 0323: no object reconstruction runs;
+# the image still carries the SAM 3D environment and weights it was built on,
+# because SAM 3 shares that environment — slimming it is a separate, unrun change).
 # AMD64, Cloud Build only. DO NOT build locally on M-series Mac.
 #
 # Build context is the REPO ROOT (same as services/api/Dockerfile) so that
@@ -242,18 +244,16 @@ COPY services/perception-obj/receiver_repo.py /app/receiver_repo.py
 COPY services/perception-obj/fcm.py /app/fcm.py
 COPY services/perception-obj/privacy.py /app/privacy.py
 COPY services/perception-obj/placement.py /app/placement.py
-COPY services/perception-obj/fusion.py /app/fusion.py
 COPY services/perception-obj/reproject.py /app/reproject.py
+COPY services/perception-obj/boxes_json.py /app/boxes_json.py
 COPY services/perception-obj/sampling.py /app/sampling.py
 COPY services/perception-obj/census_sampling.py /app/census_sampling.py
 COPY services/perception-obj/track_selection.py /app/track_selection.py
 COPY services/perception-obj/budget.py /app/budget.py
 COPY services/perception-obj/room_planes.py /app/room_planes.py
 COPY services/perception-obj/roomplan_room.py /app/roomplan_room.py
-COPY services/perception-obj/contact_priors.py /app/contact_priors.py
 COPY services/perception-obj/box_placement.py /app/box_placement.py
 COPY services/perception-obj/mask_refine.py /app/mask_refine.py
-COPY services/perception-obj/object_color.py /app/object_color.py
 COPY services/perception-obj/shell_geometry.py /app/shell_geometry.py
 COPY services/perception-obj/shell_envelope.py /app/shell_envelope.py
 COPY services/perception-obj/shell_observation.py /app/shell_observation.py
@@ -261,7 +261,6 @@ COPY services/perception-obj/shell_material.py /app/shell_material.py
 COPY services/perception-obj/shell_receiver.py /app/shell_receiver.py
 COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
 COPY services/perception-obj/compress_receiver.py /app/compress_receiver.py
-COPY services/perception-obj/compress_enqueue.py /app/compress_enqueue.py
 COPY services/perception-obj/segment_receiver.py /app/segment_receiver.py
 COPY services/perception-obj/track_receiver.py /app/track_receiver.py
 
@@ -284,12 +283,12 @@ COPY services/perception-obj/track_receiver.py /app/track_receiver.py
 # because shell_material defers it: a missing pip install would not crash —
 # the 0069 fallback rule would silently null every family forever, which
 # the build must catch instead.
-RUN python -c "import placement, fusion, reproject, sampling, census_sampling, \
+RUN python -c "import placement, reproject, boxes_json, sampling, census_sampling, \
 track_selection, \
-budget, room_planes, roomplan_room, contact_priors, box_placement, privacy, \
-mask_refine, object_color, oidc, receiver_repo, fcm, process_receiver, \
+budget, room_planes, roomplan_room, box_placement, privacy, \
+mask_refine, oidc, receiver_repo, fcm, process_receiver, \
 shell_geometry, shell_envelope, shell_observation, shell_material, \
-shell_receiver, shell_enqueue, compress_receiver, compress_enqueue, \
+shell_receiver, shell_enqueue, compress_receiver, \
 segment_receiver, track_receiver, anthropic"
 
 # ── The SPZ encoder: Node + Spark, for the /compress stage ───────────────────

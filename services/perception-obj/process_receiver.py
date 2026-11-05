@@ -8,7 +8,9 @@ Implements the contract from docs/decisions/0004-perception-receiver-semantics.m
      recovery). Exit 200 without processing on ALREADY_OWNED, WRONG_STATE,
      NOT_FOUND.
   3. Fetch the CaptureBundle proto from GCS.
-  4. For each frame: download RGB, run SAM 3 + SAM 3D, write outputs to GCS.
+  4. Write the person's boxes (boxes.json), then for each selected frame:
+     download RGB, run SAM 3, write the masks to GCS. Nothing is reconstructed
+     (decision 0323).
   5. Write a top-level manifest to GCS; update scene→ready; fire FCM.
   On PoisonError: update scene→failed, fire FCM, return 200 (drain queue).
   On EnvironmentalError: return 5xx (Cloud Tasks retries). On the final
@@ -17,27 +19,21 @@ Implements the contract from docs/decisions/0004-perception-receiver-semantics.m
 
 Output structure (keyed by scene_id):
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/manifest.json
+  gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/boxes.json
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/frames/{idx:04d}/objects.json
   gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/frames/{idx:04d}/masks.npz
-  gs://{PERCEPTION_OUTPUTS_BUCKET}/scenes/{scene_id}/frames/{idx:04d}/splats/{i:02d}_{label}.ply
 
 The scene manifest URI is stored in Scene.result_uri on success.
 
 Manifest contract (manifest_version 2):
   {scene_id, bundle_uri, schema_version, manifest_version: 2, frame_count,
-   frames_total, frames_sampled, sampling: {...},
-   roomplan: {...} (only on bundles claiming a CapturedRoom),
-   objects: [...], frames: [...]}
-  "sampling" records the frame-selection policy, the selected indices,
-  whether the budget stopped the run, and whether fusion refinement was
-  skipped (see sampling.py / census_sampling.py / budget.py).
-  "objects" is the scene-level fused array (one entry per physical object,
-  with a world transform in the ARKit world frame — see fusion.py); it is
-  what the web viewer renders. "frames" carries the per-frame observations
-  for provenance: each object entry there includes "placement" (see
-  placement.py) and "view_ray". world_transform is
-  {position: [x,y,z] meters, rotation_xyzw: unit quat, scale: float} —
-  splat local frame -> ARKit world.
+   frames_total, frames_sampled, sampling: {...}, objects: [], frames: [...]}
+  "sampling" records the frame-selection policy, the selected indices and
+  whether the budget stopped the run (see sampling.py / census_sampling.py /
+  budget.py). "objects" is always empty: scans made before decision 0323 carry
+  reconstructed objects there, and every reader tolerates both. "frames"
+  carries each segmented frame's masks (masks_gcs_uri, mask_count) for the
+  shell. The room's objects are in boxes.json, written by this route alone.
 
 Environment variables:
   RECEIVER_URL            — full HTTPS URL of this Cloud Run service
@@ -71,14 +67,11 @@ from thegoodguest_schemas import CaptureBundle
 
 logger = logging.getLogger(__name__)
 
-# The segmentation vocabulary. It lives here rather than in server.py
-# because SAM 3 returns the PROMPT TERM verbatim as a detection's label, so
-# this string and `box_placement.BOX_LABEL_FAMILIES` are two halves of one
-# contract: a family member absent from here can never match a box, and a
-# term here that is in no family can never associate with one. Eight family
-# members were in the first position and nobody could see it. server.py
-# imports this; `box_placement.vocabulary_gaps` reports both directions of
-# the gap once per room, and a test pins the map fully emittable by it.
+# The segmentation vocabulary: what SAM 3 is asked to find, so the shell can
+# leave furniture out of its wall and floor readings. It lives here rather than
+# in server.py because SAM 3 returns the PROMPT TERM verbatim as a detection's
+# label. It no longer has to agree with box_placement's label families (which
+# associated masks with RoomPlan boxes); nothing is associated now.
 DEFAULT_OBJECT_PROMPT = (
     "sofa,armchair,chair,dining chair,dining table,coffee table,side table,desk,"
     "cabinet,bookshelf,bed,nightstand,rug,curtain,floor lamp,table lamp,pendant light,"
@@ -315,10 +308,6 @@ def _fetch_frame_depth(frame, bundle_prefix: str):
 # Per-frame perception
 # ---------------------------------------------------------------------------
 
-def _safe_label(label: str) -> str:
-    return "".join(c if c.isalnum() else "_" for c in label)[:32]
-
-
 def _free_gpu_memory() -> None:
     """Collect Python garbage, then release CUDA cache blocks to the driver.
 
@@ -360,305 +349,6 @@ def _log_vram(scene_id: str, point: str) -> None:
         pass  # observability must never break processing
 
 
-# Feed SAM 3D the frame's measured LiDAR as its scene point map instead of
-# letting it estimate one from the RGB (decisions 0180, 0181). OFF by default:
-# it changes the input to the sparse-structure generator AND the pose decoder
-# on every reconstruction, so it is a bench flag until a proof says otherwise.
-# Inert on frames without depth.
-_POINTMAP_FROM_LIDAR = os.environ.get("PERCEPTION_POINTMAP", "0") == "1"
-
-
-def _reconstruct_with_retry(sam3d_model: Any, pil, mask, seed: int, pointmap=None):
-    """One SAM 3D reconstruct with a single retry that can actually succeed.
-
-    The retry MUST run after the except block exits. While an exception is
-    being handled, its traceback pins every frame of the failed attempt —
-    including the pipeline's intermediate GPU tensors — so a retry launched
-    inside the handler competes against the very memory it needs freed.
-    Production evidence (scene 25a14caf, 2026-07-21): every logged OOM
-    reported ~21.7 GiB "allocated by PyTorch" with <90 MiB reserved-but-
-    unallocated — the retry was double-booked against the pinned first
-    attempt, so a 20 MiB allocation failed on a 22 GiB card. Restructured,
-    the first attempt's tensors are collectable (traceback cycles swept by
-    _free_gpu_memory's gc.collect) before attempt two begins.
-    """
-    # The kwarg is omitted entirely when there is no point map, so the call
-    # a normal revision makes is the call that shipped — argument for
-    # argument, for the model and for any stand-in.
-    extra = {} if pointmap is None else {"pointmap": pointmap}
-    try:
-        return sam3d_model.reconstruct(pil, mask, seed=seed, **extra)
-    except Exception:
-        logger.warning(
-            "reconstruct attempt 1 failed; retrying once after freeing GPU memory",
-            exc_info=True,
-        )
-    _free_gpu_memory()
-    return sam3d_model.reconstruct(pil, mask, seed=seed, **extra)
-
-
-def _reconstruct_one_object(
-    *,
-    scene_id: str,
-    frame_idx: int,
-    i: int,
-    obj: dict,
-    pil,
-    outputs_bucket: str,
-    sam3d_model: Any,
-    budget,
-    frame,
-    depth_raster,
-    depth_confidence,
-    depth_intrinsics,
-    objects_done: int = 0,
-    objects_detected: int = 0,
-    mask_refiner=None,
-) -> tuple[Optional[dict], bool]:
-    """Reconstruct + place ONE detected object; the per-object body shared
-    verbatim by the legacy frame loop and the census two-pass driver
-    (decision 0077 — extracting it keeps the cache blobs, layout sidecar,
-    budget admission, soft-fail, and GPU-memory hygiene identical on both
-    paths).
-
-    Returns (entry, budget_stopped): entry is the objects.json record (ok
-    or soft-fail), or None exactly when the budget refused the fresh
-    reconstruction (budget_stopped True — the caller stops and does NOT
-    cache the frame). objects_done/objects_detected only feed the
-    budget_stop log line.
-
-    mask_refiner, when the census driver supplies one (decision 0201), is
-    called at most once and only after budget admission, on the fresh path
-    only: it returns (mask or None, record) and the mask — when the
-    refinement was accepted — is what SAM 3D is shown INSTEAD of the
-    segmentation's own, and what placement measures the resulting splat
-    against. The accepted mask is persisted beside the splat, so a later
-    attempt's cache hit places the same splat against the same mask. None
-    (the default, and every non-census caller) leaves this function
-    byte-identical to what shipped.
-    """
-    import mask_refine  # deferred: pulls numpy
-    import placement as placement_mod  # deferred with the other heavy imports
-
-    frame_prefix = f"scenes/{scene_id}/frames/{frame_idx:04d}"
-    result = None
-    ply_bytes = None
-    safe = _safe_label(obj["label"])
-    splat_blob = f"{frame_prefix}/splats/{i:02d}_{safe}.ply"
-
-    meta = {
-        "label": obj["label"],
-        "instance_idx": obj["instance_idx"],
-        "bbox": obj["bbox"],
-        "score": obj["score"],
-        "mask_index": i,
-    }
-
-    mask_for_model = obj["mask"]
-    refined_mask_blob = splat_blob[: -len(".ply")] + ".mask.npz"
-
-    try:
-        layout = None
-        # Per-object cache: reuse the uploaded splat if present. The
-        # bytes are downloaded (not just existence-checked) because
-        # placement needs the vertex positions either way.
-        cached_ply = _gcs_blob_exists_and_get(outputs_bucket, splat_blob)
-        layout_blob = splat_blob[: -len(".ply")] + ".layout.json"
-        if cached_ply is not None:
-            # The layout sidecar (written at fresh-reconstruct time)
-            # carries the RAW model rotation, so the rotation survives
-            # cross-attempt cache hits; extract_layout re-applies the
-            # current conventions at read time — a stored sidecar can
-            # never go stale against a convention fix. Splats from
-            # before sidecars existed have none and degrade to
-            # rotation_source "none" as before.
-            cached_layout = _gcs_blob_exists_and_get(outputs_bucket, layout_blob)
-            if cached_layout is not None:
-                try:
-                    layout = placement_mod.extract_layout(
-                        json.loads(cached_layout)
-                    )
-                except Exception:
-                    logger.warning(
-                        "unreadable layout sidecar %s; placing without "
-                        "rotation", layout_blob,
-                    )
-                    layout = None
-            if mask_refine.MASK_REFINE_ENABLED:
-                # A splat reconstructed from a repaired mask must be placed
-                # against that mask, not against the segmentation's own —
-                # the sidecar is what carries it across attempts, the same
-                # way the layout sidecar carries the rotation.
-                cached_mask = _gcs_blob_exists_and_get(
-                    outputs_bucket, refined_mask_blob
-                )
-                if cached_mask is not None:
-                    import numpy as _np  # deferred with the heavy imports
-
-                    try:
-                        with _np.load(io.BytesIO(cached_mask)) as _npz:
-                            mask_for_model = _np.asarray(_npz["mask"], dtype=bool)
-                        meta["mask_refined"] = True
-                    except Exception:
-                        logger.warning(
-                            "unreadable refined-mask sidecar %s; placing "
-                            "against the segmentation mask", refined_mask_blob,
-                        )
-            ply_bytes = cached_ply
-            entry = {
-                **meta,
-                "ok": True,
-                "cached": True,
-                "splat_gcs_uri": f"gs://{outputs_bucket}/{splat_blob}",
-            }
-        else:
-            # Budget admission gates only FRESH reconstructions —
-            # cache hits above cost seconds, a reconstruct costs tens.
-            if budget is not None and not budget.can_start_object():
-                logger.info(
-                    "budget_stop point=object scene_id=%s frame=%d "
-                    "objects_done=%d objects_detected=%d %s",
-                    scene_id, frame_idx, objects_done, objects_detected,
-                    budget.snapshot(),
-                )
-                return None, True
-
-            if mask_refiner is not None:
-                # Detection, prompt and judgement all live in mask_refine;
-                # what happens here is only the substitution. A refusal
-                # returns None and the segmentation's mask stands, which is
-                # what ships today.
-                refined, refine_record = mask_refiner()
-                meta["mask_refinement"] = refine_record
-                if refined is not None:
-                    mask_for_model = refined
-                    meta["mask_refined"] = True
-
-            pointmap = None
-            if _POINTMAP_FROM_LIDAR and depth_raster is not None:
-                import numpy as _np  # deferred with the other heavy imports
-
-                pointmap = placement_mod.sam3d_pointmap(
-                    depth_raster, depth_confidence, depth_intrinsics
-                )
-                logger.info(
-                    "pointmap scene_id=%s frame=%d obj=%d shape=%s measured=%.3f",
-                    scene_id, frame_idx, i, pointmap.shape,
-                    float(_np.isfinite(pointmap).all(axis=-1).mean()),
-                )
-
-            object_started = time.monotonic()
-            result = _reconstruct_with_retry(
-                sam3d_model, pil, mask_for_model, seed=42 + i, pointmap=pointmap
-            )
-            if budget is not None:
-                budget.note_object(time.monotonic() - object_started)
-
-            # Runtime confirmation seam for the layout-key/convention
-            # assumptions in placement.py (no GPU exists in dev).
-            logger.info(
-                "sam3d result keys frame=%d obj=%d: %s",
-                frame_idx, i, sorted(result.keys()),
-            )
-            layout = placement_mod.extract_layout(result)
-
-            # Convert to PLY bytes.
-            gs = result.get("gs")
-            if gs is None:
-                raise RuntimeError("No 'gs' output in SAM 3D result")
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".ply", delete=True) as tmp:
-                gs.save_ply(tmp.name)
-                with open(tmp.name, "rb") as f:
-                    ply_bytes = f.read()
-
-            # Everything downstream needs is now on the CPU (layout is
-            # numpy via extract_layout, the splat is bytes). Drop the
-            # result dict — 15 keys of GPU tensors — BEFORE the upload
-            # and placement tail work, not seconds later in finally.
-            result = None
-            del gs
-            _free_gpu_memory()
-
-            splat_uri = _gcs_upload_for_scene(
-                f"gs://{outputs_bucket}/", splat_blob, ply_bytes,
-                "application/octet-stream"
-            )
-            if meta.get("mask_refined"):
-                import numpy as _np  # deferred with the heavy imports
-
-                _buf = io.BytesIO()
-                _np.savez_compressed(_buf, mask=_np.asarray(mask_for_model, bool))
-                _gcs_upload_for_scene(
-                    f"gs://{outputs_bucket}/", refined_mask_blob,
-                    _buf.getvalue(), "application/octet-stream",
-                )
-            if layout is not None:
-                # Persist the RAW rotation (+ translation/scale) beside
-                # the splat so a later attempt's cache hit keeps the
-                # orientation. Raw, not converted: read-time
-                # extract_layout applies whatever conventions are then
-                # current (see the cache-hit branch above).
-                _gcs_upload_for_scene(
-                    f"gs://{outputs_bucket}/",
-                    layout_blob,
-                    json.dumps(
-                        {
-                            "rotation": layout["raw_rotation"],
-                            "translation": layout["translation"],
-                            "scale": layout["scale"],
-                        }
-                    ).encode("utf-8"),
-                    "application/json",
-                )
-            entry = {
-                **meta,
-                "ok": True,
-                "cached": False,
-                "splat_gcs_uri": splat_uri,
-                "splat_size_bytes": len(ply_bytes),
-            }
-
-        if frame is not None:
-            view_ray = placement_mod.object_view_ray(
-                mask_for_model, frame.intrinsics, frame.camera_pose
-            )
-            if view_ray is not None:
-                entry["view_ray"] = view_ray
-            # compute_frame_placement never raises: placement bugs
-            # degrade the object to unplaced, never abort the scene.
-            entry["placement"] = placement_mod.compute_frame_placement(
-                ply_bytes=ply_bytes,
-                layout=layout,
-                mask_rgb=mask_for_model,
-                depth_raster=depth_raster,
-                depth_confidence=depth_confidence,
-                depth_intrinsics=depth_intrinsics,
-                camera_pose=frame.camera_pose,
-            )
-        return entry, False
-    except (PoisonError, EnvironmentalError):
-        # GCS upload failures stay environmental: the whole attempt is
-        # retryable, and a scene must not go `ready` with objects missing
-        # only because the output bucket was briefly unavailable.
-        raise
-    except Exception as exc:
-        # Model/conversion failure on ONE object soft-fails that object
-        # and continues the frame, rather than aborting the whole scene.
-        logger.error(
-            "SAM 3D failed on frame %d object %d (%s); continuing: %s",
-            frame_idx, i, obj["label"], exc,
-        )
-        return {**meta, "ok": False, "error": str(exc)}, False
-    finally:
-        # Safety net: the fresh path already dropped result eagerly; this
-        # covers the cache-hit and exception paths, and sweeps the
-        # traceback cycles a soft-failed object leaves behind.
-        del result
-        del ply_bytes
-        _free_gpu_memory()
-
-
 def _process_frame(
     *,
     scene_id: str,
@@ -666,41 +356,21 @@ def _process_frame(
     rgb_gcs_uri: str,
     outputs_bucket: str,
     sam3_model: Any,
-    sam3d_model: Any,
     object_prompt: str,
-    frame=None,
-    bundle_prefix: Optional[str] = None,
-    budget=None,
 ) -> dict:
-    """Run SAM 3 + SAM 3D on one frame. Returns a dict with per-object results.
+    """Segment one frame with SAM 3 and bank its masks. Returns the frame entry.
 
-    budget is an optional budget.BudgetTracker. When provided, each fresh
-    (non-cached) reconstruction is admitted against the remaining request
-    budget; on refusal the frame stops early and the returned dict carries
-    "budget_stopped": True. A budget-stopped frame is NOT cached to GCS
-    (neither objects.json nor masks.npz) — caching would make the partial
-    result permanent, since cache hits skip reprocessing. Its completed
-    objects keep their per-object splat cache for a future attempt.
+    Per frame: fetch the RGB image from GCS, segment it with SAM 3 and upload a
+    packed masks.npz (the kept masks plus the suppressed-concept union, when
+    any) and a per-frame objects.json under
+    scenes/{scene_id}/frames/{frame_idx}/. Nothing is reconstructed: the
+    objects in a room are the boxes the person made (decision 0322), and the
+    masks here serve the shell (what to exclude from wall and floor
+    observation) and the privacy filter (decision 0089). A frame already
+    present in GCS is reused as a cache (partial-run recovery on retry).
 
-    Per frame: fetch the RGB image from GCS, segment it with SAM 3, reconstruct
-    each detected object with SAM 3D, and upload each splat PLY plus a packed
-    masks.npz and a per-frame objects.json manifest under
-    scenes/{scene_id}/frames/{frame_idx}/. Frame and per-object outputs already
-    present in GCS are reused as a cache (partial-run recovery on retry).
-    Each fresh reconstruct also writes a {splat}.layout.json sidecar holding
-    the RAW layout fields, so per-object cache hits on later attempts keep
-    the object's rotation (converted at read time under current
-    conventions).
-
-    frame is the CaptureBundle Frame proto (pose/intrinsics/gravity/depth);
-    when provided (with bundle_prefix for depth blob resolution), each
-    object entry gains a world "placement" (LiDAR depth fit, or an
-    unplaced record pending scene-level ray triangulation on ARKIT_ONLY
-    frames) and a "view_ray" observation. When None (legacy callers/tests),
-    entries carry no placement fields.
-
-    Raises PoisonError if the image or a depth raster can't be fetched or
-    decoded. Raises EnvironmentalError on model or GCS failures.
+    Raises PoisonError if the image can't be fetched or decoded. Raises
+    EnvironmentalError on model or GCS failures.
     """
     from PIL import Image
 
@@ -728,7 +398,7 @@ def _process_frame(
 
     # SAM 3 segmentation. Suppressed concepts (decision 0089) ride the same
     # pass and are partitioned straight back out: they exist only to build the
-    # exclusion union the shell reads, and must never reach reconstruction.
+    # exclusion union the shell reads.
     from privacy import masks_npz_bytes, partition_detections, segmentation_prompt
 
     try:
@@ -743,54 +413,6 @@ def _process_frame(
             sorted({d["label"] for d in suppressed}),
         )
 
-    # LiDAR depth payload for this frame; (None, None, None) on ARKIT_ONLY
-    # frames or when the caller provided no Frame proto.
-    if frame is not None and bundle_prefix is not None:
-        depth_raster, depth_confidence, depth_intrinsics = _fetch_frame_depth(
-            frame, bundle_prefix
-        )
-    else:
-        depth_raster = depth_confidence = depth_intrinsics = None
-
-    # SAM 3D per object.
-    objects_out: list[dict] = []
-    budget_stopped = False
-    for i, obj in enumerate(detections):
-        entry, stopped = _reconstruct_one_object(
-            scene_id=scene_id,
-            frame_idx=frame_idx,
-            i=i,
-            obj=obj,
-            pil=pil,
-            outputs_bucket=outputs_bucket,
-            sam3d_model=sam3d_model,
-            budget=budget,
-            frame=frame,
-            depth_raster=depth_raster,
-            depth_confidence=depth_confidence,
-            depth_intrinsics=depth_intrinsics,
-            objects_done=len(objects_out),
-            objects_detected=len(detections),
-        )
-        if stopped:
-            budget_stopped = True
-            break
-        objects_out.append(entry)
-
-    if budget_stopped:
-        # Incomplete frame: no masks.npz, no objects.json cache (see
-        # docstring). The caller banks the completed objects and stops.
-        return {
-            "frame_index": frame_idx,
-            "rgb_gcs_uri": rgb_gcs_uri,
-            "image_size": [pil.width, pil.height],
-            "masks_gcs_uri": None,
-            "objects": objects_out,
-            "ok": True,
-            "budget_stopped": True,
-        }
-
-    # Upload masks.npz (kept stack + the suppressed union, when any).
     masks_uri = _gcs_upload_for_scene(
         f"gs://{outputs_bucket}/", f"{frame_prefix}/masks.npz",
         masks_npz_bytes(detections, suppressed), "application/octet-stream"
@@ -801,7 +423,7 @@ def _process_frame(
         "rgb_gcs_uri": rgb_gcs_uri,
         "image_size": [pil.width, pil.height],
         "masks_gcs_uri": masks_uri,
-        "objects": objects_out,
+        "mask_count": len(detections),
         "ok": True,
     }
 
@@ -825,899 +447,6 @@ def _gcs_blob_exists_and_get(bucket_name: str, blob_path: str) -> Optional[bytes
     return None
 
 
-def _load_scene_room_plan(
-    *, bundle: CaptureBundle, bundle_uri: str, scene_id: str, outputs_bucket: str
-):
-    """Load + parse the bundle's CapturedRoom JSON (decision 0077).
-
-    Returns (room, parse_reason, source): room is a
-    roomplan_room.RoomPlanRoom or None; parse_reason records WHY it is None
-    when the bundle claimed one (the roomplan_parse_failed manifest note);
-    source is "cached" | "bundle" when parsed.
-
-    The verbatim JSON is cached to the outputs bucket on first read
-    (scenes/{id}/roomplan/room.json) so the geometry survives the captures
-    bucket's 1-day sweep — the 0065 sidecar lesson; /shell and warm
-    re-drives read the cached copy. The cached copy is also preferred here,
-    so every attempt of a scene parses the same bytes. A missing/corrupt
-    room.json NEVER fails the scene — the caller degrades to LIDAR_ARKIT
-    semantics (structured log + manifest note).
-    """
-    from roomplan_room import try_parse_captured_room  # deferred, heavy-path only
-
-    if not (bundle.HasField("room_plan") and bundle.room_plan.json_gcs_path):
-        return None, None, None
-
-    cache_blob = f"scenes/{scene_id}/roomplan/room.json"
-    raw = _gcs_blob_exists_and_get(outputs_bucket, cache_blob)
-    source = "cached"
-    if raw is None:
-        source = "bundle"
-        try:
-            raw = _download_gcs_uri(
-                _bundle_prefix(bundle_uri) + bundle.room_plan.json_gcs_path
-            )
-        except PoisonError:
-            return None, "room_json_missing", None
-        # Cache write-through: an EnvironmentalError here propagates (the
-        # whole attempt retries cheaply pre-model-load), keeping the cache
-        # guarantee — a ready ROOMPLAN scene always has the cached copy.
-        _gcs_upload_for_scene(
-            f"gs://{outputs_bucket}/", cache_blob, raw, "application/json"
-        )
-
-    room, reason = try_parse_captured_room(raw)
-    if room is not None and not room.has_geometry:
-        room, reason = None, "no walls or floor in CapturedRoom"
-    if room is None:
-        return None, reason, None
-    return room, None, source
-
-
-def _build_refinement_context(
-    *, bundle: CaptureBundle, scene_id: str, bundle_uri: str, outputs_bucket: str,
-    budget, room_plan=None,
-):
-    """Wire fusion.py's RefinementContext (decision 0067) to this
-    service's actual GCS-backed evidence sources.
-
-    Everything is memoized for the lifetime of one fusion pass: splat
-    BYTES are fetched once and parsed twice (vertices for tier 1 and the
-    fits, colors/opacity for tier 2), mask stacks once per frame, and
-    frame RGB once per frame — cached as uint8 (~8 MB/frame, bounded by
-    the <= PERCEPTION_MAX_FRAMES sampled frames) rather than float
-    (tier 2's NCC is intensity-scale-invariant, so the small form loses
-    nothing). RGB comes from the captures bucket, whose 1-day lifecycle
-    can outlive the objects on a warm re-drive — a missing frame degrades
-    that frame's scoring to tier-1-only inside reproject, recorded in
-    tiers_used, exactly like any other cache miss.
-    """
-    import contact_priors as contact_priors_mod
-    import fusion as fusion_mod
-    import placement as placement_mod
-    import reproject as reproject_mod
-
-    frames_by_idx = {f.frame_index: f for f in bundle.frames}
-    bundle_prefix = _bundle_prefix(bundle_uri)
-    splat_bytes_cache: dict[str, Optional[bytes]] = {}
-    splat_pts_cache: dict[str, Optional[Any]] = {}
-    appearance_cache: dict[str, Optional[Any]] = {}
-    rgb_cache: dict[int, Optional[Any]] = {}
-    depth_cache: dict[int, Optional[tuple]] = {}
-
-    # Measured room planes, parsed once (via room_planes — the same reading
-    # the shell renders) and reused for every single-view contact-prior
-    # placement. A bundle with no plane anchors yields empty planes, so
-    # priors are inert and single-view objects stay unplaced (decision 0067's
-    # degrade lock). Cached because fusion may call it per unplaced object.
-    room_planes_holder: list = []
-
-    def get_room_planes():
-        if not room_planes_holder:
-            room_planes_holder.append(
-                contact_priors_mod.extract_room_planes(bundle.plane_anchors)
-            )
-        return room_planes_holder[0]
-
-    def get_camera(frame_index):
-        frame = frames_by_idx.get(frame_index)
-        if frame is None:
-            return None
-        return (frame.camera_pose, frame.intrinsics)
-
-    def get_mask_stack(frame_index):
-        import numpy as np  # deferred: heavy dep, only needed during refinement
-
-        raw = _gcs_blob_exists_and_get(
-            outputs_bucket, f"scenes/{scene_id}/frames/{frame_index:04d}/masks.npz"
-        )
-        if raw is None:
-            return None
-        try:
-            return np.load(io.BytesIO(raw))["masks"]
-        except Exception:
-            logger.warning("refinement: unreadable masks.npz for frame %d", frame_index)
-            return None
-
-    def _splat_bytes(splat_uri: str) -> Optional[bytes]:
-        if splat_uri not in splat_bytes_cache:
-            raw = None
-            if splat_uri.startswith("gs://"):
-                bucket_name, blob_path = splat_uri[5:].split("/", 1)
-                raw = _gcs_blob_exists_and_get(bucket_name, blob_path)
-            splat_bytes_cache[splat_uri] = raw
-        return splat_bytes_cache[splat_uri]
-
-    def get_splat(splat_uri: str):
-        if splat_uri not in splat_pts_cache:
-            pts = None
-            raw = _splat_bytes(splat_uri)
-            if raw is not None:
-                try:
-                    pts = placement_mod.parse_ply_vertices(raw)
-                except Exception:
-                    logger.warning("refinement: unparseable splat %s", splat_uri)
-            splat_pts_cache[splat_uri] = pts
-        return splat_pts_cache[splat_uri]
-
-    def get_appearance(splat_uri: str):
-        if splat_uri not in appearance_cache:
-            appearance = None
-            raw = _splat_bytes(splat_uri)
-            if raw is not None:
-                try:
-                    appearance = reproject_mod.load_splat_appearance(raw)
-                except Exception:
-                    logger.warning("refinement: unparseable splat appearance %s", splat_uri)
-            appearance_cache[splat_uri] = appearance
-        return appearance_cache[splat_uri]
-
-    def get_rgb(frame_index):
-        if frame_index not in rgb_cache:
-            import numpy as np  # deferred
-
-            rgb = None
-            frame = frames_by_idx.get(frame_index)
-            if frame is not None and frame.rgb_gcs_path:
-                uri = bundle_prefix + frame.rgb_gcs_path
-                bucket_name, blob_path = uri[5:].split("/", 1)
-                raw = _gcs_blob_exists_and_get(bucket_name, blob_path)
-                if raw is not None:
-                    try:
-                        from PIL import Image  # deferred
-
-                        rgb = np.asarray(Image.open(io.BytesIO(raw)).convert("RGB"))
-                    except Exception:
-                        logger.warning("refinement: undecodable rgb for frame %d", frame_index)
-            rgb_cache[frame_index] = rgb
-        return rgb_cache[frame_index]
-
-    def get_depth(frame_index):
-        """(depth_raster, confidence, intrinsics) | None — the 0081 cloud
-        scorer's evidence. Same captures-bucket sourcing (and the same
-        swept-capture degrade) as get_rgb; a malformed raster is a warning
-        + None here, never the poison it is on the reconstruction path —
-        scoring is optional, reconstruction is not."""
-        if frame_index not in depth_cache:
-            payload = None
-            frame = frames_by_idx.get(frame_index)
-            if frame is not None and frame.HasField("depth"):
-                try:
-                    depth, conf, dintr = _fetch_frame_depth(frame, bundle_prefix)
-                    if depth is not None:
-                        payload = (depth, conf, dintr)
-                except Exception:
-                    logger.warning(
-                        "refinement: depth unavailable for frame %d", frame_index
-                    )
-            depth_cache[frame_index] = payload
-        return depth_cache[frame_index]
-
-    return fusion_mod.RefinementContext(
-        get_camera=get_camera,
-        get_mask_stack=get_mask_stack,
-        get_splat=get_splat,
-        get_appearance=get_appearance,
-        get_rgb=get_rgb,
-        get_depth=get_depth,
-        get_room_planes=get_room_planes,
-        get_roomplan=(lambda: room_plan),
-        budget=budget,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Census two-pass driver (decision 0077 lock 6 — LIDAR_ROOMPLAN scenes)
-# ---------------------------------------------------------------------------
-
-# How many associated views per box the reconstruction plan admits (best +
-# second view; further views of a covered box are policy-skipped — cached
-# with a skipped_reason, deterministically).
-_PLAN_VIEWS_PER_BOX = int(os.environ.get("PERCEPTION_PLAN_VIEWS_PER_BOX", "2"))
-
-
-class _PlanCtx:
-    """Association accessor over the two-pass state: pass-1 masks unpack
-    on demand (they are held bit-packed — ~30 full-res bool masks per
-    frame x 12 frames would be ~1 GB raw); whole-frame-CACHED frames'
-    masks lazy-load from their masks.npz so a warm retry's plan can see
-    which box views prior attempts already reconstructed."""
-
-    # `get_appearance` is None rather than absent: `build_box_object` guards
-    # on exactly that, and a plan-time context has no business fetching
-    # colour. `arm_fit` calls that path with scoring off, so it never asks.
-    get_appearance = None
-
-    def __init__(
-        self, frames_by_idx: dict, states: dict, cached_masks: dict
-    ) -> None:
-        self._frames = frames_by_idx
-        self._states = states
-        self._cached_loaders = cached_masks  # frame_index -> () -> stack|None
-        self._cached_stacks: dict[int, Any] = {}
-        self._splats: dict[str, Any] = {}
-
-    def get_splat(self, splat_gcs_uri: str):
-        """Parsed vertices for a splat this run already uploaded, memoized.
-
-        Fetched from GCS rather than kept from the reconstruction: the PLY
-        bytes are dropped eagerly inside `_reconstruct_one_object` — before
-        upload, deliberately, because they sit beside 15 keys of GPU tensors
-        — and holding them to save a download would undo that. One download
-        and parse per box evaluated, against the 35-75 s reconstruction the
-        evaluation may avoid.
-        """
-        if not splat_gcs_uri:
-            return None
-        if splat_gcs_uri not in self._splats:
-            import placement as placement_mod  # deferred with the heavy imports
-
-            try:
-                raw = _download_gcs_uri(splat_gcs_uri)
-                self._splats[splat_gcs_uri] = placement_mod.parse_ply_vertices(raw)
-            except Exception:
-                logger.warning(
-                    "conditional second arm: splat unreadable %s", splat_gcs_uri
-                )
-                self._splats[splat_gcs_uri] = None
-        return self._splats[splat_gcs_uri]
-
-    def get_camera(self, frame_index):
-        frame = self._frames.get(frame_index)
-        if frame is None:
-            return None
-        return (frame.camera_pose, frame.intrinsics)
-
-    def mask_for(self, frame_index, mask_index):
-        if mask_index is None:
-            return None
-        st = self._states.get(frame_index)
-        if st is not None:
-            if mask_index >= len(st["detections"]):
-                return None
-            return st["unpack_mask"](mask_index)
-        if frame_index in self._cached_loaders:
-            if frame_index not in self._cached_stacks:
-                self._cached_stacks[frame_index] = self._cached_loaders[frame_index]()
-            stack = self._cached_stacks[frame_index]
-            if stack is None or mask_index >= stack.shape[0]:
-                return None
-            return stack[mask_index]
-        return None
-
-
-def _build_reconstruction_plan(
-    boxes: list, states: dict, frames_by_idx: dict, cached_results: dict,
-    outputs_bucket: str, scene_id: str,
-) -> tuple[list[tuple[int, int, str]], dict]:
-    """The deterministic pass-2 order: (frame_index, mask_index, tier)
-    triples over the PASS-1 (uncached) frames. Priority (decision 0077):
-    uncovered boxes' best views first, then second views (boxes with the
-    WEAKEST best association first — the low-margin ones benefit most from
-    another view), then the long tail by detection score. Views of a box
-    beyond _PLAN_VIEWS_PER_BOX are policy-skipped (recorded, cached — a
-    deterministic decision, unlike a budget cut).
-
-    Association runs over cached frames too (their masks.npz lazy-loads):
-    a box view a prior attempt already reconstructed counts toward the
-    per-box view budget, so a warm retry never re-reconstructs a covered
-    box from scratch. Returns (plan, {"info", "skipped", "box_by_key"}) —
-    box_by_key names the box each box-tier view was planned FOR, which is
-    what mask refinement needs to know whose measured volume to compare a
-    mask against (decision 0201). The long tail is deliberately absent
-    from it: an unassociated mask has no measured box, so there is nothing
-    to detect an incomplete mask against."""
-    import box_placement  # deferred with the other heavy imports
-    import numpy as np  # deferred
-
-    observations = []
-    done_ok: set[tuple[int, Optional[int]]] = set()
-    cached_masks: dict[int, Any] = {}
-    for frame_index, st in states.items():
-        for mi, det in enumerate(st["detections"]):
-            observations.append({
-                "frame_index": frame_index,
-                "label": det["label"],
-                "score": float(det["score"]),
-                "mask_index": mi,
-                "splat_gcs_uri": "",
-                "placement": {},
-                "view_ray": None,
-            })
-    for frame_index, result in cached_results.items():
-        for entry in result.get("objects", []):
-            if entry.get("ok"):
-                done_ok.add((frame_index, entry.get("mask_index")))
-                observations.append({
-                    "frame_index": frame_index,
-                    "label": entry.get("label"),
-                    "score": float(entry.get("score", 0.0)),
-                    "mask_index": entry.get("mask_index"),
-                    "splat_gcs_uri": entry.get("splat_gcs_uri", ""),
-                    "placement": {},
-                    "view_ray": None,
-                })
-
-        def _loader(fi=frame_index):
-            raw = _gcs_blob_exists_and_get(
-                outputs_bucket, f"scenes/{scene_id}/frames/{fi:04d}/masks.npz"
-            )
-            if raw is None:
-                return None
-            try:
-                return np.load(io.BytesIO(raw))["masks"]
-            except Exception:
-                return None
-
-        cached_masks[frame_index] = _loader
-    observations.sort(key=lambda o: (o["frame_index"], o["mask_index"]))
-
-    ctx = _PlanCtx(frames_by_idx, states, cached_masks)
-    assoc_by_box = box_placement.associate_observations(boxes, observations, ctx)
-
-    plan: list[tuple[int, int, str]] = []
-    planned: set[tuple[int, int]] = set()
-    skipped: list[tuple[int, int]] = []
-    box_by_key: dict[tuple[int, int], int] = {}
-
-    def _views_left(bi: int) -> int:
-        already = sum(
-            1 for a in assoc_by_box.get(bi, [])
-            if (a.frame_index, a.mask_index) in done_ok
-        )
-        return max(0, _PLAN_VIEWS_PER_BOX - already)
-
-    # Tier 1: every box's best not-yet-reconstructed view, census order.
-    for bi in range(len(boxes)):
-        if _views_left(bi) < 1:
-            continue
-        for a in assoc_by_box.get(bi, []):
-            key = (a.frame_index, a.mask_index)
-            if key in done_ok or key in planned:
-                continue
-            plan.append((*key, "box_best_view"))
-            planned.add(key)
-            box_by_key[key] = bi
-            break
-
-    # Tier 2: second views, weakest best-association first.
-    seconds = [
-        (assoc_by_box[bi][0].overlap, bi)
-        for bi in sorted(assoc_by_box)
-        if _views_left(bi) >= 2
-    ]
-    seconds.sort(key=lambda p: (p[0], p[1]))
-    for _overlap, bi in seconds:
-        taken = sum(
-            1 for a in assoc_by_box[bi]
-            if (a.frame_index, a.mask_index) in planned
-        )
-        budget_left = _views_left(bi) - taken
-        for a in assoc_by_box[bi]:
-            if budget_left <= 0:
-                break
-            key = (a.frame_index, a.mask_index)
-            if key in done_ok or key in planned:
-                continue
-            plan.append((*key, "box_second_view"))
-            planned.add(key)
-            box_by_key[key] = bi
-            budget_left -= 1
-
-    # Policy skips: associated pass-1 views beyond the per-box budget.
-    for bi in sorted(assoc_by_box):
-        for a in assoc_by_box[bi]:
-            key = (a.frame_index, a.mask_index)
-            if key in done_ok or key in planned or a.frame_index not in states:
-                continue
-            skipped.append(key)
-            planned.add(key)
-
-    # Tier 3: the long tail (unassociated pass-1 masks), score desc.
-    tail = [
-        o for o in observations
-        if o["frame_index"] in states
-        and (o["frame_index"], o["mask_index"]) not in planned
-    ]
-    tail.sort(key=lambda o: (-o["score"], o["frame_index"], o["mask_index"]))
-    for o in tail:
-        key = (o["frame_index"], o["mask_index"])
-        plan.append((*key, "long_tail"))
-        planned.add(key)
-
-    plan_info = {
-        "box_best_views": sum(1 for p in plan if p[2] == "box_best_view"),
-        "box_second_views": sum(1 for p in plan if p[2] == "box_second_view"),
-        "long_tail": sum(1 for p in plan if p[2] == "long_tail"),
-        "policy_skipped": len(skipped),
-        "associated_boxes": sorted(f"box_{bi:02d}" for bi in assoc_by_box),
-    }
-    # `assoc_by_box` is returned, not recomputed: decision 0229's in-loop
-    # check needs the box's first association to score the arm it produced,
-    # and the plan has already built exactly that. Returning it does not
-    # unfreeze the plan — the triple list above is unchanged and still
-    # decided before pass 2 begins.
-    return plan, {
-        "info": plan_info,
-        "skipped": skipped,
-        "box_by_key": box_by_key,
-        "assoc_by_box": assoc_by_box,
-    }
-
-
-def _first_arm_passes(
-    *, box_index: int, boxes: list, states: dict, plan_meta: dict,
-    tier1_by_box: dict, ctx,
-) -> bool:
-    """Did this box's tier-1 view render well enough to make a second one
-    pointless? Decision 0229.
-
-    Every path that is not a clear pass returns False, and that direction is
-    load-bearing rather than defensive. 0228 measured the second arm
-    currently carrying an OOM fallback in six of nine affected boxes — in
-    those, tier-1 is the view that failed and a lower-ranked one rescued the
-    box. So "tier-1 was attempted" must never license a skip; only "tier-1
-    produced an arm, and the arm fits" may. A missing entry, a soft-failed
-    one, an unreadable splat and an unplaceable arm all fall on the safe
-    side of that line by construction.
-    """
-    import box_placement  # deferred with the other heavy imports
-
-    key = tier1_by_box.get(box_index)
-    if key is None:
-        return False  # tier-1 never ran, or was not planned for this box
-    entry = states.get(key[0], {}).get("entries", {}).get(key[1])
-    if not entry or not entry.get("ok") or not entry.get("splat_gcs_uri"):
-        return False  # tier-1 soft-failed — this is the OOM case
-    assoc = next(
-        (
-            a for a in plan_meta.get("assoc_by_box", {}).get(box_index, [])
-            if (a.frame_index, a.mask_index) == key
-        ),
-        None,
-    )
-    if assoc is None:
-        return False
-    # The plan's associations carry an empty splat uri for pass-1
-    # detections — the splat did not exist when the plan was built. Point
-    # this one at what tier-1 actually produced.
-    scored = box_placement.BoxAssociation(
-        box_index=assoc.box_index,
-        frame_index=assoc.frame_index,
-        mask_index=assoc.mask_index,
-        overlap=assoc.overlap,
-        in_frame_fraction=assoc.in_frame_fraction,
-        obs={**assoc.obs, "splat_gcs_uri": entry["splat_gcs_uri"]},
-    )
-    try:
-        fit = box_placement.arm_fit(
-            boxes[box_index], box_index, f"box_{box_index:02d}", scored, ctx
-        )
-    except Exception:
-        logger.warning(
-            "conditional second arm: arm_fit raised for box %d; keeping the "
-            "second view", box_index, exc_info=True,
-        )
-        return False
-    passes = box_placement.arm_passes(fit)
-    logger.info(
-        "conditional_second_arm box=%d fill=%s residual_m=%s passes=%s",
-        box_index,
-        "-" if fit is None else round(fit.fill, 4),
-        "-" if fit is None else round(fit.residual_m, 4),
-        passes,
-    )
-    return passes
-
-
-def _mask_refiner_for(
-    *, st: dict, boxes: list, room_plan, box_index, mask_index: int,
-    label: str, sam3_model: Any, scene_id: str, frame_idx: int,
-):
-    """A one-shot mask refinement for one planned box view, or None.
-
-    None — meaning "reconstruct what segmentation produced", i.e. exactly
-    what ships today — whenever the pass is off, the view is not a box
-    view (the long tail has no measured volume to compare against), or the
-    frame carries no depth. Otherwise a thunk the reconstruct path calls
-    once, AFTER budget admission, so a refusal at the budget never spends a
-    segmentation call.
-
-    Cost, stated because the charter asks for it: one image encode plus one
-    text prompt plus one box prompt, per FLAGGED box view. It adds no
-    reconstruction — the repaired mask REPLACES the original rather than
-    adding an arm — so the plan, its per-box view budget and the request
-    budget's admission are all untouched, and a starved room's long tail is
-    the same length it was. Across the four preserved captures the detector
-    flags 9 of 25 planned box views on the warm observation set and 10 of 37
-    on the cold plan the flag actually runs against (decision 0201; the cold
-    figure is decision 0211's) — roughly two per room either way.
-    """
-    import mask_refine  # deferred: pulls numpy
-
-    if not mask_refine.MASK_REFINE_ENABLED or box_index is None:
-        return None
-    if st.get("depth") is None or st["depth"][0] is None:
-        return None
-
-    def _refine():
-        import numpy as np  # deferred: heavy dep, only during processing
-
-        frame = st["frame"]
-        box = boxes[box_index]
-        depth_raster, depth_confidence, depth_intrinsics = st["depth"]
-        shape = st["mask_shape"]
-        stack = np.stack([
-            st["unpack_mask"](j) for j in range(len(st["detections"]))
-        ]) if st["detections"] else None
-        suppressed = None
-        if st.get("packed_suppressed") is not None and shape[0]:
-            suppressed = np.unpackbits(st["packed_suppressed"])[
-                : shape[0] * shape[1]
-            ].reshape(shape).astype(bool)
-
-        signal = mask_refine.unclaimed_in_box(
-            box=box, room=room_plan, camera_pose=frame.camera_pose,
-            depth_raster=depth_raster, depth_confidence=depth_confidence,
-            depth_intrinsics=depth_intrinsics, mask_stack=stack,
-            mask_index=mask_index, extra_claimed=suppressed,
-        )
-        if signal is None:
-            return None, {"accepted": False, "reason": "no_usable_depth"}
-        record = signal.as_record()
-        if not signal.flagged:
-            record.update(accepted=False, reason="not_flagged")
-            return None, record
-
-        original = stack[mask_index]
-        prompt = mask_refine.prompt_box_cxcywh(original, signal.unclaimed_vu)
-        if prompt is None:
-            record.update(accepted=False, reason="no_prompt_box")
-            return None, record
-
-        ys, xs = np.nonzero(original)
-        target_bbox = [
-            float(xs.min()), float(ys.min()),
-            float(xs.max() + 1), float(ys.max() + 1),
-        ]
-        refined = sam3_model.refine_with_box(
-            st["pil"], label, prompt, target_bbox=target_bbox
-        )
-        region = mask_refine.unclaimed_region_mask(
-            signal.unclaimed_vu, original.shape, depth_raster.shape
-        )
-        hull = mask_refine.box_hull_mask(
-            box, frame.intrinsics, frame.camera_pose, original.shape
-        )
-        accepted, verdict = mask_refine.accept_refined(
-            original=original, refined=refined, mask_stack=stack,
-            mask_index=mask_index, box_hull=hull, unclaimed_region=region,
-        )
-        record.update(verdict)
-        record["box_id"] = f"box_{box_index:02d}"
-        logger.info(
-            "mask_refine scene_id=%s frame=%d mask=%d box=%s accepted=%s %s",
-            scene_id, frame_idx, mask_index, record["box_id"], accepted,
-            {k: v for k, v in record.items() if k != "box_id"},
-        )
-        return (refined if accepted else None), record
-
-    return _refine
-
-
-def _run_census_two_pass(
-    *,
-    scene_id: str,
-    bundle: CaptureBundle,
-    bundle_uri: str,
-    selected: list,
-    boxes: list,
-    room_plan,
-    outputs_bucket: str,
-    sam3_model: Any,
-    sam3d_model: Any,
-    object_prompt: str,
-    budget,
-) -> tuple[list[dict], bool, dict]:
-    """Two-pass frame processing for census scenes (decision 0077): pass 1
-    segments the sampled frames (masks.npz written per frame — it is
-    complete at segmentation time); pass 2 reconstructs per the plan under
-    budget admission. Returns (frame_results, budget_stopped, plan_info).
-
-    room_plan is the parsed CapturedRoom the boxes came from; mask
-    refinement reads its measured floors and walls to tell an object's own
-    unclaimed surface from the room it stands in (decision 0201). It is
-    unused when PERCEPTION_MASK_REFINE is off.
-
-    Cache contract (frozen; additive only): a frame's objects.json is
-    written exactly when every planned mask in it was ATTEMPTED — masks
-    deliberately not reconstructed carry `skipped_reason` (a deterministic
-    policy decision, safe to cache); a frame with a budget-cut planned
-    mask is NOT cached (0062's law — a budget stop must never become
-    permanent), and its completed objects keep their per-object splat
-    caches for the next attempt. Whole-frame cache hits (legacy or
-    two-pass) are used verbatim.
-    """
-    import numpy as np  # deferred: heavy dep, only during processing
-    from PIL import Image
-    from privacy import (
-        masks_npz_bytes,
-        partition_detections,
-        segmentation_prompt,
-        suppressed_union,
-    )
-
-    prefix = _bundle_prefix(bundle_uri)
-    frames_by_idx = {f.frame_index: f for f in bundle.frames}
-    frame_results_by_idx: dict[int, dict] = {}
-    states: dict[int, dict] = {}
-    budget_stopped = False
-
-    # ---- Pass 1: segmentation (cache-aware) -------------------------------
-    for frame in selected:
-        frame_idx = frame.frame_index
-        frame_prefix = f"scenes/{scene_id}/frames/{frame_idx:04d}"
-        cached_bytes = _gcs_blob_exists_and_get(
-            outputs_bucket, f"{frame_prefix}/objects.json"
-        )
-        if cached_bytes:
-            logger.info("Frame %d cache hit for scene %s", frame_idx, scene_id)
-            frame_results_by_idx[frame_idx] = json.loads(cached_bytes)
-            continue
-
-        # Segmentation admission: a SAM 3 pass costs a few seconds — the
-        # object estimate is a conservative upper bound for "one more
-        # cheap step" without teaching the tracker a new cost class.
-        if budget is not None and not budget.can_start_object():
-            budget_stopped = True
-            logger.info(
-                "budget_stop point=segment scene_id=%s frames_segmented=%d %s",
-                scene_id, len(states), budget.snapshot(),
-            )
-            break
-
-        rgb_uri = prefix + frame.rgb_gcs_path
-        try:
-            img_bytes = _download_gcs_uri(rgb_uri)
-        except PoisonError:
-            raise
-        except Exception as exc:
-            raise EnvironmentalError(
-                f"Failed to fetch frame {frame_idx}: {exc}"
-            ) from exc
-        try:
-            pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        except Exception as exc:
-            raise PoisonError(
-                f"Frame {frame_idx} image cannot be opened: {exc}"
-            ) from exc
-
-        try:
-            detections = sam3_model.segment(pil, segmentation_prompt(object_prompt))
-        except Exception as exc:
-            raise EnvironmentalError(
-                f"SAM 3 failed on frame {frame_idx}: {exc}"
-            ) from exc
-        # Suppressed concepts leave the pipeline here (decision 0089): only
-        # the exclusion union survives, and only inside masks.npz.
-        detections, suppressed = partition_detections(detections)
-        if suppressed:
-            logger.info(
-                "privacy: frame %d scene %s suppressed=%d labels=%s",
-                frame_idx, scene_id, len(suppressed),
-                sorted({d["label"] for d in suppressed}),
-            )
-
-        # masks.npz is complete at segmentation time — write it now (the
-        # shell + refinement read it; there is no masks-only cache-hit
-        # path, so an early write can never short-circuit reprocessing).
-        masks_uri = _gcs_upload_for_scene(
-            f"gs://{outputs_bucket}/", f"{frame_prefix}/masks.npz",
-            masks_npz_bytes(detections, suppressed), "application/octet-stream"
-        )
-
-        # Hold masks bit-packed (~8x smaller than bool) for association +
-        # pass-2 reconstruction; unpack on demand.
-        mask_shape = detections[0]["mask"].shape if detections else (0, 0)
-        packed = [np.packbits(d["mask"].astype(bool)) for d in detections]
-        # The suppressed union rides along bit-packed: a person standing in
-        # front of an object claims those pixels, and without this the
-        # detector would read them as the object's own missing surface.
-        _suppressed_union = suppressed_union(suppressed)
-        packed_suppressed = (
-            None if _suppressed_union is None
-            else np.packbits(_suppressed_union.astype(bool))
-        )
-        det_meta = [
-            {k: d[k] for k in ("label", "instance_idx", "bbox", "score")}
-            for d in detections
-        ]
-
-        def _unpacker(packed_list, shape):
-            def unpack(mi: int):
-                flat = np.unpackbits(packed_list[mi])[: shape[0] * shape[1]]
-                return flat.reshape(shape).astype(bool)
-            return unpack
-
-        states[frame_idx] = {
-            "frame": frame,
-            "pil": pil,
-            "rgb_gcs_uri": rgb_uri,
-            "masks_uri": masks_uri,
-            "detections": det_meta,
-            "unpack_mask": _unpacker(packed, mask_shape),
-            "entries": {},
-            "depth": None,  # fetched lazily at first pass-2 use
-            "mask_shape": mask_shape,
-            "packed_suppressed": packed_suppressed,
-        }
-
-    # ---- Plan + Pass 2 ----------------------------------------------------
-    plan, plan_meta = _build_reconstruction_plan(
-        boxes, states, frames_by_idx, frame_results_by_idx,
-        outputs_bucket, scene_id,
-    )
-    executed: set[tuple[int, int]] = set()
-    # Decision 0229: which box each executed tier-1 view was planned for, so
-    # a tier-2 entry can ask what its own tier-1 actually rendered. The plan
-    # emits every box_best_view before any box_second_view, so this is always
-    # populated by the time it is read — and a box whose tier-1 was already
-    # cached never reaches tier 2 at all, because `_views_left` drops below 2.
-    tier1_by_box: dict[int, tuple[int, int]] = {}
-    conditional_skipped: list[tuple[int, int]] = []
-    if not budget_stopped:
-        import box_placement  # deferred with the other heavy imports
-
-        # One context for the whole loop so its splat memo survives; masks
-        # are not needed here, hence the empty cached-loader map.
-        arm_ctx = _PlanCtx(frames_by_idx, states, {})
-        for frame_idx, mask_index, _tier in plan:
-            st = states[frame_idx]
-            det = st["detections"][mask_index]
-            box_index = plan_meta["box_by_key"].get((frame_idx, mask_index))
-            if (
-                box_placement._CONDITIONAL_SECOND_ARM
-                and _tier == "box_second_view"
-                and box_index is not None
-                and _first_arm_passes(
-                    box_index=box_index,
-                    boxes=boxes,
-                    states=states,
-                    plan_meta=plan_meta,
-                    tier1_by_box=tier1_by_box,
-                    ctx=arm_ctx,
-                )
-            ):
-                conditional_skipped.append((frame_idx, mask_index))
-                continue
-            if st["depth"] is None:
-                st["depth"] = _fetch_frame_depth(st["frame"], prefix)
-            depth_raster, depth_confidence, depth_intrinsics = st["depth"]
-            obj = {**det, "mask": st["unpack_mask"](mask_index)}
-            refiner = _mask_refiner_for(
-                st=st, boxes=boxes, room_plan=room_plan,
-                box_index=plan_meta["box_by_key"].get((frame_idx, mask_index)),
-                mask_index=mask_index, label=det["label"],
-                sam3_model=sam3_model, scene_id=scene_id, frame_idx=frame_idx,
-            )
-            entry, stopped = _reconstruct_one_object(
-                scene_id=scene_id,
-                frame_idx=frame_idx,
-                i=mask_index,
-                obj=obj,
-                pil=st["pil"],
-                outputs_bucket=outputs_bucket,
-                sam3d_model=sam3d_model,
-                budget=budget,
-                frame=st["frame"],
-                depth_raster=depth_raster,
-                depth_confidence=depth_confidence,
-                depth_intrinsics=depth_intrinsics,
-                objects_done=len(executed),
-                objects_detected=len(plan),
-                mask_refiner=refiner,
-            )
-            if stopped:
-                budget_stopped = True
-                break
-            st["entries"][mask_index] = entry
-            executed.add((frame_idx, mask_index))
-            if _tier == "box_best_view" and box_index is not None:
-                tier1_by_box[box_index] = (frame_idx, mask_index)
-            _free_gpu_memory()
-
-    # Conditional second-arm skips (decision 0229). Recorded with their own
-    # reason, never folded into `box_covered_by_other_view`: that reason
-    # means "another view of this box is planned", and this one means "this
-    # box's own first view already rendered well enough".
-    for frame_idx, mask_index in conditional_skipped:
-        st = states[frame_idx]
-        det = st["detections"][mask_index]
-        st["entries"][mask_index] = {
-            "label": det["label"],
-            "instance_idx": det["instance_idx"],
-            "bbox": det["bbox"],
-            "score": det["score"],
-            "mask_index": mask_index,
-            "ok": False,
-            "skipped_reason": "first_arm_already_fits",
-        }
-
-    # Policy skips: recorded entries (deterministic — safe to cache).
-    for frame_idx, mask_index in plan_meta["skipped"]:
-        st = states[frame_idx]
-        det = st["detections"][mask_index]
-        st["entries"][mask_index] = {
-            "label": det["label"],
-            "instance_idx": det["instance_idx"],
-            "bbox": det["bbox"],
-            "score": det["score"],
-            "mask_index": mask_index,
-            "ok": False,
-            "skipped_reason": "box_covered_by_other_view",
-        }
-
-    # ---- Finalize frames (in selected order) ------------------------------
-    planned_by_frame: dict[int, set[int]] = {}
-    for frame_idx, mask_index, _tier in plan:
-        planned_by_frame.setdefault(frame_idx, set()).add(mask_index)
-
-    frame_results: list[dict] = []
-    for frame in selected:
-        frame_idx = frame.frame_index
-        if frame_idx in frame_results_by_idx:  # whole-frame cache hit
-            frame_results.append(frame_results_by_idx[frame_idx])
-            continue
-        st = states.get(frame_idx)
-        if st is None:
-            continue  # pass-1 budget cut before this frame — not attempted
-        pending = planned_by_frame.get(frame_idx, set()) - set(st["entries"])
-        objects_out = [st["entries"][mi] for mi in sorted(st["entries"])]
-        result = {
-            "frame_index": frame_idx,
-            "rgb_gcs_uri": st["rgb_gcs_uri"],
-            "image_size": [st["pil"].width, st["pil"].height],
-            "masks_gcs_uri": st["masks_uri"],
-            "objects": objects_out,
-            "ok": True,
-        }
-        if pending:
-            # Budget cut a planned mask in this frame: the frame is
-            # incomplete — never cached (its finished splats keep their
-            # per-object caches for the retry).
-            result["budget_stopped"] = True
-            frame_results.append(result)
-            continue
-        _gcs_upload_for_scene(
-            f"gs://{outputs_bucket}/",
-            f"scenes/{scene_id}/frames/{frame_idx:04d}/objects.json",
-            json.dumps(result).encode(), "application/json"
-        )
-        frame_results.append(result)
-
-    return frame_results, budget_stopped, plan_meta["info"]
-
-
 # ---------------------------------------------------------------------------
 # Top-level processing orchestrator
 # ---------------------------------------------------------------------------
@@ -1728,27 +457,31 @@ def run_perception(
     bundle_uri: str,
     outputs_bucket: str,
     sam3_model: Any,
-    sam3d_model: Any,
     object_prompt: str,
     max_frames: Optional[int] = None,
     budget=None,
 ) -> str:
-    """Process a bounded, pose-diverse subset of the bundle's frames.
-    Returns the gs:// URI of the manifest.
+    """Segment a bounded, box-aware subset of the bundle's frames and write
+    the scene's manifest and boxes.json. Returns the gs:// URI of the manifest.
 
-    max_frames caps how many frames are reconstructed (None → sampling
-    module default, env PERCEPTION_MAX_FRAMES). budget is an optional
-    budget.BudgetTracker anchored at request entry; when the remaining
-    budget can't fit another frame (or another object, mid-frame), the loop
-    stops early and the scene ships with what's banked — a degraded-but-
-    ready scene beats a request-timeout zombie. If NO frame completed in
-    full, raises EnvironmentalError instead: the Cloud Tasks retry starts
-    with warm models and per-object splat caches, so it gets strictly
-    further than this attempt did.
+    The objects in a room are the boxes the person made on the phone
+    (decision 0322): they are read from the bundle, written as boxes.json, and
+    decide which frames are worth segmenting (census set-cover over the boxes;
+    no boxes → the pose-diverse sampler). No object is reconstructed; the
+    manifest's `objects` array stays, empty, for the readers that expect it.
+
+    max_frames caps how many frames are segmented (None → sampling module
+    default, env PERCEPTION_MAX_FRAMES). budget is an optional
+    budget.BudgetTracker anchored at request entry; when the remaining budget
+    can't fit another frame the loop stops early and the scene ships with
+    what's banked. If NO frame completed, raises EnvironmentalError instead:
+    the Cloud Tasks retry starts with warm models and the per-frame cache, so
+    it gets strictly further than this attempt did.
 
     Raises PoisonError or EnvironmentalError as appropriate.
     """
-    import sampling as sampling_mod  # deferred with the other heavy imports
+    import boxes_json as boxes_json_mod  # deferred with the other heavy imports
+    import sampling as sampling_mod
     from budget import BudgetTracker
 
     if budget is None:
@@ -1765,48 +498,29 @@ def run_perception(
     if not bundle.frames:
         raise PoisonError("Bundle has no frames")
 
-    # CapturedRoom (decision 0077): parsed once, cached to the outputs
-    # bucket, threaded into fusion's census pass. Missing/corrupt →
-    # LIDAR_ARKIT semantics with a structured log + manifest note — never
-    # a failed scene.
-    room_plan, roomplan_reason, roomplan_source = _load_scene_room_plan(
-        bundle=bundle, bundle_uri=bundle_uri, scene_id=scene_id,
-        outputs_bucket=outputs_bucket,
+    # The person's boxes: written first, whole and idempotent (one blob PUT of
+    # canonical bytes), even when empty, so a missing file always means "not
+    # yet" and never "no boxes".
+    boxes = boxes_json_mod.boxes_from_bundle(bundle)
+    _gcs_upload_for_scene(
+        f"gs://{outputs_bucket}/", f"scenes/{scene_id}/boxes.json",
+        boxes_json_mod.boxes_json_bytes(scene_id, boxes), "application/json",
     )
-    if roomplan_reason is not None:
+    if len(boxes) < len(bundle.person_boxes):
         logger.warning(
-            "roomplan_parse_failed scene_id=%s reason=%s; degrading to "
-            "LIDAR_ARKIT semantics", scene_id, roomplan_reason,
+            "boxes scene_id=%s kept=%d dropped=%d (unusable, repeated or past the limit)",
+            scene_id, len(boxes), len(bundle.person_boxes) - len(boxes),
         )
-    elif room_plan is not None:
-        logger.info(
-            "roomplan scene_id=%s source=%s walls=%d objects=%d",
-            scene_id, roomplan_source, len(room_plan.walls), len(room_plan.objects),
-        )
-        # Structural association misses, both directions, once per room. A
-        # box whose category has no family never associates however well its
-        # mask overlaps; a family label the prompt cannot emit never matches
-        # however well it fits. Neither is visible in any other log.
-        import box_placement  # deferred with the other heavy imports
-
-        unmapped, inert = box_placement.vocabulary_gaps(
-            room_plan.objects, object_prompt
-        )
-        if unmapped or inert:
-            logger.warning(
-                "box_vocabulary_gap scene_id=%s unmapped_categories=%s "
-                "unemittable_family_labels=%s",
-                scene_id, unmapped or "-", inert or "-",
-            )
+    logger.info("boxes scene_id=%s count=%d", scene_id, len(boxes))
 
     frames_total = len(bundle.frames)
     effective_max = max_frames if max_frames is not None else sampling_mod.DEFAULT_MAX_FRAMES
-    census_boxes = list(room_plan.objects) if room_plan is not None else []
+    census_boxes = boxes_json_mod.census_boxes(boxes)
     census_info = None
     if census_boxes:
-        # Census-driven selection (decision 0077): box-visibility set-cover
-        # + pose-diverse residue. No census → the 0062 sampler VERBATIM
-        # (the degrade lock).
+        # Census-driven selection (decision 0077): box-visibility set-cover +
+        # pose-diverse residue. No boxes → the 0062 sampler VERBATIM (the
+        # degrade lock).
         import census_sampling as census_sampling_mod
 
         # The vetoes (decision 0234) need pixels and depth, which only this
@@ -1841,7 +555,7 @@ def run_perception(
         _veto_on = census_sampling_mod.VISIBILITY_VETO
         selected, census_info = census_sampling_mod.select_frames_census(
             bundle.frames, census_boxes, effective_max,
-            room=room_plan if _veto_on else None,
+            room=None,
             get_depth=_veto_depth if _veto_on else None,
             get_rgb=_veto_rgb if _veto_on else None,
         )
@@ -1856,107 +570,45 @@ def run_perception(
     )
 
     prefix = _bundle_prefix(bundle_uri)
-    plan_info = None
     run_started = time.monotonic()
-
-    if census_boxes:
-        frame_results, budget_stopped, plan_info = _run_census_two_pass(
+    frame_results: list[dict] = []
+    budget_stopped = False
+    for frame in selected:
+        if not budget.can_start_frame():
+            budget_stopped = True
+            logger.info(
+                "budget_stop point=frame scene_id=%s frames_done=%d "
+                "frames_planned=%d %s",
+                scene_id, len(frame_results), len(selected), budget.snapshot(),
+            )
+            break
+        frame_started = time.monotonic()
+        frame_result = _process_frame(
             scene_id=scene_id,
-            bundle=bundle,
-            bundle_uri=bundle_uri,
-            selected=selected,
-            boxes=census_boxes,
-            room_plan=room_plan,
+            frame_idx=frame.frame_index,
+            rgb_gcs_uri=prefix + frame.rgb_gcs_path,
             outputs_bucket=outputs_bucket,
             sam3_model=sam3_model,
-            sam3d_model=sam3d_model,
             object_prompt=object_prompt,
-            budget=budget,
         )
+        frame_s = time.monotonic() - frame_started
+        frame_results.append(frame_result)
         logger.info(
-            "census two-pass scene_id=%s frames=%d plan=%s budget_stopped=%s "
-            "elapsed_s=%.1f",
-            scene_id, len(frame_results), plan_info, budget_stopped,
-            time.monotonic() - run_started,
+            "scene %s frame %d done (%d masks) frame_s=%.1f elapsed_s=%.1f %s",
+            scene_id, frame.frame_index, frame_result.get("mask_count", 0),
+            frame_s, time.monotonic() - run_started, budget.snapshot(),
         )
-        _log_vram(scene_id, "after_census_pass2")
-    else:
-        frame_results = []
-        budget_stopped = False
-        for frame in selected:
-            if not budget.can_start_frame():
-                budget_stopped = True
-                logger.info(
-                    "budget_stop point=frame scene_id=%s frames_done=%d "
-                    "frames_planned=%d %s",
-                    scene_id, len(frame_results), len(selected), budget.snapshot(),
-                )
-                break
-            frame_started = time.monotonic()
-            rgb_uri = prefix + frame.rgb_gcs_path
-            frame_result = _process_frame(
-                scene_id=scene_id,
-                frame_idx=frame.frame_index,
-                rgb_gcs_uri=rgb_uri,
-                outputs_bucket=outputs_bucket,
-                sam3_model=sam3_model,
-                sam3d_model=sam3d_model,
-                object_prompt=object_prompt,
-                frame=frame,
-                bundle_prefix=prefix,
-                budget=budget,
-            )
-            frame_s = time.monotonic() - frame_started
-            frame_results.append(frame_result)
-            logger.info(
-                "scene %s frame %d done (%d objects) frame_s=%.1f elapsed_s=%.1f %s",
-                scene_id, frame.frame_index,
-                sum(1 for o in frame_result.get("objects", []) if o.get("ok")),
-                frame_s, time.monotonic() - run_started, budget.snapshot(),
-            )
-            if frame_result.get("budget_stopped"):
-                # Mid-frame stop: bank this partial frame's objects and finish.
-                budget_stopped = True
-                break
-            budget.note_frame(frame_s)
-            _free_gpu_memory()
-            _log_vram(scene_id, f"after_frame_{frame.frame_index}")
+        budget.note_frame(frame_s)
+        _free_gpu_memory()
+        _log_vram(scene_id, f"after_frame_{frame.frame_index}")
 
-    complete_frames = [fr for fr in frame_results if not fr.get("budget_stopped")]
-    if not complete_frames:
-        # Nothing trustworthy banked. 5xx so Cloud Tasks retries: the retry
-        # runs against warm models and this attempt's per-object splat
-        # caches, so it makes strictly more progress per second.
+    if not frame_results:
+        # Nothing banked. 5xx so Cloud Tasks retries against warm models and
+        # this attempt's per-frame cache.
         raise EnvironmentalError(
             f"budget exhausted before any frame completed "
             f"(frames_planned={len(selected)}); {budget.snapshot()}"
         )
-
-    # Scene-level fusion: one entry per physical object, with a fused world
-    # transform — the array the web viewer renders. Frames stay for
-    # provenance/debug. See fusion.py.
-    import fusion as fusion_mod
-    refine_ctx = _build_refinement_context(
-        bundle=bundle, scene_id=scene_id, bundle_uri=bundle_uri,
-        outputs_bucket=outputs_bucket, budget=budget, room_plan=room_plan,
-    )
-    scene_objects, fusion_meta = fusion_mod.fuse_scene_objects_with_meta(frame_results, refine_ctx)
-
-    # Scene-level roomplan note — emitted ONLY when the bundle claims a
-    # CapturedRoom, so a no-roomplan bundle's manifest stays byte-identical
-    # to the pre-0077 shape (the no-CapturedRoom degrade lock).
-    roomplan_note: Optional[dict] = None
-    if bundle.HasField("room_plan") and bundle.room_plan.json_gcs_path:
-        roomplan_note = {
-            "present": True,
-            "parse_ok": room_plan is not None,
-            "wall_count": len(room_plan.walls) if room_plan is not None else None,
-            "object_count": len(room_plan.objects) if room_plan is not None else None,
-        }
-        if roomplan_reason is not None:
-            roomplan_note["parse_failed"] = roomplan_reason
-        if roomplan_source is not None:
-            roomplan_note["source"] = roomplan_source
 
     manifest = {
         "scene_id": scene_id,
@@ -1966,7 +618,6 @@ def run_perception(
         "frame_count": frames_total,
         "frames_total": frames_total,
         "frames_sampled": len(selected),
-        **({"roomplan": roomplan_note} if roomplan_note is not None else {}),
         "sampling": {
             "policy": (
                 "census_set_cover_v1" if census_boxes else "pose_diverse_fps_v1"
@@ -1975,13 +626,11 @@ def run_perception(
             "selected_frame_indices": selected_indices,
             "frames_processed": len(frame_results),
             "budget_stopped": budget_stopped,
-            "refinement_skipped": fusion_meta["refinement_skipped"],
-            **(
-                {"census": {**census_info, "plan": plan_info}}
-                if census_info is not None else {}
-            ),
+            **({"census": census_info} if census_info is not None else {}),
         },
-        "objects": scene_objects,
+        # No object is reconstructed (decision 0323): the room's objects are the
+        # boxes in boxes.json. The key stays so readers that ask for it get [].
+        "objects": [],
         "frames": frame_results,
     }
     manifest_blob = f"scenes/{scene_id}/manifest.json"
@@ -2005,7 +654,6 @@ async def handle_process(
     fcm_notifier,         # FcmNotifier
     outputs_bucket: str,
     sam3_model: Any,
-    sam3d_model: Any,
     object_prompt: str,
     deadline: Optional[float] = None,
 ) -> JSONResponse:
@@ -2082,7 +730,6 @@ async def handle_process(
             bundle_uri=req.bundle_uri,
             outputs_bucket=outputs_bucket,
             sam3_model=sam3_model,
-            sam3d_model=sam3d_model,
             object_prompt=object_prompt,
             budget=budget,
         )
@@ -2157,20 +804,6 @@ async def handle_process(
     except Exception as exc:
         logger.warning(
             "shell enqueue failed (scene %s stays ready): %s", scene_id, exc
-        )
-
-    # Third stage: enqueue the compressed-splat tier (decisions 0125/0126).
-    # Same fire-and-forget posture, and independent of the shell enqueue
-    # above — one failing must not cost the other. A missing compressed
-    # tier is invisible to the client: the room renders from PLY, which is
-    # what every room did before the tier existed.
-    try:
-        from compress_enqueue import enqueue_compress_task  # deferred
-
-        enqueue_compress_task(scene_id=scene_id)
-    except Exception as exc:
-        logger.warning(
-            "compress enqueue failed (scene %s stays ready): %s", scene_id, exc
         )
 
     if fcm_token:

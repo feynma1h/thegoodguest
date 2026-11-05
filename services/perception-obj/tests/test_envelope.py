@@ -1,32 +1,29 @@
-"""Envelope tests for the perception receiver: frame sampling wiring, budget
-cutoff behaviour, and the GPU-memory lifecycle.
+"""Envelope tests for the perception receiver: frame sampling wiring, the
+person's boxes, and budget cutoff behaviour.
 
 These drive run_perception/_process_frame with fake models and patched GCS,
 pinning the invariants the 2026-07-21 real capture (scene 25a14caf) proved
-necessary:
+necessary, now that nothing is reconstructed (decision 0323):
 
-  * only the sampled subset of a large bundle is reconstructed, and the
-    manifest records the sampling (frames_total / frames_sampled / sampling);
-  * when the budget refuses another frame (or object, mid-frame), the run
-    ships what's banked instead of computing past the request window —
-    and a budget-stopped frame is never cached to GCS;
-  * if no frame completed in full, the attempt raises EnvironmentalError
-    (Cloud Tasks retry, warm models) instead of shipping an empty scene;
-  * nothing from a SAM 3D result dict (device tensors) survives into the
-    accumulated frame result — the leak class behind the OOM cascade;
-  * the single reconstruct retry happens and can succeed.
+  * only the sampled subset of a large bundle is segmented, and the manifest
+    records the sampling (frames_total / frames_sampled / sampling);
+  * the boxes the person made are written as boxes.json (even when there are
+    none), pick the frames, and are the only object source: the manifest
+    carries no objects;
+  * when the budget refuses another frame, the run ships what's banked
+    instead of computing past the request window;
+  * if no frame completed, the attempt raises EnvironmentalError (Cloud Tasks
+    retry, warm models) instead of shipping an empty scene.
 
 Run from repo root:
   pytest services/perception-obj/tests/test_envelope.py -v
 """
 from __future__ import annotations
 
-import gc
 import io
 import json
 import math
 import sys
-import weakref
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -43,30 +40,14 @@ if str(_schemas_path) not in sys.path:
 sys.modules.setdefault("torch", MagicMock())
 sys.modules.setdefault("models", MagicMock())
 sys.modules.setdefault("models.sam3", MagicMock())
-sys.modules.setdefault("models.sam3d", MagicMock())
 
 import process_receiver  # noqa: E402
-from process_receiver import (  # noqa: E402
-    EnvironmentalError,
-    _process_frame,
-    run_perception,
-)
+from process_receiver import EnvironmentalError, run_perception  # noqa: E402
 from thegoodguest_schemas import ARKIT_ONLY, SCHEMA_VERSION, CaptureBundle  # noqa: E402
 
 _SCENE_ID = "scene-envelope-001"
 _BUNDLE_URI = "gs://bucket/captures/envtest/bundle.pb"
 _OUT = "outputs-bucket"
-
-_MINI_PLY = (
-    "ply\n"
-    "format ascii 1.0\n"
-    "element vertex 8\n"
-    "property float x\n"
-    "property float y\n"
-    "property float z\n"
-    "end_header\n"
-    "0 0 0\n1 0 0\n0 1 0\n0 0 1\n1 1 0\n1 0 1\n0 1 1\n1 1 1\n"
-)
 
 
 def _tiny_jpeg() -> bytes:
@@ -80,8 +61,9 @@ def _tiny_jpeg() -> bytes:
 _JPEG = _tiny_jpeg()
 
 
-def _make_bundle_bytes(frame_count: int) -> bytes:
-    """Valid ARKIT_ONLY bundle with pose diversity (arc walk + pan)."""
+def _make_bundle_bytes(frame_count: int, boxes: tuple = ()) -> bytes:
+    """Valid ARKIT_ONLY bundle with pose diversity (arc walk + pan), carrying
+    the given person boxes: dicts of box_id / label / center / size."""
     import time as _time
 
     b = CaptureBundle()
@@ -104,13 +86,20 @@ def _make_bundle_bytes(frame_count: int) -> bytes:
         half = math.radians(3.0 * i) / 2.0
         f.camera_pose.quat_y = math.sin(half)
         f.camera_pose.quat_w = math.cos(half)
-        f.intrinsics.fx = 800.0
-        f.intrinsics.fy = 800.0
+        f.intrinsics.fx = 24.0  # a wide view of this tiny frame, so a box 2 m away fits
+        f.intrinsics.fy = 24.0
         f.intrinsics.cx = 16.0
         f.intrinsics.cy = 12.0
         f.intrinsics.width = 32
         f.intrinsics.height = 24
         f.gravity.y = -1.0
+    for n, spec in enumerate(boxes):
+        pb = b.person_boxes.add()
+        pb.box_id = spec["box_id"]
+        pb.detector_label = spec.get("label", "chair")
+        pb.center_x, pb.center_y, pb.center_z = spec["center"]
+        pb.size_x, pb.size_y, pb.size_z = spec.get("size", (0.5, 0.9, 0.5))
+        pb.created_at_device_us = n
     return b.SerializeToString()
 
 
@@ -126,40 +115,6 @@ def _detection(i: int = 0, label: str = "chair") -> dict:
     }
 
 
-class _FakeTensor:
-    """Device-tensor stand-in: satisfies placement's duck-typed conversion."""
-
-    def __init__(self, value):
-        self._v = np.asarray(value, dtype=np.float64)
-
-    def detach(self):
-        return self
-
-    def cpu(self):
-        return self
-
-    def numpy(self):
-        return self._v
-
-
-class _FakeGS:
-    def __init__(self):
-        self.payload = bytearray(256)  # give the object a body worth leaking
-
-    def save_ply(self, path):
-        Path(path).write_text(_MINI_PLY)
-
-
-def _fake_result() -> dict:
-    return {
-        "rotation": _FakeTensor([1.0, 0.0, 0.0, 0.0]),  # wxyz identity
-        "translation": _FakeTensor([0.0, 0.0, 1.0]),
-        "scale": _FakeTensor([1.0, 1.0, 1.0]),
-        "coords": _FakeTensor(np.zeros((16, 3))),
-        "gs": _FakeGS(),
-    }
-
-
 class _FakeSam3:
     def __init__(self, detections_per_frame):
         self.calls = 0
@@ -170,16 +125,6 @@ class _FakeSam3:
         return [dict(d) for d in self._dets]
 
 
-class _FakeSam3D:
-    def __init__(self, factory=_fake_result):
-        self.calls = 0
-        self._factory = factory
-
-    def reconstruct(self, pil, mask, seed=42):
-        self.calls += 1
-        return self._factory()
-
-
 class _FakeBudget:
     """Duck-typed budget seam: scripted admissions, recorded observations.
 
@@ -187,27 +132,17 @@ class _FakeBudget:
     run_perception's CONTRACT with whatever tracker it is given.
     """
 
-    def __init__(self, frame_admits=None, object_admits=None):
+    def __init__(self, frame_admits=None):
         self._frame = None if frame_admits is None else list(frame_admits)
-        self._object = None if object_admits is None else list(object_admits)
         self.noted_frames: list[float] = []
-        self.noted_objects: list[float] = []
 
     def can_start_frame(self) -> bool:
         if self._frame is None:
             return True
         return self._frame.pop(0) if self._frame else False
 
-    def can_start_object(self) -> bool:
-        if self._object is None:
-            return True
-        return self._object.pop(0) if self._object else False
-
     def note_frame(self, s):
         self.noted_frames.append(s)
-
-    def note_object(self, s):
-        self.noted_objects.append(s)
 
     def remaining(self):
         return 999.0
@@ -250,22 +185,21 @@ def _manifest_from(uploads) -> dict:
 # Sampling wiring
 # ---------------------------------------------------------------------------
 
+def _run(bundle_bytes, uploads, **kw):
+    sam3 = kw.pop("sam3", None) or _FakeSam3([_detection(0)])
+    with ExitStack() as stack:
+        _gcs_patches(stack, bundle_bytes, uploads)
+        uri = run_perception(
+            scene_id=_SCENE_ID, bundle_uri=_BUNDLE_URI, outputs_bucket=_OUT,
+            sam3_model=sam3, object_prompt="chair", **kw,
+        )
+    return uri, sam3
+
+
 class TestSamplingWiring:
     def test_only_sampled_frames_processed(self):
         uploads: list = []
-        sam3 = _FakeSam3([_detection(0)])
-        sam3d = _FakeSam3D()
-        with ExitStack() as stack:
-            _gcs_patches(stack, _make_bundle_bytes(30), uploads)
-            uri = run_perception(
-                scene_id=_SCENE_ID,
-                bundle_uri=_BUNDLE_URI,
-                outputs_bucket=_OUT,
-                sam3_model=sam3,
-                sam3d_model=sam3d,
-                object_prompt="chair",
-                max_frames=4,
-            )
+        uri, sam3 = _run(_make_bundle_bytes(30), uploads, max_frames=4)
         assert uri.endswith("manifest.json")
         assert sam3.calls == 4, "exactly the sampled frames must be segmented"
         m = _manifest_from(uploads)
@@ -285,22 +219,79 @@ class TestSamplingWiring:
 
     def test_small_bundle_processes_all_frames(self):
         uploads: list = []
-        sam3 = _FakeSam3([_detection(0)])
-        with ExitStack() as stack:
-            _gcs_patches(stack, _make_bundle_bytes(2), uploads)
-            run_perception(
-                scene_id=_SCENE_ID,
-                bundle_uri=_BUNDLE_URI,
-                outputs_bucket=_OUT,
-                sam3_model=sam3,
-                sam3d_model=_FakeSam3D(),
-                object_prompt="chair",
-            )
+        _, sam3 = _run(_make_bundle_bytes(2), uploads)
         assert sam3.calls == 2
         m = _manifest_from(uploads)
         assert m["frames_total"] == 2
         assert m["frames_sampled"] == 2
         assert m["sampling"]["budget_stopped"] is False
+
+    def test_each_frame_banks_its_masks_for_the_shell(self):
+        uploads: list = []
+        _run(_make_bundle_bytes(2), uploads)
+        blobs = [b for b, _ in uploads]
+        assert sum(b.endswith("/masks.npz") for b in blobs) == 2
+        m = _manifest_from(uploads)
+        assert all(fr["masks_gcs_uri"].endswith("/masks.npz") and fr["mask_count"] == 1
+                   for fr in m["frames"])
+
+
+# ---------------------------------------------------------------------------
+# The person's boxes, and no reconstruction (decisions 0322, 0323)
+# ---------------------------------------------------------------------------
+
+def _boxes_from(uploads) -> dict:
+    bodies = [d for (b, d) in uploads if b == f"scenes/{_SCENE_ID}/boxes.json"]
+    assert len(bodies) == 1, "boxes.json is written exactly once per run"
+    return json.loads(bodies[0])
+
+
+class TestPersonBoxes:
+    BOX = {"box_id": "box-1", "label": "dining table", "center": (0.3, 0.0, -2.0), "size": (1.2, 0.8, 0.6)}
+
+    def test_the_bundles_boxes_are_written_as_boxes_json(self):
+        uploads: list = []
+        _run(_make_bundle_bytes(3, boxes=(self.BOX,)), uploads)
+        doc = _boxes_from(uploads)
+        assert doc["scene_id"] == _SCENE_ID and doc["source"] == "person"
+        assert [(b["id"], b["label"]) for b in doc["boxes"]] == [("box-1", "dining table")]
+
+    def test_a_bundle_without_boxes_still_writes_an_empty_boxes_json(self):
+        uploads: list = []
+        _run(_make_bundle_bytes(3), uploads)
+        assert _boxes_from(uploads)["boxes"] == []
+
+    def test_boxes_json_is_written_before_any_frame_is_segmented(self):
+        uploads: list = []
+        _run(_make_bundle_bytes(3, boxes=(self.BOX,)), uploads)
+        blobs = [b for b, _ in uploads]
+        assert blobs.index(f"scenes/{_SCENE_ID}/boxes.json") < blobs.index(f"scenes/{_SCENE_ID}/manifest.json")
+        assert blobs.index(f"scenes/{_SCENE_ID}/boxes.json") == 0
+
+    def test_a_rerun_writes_identical_boxes_bytes(self):
+        first: list = []
+        second: list = []
+        bundle = _make_bundle_bytes(3, boxes=(self.BOX,))
+        _run(bundle, first)
+        _run(bundle, second)
+        pick = lambda ups: [d for b, d in ups if b.endswith("/boxes.json")]  # noqa: E731
+        assert pick(first) == pick(second)
+
+    def test_boxes_choose_the_frames_by_census_cover(self):
+        uploads: list = []
+        # A box in view of the first poses (the camera looks down world -Z).
+        _run(_make_bundle_bytes(30, boxes=(self.BOX,)), uploads, max_frames=4)
+        m = _manifest_from(uploads)
+        assert m["sampling"]["policy"] == "census_set_cover_v1"
+        assert "census" in m["sampling"] and m["sampling"]["census"]["cover_frame_indices"]
+
+    def test_nothing_is_reconstructed_the_manifest_has_no_objects(self):
+        uploads: list = []
+        _run(_make_bundle_bytes(3, boxes=(self.BOX,)), uploads)
+        m = _manifest_from(uploads)
+        assert m["objects"] == []
+        assert all("objects" not in fr for fr in m["frames"])
+        assert not any("/splats/" in b for b, _ in uploads)
 
 
 # ---------------------------------------------------------------------------
@@ -310,20 +301,8 @@ class TestSamplingWiring:
 class TestBudgetCutoff:
     def test_stops_between_frames_and_ships_banked(self):
         uploads: list = []
-        sam3 = _FakeSam3([_detection(0)])
         budget = _FakeBudget(frame_admits=[True, True, True])  # then False
-        with ExitStack() as stack:
-            _gcs_patches(stack, _make_bundle_bytes(12), uploads)
-            uri = run_perception(
-                scene_id=_SCENE_ID,
-                bundle_uri=_BUNDLE_URI,
-                outputs_bucket=_OUT,
-                sam3_model=sam3,
-                sam3d_model=_FakeSam3D(),
-                object_prompt="chair",
-                max_frames=6,
-                budget=budget,
-            )
+        uri, sam3 = _run(_make_bundle_bytes(12), uploads, max_frames=6, budget=budget)
         assert uri.endswith("manifest.json")
         assert sam3.calls == 3
         m = _manifest_from(uploads)
@@ -332,244 +311,9 @@ class TestBudgetCutoff:
         assert m["sampling"]["budget_stopped"] is True
         assert m["sampling"]["frames_processed"] == 3
         assert len(budget.noted_frames) == 3
-        # Banked frames still fuse into scene objects.
-        assert isinstance(m["objects"], list)
 
     def test_zero_complete_frames_is_environmental(self):
         uploads: list = []
-        budget = _FakeBudget(frame_admits=[])  # refuses immediately
-        with ExitStack() as stack:
-            _gcs_patches(stack, _make_bundle_bytes(5), uploads)
-            with pytest.raises(EnvironmentalError):
-                run_perception(
-                    scene_id=_SCENE_ID,
-                    bundle_uri=_BUNDLE_URI,
-                    outputs_bucket=_OUT,
-                    sam3_model=_FakeSam3([_detection(0)]),
-                    sam3d_model=_FakeSam3D(),
-                    object_prompt="chair",
-                    budget=budget,
-                )
+        with pytest.raises(EnvironmentalError):
+            _run(_make_bundle_bytes(5), uploads, budget=_FakeBudget(frame_admits=[]))
         assert not any(b.endswith("manifest.json") for b, _ in uploads)
-
-    def test_only_partial_frames_is_environmental(self):
-        """A lone mid-frame-stopped frame is not a shippable scene."""
-        uploads: list = []
-        budget = _FakeBudget(frame_admits=[True], object_admits=[True])
-        # second object refused -> partial frame; no more frames admitted
-        with ExitStack() as stack:
-            _gcs_patches(stack, _make_bundle_bytes(1), uploads)
-            with pytest.raises(EnvironmentalError):
-                run_perception(
-                    scene_id=_SCENE_ID,
-                    bundle_uri=_BUNDLE_URI,
-                    outputs_bucket=_OUT,
-                    sam3_model=_FakeSam3([_detection(0), _detection(1)]),
-                    sam3d_model=_FakeSam3D(),
-                    object_prompt="chair",
-                    budget=budget,
-                )
-
-    def test_midframe_stop_banks_partial_after_complete_frame(self):
-        uploads: list = []
-        # Frame 1: 2 objects admitted (completes). Frame 2: first object
-        # refused -> partial with 0 objects. Then the loop stops.
-        budget = _FakeBudget(
-            frame_admits=[True, True],
-            object_admits=[True, True, False],
-        )
-        sam3 = _FakeSam3([_detection(0), _detection(1)])
-        with ExitStack() as stack:
-            _gcs_patches(stack, _make_bundle_bytes(2), uploads)
-            uri = run_perception(
-                scene_id=_SCENE_ID,
-                bundle_uri=_BUNDLE_URI,
-                outputs_bucket=_OUT,
-                sam3_model=sam3,
-                sam3d_model=_FakeSam3D(),
-                object_prompt="chair",
-                budget=budget,
-            )
-        assert uri.endswith("manifest.json")
-        m = _manifest_from(uploads)
-        assert m["sampling"]["budget_stopped"] is True
-        assert len(m["frames"]) == 2
-        complete, partial = m["frames"][0], m["frames"][1]
-        assert "budget_stopped" not in complete
-        assert partial["budget_stopped"] is True
-        assert partial["objects"] == []
-        # The partial frame must not be cached: exactly one objects.json and
-        # one masks.npz upload (the complete frame's).
-        assert sum(1 for b, _ in uploads if b.endswith("objects.json")) == 1
-        assert sum(1 for b, _ in uploads if b.endswith("masks.npz")) == 1
-
-
-# ---------------------------------------------------------------------------
-# Mid-frame stop semantics at the _process_frame level
-# ---------------------------------------------------------------------------
-
-class TestProcessFrameBudget:
-    def _frame_proto(self):
-        b = CaptureBundle()
-        b.ParseFromString(_make_bundle_bytes(1))
-        return b.frames[0]
-
-    def test_partial_frame_not_cached_and_flagged(self):
-        uploads: list = []
-        budget = _FakeBudget(object_admits=[True, False])
-        with ExitStack() as stack:
-            _gcs_patches(stack, b"", uploads)
-            fr = _process_frame(
-                scene_id=_SCENE_ID,
-                frame_idx=0,
-                rgb_gcs_uri="gs://bucket/captures/envtest/frames/000000.jpg",
-                outputs_bucket=_OUT,
-                sam3_model=_FakeSam3([_detection(0), _detection(1), _detection(2)]),
-                sam3d_model=_FakeSam3D(),
-                object_prompt="chair",
-                frame=self._frame_proto(),
-                bundle_prefix="gs://bucket/captures/envtest/",
-                budget=budget,
-            )
-        assert fr["budget_stopped"] is True
-        assert fr["masks_gcs_uri"] is None
-        assert len(fr["objects"]) == 1  # the admitted object was banked
-        assert fr["objects"][0]["ok"] is True
-        blobs = [b for b, _ in uploads]
-        assert not any(b.endswith("objects.json") for b in blobs)
-        assert not any(b.endswith("masks.npz") for b in blobs)
-        assert any(b.endswith(".ply") for b in blobs)  # completed splat kept
-
-    def test_no_budget_processes_all_objects(self):
-        uploads: list = []
-        with ExitStack() as stack:
-            _gcs_patches(stack, b"", uploads)
-            fr = _process_frame(
-                scene_id=_SCENE_ID,
-                frame_idx=0,
-                rgb_gcs_uri="gs://bucket/captures/envtest/frames/000000.jpg",
-                outputs_bucket=_OUT,
-                sam3_model=_FakeSam3([_detection(0), _detection(1)]),
-                sam3d_model=_FakeSam3D(),
-                object_prompt="chair",
-                frame=self._frame_proto(),
-                bundle_prefix="gs://bucket/captures/envtest/",
-            )
-        assert "budget_stopped" not in fr
-        assert len(fr["objects"]) == 2
-
-
-# ---------------------------------------------------------------------------
-# Memory lifecycle
-# ---------------------------------------------------------------------------
-
-class TestMemoryLifecycle:
-    def test_result_tensors_unreachable_after_frame(self):
-        """Nothing from a reconstruct() result — device tensors, the GS
-        object — may survive into the accumulated frame result. This is the
-        leak class that saturated the GPU on scene 25a14caf."""
-        refs: list[weakref.ref] = []
-
-        def _tracked_result():
-            r = _fake_result()
-            refs.extend(weakref.ref(v) for v in r.values())
-            return r
-
-        uploads: list = []
-        with ExitStack() as stack:
-            _gcs_patches(stack, b"", uploads)
-            b = CaptureBundle()
-            b.ParseFromString(_make_bundle_bytes(1))
-            fr = _process_frame(
-                scene_id=_SCENE_ID,
-                frame_idx=0,
-                rgb_gcs_uri="gs://bucket/captures/envtest/frames/000000.jpg",
-                outputs_bucket=_OUT,
-                sam3_model=_FakeSam3([_detection(0), _detection(1)]),
-                sam3d_model=_FakeSam3D(factory=_tracked_result),
-                object_prompt="chair",
-                frame=b.frames[0],
-                bundle_prefix="gs://bucket/captures/envtest/",
-            )
-        assert len(refs) == 10  # 5 values x 2 objects
-        gc.collect()
-        alive = [r for r in refs if r() is not None]
-        assert not alive, f"{len(alive)} device-side objects still reachable"
-        # And the accumulated result is pure JSON.
-        json.dumps(fr)
-
-    def test_frame_result_json_serializable_via_run(self):
-        uploads: list = []
-        with ExitStack() as stack:
-            _gcs_patches(stack, _make_bundle_bytes(3), uploads)
-            run_perception(
-                scene_id=_SCENE_ID,
-                bundle_uri=_BUNDLE_URI,
-                outputs_bucket=_OUT,
-                sam3_model=_FakeSam3([_detection(0)]),
-                sam3d_model=_FakeSam3D(),
-                object_prompt="chair",
-            )
-        m = _manifest_from(uploads)  # json round-trip already proves it
-        assert m["scene_id"] == _SCENE_ID
-
-
-# ---------------------------------------------------------------------------
-# Reconstruct retry
-# ---------------------------------------------------------------------------
-
-class TestReconstructRetry:
-    def test_retry_after_first_failure_succeeds(self):
-        calls = {"n": 0}
-
-        class _FlakySam3D:
-            def reconstruct(self, pil, mask, seed=42):
-                calls["n"] += 1
-                if calls["n"] == 1:
-                    raise RuntimeError("CUDA out of memory (simulated)")
-                return _fake_result()
-
-        uploads: list = []
-        with ExitStack() as stack:
-            _gcs_patches(stack, b"", uploads)
-            b = CaptureBundle()
-            b.ParseFromString(_make_bundle_bytes(1))
-            fr = _process_frame(
-                scene_id=_SCENE_ID,
-                frame_idx=0,
-                rgb_gcs_uri="gs://bucket/captures/envtest/frames/000000.jpg",
-                outputs_bucket=_OUT,
-                sam3_model=_FakeSam3([_detection(0)]),
-                sam3d_model=_FlakySam3D(),
-                object_prompt="chair",
-                frame=b.frames[0],
-                bundle_prefix="gs://bucket/captures/envtest/",
-            )
-        assert calls["n"] == 2
-        assert fr["objects"][0]["ok"] is True
-
-    def test_both_attempts_failing_soft_fails_object(self):
-        class _DeadSam3D:
-            def reconstruct(self, pil, mask, seed=42):
-                raise RuntimeError("CUDA out of memory (simulated)")
-
-        uploads: list = []
-        with ExitStack() as stack:
-            _gcs_patches(stack, b"", uploads)
-            b = CaptureBundle()
-            b.ParseFromString(_make_bundle_bytes(1))
-            fr = _process_frame(
-                scene_id=_SCENE_ID,
-                frame_idx=0,
-                rgb_gcs_uri="gs://bucket/captures/envtest/frames/000000.jpg",
-                outputs_bucket=_OUT,
-                sam3_model=_FakeSam3([_detection(0), _detection(1)]),
-                sam3d_model=_DeadSam3D(),
-                object_prompt="chair",
-                frame=b.frames[0],
-                bundle_prefix="gs://bucket/captures/envtest/",
-            )
-        # Frame completes; both objects soft-failed with recorded errors.
-        assert "budget_stopped" not in fr
-        assert [o["ok"] for o in fr["objects"]] == [False, False]
-        assert all("error" in o for o in fr["objects"])

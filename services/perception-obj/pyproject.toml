@@ -1,7 +1,7 @@
 [project]
 name = "thegoodguest-perception-obj"
 version = "0.0.1"
-description = "Per-object segmentation (SAM 3) + Gaussian splat reconstruction (SAM 3D Objects)"
+description = "Scene segmentation (SAM 3), the person's boxes, and the room shell"
 requires-python = ">=3.11"
 
 # Runtime deps are installed in the Dockerfile (not via this file) because

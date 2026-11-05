@@ -41,7 +41,6 @@ _torch_stub.cuda.is_available.return_value = False
 sys.modules.setdefault("torch", _torch_stub)
 sys.modules.setdefault("models", MagicMock())
 sys.modules.setdefault("models.sam3", MagicMock())
-sys.modules.setdefault("models.sam3d", MagicMock())
 
 # Use the already-loaded perc_server if registry tests ran first; otherwise
 # load it fresh. Either way, `server` is the perception-obj server module.

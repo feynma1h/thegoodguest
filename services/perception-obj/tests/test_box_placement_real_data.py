@@ -250,38 +250,3 @@ class TestP1Pins:
         # box footprint is ENTIRELY outside the frame.
         assert frac129 == pytest.approx(0.6295, abs=0.02)
         assert frac164 == pytest.approx(0.0, abs=0.01)
-
-
-class TestF242CrossLabelTriple:
-    """The committed f242 masks: one ~20k px region under three labels
-    (artwork / painting / mirror), pairwise near-identity ~0.999 — the
-    measured case behind the cross-label dedup gate. Mask-only: runs
-    everywhere (no big artifacts needed)."""
-
-    def test_masks_are_near_identical(self):
-        m0, m1, m2 = (_mask(242, i) for i in range(3))
-        import fusion
-
-        assert fusion._mask_near_identity(m0, m1) >= 0.99
-        assert fusion._mask_near_identity(m0, m2) >= 0.99
-        assert fusion._mask_near_identity(m1, m2) >= 0.99
-
-    def test_triple_collapses_through_the_gate(self):
-        import fusion
-
-        class Ctx:
-            def mask_for(self, frame_index, mask_index):
-                return _mask(242, mask_index)
-
-        obs = [
-            {"frame_index": 242, "label": label, "score": score,
-             "mask_index": mi, "splat_gcs_uri": f"gs://o/{mi}.ply",
-             "placement": {}, "view_ray": None}
-            for mi, (label, score) in enumerate(
-                [("artwork", 0.578), ("painting", 0.417), ("mirror", 0.412)]
-            )
-        ]
-        kept, records = fusion._dedup_cross_label(obs, Ctx())
-        assert len(kept) == 1
-        assert kept[0]["label"] == "artwork"
-        assert len(records) == 2
