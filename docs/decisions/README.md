@@ -1,6 +1,6 @@
 # Decision notes
 
-294 notes. **245 of them are `Decided`** -- those govern code that
+304 notes. **255 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
 other 49 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
@@ -21,7 +21,7 @@ The status vocabulary and the numbering rule live in
 | `Superseded` | 8 | replaced by a later note |
 | `Amended` | 9 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
-| `Decided` | 245 | governs code that ships today |
+| `Decided` | 255 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -100,7 +100,7 @@ The status vocabulary and the numbering rule live in
 | [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (245)
+## Decided (255)
 
 | # | title | status |
 |---|---|---|
@@ -349,3 +349,13 @@ The status vocabulary and the numbering rule live in
 | [0330](0330-the-room-look-code-is-an-importable-package-the-tools-wrap.md) | the room-look code is an importable package; the tools wrap it | Decided |
 | [0331](0331-the-finish-is-checked-against-headless-renders-with-software-gl.md) | the finish is checked against headless renders made with software GL | Decided |
 | [0332](0332-scene-finish-is-its-own-cpu-service-with-gate-numbers-from-the-renderer.md) | scene-finish is its own CPU service, with gate numbers taken from its renderer | Decided |
+| [0350](0350-claude-runs-only-inside-scene-finish-through-one-wrapper-with-a-fake.md) | Claude runs only inside scene-finish, through one wrapper that has a fake | Decided |
+| [0351](0351-claudes-answers-are-closed-vocabulary-json-validated-in-code.md) | Claude's answers are closed-vocabulary JSON, validated in code | Decided |
+| [0352](0352-what-leaves-the-service-is-built-in-one-place-and-its-pixels-are-deleted-at-job-end.md) | What leaves the service is built in one place, and its pixels are deleted at job end | Decided |
+| [0353](0353-a-per-scan-spend-ceiling-is-checked-before-every-call.md) | A per-scan spend ceiling is checked before every call | Decided |
+| [0354](0354-hints-and-colour-corrections-are-kept-only-when-rendering-them-improves-the-match.md) | Hints and colour corrections are kept only when rendering them improves the match | Decided |
+| [0355](0355-a-furniture-piece-is-a-write-and-critique-loop-and-a-failed-piece-shows-nothing.md) | A furniture piece is a write-and-critique loop, and a failed piece shows nothing | Decided |
+| [0356](0356-the-room-is-published-all-at-once-by-one-merge-with-a-forty-minute-deadline.md) | The room is published all at once, by one merge, with a forty-minute deadline | Decided |
+| [0357](0357-accepted-specs-are-cached-as-json-and-a-redrive-tool-needs-no-pixels.md) | Accepted specs are cached as JSON, and a re-drive needs no pixels | Decided |
+| [0358](0358-observability-is-structured-log-lines-and-a-summary-with-no-pixels.md) | Observability is structured log lines and a summary with no pixels | Decided |
+| [0359](0359-the-local-run-proves-the-wiring-not-the-quality.md) | The local run proves the wiring, not the quality | Decided |
