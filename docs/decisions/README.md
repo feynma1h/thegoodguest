@@ -1,6 +1,6 @@
 # Decision notes
 
-291 notes. **242 of them are `Decided`** -- those govern code that
+294 notes. **245 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
 other 49 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
@@ -21,7 +21,7 @@ The status vocabulary and the numbering rule live in
 | `Superseded` | 8 | replaced by a later note |
 | `Amended` | 9 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
-| `Decided` | 242 | governs code that ships today |
+| `Decided` | 245 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -100,7 +100,7 @@ The status vocabulary and the numbering rule live in
 | [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (242)
+## Decided (245)
 
 | # | title | status |
 |---|---|---|
@@ -346,3 +346,6 @@ The status vocabulary and the numbering rule live in
 | [0311](0311-furniture-twins-are-placed-from-boxes-by-rules-that-record-their-fixes.md) | furniture twins are placed from boxes by rules that record their fixes | Decided |
 | [0312](0312-the-furniture-twin-room-has-a-day-and-a-night.md) | the furniture twin room has a day and a night | Decided |
 | [0313](0313-finish-and-furniture-are-separate-optional-files-beside-the-shell.md) | finish and furniture are separate optional files beside the shell | Decided |
+| [0330](0330-the-room-look-code-is-an-importable-package-the-tools-wrap.md) | the room-look code is an importable package; the tools wrap it | Decided |
+| [0331](0331-the-finish-is-checked-against-headless-renders-with-software-gl.md) | the finish is checked against headless renders made with software GL | Decided |
+| [0332](0332-scene-finish-is-its-own-cpu-service-with-gate-numbers-from-the-renderer.md) | scene-finish is its own CPU service, with gate numbers taken from its renderer | Decided |
