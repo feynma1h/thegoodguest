@@ -94,7 +94,8 @@ def test_invalid_specs_twice_fail_the_piece(scene):
     assert res["status"] == "failed" and "no valid model" in res["reason"] and len(fake.shapes) == 2
 
 
-def test_spend_ceiling_before_the_first_call_fails_the_piece_and_after_a_good_spec_keeps_it(scene):
+def test_spend_ceiling_before_the_first_call_fails_the_piece_and_after_a_good_spec_keeps_it(scene, monkeypatch):
+    monkeypatch.setattr(C, "FURNITURE_MODEL", "claude-opus-5-5")  # the 0.2 ceiling below is sized for Opus prices
     start(scene)
     ctx, fake = ctx_for(scene, [scenes.spec_answer()], ceiling=0.0001)
     res = run_piece(ctx, "box_0")

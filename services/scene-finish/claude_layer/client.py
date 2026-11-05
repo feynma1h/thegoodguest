@@ -93,6 +93,8 @@ class ClaudeClient(Protocol):
 
 
 def check_privacy(req: Request) -> None:
+    if req.model not in C.ALLOWED_MODELS:
+        raise PrivacyViolation(f"model {req.model!r} is not one that may see a room (decision 0360)")
     photos = [i for i in req.images() if i.kind == "photo"]
     if req.stage == "finish" and any(i.kind not in ("atlas", "render") for i in req.images()):
         raise PrivacyViolation("the finish pass may send atlases and our renders only")

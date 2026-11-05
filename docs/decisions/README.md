@@ -1,6 +1,6 @@
 # Decision notes
 
-314 notes. **265 of them are `Decided`** -- those govern code that
+315 notes. **266 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
 other 49 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
@@ -21,7 +21,7 @@ The status vocabulary and the numbering rule live in
 | `Superseded` | 8 | replaced by a later note |
 | `Amended` | 9 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
-| `Decided` | 265 | governs code that ships today |
+| `Decided` | 266 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -100,7 +100,7 @@ The status vocabulary and the numbering rule live in
 | [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (265)
+## Decided (266)
 
 | # | title | status |
 |---|---|---|
@@ -369,3 +369,4 @@ The status vocabulary and the numbering rule live in
 | [0357](0357-accepted-specs-are-cached-as-json-and-a-redrive-tool-needs-no-pixels.md) | Accepted specs are cached as JSON, and a re-drive needs no pixels | Decided |
 | [0358](0358-observability-is-structured-log-lines-and-a-summary-with-no-pixels.md) | Observability is structured log lines and a summary with no pixels | Decided |
 | [0359](0359-the-local-run-proves-the-wiring-not-the-quality.md) | The local run proves the wiring, not the quality | Decided |
+| [0360](0360-which-models-may-see-a-room-and-what-the-operator-ruled-on-sending.md) | Which models may see a room, and what the operator ruled on sending | Decided |

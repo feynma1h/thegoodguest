@@ -94,6 +94,29 @@ def test_privacy_rules_on_images(tmp_path):
         caller.ask(req("finish", content=[Image("photo", b"p", 100, 100, masked=True)]), dict)
 
 
+def test_only_pinned_models_may_see_a_room(tmp_path):
+    caller = ClaudeCaller(FakeClient(lambda r: {}), SpendLedger(port(tmp_path), "w"))
+    for ok in sorted(C.ALLOWED_MODELS):
+        caller.ask(req(model=ok), dict)
+    for refused in ("claude-haiku-5-5", "claude-fable-5-1", "mystery"):
+        with pytest.raises(PrivacyViolation):
+            caller.ask(req(model=refused), dict)
+
+
+def test_a_model_from_the_environment_must_be_pinned(monkeypatch):
+    monkeypatch.setenv("FURNITURE_SPEC_MODEL", "claude-fable-5-1")
+    with pytest.raises(ValueError):
+        C.pinned_model("FURNITURE_SPEC_MODEL", "claude-sonnet-5-5")
+    monkeypatch.setenv("FURNITURE_SPEC_MODEL", "claude-opus-5-5")
+    assert C.pinned_model("FURNITURE_SPEC_MODEL", "claude-sonnet-5-5") == "claude-opus-5-5"
+    monkeypatch.delenv("FURNITURE_SPEC_MODEL")
+    assert C.pinned_model("FURNITURE_SPEC_MODEL", "claude-sonnet-5-5") == "claude-sonnet-5-5"
+
+
+def test_both_stages_default_to_sonnet_until_a_measured_ab():
+    assert C.FINISH_MODEL == "claude-sonnet-5-5" and C.FURNITURE_MODEL == "claude-sonnet-5-5"
+
+
 def test_call_log_has_sizes_and_no_pixels(tmp_path, caplog):
     caller = ClaudeCaller(FakeClient(lambda r: {}), SpendLedger(port(tmp_path), "w"))
     secret = b"PIXELBYTES-DO-NOT-LOG"

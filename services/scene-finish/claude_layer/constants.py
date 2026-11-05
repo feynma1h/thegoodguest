@@ -12,8 +12,9 @@ import os
 FINISH_MAX_IMAGES = 8
 FINISH_IMAGE_MAX_SIDE_PX = 1024
 # Furniture pass: crops cut around one boxed object, person-masked (suppressed
-# pixels blacked out), at most 6 photo crops per request, long side <= 768 px so
-# text cannot be read. Our own renders are not photos and are not counted.
+# pixels blacked out), at most 6 photo crops per request, long side <= 768 px to
+# limit how legible small text is (it is a limit, not a guarantee). Our own
+# renders are not photos and are not counted.
 PHOTO_CROPS_PER_REQUEST = 6
 PHOTO_CROP_MAX_SIDE_PX = 768
 CROP_PAD = 0.12  # margin around the projected box, share of its size
@@ -43,8 +44,24 @@ PRICES = {
     "claude-haiku-5-5": (0.10, 0.50, 0.01),
 }
 UNKNOWN_MODEL_PRICE = max(PRICES.values())  # an unpriced model is billed as the dearest
-FINISH_MODEL = os.environ.get("FINISH_HINT_MODEL", "claude-sonnet-5-5")
-FURNITURE_MODEL = os.environ.get("FURNITURE_SPEC_MODEL", "claude-opus-5-5")
+# Only these models may see a room (decision 0360). Anthropic keeps the content
+# sent to some models (its "Covered Models") for 30 days and offers no zero
+# retention for them; a model swapped in by an environment variable must not
+# change who keeps a room's pictures, so anything else is refused at startup and
+# again on every request. Adding a model is a decision, not a setting.
+ALLOWED_MODELS = frozenset({"claude-sonnet-5-5", "claude-opus-5-5"})
+
+
+def pinned_model(env_name: str, default: str) -> str:
+    name = os.environ.get(env_name, default)
+    if name not in ALLOWED_MODELS:
+        raise ValueError(f"{env_name}={name!r} is not an allowed model; allowed: {sorted(ALLOWED_MODELS)}")
+    return name
+
+
+# Sonnet 5.5 for both until a measured A/B on a real scan says otherwise (0360).
+FINISH_MODEL = pinned_model("FINISH_HINT_MODEL", "claude-sonnet-5-5")
+FURNITURE_MODEL = pinned_model("FURNITURE_SPEC_MODEL", "claude-sonnet-5-5")
 EFFORT = os.environ.get("FINISH_EFFORT", "medium")
 # Estimated input tokens per image (width*height/750, design 4.6 [ASSUMED]).
 PIXELS_PER_TOKEN = 750
