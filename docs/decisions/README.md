@@ -1,6 +1,6 @@
 # Decision notes
 
-310 notes. **261 of them are `Decided`** -- those govern code that
+314 notes. **265 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
 other 49 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
@@ -21,7 +21,7 @@ The status vocabulary and the numbering rule live in
 | `Superseded` | 8 | replaced by a later note |
 | `Amended` | 9 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
-| `Decided` | 261 | governs code that ships today |
+| `Decided` | 265 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -100,7 +100,7 @@ The status vocabulary and the numbering rule live in
 | [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (261)
+## Decided (265)
 
 | # | title | status |
 |---|---|---|
@@ -355,6 +355,10 @@ The status vocabulary and the numbering rule live in
 | [0330](0330-the-room-look-code-is-an-importable-package-the-tools-wrap.md) | the room-look code is an importable package; the tools wrap it | Decided |
 | [0331](0331-the-finish-is-checked-against-headless-renders-with-software-gl.md) | the finish is checked against headless renders made with software GL | Decided |
 | [0332](0332-scene-finish-is-its-own-cpu-service-with-gate-numbers-from-the-renderer.md) | scene-finish is its own CPU service, with gate numbers taken from its renderer | Decided |
+| [0340](0340-the-finished-room-is-in-the-product-build-behind-one-runtime-switch.md) | the finished room is in the product build behind one runtime switch | Decided |
+| [0341](0341-a-room-of-twins-shows-only-the-twins.md) | a room of twins shows only the twins | Decided |
+| [0342](0342-light-emitters-are-a-property-of-a-part.md) | light emitters are a property of a part | Decided |
+| [0343](0343-day-and-night-are-always-on-the-room-page.md) | day and night are always on the room page | Decided |
 | [0350](0350-claude-runs-only-inside-scene-finish-through-one-wrapper-with-a-fake.md) | Claude runs only inside scene-finish, through one wrapper that has a fake | Decided |
 | [0351](0351-claudes-answers-are-closed-vocabulary-json-validated-in-code.md) | Claude's answers are closed-vocabulary JSON, validated in code | Decided |
 | [0352](0352-what-leaves-the-service-is-built-in-one-place-and-its-pixels-are-deleted-at-job-end.md) | What leaves the service is built in one place, and its pixels are deleted at job end | Decided |
