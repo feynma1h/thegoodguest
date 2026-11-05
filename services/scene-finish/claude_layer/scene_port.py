@@ -18,6 +18,8 @@ import os
 from pathlib import Path
 from typing import Protocol
 
+from . import constants as C
+
 
 def canonical(doc: dict) -> bytes:
     """Deterministic bytes: the same input always writes the same blob."""
@@ -75,11 +77,12 @@ class LocalScenePort:
 
 
 class GcsScenePort:
-    """`scenes/<scene_id>/...` in the outputs bucket; capture pixels from the captures bucket."""
+    """`scenes/<scene_id>/...` in the outputs bucket; capture pixels from wherever
+    the bundle says (`bundle_uri`, and each frame's `rgb_gcs_path`)."""
 
-    def __init__(self, scene_id: str, outputs_bucket, captures_bucket, captures_prefix: str):
+    def __init__(self, scene_id: str, outputs_bucket, storage_client, bundle_uri: str = ""):
         self.scene_id = scene_id
-        self._out, self._cap, self._cap_prefix = outputs_bucket, captures_bucket, captures_prefix
+        self._out, self._storage, self._bundle_uri = outputs_bucket, storage_client, bundle_uri
         self._prefix = f"scenes/{scene_id}/"
 
     def read_json(self, rel: str) -> dict | None:
@@ -96,20 +99,38 @@ class GcsScenePort:
         return sorted(b.name[len(self._prefix):] for b in self._out.client.list_blobs(self._out, prefix=full)
                       if b.name.endswith(".json"))
 
+    def _blob(self, uri: str, bucket: str = "", base: str = ""):
+        """A gs:// uri, or a path relative to the bundle's own folder."""
+        if uri.startswith("gs://"):
+            bucket, _, key = uri[5:].partition("/")
+        else:
+            key = f"{base}/{uri}".lstrip("/")
+        return self._storage.bucket(bucket).blob(key), bucket
+
     def materialise(self, dest: Path) -> None:
+        """shell.json, boxes.json, the bundle, at most MATERIALISE_MAX_FRAMES frames
+        spread over the capture, and the shell's person masks for those frames."""
+        from thegoodguest_schemas import CaptureBundle
+
         for name in ("shell.json", "boxes.json"):
             doc = self.read_json(name)
             if doc is not None:
                 (dest / name).write_bytes(canonical(doc))
         cap = dest / "captures"
         (cap / "frames").mkdir(parents=True)
-        for blob in self._cap.client.list_blobs(self._cap, prefix=self._cap_prefix):
-            rel = blob.name[len(self._cap_prefix):].lstrip("/")
-            if rel == "bundle.pb" or rel.startswith("frames/"):
-                blob.download_to_filename(str(cap / rel))
-        # The person masks the shell already wrote: scenes/<id>/frames/<idx>/masks.npz.
+        blob, bucket = self._blob(self._bundle_uri)
+        base = self._bundle_uri[5:].partition("/")[2].rpartition("/")[0]
+        blob.download_to_filename(str(cap / "bundle.pb"))
+        b = CaptureBundle()
+        b.ParseFromString((cap / "bundle.pb").read_bytes())
+        frames = list(b.frames)
+        if len(frames) > C.MATERIALISE_MAX_FRAMES:
+            keep = sorted({round(i * (len(frames) - 1) / (C.MATERIALISE_MAX_FRAMES - 1)) for i in range(C.MATERIALISE_MAX_FRAMES)})
+            frames = [frames[i] for i in keep]
         (dest / "masks").mkdir()
-        for blob in self._out.client.list_blobs(self._out, prefix=self._prefix + "frames/"):
-            parts = blob.name.split("/")
-            if parts[-1] == "masks.npz" and len(parts) >= 2:
-                blob.download_to_filename(str(dest / "masks" / f"{parts[-2]}.npz"))
+        for f in frames:
+            fb, _ = self._blob(f.rgb_gcs_path, bucket, base)
+            fb.download_to_filename(str(cap / "frames" / Path(f.rgb_gcs_path).name))
+            mb = self._out.blob(f"{self._prefix}frames/{f.frame_index:04d}/masks.npz")
+            if mb.exists():  # the shell's person masks (privacy.py); a frame without one is unusable evidence
+                mb.download_to_filename(str(dest / "masks" / f"{f.frame_index:04d}.npz"))

@@ -22,6 +22,9 @@ MAX_SUPPRESSED_SHARE = 0.35
 # Pixels for a crop whose person mask is unavailable are never sent (fail closed).
 SUPPRESSED_FILL_RGB = (0, 0, 0)
 
+# Frames downloaded into a job's workspace (an even spread over the capture).
+MATERIALISE_MAX_FRAMES = 150
+
 # --- Time and money -----------------------------------------------------------
 JOB_DEADLINE_S = 40 * 60  # [operator] publish what passed this long after the job began
 SPEND_CEILING_USD = float(os.environ.get("FINISH_MAX_USD", "12"))  # per scan
@@ -53,6 +56,7 @@ MAX_REJECTED_IN_A_ROW = 2
 MIN_GAIN_L = 0.3  # two accepted edits gaining less than this end the loop
 TOL_DL = 1.0  # [proposed] renderer noise allowance, lightness and chroma
 TOL_BBOX_GAP = 0.02  # [proposed] 1 - IoU of render mask bbox vs the box's projection
+FLOOR_TOLERANCE_M = 0.05  # the placement rules raise a piece that sits lower
 SPEC_OUTSIDE_BOX = 0.10  # parts may exceed the box by this share in any dimension
 PLACEMENT_UNCERTAIN_GAP = 0.35  # [proposed] iteration-0 bbox gap above this: failed
 MIN_MASK_PX = 800  # a render mask smaller than this is "no usable overlap"

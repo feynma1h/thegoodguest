@@ -183,7 +183,9 @@ def test_local_port_writes_beside_not_into_the_source_and_canonically(tmp_path):
     assert p.list_json("work/furniture/") == ["work/furniture/b.json"] and p.read_json("shell.json") == {}
 
 
-def test_gcs_port_round_trip_and_masks_with_a_fake_bucket(tmp_path):
+def test_gcs_port_round_trip_and_materialises_an_even_spread_of_frames_and_masks(tmp_path, monkeypatch):
+    import scenes
+
     class Blob:
         def __init__(self, store, name): self.store, self.name = store, name
         def exists(self): return self.name in self.store
@@ -198,15 +200,24 @@ def test_gcs_port_round_trip_and_masks_with_a_fake_bucket(tmp_path):
         def __init__(self): self.store, self.client = {}, Client()
         def blob(self, name): return Blob(self.store, name)
 
+    class Storage:
+        def __init__(self, buckets): self.buckets = buckets
+        def bucket(self, name): return self.buckets[name]
+
+    src = scenes.build(tmp_path / "src", n_frames=6)
     out, cap = Bucket(), Bucket()
-    cap.store["cap/x/bundle.pb"] = b"B"
-    cap.store["cap/x/frames/000001.jpg"] = b"J"
+    cap.store["x/bundle.pb"] = (src / "captures" / "bundle.pb").read_bytes()
+    for i in range(6):
+        cap.store[f"x/frames/{i:06d}.jpg"] = (src / "captures" / "frames" / f"{i:06d}.jpg").read_bytes()
     np.savez(tmp_path / "m.npz", suppressed=np.ones((2, 2), bool))
-    out.store["scenes/s1/frames/0001/masks.npz"] = (tmp_path / "m.npz").read_bytes()
-    p = GcsScenePort("s1", out, cap, "cap/x")
+    out.store["scenes/s1/frames/0002/masks.npz"] = (tmp_path / "m.npz").read_bytes()
+    monkeypatch.setattr(C, "MATERIALISE_MAX_FRAMES", 3)
+    p = GcsScenePort("s1", out, Storage({"cap": cap}), "gs://cap/x/bundle.pb")
     p.write_json("boxes.json", {"boxes": []})
     assert p.read_json("boxes.json") == {"boxes": []} and p.read_json("nope.json") is None
     assert p.list_json("") == ["boxes.json"]
     with Workspace(p) as root:
-        assert (root / "captures" / "bundle.pb").read_bytes() == b"B"
-        assert (root / "masks" / "0001.npz").is_file() and (root / "boxes.json").is_file()
+        assert (root / "captures" / "bundle.pb").is_file() and (root / "boxes.json").is_file()
+        got = sorted(f.name for f in (root / "captures" / "frames").iterdir())
+        assert got == ["000000.jpg", "000002.jpg", "000005.jpg"]
+        assert [m.name for m in (root / "masks").iterdir()] == ["0002.npz"]

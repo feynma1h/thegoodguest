@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 from thegoodguest_room_look.finish_hints import HintsError, parse_hints
-from thegoodguest_room_look.furniture_geometry import part_extent
+from thegoodguest_room_look.furniture_geometry import corners, part_obb
 from thegoodguest_room_look.furniture_models import PART_KINDS, validate_spec
 
 from . import constants as C
@@ -114,6 +114,12 @@ def spec_from_answer(ans: dict, box_id: str, box_size: list[float]) -> dict:
     return spec
 
 
+def spec_extent(spec: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Axis-aligned bounds of all parts in the piece frame, rotations included."""
+    pts = np.vstack([corners(part_obb(p, np.zeros(3), 0.0)) for p in spec["parts"]])
+    return pts.min(0), pts.max(0)
+
+
 def check_spec(spec: dict, box_size: list[float], other_ids: set[str]) -> list[str]:
     """Everything wrong with a spec: the package's validator plus our guards."""
     problems = []
@@ -130,13 +136,10 @@ def check_spec(spec: dict, box_size: list[float], other_ids: set[str]) -> list[s
     if problems:
         return problems
     dims = np.array(box_size, float)
-    lo, hi = np.full(3, np.inf), np.full(3, -np.inf)
-    for part in spec["parts"]:
-        a, b = part_extent(part)
-        lo, hi = np.minimum(lo, a), np.maximum(hi, b)
+    lo, hi = spec_extent(spec)
     half = dims / 2
     slack = dims * C.SPEC_OUTSIDE_BOX + 0.02
-    if lo[1] < -0.01:
+    if lo[1] < -C.FLOOR_TOLERANCE_M:
         problems.append(f"a part goes below the floor (y {lo[1]:.2f}); y=0 is the floor")
     if (lo[[0, 2]] < -half[[0, 2]] - slack[[0, 2]]).any() or (hi[[0, 2]] > half[[0, 2]] + slack[[0, 2]]).any() or hi[1] > dims[1] + slack[1]:
         problems.append(f"the model spans x {lo[0]:.2f}..{hi[0]:.2f}, y {lo[1]:.2f}..{hi[1]:.2f}, z {lo[2]:.2f}..{hi[2]:.2f} m; "
@@ -177,21 +180,22 @@ def hints_from_answer(ans: dict) -> tuple[dict, dict[str, str]]:
     out-of-range value costs only its section. Accepted sections are stamped
     source "review": somebody looked and decided.
     """
-    sections: dict[str, dict] = {}
+    candidates: dict[str, dict] = {}
     for name in ("baseboard", "wainscot", "floor"):
         if ans.get(name):
-            sections[name] = {"source": "review", **_drop_none(ans[name])}
-    openings = {}
+            candidates[name] = {name: {"source": "review", **_drop_none(ans[name])}}
     for kind in ("door", "window"):
         if ans.get(kind):
-            openings[kind] = {"source": "review", **_drop_none(ans[kind])}
-    if openings:
-        sections["openings"] = openings
+            candidates[f"openings.{kind}"] = {"openings": {kind: {"source": "review", **_drop_none(ans[kind])}}}
     accepted: dict[str, dict] = {}
     rejected: dict[str, str] = {}
-    for name, sec in sections.items():
+    for name, doc in candidates.items():
         try:
-            accepted[name] = parse_hints({name: sec})[name]
+            for sec, val in parse_hints(doc).items():
+                if sec == "openings":
+                    accepted.setdefault("openings", {}).update(val)
+                else:
+                    accepted[sec] = val
         except HintsError as exc:
             rejected[name] = "; ".join(exc.problems)[:300]
     return accepted, rejected
