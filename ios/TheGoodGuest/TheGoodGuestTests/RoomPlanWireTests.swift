@@ -140,6 +140,7 @@ final class RoomPlanWireTests: XCTestCase {
             startedAtWallUs:   3_000,
             frames:            [],
             planeAnchors:      [],
+            personBoxes:       [],
             roomPlan:          roomPlan,
             outputDir:         dir
         )

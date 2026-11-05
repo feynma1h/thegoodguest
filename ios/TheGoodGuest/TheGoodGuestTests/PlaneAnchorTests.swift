@@ -158,6 +158,7 @@ final class PlaneAnchorTests: XCTestCase {
             startedAtWallUs:   3_000,
             frames:            [],
             planeAnchors:      [anchor],
+            personBoxes:       [],
             roomPlan:          nil,
             outputDir:         dir
         )
@@ -185,6 +186,7 @@ final class PlaneAnchorTests: XCTestCase {
             startedAtWallUs:   3_000,
             frames:            [],
             planeAnchors:      [],
+            personBoxes:       [],
             roomPlan:          nil,
             outputDir:         dir
         )

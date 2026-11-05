@@ -69,6 +69,21 @@ nonisolated enum LiveBoxesPresentation {
             boxes: boxedTracks.map { .init(id: $0.id, box: DotRules.box(of: $0, tops: tops), current: $0.id == current) })
     }
 
+    /// The boxes the person kept, for the capture bundle (decision 0320): the
+    /// boxes `scene` draws, nothing else, so a box the person removed or that
+    /// fusion merged away is not sent. Each is the box on screen — the finished
+    /// one, a table reaching to its top — named by the detector's own class name.
+    /// An object boxed with no time on record (never happens: the camera stamps
+    /// each as it is boxed) is stamped `now`.
+    static func kept(_ tracks: [TrackSummary], boxed: Set<UUID>, madeAt: [UUID: Int64], now: Int64,
+                     tops: [HorizontalSurface] = []) -> [KeptBox] {
+        tracks.filter { boxed.contains($0.id) }.map { t in
+            let box = DotRules.box(of: t, tops: tops)
+            return KeptBox(id: t.id, detectorLabel: t.name, center: box.center, yaw: box.yaw, size: box.size,
+                           madeAtDeviceUs: madeAt[t.id] ?? now)
+        }
+    }
+
     // MARK: Words
 
     static let walkAroundHint = "Walk around it to finish the box"

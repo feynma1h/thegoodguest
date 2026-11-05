@@ -4,9 +4,9 @@
 /// Decision 0295 first said live boxes never run during a capture; decision 0301
 /// lets them, on one condition: a `LiveBoxesSession` rides the CAPTURE's own
 /// ARSession, fed frames by `CaptureManager.frameTap`, so there is one session
-/// and the bundle is produced exactly as it is without this view. Boxes are
-/// drawn on screen only; they never enter the bundle, and neither do the stills
-/// below.
+/// and the bundle is produced exactly as it is without this view. The boxes the
+/// person made and kept enter the bundle, once, as the capture stops
+/// (`CaptureManager.keptBoxes`, decision 0320); the stills below never do.
 ///
 /// TAP A DOT, BOXED. Every object found wears a dot; tapping one boxes that
 /// object. No names are drawn: a detection's label can be wrong.
@@ -35,6 +35,8 @@ struct LiveBoxesCamera: View {
     @StateObject private var session = LiveBoxesSession()
     @StateObject private var thumbs = BoxThumbs()
     @State private var overlay = ProjectedOverlay()
+    /// The boxes made, as `CaptureManager` reads them when the capture stops.
+    @State private var ledger = KeptLedger()
     /// The objects the person has boxed, newest first, and the one still being worked on.
     @State private var boxed: Set<UUID> = []
     @State private var order: [UUID] = []
@@ -79,12 +81,19 @@ struct LiveBoxesCamera: View {
         .animation(.easeOut(duration: 0.2), value: stripOpen)
         .animation(.easeOut(duration: 0.2), value: current)
         .ignoresSafeArea()
+        .onChange(of: boxed) { _, now in ledger.record(now, at: Int64(CACurrentMediaTime() * 1_000_000)) }
         .onAppear {
             capture.frameTap = session.driver
+            capture.keptBoxes = { [session, ledger] in
+                LiveBoxesPresentation.kept(session.tracks, boxed: ledger.boxed, madeAt: ledger.madeAt,
+                                           now: Int64(CACurrentMediaTime() * 1_000_000),
+                                           tops: session.latestSight?.tops ?? [])
+            }
             session.start()
         }
         .onDisappear {
             capture.frameTap = nil
+            capture.keptBoxes = nil
             session.stop()
         }
     }
@@ -248,6 +257,23 @@ struct LiveBoxesCamera: View {
             try? await Task.sleep(for: .seconds(inView ? 1.6 : 4))
             if selected == id { selected = nil }
         }
+    }
+}
+
+// MARK: - The ledger
+
+/// What the person has boxed, and when each was boxed, held where the capture can
+/// read it at stop. A class, because the capture reads it from outside the view.
+@MainActor
+private final class KeptLedger {
+    private(set) var boxed: Set<UUID> = []
+    private(set) var madeAt: [UUID: Int64] = [:]
+
+    /// Notes the set as it is now; an object newly in it is stamped `now`, and one
+    /// taken out (and put back by Undo) keeps its first stamp.
+    func record(_ now: Set<UUID>, at time: Int64) {
+        for id in now where madeAt[id] == nil { madeAt[id] = time }
+        boxed = now
     }
 }
 

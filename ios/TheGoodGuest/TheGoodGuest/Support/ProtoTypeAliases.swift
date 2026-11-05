@@ -12,4 +12,5 @@ typealias RSGravity       = Thegoodguest_Capture_V1_Gravity
 typealias RSDepth         = Thegoodguest_Capture_V1_Depth
 typealias RSRoomPlanModel = Thegoodguest_Capture_V1_RoomPlanModel
 typealias RSPlaneAnchor    = Thegoodguest_Capture_V1_PlaneAnchor
+typealias RSPersonBox     = Thegoodguest_Capture_V1_PersonBox
 typealias RSPlaneAlignment = Thegoodguest_Capture_V1_PlaneAlignment

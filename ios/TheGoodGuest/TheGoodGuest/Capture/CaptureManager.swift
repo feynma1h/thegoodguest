@@ -174,6 +174,11 @@ final class CaptureManager: NSObject, ObservableObject {
     /// session's delegate callbacks; it reads them and records nothing in the bundle.
     nonisolated(unsafe) var frameTap: LiveBoxesFrameDriver?
     #endif
+    /// Reads the boxes the person has kept, at the moment the capture stops. Set
+    /// by the Scan screen's camera layer when it has any; a build without live
+    /// boxes leaves it nil and its bundles carry none (decision 0320).
+    var keptBoxes: (@MainActor () -> [KeptBox])?
+    private(set) var capturedPersonBoxes: [KeptBox] = []
     private var accumulator = KeyframeAccumulator()
 
     // RoomPlan co-run state (decisions 0076/0077). All MainActor-mutated.
@@ -232,6 +237,7 @@ final class CaptureManager: NSObject, ObservableObject {
         assemblyFailure = nil
         capturedFrames  = []
         capturedPlaneAnchors = []
+        capturedPersonBoxes = []
         accumulator.reset()
         frameCount      = 0
         bundleId        = UUID()
@@ -325,6 +331,11 @@ final class CaptureManager: NSObject, ObservableObject {
         let arAnchors = (arSession.currentFrame?.anchors ?? [])
             .compactMap { $0 as? ARPlaneAnchor }
         capturedPlaneAnchors = arAnchors.map { PlaneAnchorExtractor.from($0) }
+
+        // 2b. The boxes the person kept, read now: the camera layer is still on
+        // screen and the session still running, so they are the final set in
+        // the same world frame as the poses (decision 0320).
+        capturedPersonBoxes = keptBoxes?() ?? []
 
         // 3. Pause. RoomBuilder runs AFTER this (its ~905 MB transient must not
         // overlap the live session, 0076 Q3).
@@ -512,6 +523,7 @@ final class CaptureManager: NSObject, ObservableObject {
             startedAtWallUs:   startedAtWallUs,
             frames:            capturedFrames,
             planeAnchors:      capturedPlaneAnchors,
+            personBoxes:       capturedPersonBoxes,
             roomPlan:          roomPlan,
             outputDir:         bundleOutputDir!
         )

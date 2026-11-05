@@ -15,6 +15,34 @@ final class LiveBoxesPresentationTests: XCTestCase {
                      confirmed: true, box: GravityBox(center: c, size: size, yaw: 0))
     }
 
+    // MARK: What the bundle carries
+
+    func test_theBundleCarriesTheBoxesDrawn_namedByTheDetector_andNothingElse() {
+        let lamp = track("LAMP", at: SIMD3(0, 0.5, -2), hits: 10)
+        let toy = track("TOY", at: SIMD3(1, 0.1, -2), hits: 10)
+        let kept = LiveBoxesPresentation.kept([lamp, toy], boxed: [lamp.id], madeAt: [lamp.id: 42], now: 99)
+        XCTAssertEqual(kept.map(\.id), [lamp.id], "an object with only a dot is not sent")
+        XCTAssertEqual(kept.first?.detectorLabel, "lamp", "the detector's own name, not the vocabulary's label")
+        XCTAssertEqual(kept.first?.madeAtDeviceUs, 42)
+        let drawn = LiveBoxesPresentation.scene([lamp, toy], boxed: [lamp.id], current: nil).boxes.first?.box
+        XCTAssertEqual(kept.first?.center, drawn?.center)
+        XCTAssertEqual(kept.first?.size, drawn?.size)
+        XCTAssertEqual(kept.first?.yaw, drawn?.yaw)
+    }
+
+    func test_aBoxedObjectFusionMergedAway_isNotSent() {
+        let gone = UUID()
+        let lamp = track("LAMP", at: SIMD3(0, 0.5, -2), hits: 10)
+        let kept = LiveBoxesPresentation.kept([lamp], boxed: [lamp.id, gone], madeAt: [:], now: 99)
+        XCTAssertEqual(kept.map(\.id), [lamp.id])
+        XCTAssertEqual(kept.first?.madeAtDeviceUs, 99, "with no time on record it is stamped now")
+    }
+
+    func test_nothingBoxed_sendsNothing() {
+        let lamp = track("LAMP", at: SIMD3(0, 0.5, -2), hits: 10)
+        XCTAssertTrue(LiveBoxesPresentation.kept([lamp], boxed: [], madeAt: [:], now: 0).isEmpty)
+    }
+
     func test_nothingFound_drawsNothing() {
         XCTAssertEqual(LiveBoxesPresentation.scene([], boxed: [UUID()], current: nil), LiveBoxesScene())
     }

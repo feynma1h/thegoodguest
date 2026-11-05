@@ -32,6 +32,7 @@ final class BundleClockTests: XCTestCase {
             frames:            [keyframe(0, atDeviceUs: startUs + 500_000),
                                 keyframe(1, atDeviceUs: startUs + 1_250_000)],
             planeAnchors:      [],
+            personBoxes:       [],
             roomPlan:          nil,
             outputDir:         dir
         )

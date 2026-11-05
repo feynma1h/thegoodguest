@@ -37,6 +37,9 @@ struct BundleAssembler {
     /// The session's final plane-anchor set (decision 0066). Empty is
     /// valid — the shell degrades to "unavailable" server-side.
     let planeAnchors:      [RSPlaneAnchor]
+    /// The boxes the person made and kept (decisions 0320, 0321). Empty is
+    /// valid and is what every build without live boxes ships.
+    let personBoxes:       [KeptBox]
     /// RoomPlan output (decision 0077). Non-nil iff roomplan/room.json was
     /// written — which is also exactly when tier == .lidarRoomplan; the caller
     /// (CaptureManager.assembleBundle) computes both from the same fact.
@@ -77,6 +80,7 @@ struct BundleAssembler {
         }
 
         bundle.planeAnchors = planeAnchors
+        bundle.personBoxes  = PersonBoxWire.messages(personBoxes, startedAtDeviceUs: startedAtDeviceUs)
         if let roomPlan { bundle.roomPlan = roomPlan }
 
         let data = try bundle.serializedData()
