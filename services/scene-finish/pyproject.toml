@@ -1,0 +1,27 @@
+[project]
+name = "thegoodguest-scene-finish"
+version = "0.1.0"
+description = "thegoodguest scene-finish: finish a scanned room (finish, furniture twins) in the cloud, checked against the scan's own photos"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110,<1.0",
+    "uvicorn[standard]>=0.27,<1.0",
+    "numpy>=1.24",
+    "pillow>=10",
+    # thegoodguest-schemas and thegoodguest-room-look are local packages.
+    # Install them first: pip install -e packages/schemas packages/room-look
+    "thegoodguest-schemas",
+    "thegoodguest-room-look",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "httpx>=0.25,<1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# No packages to find: flat-module service, not an installable library.

@@ -1,0 +1,10 @@
+{
+  "name": "scene-finish-render",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Headless driver for the room viewer (services/scene-finish)",
+  "dependencies": {
+    "playwright-core": "1.49.1"
+  }
+}
