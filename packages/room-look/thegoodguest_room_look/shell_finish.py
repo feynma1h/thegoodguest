@@ -506,7 +506,7 @@ def _structure(shell: dict, cams: list[Camera], hints: dict, wall_out: list[dict
     Mutates wall_out. Returns the measurement summary, or None with no frames."""
     if not cams:
         return None
-    import shell_structure as ss
+    from . import shell_structure as ss
 
     m = ss.measure(shell, cams, hints, {i: w["paint"]["hex"] for i, w in enumerate(wall_out)})
     wh = hints.get("wainscot") or {}
