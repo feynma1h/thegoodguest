@@ -1,0 +1,45 @@
+# Cloud Build configuration for scene-finish (services/scene-finish/).
+#
+# Invoked by infra/deploy_scene_finish.sh. Builds from the repo root: the viewer
+# comes from web/, the Python from packages/schemas and packages/room-look.
+#
+# CPU only: no GPU, no model weights, no secrets at build time. The first build
+# downloads Chromium (~150 MB) and builds the web app (~1 min); expect 5-8 min.
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - --tag
+      - '${_IMAGE_URI}'
+      - --file
+      - services/scene-finish/Dockerfile
+      - .   # repo root is the build context
+
+  # Smoke test before pushing: the imports the service needs, and the viewer
+  # build the driver serves (it must carry the finish page the harness lives on).
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - run
+      - --rm
+      - '${_IMAGE_URI}'
+      - sh
+      - -c
+      - |
+        python -c "import finish_server, thegoodguest_room_look.shell_finish, thegoodguest_schemas; print('import smoke: OK')" \
+        && test -f "$$VIEWER_DIR/shell-finish.html" && echo "viewer build: OK"
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_IMAGE_URI}']
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: 30
+
+timeout: 1200s
+
+images:
+  - '${_IMAGE_URI}'
+
+substitutions:
+  _IMAGE_URI: ''

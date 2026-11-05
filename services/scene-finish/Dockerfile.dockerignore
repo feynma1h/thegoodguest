@@ -1,0 +1,13 @@
+# Build context for services/scene-finish/Dockerfile is the repo root; send only
+# what the three stages COPY (web/, packages/, services/scene-finish/).
+**
+!web/
+!packages/schemas/
+!packages/room-look/
+!services/scene-finish/
+**/node_modules
+**/__pycache__
+**/*.pyc
+web/out
+web/.next
+web/public/dev-fixtures

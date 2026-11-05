@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# Deploy scene-finish to Cloud Run. WRITTEN, NOT RUN: nothing in this script has
+# been executed against the project; the coordinator reads it, then runs it.
+#
+# Run from the repo root:
+#     ./infra/deploy_scene_finish.sh               # deploy, straight to 100%
+#     ./infra/deploy_scene_finish.sh --candidate   # hold the revision at 0%, smoke, then flip
+#
+# scene-finish is a CPU-only service (decision 0330 and the phase 2 design): it
+# draws the room viewer in headless Chrome with software GL, so it needs no GPU,
+# no model weights and no HF token. It is NOT part of perception-obj: that is one
+# L4 instance at concurrency 1 with a ~195 s model load, and the finish work wants
+# many small parallel workers that cannot starve SAM.
+#
+# Prerequisites (infra/secrets.md):
+#   1. The 'anthropic-api-key' secret exists (perception-obj already uses it).
+#   2. The Cloud Tasks queue 'perception-dispatch' and tasks-invoker@ exist.
+#   3. Cloud Run Admin, Artifact Registry and Cloud Build APIs enabled.
+#
+# Sizing is an ESTIMATE (design 3, from a 10-core Mac measurement): 4 vCPU,
+# 8 GiB, concurrency 1, 900 s. Software GL is multithreaded, so a render is
+# slower here than on the measuring machine; re-measure on the first candidate
+# before trusting the numbers.
+
+set -euo pipefail
+
+CANDIDATE_MODE=0
+if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--candidate" ) ]]; then
+    echo "Usage: $0 [--candidate]"
+    exit 1
+fi
+[[ $# -eq 1 ]] && CANDIDATE_MODE=1
+
+SERVICE="scene-finish"
+CONTEXT_DIR="services/scene-finish"
+CLOUDBUILD_CONFIG="infra/cloudbuild/scene-finish.yaml"
+
+PROJECT_ID="thegoodguest"
+REGION="asia-southeast1"
+REPO="thegoodguest"
+
+# Dedicated least-privilege runtime SA, the perception-obj pattern (decision
+# 0090): everything it is granted is enumerated in ensure_runtime_iam below.
+RUNTIME_SA="scene-finish-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+INVOKER_SA="tasks-invoker@${PROJECT_ID}.iam.gserviceaccount.com"
+IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
+IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:${IMAGE_TAG}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
+
+# ---------------------------------------------------------------------------
+# Runtime IAM. All idempotent, scoped to the exact resource wherever the API
+# allows. Runs BEFORE the deploy: --service-account and --set-secrets are
+# validated at revision creation.
+# ---------------------------------------------------------------------------
+ensure_runtime_iam() {
+    echo "=== Runtime IAM for ${RUNTIME_SA} ==="
+
+    gcloud iam service-accounts describe "${RUNTIME_SA}" \
+        --project="${PROJECT_ID}" >/dev/null 2>&1 \
+      || gcloud iam service-accounts create scene-finish-runtime \
+            --project="${PROJECT_ID}" \
+            --display-name="scene-finish Cloud Run runtime" \
+            --description="Least-privilege runtime SA for scene-finish"
+
+    # Capture bundles: READ ONLY (poses, intrinsics, frames; never written).
+    gcloud storage buckets add-iam-policy-binding "gs://thegoodguest-captures" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/storage.objectViewer" \
+        --project="${PROJECT_ID}" >/dev/null
+
+    # Perception outputs: read shell.json/boxes.json, write finish.json,
+    # furniture.json and work/ (the same managed role perception-obj holds).
+    gcloud storage buckets add-iam-policy-binding "gs://thegoodguest-perception-outputs" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/storage.objectAdmin" \
+        --project="${PROJECT_ID}" >/dev/null
+
+    # No Firestore: these stages never write scene state, so they cannot
+    # un-ready a room (design 4.5).
+
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/logging.logWriter" --condition=None >/dev/null
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/monitoring.metricWriter" --condition=None >/dev/null
+
+    # Anthropic key, SECRET-scoped (the api-public / perception-obj pattern).
+    gcloud secrets add-iam-policy-binding anthropic-api-key \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/secretmanager.secretAccessor" \
+        --project="${PROJECT_ID}" --quiet >/dev/null
+
+    # The finish route enqueues one piece task per boxed object, and a piece
+    # enqueues the merge: enqueue rights on the queue and actAs on the OIDC
+    # invoker identity.
+    gcloud tasks queues add-iam-policy-binding perception-dispatch \
+        --location="${REGION}" --project="${PROJECT_ID}" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/cloudtasks.enqueuer" >/dev/null
+    gcloud iam service-accounts add-iam-policy-binding "${INVOKER_SA}" \
+        --project="${PROJECT_ID}" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/iam.serviceAccountUser" >/dev/null
+
+    local deployer
+    deployer="$(gcloud config get-value account 2>/dev/null)"
+    if [[ -n "${deployer}" ]]; then
+        gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
+            --project="${PROJECT_ID}" \
+            --member="user:${deployer}" \
+            --role="roles/iam.serviceAccountUser" >/dev/null 2>&1 || true
+    fi
+    echo "runtime IAM ensured"
+}
+
+echo "=== Deploying ${SERVICE} ==="
+
+echo "=== 1/3: Ensure Artifact Registry repo exists ==="
+gcloud artifacts repositories describe "${REPO}" \
+    --location="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1 \
+  || gcloud artifacts repositories create "${REPO}" \
+        --repository-format=docker \
+        --location="${REGION}" \
+        --project="${PROJECT_ID}" \
+        --description="thegoodguest container images"
+
+echo "=== 2/3: Build container via Cloud Build ==="
+echo "Image:   ${IMAGE_URI}"
+echo "Config:  ${CLOUDBUILD_CONFIG}"
+gcloud builds submit . \
+    --project="${PROJECT_ID}" \
+    --region="${REGION}" \
+    --config="${CLOUDBUILD_CONFIG}" \
+    --substitutions="_IMAGE_URI=${IMAGE_URI}"
+
+ensure_runtime_iam
+
+echo "=== 3/3: Deploy to Cloud Run (CPU only) ==="
+# Platform-gated like perception-obj (0106): only the Cloud Tasks invoker, which
+# holds run.invoker (granted below), can call it.
+DEPLOY_FLAGS=(--platform=managed --service-account="${RUNTIME_SA}" --no-allow-unauthenticated)
+if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
+    if gcloud run services describe "${SERVICE}" \
+            --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+        DEPLOY_FLAGS+=(--no-traffic)
+        echo "[deploy] ${SERVICE} exists; new revision held at 0% traffic."
+    else
+        echo "[deploy] WARNING: ${SERVICE} has no prior revision; --no-traffic cannot be honored."
+    fi
+    DEPLOY_FLAGS+=(--tag=candidate)
+fi
+# concurrency=1: a render holds a Chrome and several GB; parallelism comes from
+# more instances (max 12 = one per piece of a typical room), not more requests.
+# --no-cpu-throttling: the container is billed through Claude waits, which the
+# design accepts (~$1 a scan) to avoid splitting render from wait.
+# ANTHROPIC_API_KEY is mounted for the Claude-layer routes that land next; the
+# skeleton's routes do not read it.
+gcloud run deploy "${SERVICE}" \
+    --image="${IMAGE_URI}" \
+    --region="${REGION}" \
+    --project="${PROJECT_ID}" \
+    "${DEPLOY_FLAGS[@]}" \
+    --cpu=4 \
+    --memory=8Gi \
+    --max-instances=12 \
+    --min-instances=0 \
+    --concurrency=1 \
+    --timeout=900 \
+    --port=8080 \
+    --no-cpu-throttling \
+    --cpu-boost \
+    --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=2,periodSeconds=3,failureThreshold=10,timeoutSeconds=3 \
+    --set-env-vars=PERCEPTION_OUTPUTS_BUCKET=thegoodguest-perception-outputs,CAPTURES_BUCKET=thegoodguest-captures,CLOUD_TASKS_INVOKER_SA="${INVOKER_SA}",CLOUD_TASKS_PROJECT="${PROJECT_ID}",CLOUD_TASKS_LOCATION="${REGION}",CLOUD_TASKS_QUEUE=perception-dispatch \
+    --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
+    # --set-env-vars REPLACES the whole list: a variable missing from this line
+    # silently does not ship. RECEIVER_URL (the service's own URL, the OIDC
+    # audience base) is not known before the first deploy; the routes that need
+    # it add it with `gcloud run services update --update-env-vars` and a line
+    # here, the way perception-obj carries it.
+
+EFFECTIVE_SA=$(gcloud run services describe "${SERVICE}" \
+    --region="${REGION}" --project="${PROJECT_ID}" \
+    --format='value(spec.template.spec.serviceAccountName)')
+echo "=== Runtime SA on the new revision: ${EFFECTIVE_SA:-<compute default>} ==="
+[[ "${EFFECTIVE_SA}" == "${RUNTIME_SA}" ]] || echo "WARNING: expected ${RUNTIME_SA}" >&2
+
+gcloud run services add-iam-policy-binding "${SERVICE}" \
+    --region="${REGION}" --project="${PROJECT_ID}" \
+    --member="serviceAccount:${INVOKER_SA}" \
+    --role="roles/run.invoker" >/dev/null
+echo "=== run.invoker ensured for tasks-invoker@ (platform gate) ==="
+
+if [[ "${CANDIDATE_MODE}" -eq 0 ]]; then
+    gcloud run services update-traffic "${SERVICE}" --to-latest \
+        --region="${REGION}" --project="${PROJECT_ID}"
+fi
+
+URL=$(gcloud run services describe "${SERVICE}" \
+        --region="${REGION}" --project="${PROJECT_ID}" \
+        --format='value(status.url)')
+echo ""
+echo "=== Done ==="
+echo "Service URL: ${URL}"
+if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
+    echo ""
+    echo "Smoke the candidate (platform-gated, so it needs an identity token):"
+    echo "  curl -H \"Authorization: Bearer \$(gcloud auth print-identity-token)\" <candidate url>/health"
+    echo "Then flip traffic:"
+    echo "  gcloud run services update-traffic ${SERVICE} --to-latest --region=${REGION} --project=${PROJECT_ID}"
+fi
