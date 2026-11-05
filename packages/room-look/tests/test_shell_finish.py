@@ -235,3 +235,22 @@ def test_calibration_reaches_the_floor_texture_and_is_recorded_without_its_sourc
     assert f["floor"]["style"]["texture_gain"] == 2.0
     assert f["floor"]["style"]["mottle"] >= base["floor"]["style"]["mottle"]
     assert "source" not in f["calibration"]
+
+
+def test_pose_items_carry_pose_and_intrinsics_only(tmp_path):
+    from thegoodguest_room_look import finish_compare as fc
+    from thegoodguest_schemas import CaptureBundle
+
+    b = CaptureBundle()
+    f = b.frames.add()
+    f.frame_index = 7
+    f.rgb_gcs_path = "frames/000007.jpg"
+    f.camera_pose.pos_x, f.camera_pose.pos_y, f.camera_pose.pos_z = 1.0, 2.0, 3.0
+    f.camera_pose.quat_w = 1.0
+    f.intrinsics.fy, f.intrinsics.width, f.intrinsics.height = 1000.0, 1920, 1440
+    (tmp_path / "captures").mkdir()
+    (tmp_path / "captures" / "bundle.pb").write_bytes(b.SerializeToString())
+
+    (item,) = fc.pose_items(tmp_path, [7])
+    assert item == {"id": 7, "pos": [1.0, 2.0, 3.0], "quat": [0.0, 0.0, 0.0, 1.0], "fy": 1000.0, "h": 1440, "w": 1920}
+    assert fc.poses(tmp_path, [7], 8791).startswith("window.__shellFinishView.harness.run([{")

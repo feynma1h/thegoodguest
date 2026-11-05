@@ -48,7 +48,10 @@ def _frames(scene: Path, ids: list[int]):
     return [by[i] for i in ids]
 
 
-def poses(scene: Path, ids: list[int], port: int) -> str:
+def pose_items(scene: Path, ids: list[int]) -> list[dict]:
+    """The harness's frames for these capture frames: the camera pose and
+    intrinsics of each, as the viewer's compare harness takes them. Poses only;
+    no photo is read."""
     items = []
     for f in _frames(scene, ids):
         p, i = f.camera_pose, f.intrinsics
@@ -58,9 +61,11 @@ def poses(scene: Path, ids: list[int], port: int) -> str:
             "quat": [p.quat_x, p.quat_y, p.quat_z, p.quat_w],
             "fy": i.fy, "h": i.height, "w": i.width,
         })
-    return (
-        "window.__shellFinishView.harness.run(" + json.dumps(items) + f",{port})"
-    )
+    return items
+
+
+def poses(scene: Path, ids: list[int], port: int) -> str:
+    return "window.__shellFinishView.harness.run(" + json.dumps(pose_items(scene, ids)) + f",{port})"
 
 
 def _srgb(v: int) -> int:
