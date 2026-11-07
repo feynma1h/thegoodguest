@@ -272,7 +272,7 @@ def mount(app, session) -> None:
             session.transcript.append(("person", {"text": text}))
 
         def emit(kind: str, data: dict) -> None:
-            if kind in ("delta", "card", "note"):
+            if kind in ("delta", "card", "note", "focus"):
                 session.transcript.append((kind, data))
             events.put((kind, data))
 

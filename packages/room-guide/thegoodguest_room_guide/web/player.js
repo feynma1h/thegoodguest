@@ -70,20 +70,23 @@ function rect(x, z, hx, hz, yaw, color, { dashed = false, fill = 0, y = 0.006 } 
   const g = new THREE.Group();
   const pts = [[hx, hz], [-hx, hz], [-hx, -hz], [hx, -hz], [hx, hz]].map(([a, b]) => new THREE.Vector3(a, 0, b));
   const geom = new THREE.BufferGeometry().setFromPoints(pts);
+  // Drawn over everything: a highlight under a desk is still a highlight.
   const mat = dashed
-    ? new THREE.LineDashedMaterial({ color, dashSize: 0.06, gapSize: 0.04, transparent: true, opacity: 0.95 })
-    : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 });
+    ? new THREE.LineDashedMaterial({ color, dashSize: 0.06, gapSize: 0.04, transparent: true, opacity: 0.95, depthTest: false })
+    : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: false });
   const line = new THREE.Line(geom, mat);
   if (dashed) line.computeLineDistances();
   g.add(line);
   if (fill > 0) {
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(2 * hx, 2 * hz),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: fill, depthWrite: false, side: THREE.DoubleSide }));
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: fill, depthWrite: false, depthTest: false,
+        side: THREE.DoubleSide }));
     plane.rotation.x = -Math.PI / 2;
     g.add(plane);
   }
   g.position.set(x, y, z);
   g.rotation.y = yaw;
+  g.traverse((o) => { o.renderOrder = 999; });
   overlay.add(g);
   return g;
 }
@@ -165,10 +168,16 @@ function show(focus) {
   for (const pid of focus.pieces || []) {              // a piece the guide is talking about
     const g = groups.get(pid);
     if (!g) continue;
-    const box = new THREE.Box3().setFromObject(g);
-    const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
-    const r = rect(c.x, c.z, s.x / 2 + 0.04, s.z / 2 + 0.04, 0, ACCENT);
-    r.userData.kind = 'focus';
+    const box = new THREE.Box3().setFromObject(g).expandByScalar(0.03);
+    const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+    const pad = rect(c.x, c.z, size.x / 2, size.z / 2, 0, ACCENT, { fill: 0.22 });
+    pad.userData.kind = 'focus';
+    const helper = new THREE.Box3Helper(box, ACCENT);
+    helper.material.depthTest = false;
+    helper.material.transparent = true;
+    helper.renderOrder = 999;
+    helper.userData.kind = 'focus';
+    overlay.add(helper);
   }
   if (typeof focus.view === 'number') D.goTo(focus.view);
   if (typeof focus.night === 'boolean') D.setMode(focus.night);
