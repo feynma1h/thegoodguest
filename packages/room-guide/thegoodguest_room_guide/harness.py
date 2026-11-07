@@ -39,11 +39,14 @@ WEB = Path(__file__).resolve().parent / "web"
 class Session:
     """One room's state in the harness."""
 
-    def __init__(self, scene: Path, work: Path, mode: str | None = None):
+    def __init__(self, scene: Path, work: Path, mode: str | None = None, stub=None):
         self.scene = Path(scene)
         self.work = Path(work)
         self.work.mkdir(parents=True, exist_ok=True)
-        self.gateway = Gateway(self.work / "llm", mode=mode)
+        self.gateway = Gateway(self.work / "llm", mode=mode, stub=stub)
+        self.messages: list[dict] = []
+        self.told: list[str] = []
+        self.changes: list[str] = []
         self.history: list[Arrangement] = [{}]
         self.proposals: dict[str, Proposal] = {}
         self.notes: list[str] = []

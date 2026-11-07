@@ -87,10 +87,49 @@ function findingsBlock(state) {
 }
 
 // ---------------------------------------------------------------- the conversation
+// A turn streams back as server-sent events: the guide's words as they are written,
+// proposal cards it offers, moves to play now, things to light up, notes, and done.
+async function turn(path, body) {
+  busy = true;
+  let words = null;
+  try {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let cut;
+      while ((cut = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, cut);
+        buf = buf.slice(cut + 2);
+        const kind = (chunk.match(/^event: (.*)$/m) || [])[1];
+        const data = JSON.parse((chunk.match(/^data: (.*)$/m) || [, '{}'])[1]);
+        if (kind === 'delta') {
+          if (!words) words = add('guest', '');
+          words.textContent += data.text;
+          log.scrollTop = log.scrollHeight;
+        } else if (kind === 'card') {
+          proposalCard(data); words = null;
+        } else if (kind === 'play') {
+          await play(data.plan); render(data.state); words = null;
+        } else if (kind === 'focus') {
+          if (player) player.show(data);
+        } else if (kind === 'note') {
+          add('note', esc(data.text)); words = null;
+        } else if (kind === 'error') {
+          add('note', `The guide stopped: ${esc(data.message)}`);
+        }
+      }
+    }
+  } finally { busy = false; }
+}
+
 async function ask(text) {
   add('person', esc(text));
-  if (window.guideTurn) return window.guideTurn(text, { add, esc, play, proposalCard, render, api });
-  add('note', 'The guide is not connected in this harness yet.');
+  await turn('/api/turn', { text });
 }
 
 $('ask').onsubmit = (ev) => {
@@ -136,5 +175,5 @@ $('undo').onclick = async () => {
   render(fresh);
   findingsBlock(fresh);
   if (Object.keys(fresh.poses).length) await player.place(fresh.poses);
-  if (window.guideOpen) window.guideOpen({ add, esc, play, proposalCard, render, api });
+  await turn('/api/open', {});
 })();
