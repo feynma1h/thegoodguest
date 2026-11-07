@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import cached_property
 
 import numpy as np
 
@@ -39,13 +40,17 @@ class Box:
     y0: float
     y1: float
 
-    @property
+    @cached_property
     def across(self) -> Vec2:
         return (math.cos(self.yaw), -math.sin(self.yaw))
 
-    @property
+    @cached_property
     def front(self) -> Vec2:
         return (math.sin(self.yaw), math.cos(self.yaw))
+
+    @cached_property
+    def radius(self) -> float:
+        return math.hypot(self.hx, self.hz)
 
     def corners(self) -> np.ndarray:
         """The footprint's four corners, (4, 2), in order round the box."""
@@ -66,23 +71,30 @@ class Box:
         return Box(self.x, self.z, self.hx + by, self.hz + by, self.yaw, self.y0, self.y1)
 
 
-def _half_projection(b: Box, n: np.ndarray) -> float:
-    ax, az = b.across
-    fx, fz = b.front
-    return b.hx * abs(ax * n[0] + az * n[1]) + b.hz * abs(fx * n[0] + fz * n[1])
-
-
 def footprint_penetration(a: Box, b: Box) -> float:
     """How deep two footprints interpenetrate, by the separating-axis test.
 
     Positive: they overlap, and this is the overlap along the axis where it is
-    smallest. Zero or negative: they do not overlap.
+    smallest. Zero or negative: they do not overlap. Plain floats, because the
+    engine asks this many thousands of times per search.
     """
-    d = np.array([b.x - a.x, b.z - a.z])
+    dx, dz = b.x - a.x, b.z - a.z
+    reach = a.radius + b.radius
+    if dx * dx + dz * dz > reach * reach:
+        return -1.0
+    aax, aaz = a.across
+    afx, afz = a.front
+    bax, baz = b.across
+    bfx, bfz = b.front
     best = math.inf
-    for axis in (a.across, a.front, b.across, b.front):
-        n = np.array(axis)
-        best = min(best, _half_projection(a, n) + _half_projection(b, n) - abs(float(d @ n)))
+    for nx, nz in ((aax, aaz), (afx, afz), (bax, baz), (bfx, bfz)):
+        ha = a.hx * abs(aax * nx + aaz * nz) + a.hz * abs(afx * nx + afz * nz)
+        hb = b.hx * abs(bax * nx + baz * nz) + b.hz * abs(bfx * nx + bfz * nz)
+        o = ha + hb - abs(dx * nx + dz * nz)
+        if o < best:
+            best = o
+            if best <= 0:
+                return best
     return best
 
 

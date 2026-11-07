@@ -609,9 +609,13 @@ def backing_wall(room: Room, piece_id: str, pose: Pose, tol: float = 0.1) -> str
     return None
 
 
-def preferences(room: Room, needs: RoomNeeds, poses: dict[str, Pose], grid: FloorGrid) -> list[PrefResult]:
+def preferences(room: Room, needs: RoomNeeds, poses: dict[str, Pose], grid: FloorGrid | None,
+                *, cheap: bool = False) -> list[PrefResult]:
+    """How well each preference is met. `cheap` skips the ones that need the floor grid."""
     out = []
     for p in needs.preferences:
+        if cheap and p.pref in ("open_floor", "balance"):
+            continue
         weight = WEIGHTS[p.weight]
         if p.pref == "task_light" and p.piece:
             user, facing = user_at(room, p.piece, poses[p.piece], p.viewer or "facing_piece")
