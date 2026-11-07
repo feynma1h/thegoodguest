@@ -86,6 +86,9 @@ TOOLS = [
 ]
 
 
+SAY_AFTER = ("offer", "show", "put_back", "note")
+
+
 class Turn:
     """One turn's tool calls against the harness session, with events for the panel."""
 
@@ -103,6 +106,10 @@ class Turn:
             out = {"refused": f"there's no clear way to move it there ({e.piece})"}
         except (KeyError, TypeError, ValueError) as e:
             out = {"error": f"{type(e).__name__}: {e}"}
+        if name in SAY_AFTER and isinstance(out, dict) and "error" not in out:
+            # A card or a move with no words beside it reaches the person as a
+            # silent change; the room asks for the sentence.
+            out["then"] = "tell them in a sentence or two what you did and why"
         text = json.dumps(out, ensure_ascii=False)
         self.tool_texts.append(text)
         return text
@@ -118,7 +125,7 @@ class Turn:
         self.emit("note", {"text": "Looking at every place each piece could go…"})
         props = self._proposals(self.s.engine.explore(key, locked=keep_still or []))
         if not props:
-            return {"proposals": [], "why": "nothing the room checked beats it as it stands, by its own needs"}
+            return {"proposals": [], "why": self.s.engine.why_nothing()}
         return {"proposals": props}
 
     def t_move(self, piece: str, how: str, target: str | None = None):
@@ -140,8 +147,10 @@ class Turn:
         result = self.s.show(proposal)
         self.s.changes.extend(p.words)
         self.emit("play", result)
-        return {"shown": p.words, "now": [f.text for f in self.s.engine.current_findings
-                                          if f.kind in ("problem", "tight")][:6]}
+        # What changed, as the engine judged it, not a list for the guide to diff.
+        return {"shown": p.words, "fixed": [f.text for f in p.fixes],
+                "still": [f.text for f in p.leaves if f.kind == "problem"],
+                "brings": [f.text for f in p.adds]}
 
     def t_put_back(self):
         if len(self.s.history) < 2:
@@ -175,7 +184,7 @@ class Turn:
         if piece not in self.s.room.pieces:
             return {"error": f"no piece {piece}"}
         if change == "relax":
-            self.s.needs = with_change(self.s.needs, piece, drop=need)
+            self.s.needs = with_change(self.s.needs, piece, drop=need, side=side)
         else:
             self.s.needs = with_change(self.s.needs, piece, add=Need(
                 need, side or "front", strength or "hard", fact[:200], source="person",
@@ -242,7 +251,11 @@ def _turn(session, text, emit, room, fs, first) -> str:
     stray = foreign_numbers(said, allowed)
     if stray:
         log.warning("guide said numbers from nowhere: %s", stray)
-    emit("done", {"flags": [f"foreign_number:{n}" for n in stray], "spend": session.gateway.report()})
+    flags = [f"foreign_number:{n}" for n in stray]
+    sentences = len(re.findall(r"[.!?](?:\s|$)", said.strip()))
+    if sentences > 4:
+        flags.append(f"long:{sentences}")
+    emit("done", {"flags": flags, "spend": session.gateway.report()})
     return said
 
 

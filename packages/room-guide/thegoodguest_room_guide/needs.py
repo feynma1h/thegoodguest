@@ -183,6 +183,8 @@ def _need(raw: dict, piece: Piece, problems: list[str], where: str) -> Need | No
         return None
     kind = _choice(raw.get("need"), NEED_TYPES, problems, f"{where}.need")
     side = _choice(raw.get("side"), SIDES, problems, f"{where}.side", DEFAULT_SIDE[kind])
+    if kind in ("pass", "light", "reach"):
+        side = "front"               # a way through, daylight and a hand's reach face the room
     strength = _choice(raw.get("strength"), STRENGTHS, problems, f"{where}.strength")
     why = _text(raw.get("why"), problems, f"{where}.why")
     posture = None
@@ -337,10 +339,22 @@ def default_needs(room: Room) -> RoomNeeds:
 
 
 def with_change(needs: RoomNeeds, piece_id: str, *, add: Need | None = None,
-                drop: str | None = None, moves: str | None = None) -> RoomNeeds:
-    """The same needs with one piece's needs changed (by the person or the critic)."""
+                drop: str | None = None, side: str | None = None, moves: str | None = None) -> RoomNeeds:
+    """The same needs with one piece's needs changed (by the person or the critic).
+
+    Dropping with a side drops that side only: a need declared on both sides keeps
+    the other one.
+    """
     entry = needs.pieces.get(piece_id, PieceNeeds("yes", ""))
-    kept = tuple(n for n in entry.needs if drop is None or n.need != drop)
+    kept: tuple[Need, ...] = ()
+    for n in entry.needs:
+        if drop is None or n.need != drop:
+            kept += (n,)
+        elif side and side not in concrete_sides(n.side):
+            kept += (n,)
+        elif side and n.side != side:
+            rest = [s for s in concrete_sides(n.side) if s != side]
+            kept += tuple(replace(n, side=s) for s in rest)
     if add is not None:
         kept = tuple(n for n in kept if not (n.need == add.need and n.side == add.side)) + (add,)
     entry = replace(entry, needs=kept, moves=moves or entry.moves)
@@ -422,7 +436,10 @@ def zones(room: Room, needs: RoomNeeds) -> list[Zone]:
                 y0, y1 = 0.0, sy + 0.5
             else:
                 y0, y1 = 0.0, sy
-            for side in concrete_sides(n.side):
+            sides = concrete_sides(n.side)
+            if piece.opening is not None:
+                sides = ("front",)       # a door or window's other sides are wall, or outside
+            for side in sides:
                 width = sx if side in ("front", "back") else sz
                 out.append(Zone(pid, n.need, side, n.strength, hard, comfortable, width, y0, y1,
                                 floor_based, n.posture, exempt, n.why, estimate, say, n.mechanism))

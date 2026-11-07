@@ -156,10 +156,10 @@ class Engine:
         return carry(poses[f], frm, to)
 
     def seat(self, anchor: str, to: Pose, f: str, poses: dict[str, Pose]) -> Pose:
-        """A piece used at another one, set squarely at its front: tucked in a little
-        when their shapes allow it, otherwise just clear of it."""
+        """A piece used at another one, set squarely at its front and pushed in as far
+        as their shapes allow, the way a chair is pushed in under a desk."""
         a, p = self.room.pieces[anchor], self.room.pieces[f]
-        for tuck in (0.1, -GAP):
+        for tuck in (0.45, 0.35, 0.25, 0.15, 0.05, -GAP):
             x, z = to.place(0.0, a.size[2] / 2 + p.size[2] / 2 - tuck)
             pose = Pose(x, poses[f].y, z, to.yaw + math.pi)
             if laws.pair_penetration(a, to, p, pose) <= laws.OVERLAP_EPS:
@@ -233,7 +233,7 @@ class Engine:
 
     def all_slots(self, pid: str, poses: dict[str, Pose]) -> Iterable[tuple[Pose, dict]]:
         for w in self.room.walls:
-            yield from self.wall_slots(pid, w.id, step=0.1)
+            yield from self.wall_slots(pid, w.id, step=0.15)
         for other in self.room.pieces:
             o = self.room.pieces[other]
             if other != pid and o.support == "floor" and laws.collides(o) and o.size[0] * o.size[2] > 0.3:
@@ -264,14 +264,40 @@ class Engine:
                 ranked.append((rough, arrangement, [(anchor, to, meta)]))
         ranked.sort(key=lambda r: -r[0])
         out = []
+        stopped = self.__dict__.setdefault("_stopped", {})
         for rough, arrangement, metas in ranked[: keep_best * 2]:
             ok, a, s = self.full(arrangement)
             if ok:
                 out.append((s + self.goal_bonus(goal, a), arrangement, metas, a))
+            else:
+                for b in a.unexcused(self.scanned, self.room, arrangement):
+                    k = (b.kind, b.need, b.side, b.pieces[0])
+                    stopped[k] = stopped.get(k, 0) + 1
             if len(out) >= keep_best:
                 break
         out.sort(key=lambda r: -r[0])
         return out
+
+    def why_nothing(self) -> str:
+        """What stopped the most promising changes, in words the guide may say."""
+        stopped = self.__dict__.get("_stopped", {})
+        if not stopped:
+            return "nothing the room tried beats it as it stands, by its own needs"
+        (kind, need, side, pid), _ = max(stopped.items(), key=lambda kv: kv[1])
+        target = the(self.room, pid)
+        if side in ("left", "right"):
+            target = f"the side of {target}"
+        elif side == "front" and need in ("use", "open"):
+            target = f"the front of {target}"
+        reason = {
+            "unreachable": f"they closed off the way to {target}",
+            "zone": f"they crowded {target}",
+            "covered": f"they covered {target}",
+            "out_of_reach": f"they put {target} out of reach",
+            "unseen": f"they blocked the view of {target}",
+            "dark": f"they blocked the light from {target}",
+        }.get(kind, f"they broke something {target} needs")
+        return f"the changes that would have helped most were stopped because {reason}"
 
     def goal_bonus(self, goal: str, a: Assessment) -> float:
         """Extra credit for what the goal asks for, on top of the room's score."""
@@ -461,7 +487,17 @@ class Engine:
         return f"{who} would run into {the(self.room, worst)} there"
 
     def explore(self, goal: str = "general", *, locked: Iterable[str] = (), max_pieces: int = 2) -> list[Proposal]:
-        """Up to three different, valid proposals toward the goal, best first."""
+        """Up to three different, valid proposals toward the goal, best first.
+
+        Remembered for the room as it stands, so asking twice costs nothing.
+        """
+        key = (goal, tuple(sorted(locked)), max_pieces)
+        memo = self.__dict__.setdefault("_explored", {})
+        if key not in memo:
+            memo[key] = self._explore(goal, locked=locked, max_pieces=max_pieces)
+        return memo[key]
+
+    def _explore(self, goal: str, *, locked: Iterable[str], max_pieces: int) -> list[Proposal]:
         locked = set(locked)
         movable = [pid for pid, p in self.room.pieces.items()
                    if p.support == "floor" and pid not in self.fixed and pid not in locked and laws.collides(p)

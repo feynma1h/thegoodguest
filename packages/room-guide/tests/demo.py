@@ -19,14 +19,16 @@ DEMO = REPO / "outputs" / "guide" / "8cca44d4"
 def demo_room():
     """(room, needs) for the demo room, or skip."""
     scene = DEMO / "scene.json"
-    if not scene.exists() or not (DEMO / "llm" / "cache").exists():
+    if not scene.exists():
         pytest.skip("the demo room is not on this machine")
     from thegoodguest_room_guide.gateway import Gateway
     from thegoodguest_room_guide.model import load_room
     from thegoodguest_room_guide.rules_pass import run_rules_pass
     room = load_room(scene, DEMO / "solids.json")
-    try:
-        needs = run_rules_pass(room, Gateway(DEMO / "llm", mode="replay"))
-    except KeyError:
-        pytest.skip("the demo room's rules pass is not cached for this scene")
-    return room, needs
+    # The live run's answer first, then the one written offline.
+    for llm in (DEMO / "live" / "llm", DEMO / "llm"):
+        try:
+            return room, run_rules_pass(room, Gateway(llm, mode="replay"))
+        except KeyError:
+            continue
+    pytest.skip("the demo room's rules pass is not cached for this scene")

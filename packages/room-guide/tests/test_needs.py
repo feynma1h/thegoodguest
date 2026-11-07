@@ -92,6 +92,13 @@ def test_defaults_fix_the_shell_and_let_everything_else_move():
     assert entrances(room(), needs) == ["door"]
 
 
+def test_relaxing_one_side_keeps_the_other():
+    needs = parse_needs(room(), bedroom_needs())
+    one = with_change(needs, "bed", drop="get_in", side="right")
+    assert [(n.need, n.side) for n in one.needs_of("bed")] == [("get_in", "left")]
+    assert not with_change(needs, "bed", drop="get_in").needs_of("bed")
+
+
 def test_a_person_can_relax_a_need():
     needs = parse_needs(room(), bedroom_needs())
     relaxed = with_change(needs, "door", drop="open")

@@ -289,18 +289,12 @@ class Gateway:
         if kind == "json":
             data = json.loads(next(b.text for b in msg.content if b.type == "text"))
         else:
-            data = {"content": [_block(b) for b in msg.content if b.type in ("text", "tool_use", "thinking")],
+            # Every block goes back exactly as it came, reasoning blocks included:
+            # the API refuses a conversation whose earlier turns were edited.
+            data = {"content": [b.model_dump(exclude_none=True) for b in msg.content],
                     "stop_reason": msg.stop_reason}
         c = u.cost(req.model)
         self.spent += c
         self._cache_put(key, req, data, u, "live")
         self._log(req, key, "live", u, billed=c)
         return data
-
-
-def _block(b) -> dict:
-    if b.type == "text":
-        return {"type": "text", "text": b.text}
-    if b.type == "tool_use":
-        return {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
-    return {"type": "thinking", "thinking": getattr(b, "thinking", ""), "signature": getattr(b, "signature", "")}
