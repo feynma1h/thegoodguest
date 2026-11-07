@@ -199,6 +199,17 @@ def run_turn(session, text: str, emit) -> str:
     room, needs = session.room, session.needs
     fs = session.engine.current_findings
     first = not session.messages
+    start = len(session.messages)
+    try:
+        return _turn(session, text, emit, room, fs, first)
+    except BaseException:
+        # A turn that didn't finish leaves no half of itself behind, so asking
+        # again sends the same request (and an answered one replays free).
+        del session.messages[start:]
+        raise
+
+
+def _turn(session, text, emit, room, fs, first) -> str:
     content = [{"type": "text", "text": text}]
     if first:
         content = [plan_image(room, {}).block(),
@@ -240,10 +251,16 @@ def mount(app, session) -> None:
     from fastapi import Request
     from fastapi.responses import Response, StreamingResponse
 
-    def stream(text: str):
+    session.transcript = []          # what the panel showed, to show again after a reload
+
+    def stream(text: str, person: bool = True):
         events: queue.Queue = queue.Queue()
+        if person:
+            session.transcript.append(("person", {"text": text}))
 
         def emit(kind: str, data: dict) -> None:
+            if kind in ("delta", "card", "note"):
+                session.transcript.append((kind, data))
             events.put((kind, data))
 
         def work():
@@ -251,6 +268,9 @@ def mount(app, session) -> None:
                 run_turn(session, text, emit)
             except OracleNeeded as e:
                 emit("note", {"text": f"Waiting for an answer to {e.folder.name} (offline mode)."})
+                emit("done", {})
+            except KeyError as e:
+                emit("note", {"text": f"No saved answer for this turn and no live key ({e})."})
                 emit("done", {})
             except (BudgetExceeded, ModelNotAllowed) as e:
                 emit("error", {"message": str(e)})
@@ -275,8 +295,9 @@ def mount(app, session) -> None:
     @app.post("/api/open")
     def open_room():
         if session.messages:
-            return StreamingResponse(iter(["event: done\ndata: {}\n\n"]), media_type="text/event-stream")
-        return StreamingResponse(stream(OPENING), media_type="text/event-stream")
+            again = [f"event: {k}\ndata: {json.dumps(d, ensure_ascii=False)}\n\n" for k, d in session.transcript]
+            return StreamingResponse(iter(again + ["event: done\ndata: {}\n\n"]), media_type="text/event-stream")
+        return StreamingResponse(stream(OPENING, person=False), media_type="text/event-stream")
 
     @app.get("/plan.png")
     def plan_png():

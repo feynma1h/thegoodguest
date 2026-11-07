@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import heapq
 import math
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -46,6 +47,7 @@ CHECK_STEP = 0.02         # metres between path checks while planning
 CHECK_TURN = math.radians(3)
 GRID = 0.1
 YAWS = 8
+SEARCH_SECONDS = 1.0     # a floor search that finds nothing by then is given up for a lift
 
 
 class NoPath(Exception):
@@ -177,7 +179,7 @@ def _path(world: _World, room: Room, unit: list[str], start: dict[str, Pose], le
     raise NoPath(lead)
 
 
-def _search(world: _World, room: Room, unit, start, lead, a: Pose, g: Pose, budget: int = 6000) -> list[Pose] | None:
+def _search(world: _World, room: Room, unit, start, lead, a: Pose, g: Pose, budget: int = 4000) -> list[Pose] | None:
     """A* over the floor in 10 cm steps and eighth turns, joined to the exact start and goal."""
     def node_pose(n):
         ix, iz, iy = n
@@ -206,7 +208,8 @@ def _search(world: _World, room: Room, unit, start, lead, a: Pose, g: Pose, budg
     came = {s_node: None}
     cost = {s_node: 0.0}
     expanded = 0
-    while frontier and expanded < budget:
+    deadline = time.monotonic() + SEARCH_SECONDS
+    while frontier and expanded < budget and time.monotonic() < deadline:
         _, c, n = heapq.heappop(frontier)
         if n == g_node:
             nodes = []

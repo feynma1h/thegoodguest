@@ -92,6 +92,7 @@ function findingsBlock(state) {
 async function turn(path, body) {
   busy = true;
   let words = null;
+  const cards = [];          // offered while the guide is still talking: shown after its words
   try {
     const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const reader = r.body.getReader();
@@ -107,12 +108,14 @@ async function turn(path, body) {
         buf = buf.slice(cut + 2);
         const kind = (chunk.match(/^event: (.*)$/m) || [])[1];
         const data = JSON.parse((chunk.match(/^data: (.*)$/m) || [, '{}'])[1]);
-        if (kind === 'delta') {
+        if (kind === 'person') {
+          add('person', esc(data.text)); words = null;
+        } else if (kind === 'delta') {
           if (!words) words = add('guest', '');
           words.textContent += data.text;
           log.scrollTop = log.scrollHeight;
         } else if (kind === 'card') {
-          proposalCard(data); words = null;
+          cards.push(data);
         } else if (kind === 'play') {
           await play(data.plan); render(data.state); words = null;
         } else if (kind === 'focus') {
@@ -124,7 +127,10 @@ async function turn(path, body) {
         }
       }
     }
-  } finally { busy = false; }
+  } finally {
+    cards.forEach(proposalCard);
+    busy = false;
+  }
 }
 
 async function ask(text) {
