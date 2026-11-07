@@ -215,6 +215,17 @@ def parse_needs(room: Room, data: dict) -> RoomNeeds:
     if unknown_keys:
         problems.append(f"unknown keys: {', '.join(sorted(unknown_keys))}")
     raw_pieces = data.get("pieces")
+    if isinstance(raw_pieces, list):
+        # The rules pass answers with a list of entries, each carrying its id.
+        by_id: dict = {}
+        for i, entry in enumerate(raw_pieces):
+            if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+                problems.append(f"pieces[{i}]: needs an id")
+                continue
+            if entry["id"] in by_id:
+                problems.append(f"pieces: {entry['id']} appears twice")
+            by_id[entry["id"]] = {k: v for k, v in entry.items() if k != "id"}
+        raw_pieces = by_id
     if not isinstance(raw_pieces, dict):
         raise NeedsError(problems + ["pieces: missing or not an object"])
     missing = [pid for pid in room.pieces if pid not in raw_pieces]

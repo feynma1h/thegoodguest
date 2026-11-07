@@ -20,13 +20,13 @@ Read by: analyzer.py, engine.py.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
 from . import laws
-from .geometry import Box, FloorGrid, box_inside_polygon, clearance, flood, footprint_penetration, \
-    largest_open_rectangle, penetration, widest_path
+from .geometry import Box, FloorGrid, clearance, flood, footprint_distance, footprint_gap, \
+    footprint_penetration, largest_open_rectangle, penetration, point_in_polygon, widest_path
 from .model import Arrangement, Pose, Room
 from .needs import WEIGHTS, RoomNeeds, Target, Zone, entrances, targets, zone_box, zones
 from .rulebook import BODY_TOP, EYE_HEIGHT, LIGHT_DEPTH, PERSON_PATH, size_for
@@ -153,37 +153,141 @@ def _intruders(box: Box, solids: list[tuple[str, Box]]) -> list[str]:
     return hit
 
 
+# Where a person stands, sits or passes they need a strip about a body wide, not
+# the whole side of the piece: a bed is got into anywhere along its side.
+PERSON_SPAN = 0.6
+# A zone stops this short of its piece's corners, so something on the wall the
+# piece backs onto (a socket board at a bed's head) doesn't count as standing in it.
+ZONE_INSET = 0.03
+PROFILE_STEP = 0.02
+STRIP_NEEDS = ("use", "get_in", "pass")
+
+
+def _side_frame(piece, zone: Zone, pose: Pose) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The zone's own frame: the middle of the piece's side, the lateral axis, the outward axis."""
+    sx, _, sz = piece.size
+    f = np.array([math.sin(pose.yaw), math.cos(pose.yaw)])
+    a = np.array([math.cos(pose.yaw), -math.sin(pose.yaw)])
+    if zone.side == "front":
+        return np.array(pose.place(0.0, sz / 2)), a, f
+    if zone.side == "back":
+        return np.array(pose.place(0.0, -sz / 2)), a, -f
+    if zone.side == "right":
+        return np.array(pose.place(sx / 2, 0.0)), f, a
+    return np.array(pose.place(-sx / 2, 0.0)), f, -a
+
+
+def clear_profile(room: Room, zone: Zone, poses: dict[str, Pose],
+                  solids: list[tuple[str, Box]]) -> tuple[np.ndarray, np.ndarray, list[set[str]]]:
+    """How far out from the piece the zone is clear, at each step along its width.
+
+    Returns the lateral positions, the clear depth at each (up to the zone's
+    deepest), and what stops it there ("wall" for the room's edge).
+    """
+    piece = room.pieces[zone.piece]
+    pose = poses[zone.piece]
+    origin, u_axis, v_axis = _side_frame(piece, zone, pose)
+    top = max(zone.comfortable, zone.hard)
+    half = max(zone.width / 2 - ZONE_INSET, PROFILE_STEP)
+    # A person may stand a little past either end of a side, so their strip is
+    # looked for over the side plus half a strip each way.
+    ext = PERSON_SPAN / 2 if zone.need in STRIP_NEEDS else 0.0
+    n = max(3, int(math.ceil(2 * (half + ext) / PROFILE_STEP)) + 1)
+    us = np.linspace(-half - ext, half + ext, n)
+    clear = np.full(len(us), top)
+    who: list[set[str]] = [set() for _ in us]
+    outside = ~point_in_polygon(origin + us[:, None] * u_axis + v_axis * 0.01, room.footprint)
+    clear[outside] = 0.0
+    for k in np.nonzero(outside)[0]:
+        who[k] = {"wall"}
+
+    # The room's edge, straight out from each point along the side.
+    starts = origin + us[:, None] * u_axis
+    poly = room.footprint
+    for i in range(len(poly)):
+        p, q = poly[i], poly[(i + 1) % len(poly)]
+        e = q - p
+        denom = v_axis[0] * e[1] - v_axis[1] * e[0]
+        if abs(denom) < 1e-12:
+            continue
+        w = p - starts
+        t = (w[:, 0] * e[1] - w[:, 1] * e[0]) / denom
+        s = (w[:, 0] * v_axis[1] - w[:, 1] * v_axis[0]) / denom
+        hit = (t > -1e-6) & (s >= -1e-9) & (s <= 1 + 1e-9) & (t < clear)
+        for k in np.nonzero(hit)[0]:
+            clear[k] = max(0.0, float(t[k]))
+            who[k] = {"wall"}
+
+    base = 0.0 if zone.floor_based else pose.y
+    y0, y1 = base + zone.y0, base + zone.y1
+    full = zone_box(piece, replace(zone, width=zone.width + 2 * ext), pose, top)
+    for pid, s in solids:
+        if min(y1, s.y1) - max(y0, s.y0) <= laws.OVERLAP_EPS or footprint_penetration(full, s) <= 0:
+            continue
+        rel = s.corners() - origin
+        cu, cv = rel @ u_axis, rel @ v_axis
+        vmin = np.full(len(us), np.inf)
+        for i in range(4):
+            u0, v0, u1, v1 = cu[i], cv[i], cu[(i + 1) % 4], cv[(i + 1) % 4]
+            lo, hi = min(u0, u1), max(u0, u1)
+            span = (us >= lo - 1e-9) & (us <= hi + 1e-9)
+            if hi - lo < 1e-9:
+                v_at = np.full(len(us), min(v0, v1))
+            else:
+                v_at = v0 + (us - u0) / (u1 - u0) * (v1 - v0)
+            vmin = np.where(span, np.minimum(vmin, v_at), vmin)
+        depth = np.maximum(vmin, 0.0)
+        reaches = np.isfinite(vmin) & (vmin < top)
+        # A solid entirely behind the side (v < 0 everywhere) isn't in the zone.
+        behind = (cv.max() <= 1e-6)
+        if behind:
+            continue
+        for k in np.nonzero(reaches)[0]:
+            if depth[k] < clear[k] - 1e-6:
+                clear[k] = float(depth[k])
+                who[k] = {pid}
+            elif abs(depth[k] - clear[k]) <= 1e-6:
+                who[k].add(pid)
+    return us, clear, who
+
+
 def free_depth(room: Room, zone: Zone, poses: dict[str, Pose],
                solids: list[tuple[str, Box]] | None = None) -> tuple[float, tuple[str, ...]]:
     """How deep the zone is clear, up to its comfortable depth, and what stops it.
 
+    Something that swings, breathes or heats needs the whole side clear, so the
+    answer is the shallowest point along it. A person needs a body-wide strip,
+    so for standing, sitting and passing it is the best such strip.
     "wall" stands for the room's edge.
     """
-    piece = room.pieces[zone.piece]
-    pose = poses[zone.piece]
     solids = solids if solids is not None else _blocking_solids(room, poses, zone.exempt)
+    us, clear, who = clear_profile(room, zone, poses, solids)
     top = max(zone.comfortable, zone.hard)
-    full = zone_box(piece, zone, pose, top)
-    near = [(pid, s) for pid, s in solids if footprint_penetration(full, s) > 0]
-
-    def blocked(d: float) -> list[str]:
-        b = zone_box(piece, zone, pose, d)
-        hit = _intruders(b, near)
-        if not box_inside_polygon(b, room.footprint, laws.SHELL_TOL):
-            hit.append("wall")
-        return hit
-
-    at_top = blocked(top)
-    if not at_top:
+    if zone.need in STRIP_NEEDS and len(us) > 1:
+        step = float(us[1] - us[0])
+        k = max(1, min(len(us), int(round(PERSON_SPAN / step)) + 1))
+        half = max(zone.width / 2 - ZONE_INSET, PROFILE_STEP)
+        best, at = -1.0, 0
+        for i in range(len(us) - k + 1):
+            centre = (us[i] + us[i + k - 1]) / 2
+            if abs(centre) > half + 1e-9:
+                continue          # the strip must be centred somewhere along the piece's own side
+            m = float(clear[i:i + k].min())
+            if m > best:
+                best, at = m, i
+        window = range(at, at + k)
+    else:
+        best = float(clear.min())
+        window = range(len(us))
+    if best >= top - 1e-6:
         return top, ()
-    lo, hi = 0.0, top
-    while hi - lo > 0.005:
-        mid = (lo + hi) / 2
-        if blocked(mid):
-            hi = mid
-        else:
-            lo = mid
-    return lo, tuple(blocked(min(top, hi + 0.01)) or at_top)
+    limiting: list[str] = []
+    for i in window:
+        if clear[i] <= best + 0.01:
+            for pid in sorted(who[i]):
+                if pid not in limiting:
+                    limiting.append(pid)
+    return best, tuple(limiting)
 
 
 # ---------------------------------------------------------------- the assessment
@@ -231,7 +335,7 @@ def assess(room: Room, needs: RoomNeeds, arrangement: Arrangement | None = None,
 
     for t in targets(room, needs):
         if t.need == "reach":
-            breaks_, short_, dist = _reach(room, t, poses, grid, walk)
+            breaks_, short_, dist = _reach(room, needs, t, poses, grid, walk)
             breaks += breaks_
             shortfalls += short_
             reach_dist[t.piece] = dist
@@ -240,12 +344,50 @@ def assess(room: Room, needs: RoomNeeds, arrangement: Arrangement | None = None,
             breaks += b
             shortfalls += s
         elif t.need == "light":
-            b, s = _light(room, t, poses)
+            b, s = _light(room, needs, t, poses)
             breaks += b
             shortfalls += s
 
+    shortfalls += bond_shortfalls(room, needs, poses)
     prefs = preferences(room, needs, poses, grid) if paths else []
     return Assessment(breaks, shortfalls, path_widths, prefs, poses, depths, reach_dist)
+
+
+def bond_holds(room: Room, follower: str, anchor: str, how: str, poses: dict[str, Pose]) -> bool:
+    """Whether a piece still stands the way it goes with another one."""
+    f, a = room.pieces[follower], room.pieces[anchor]
+    pf, pa = poses[follower], poses[anchor]
+    ab = a.box(pa)
+    lx, lz = ab.to_local([[pf.x, pf.z]])[0]
+    sx, _, sz = a.size
+    if how == "at":            # in front of it, or tucked under it
+        return abs(lx) <= sx / 2 + 0.1 and -sz / 2 <= lz <= sz / 2 + 1.0
+    if how == "beside":        # off one of its sides, close
+        return footprint_gap(ab, f.box(pf)) <= 0.3 and abs(lx) >= sx / 2 - 0.05
+    if how == "over":          # on the wall it backs onto, over it
+        wall = backing_wall(room, anchor, pa)
+        if wall is None or f.wall != wall:
+            return False
+        w = room.wall(wall)
+        return abs(w.u_of((pf.x, pf.z)) - w.u_of((pa.x, pa.z))) <= sx / 2
+    if how == "near":
+        return math.hypot(pf.x - pa.x, pf.z - pa.z) <= 1.2
+    if how == "facing":
+        d = np.array([pa.x - pf.x, pa.z - pf.z])
+        n = float(np.hypot(*d))
+        return n < 1e-6 or float(d @ np.array([math.sin(pf.yaw), math.cos(pf.yaw)])) / n >= math.cos(math.radians(35))
+    return True
+
+
+def bond_shortfalls(room: Room, needs: RoomNeeds, poses: dict[str, Pose]) -> list[Shortfall]:
+    out = []
+    for pid, entry in needs.pieces.items():
+        if pid not in room.pieces:
+            continue
+        for b in entry.bonds:
+            if b.piece in room.pieces and not bond_holds(room, pid, b.piece, b.how, poses):
+                out.append(Shortfall(pid, "with", b.how, 0.0, 1.0, (b.piece,), b.strength))
+    return out
 
 
 def solid_walls(room: Room) -> list[tuple[tuple[float, float], tuple[float, float]]]:
@@ -288,7 +430,7 @@ def _face(room: Room, piece_id: str, pose: Pose) -> tuple[np.ndarray, np.ndarray
     return c, f, sx, pose.y, pose.y + sy
 
 
-def _reach(room: Room, t: Target, poses, grid: FloorGrid, walk):
+def _reach(room: Room, needs: RoomNeeds, t: Target, poses, grid: FloorGrid, walk):
     size = size_for("reach")
     piece = room.pieces[t.piece]
     pose = poses[t.piece]
@@ -300,15 +442,21 @@ def _reach(room: Room, t: Target, poses, grid: FloorGrid, walk):
     if covering and t.strength == "hard":
         breaks.append(Break("covered", (t.piece, *covering), need="reach"))
     dist = math.inf
+    c, _, _, _, _ = _face(room, t.piece, pose)
     if walk is not None:
         _, _, reachable = walk
-        c, _, _, _, _ = _face(room, t.piece, pose)
         pts = grid.points[reachable]
         if len(pts):
             # Reach is measured from the front of the body, which stands half a
             # person's width in front of the spot it occupies.
             centre = float(np.min(np.hypot(pts[:, 0] - c[0], pts[:, 1] - c[1])))
             dist = max(0.0, centre - PERSON_PATH / 2)
+    # A person also reaches from whatever they get into or sit on (a socket by
+    # the bed is reached from the bed).
+    for pid, entry in needs.pieces.items():
+        if pid in room.pieces and any(n.need == "get_in" for n in entry.needs):
+            b = room.pieces[pid].box(poses[pid])
+            dist = min(dist, float(footprint_distance(b, c[None, :])[0]))
     if dist > size.hard and t.strength == "hard":
         breaks.append(Break("out_of_reach", (t.piece,), need="reach", amount=dist))
     if dist > size.comfortable:
@@ -382,8 +530,11 @@ def window_cover(room: Room, piece_id: str, poses: dict[str, Pose], exempt=froze
     return float(covered.mean()), tuple(who)
 
 
-def _light(room: Room, t: Target, poses):
-    share, who = window_cover(room, t.piece, poses, t.exempt)
+def _light(room: Room, needs: RoomNeeds, t: Target, poses):
+    """Only what can move counts against a window's light: what is fixed in or at it
+    (an air conditioner set in it, its own curtains) is the window as it is."""
+    fixed = frozenset(needs.fixed_ids())
+    share, who = window_cover(room, t.piece, poses, t.exempt | fixed)
     breaks, shorts = [], []
     if share > 0.5 and t.strength == "hard":
         breaks.append(Break("dark", (t.piece, *who), need="light", amount=share))

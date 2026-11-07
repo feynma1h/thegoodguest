@@ -40,16 +40,27 @@ def test_a_dresser_in_front_of_the_door_breaks_its_swing_and_its_way_in():
     assert ("zone", "pass", ("door", "dresser")) in found
 
 
-def test_a_chair_crowding_the_bed_side():
+def test_a_chair_beside_part_of_a_bed_leaves_a_way_in_elsewhere_along_it():
     b = bedroom()
     b.add("chair", "office_chair", (0.65, -0.2), (0.5, 1.0, 0.5))
     data = bedroom_needs()
     data["pieces"]["chair"] = {"moves": "yes"}
     room, needs = setup(b, data)
     a = assess(room, needs)
-    zone = [x for x in a.breaks if x.kind == "zone" and x.pieces[0] == "bed"]
-    assert len(zone) == 1 and zone[0].side == "right" and zone[0].pieces[1:] == ("chair",)
-    assert zone[0].amount == pytest.approx(0.1, abs=0.02)
+    assert not [x for x in a.breaks if x.kind == "zone" and x.pieces[0] == "bed"]
+
+
+def test_a_desk_along_the_whole_bed_side_leaves_no_body_wide_strip():
+    b = bedroom()
+    b.objects = [o for o in b.objects if o["id"] not in ("bedside", "lamp")]
+    b.add("long_desk", "desk", (0.85, -0.69), (0.5, 0.74, 2.2))   # 0.3 m off the bed's right side
+    data = bedroom_needs()
+    del data["pieces"]["bedside"], data["pieces"]["lamp"]
+    data["pieces"]["long_desk"] = {"moves": "heavy", "why": "long"}
+    room, needs = setup(b, data)
+    zone = [x for x in assess(room, needs).breaks if x.kind == "zone" and x.pieces[0] == "bed"]
+    assert len(zone) == 1 and zone[0].side == "right" and zone[0].pieces[1:] == ("long_desk",)
+    assert zone[0].amount == pytest.approx(0.3, abs=0.02)
 
 
 def test_a_bed_side_with_no_way_to_it():
@@ -83,14 +94,16 @@ def _back_door_room():
 def test_the_scans_own_problem_is_excused_while_its_pieces_stay():
     room, needs = _back_door_room()
     base = assess(room, needs)
-    assert ("zone", "pass", ("back_door", "bookcase")) in kinds(base)
+    blocked = [b for b in base.breaks if b.kind == "zone" and b.pieces[0] == "back_door"]
+    assert {b.need for b in blocked} == {"open", "pass"}
+    assert all("bookcase" in b.pieces for b in blocked)
     dresser = room.pieces["dresser"].pose
     unrelated = {"dresser": replace(dresser, x=dresser.x + 0.2)}
     assert assess(room, needs, unrelated).unexcused(base, room, unrelated) == []
     bookcase = room.pieces["bookcase"].pose
     nudged = {"bookcase": replace(bookcase, x=bookcase.x - 0.05)}
     left = assess(room, needs, nudged).unexcused(base, room, nudged)
-    assert any(b.kind == "zone" and b.pieces[:2] == ("back_door", "bookcase") for b in left)
+    assert any(b.kind == "zone" and b.pieces[0] == "back_door" and "bookcase" in b.pieces for b in left)
 
 
 def test_a_switch_covered_by_a_wardrobe_and_reachable_over_a_desk():
