@@ -376,6 +376,7 @@ class Zone:
     why: str
     estimate: bool = False
     say: str = ""
+    mechanism: str | None = None
 
 
 def concrete_sides(side: str) -> tuple[str, ...]:
@@ -424,7 +425,7 @@ def zones(room: Room, needs: RoomNeeds) -> list[Zone]:
             for side in concrete_sides(n.side):
                 width = sx if side in ("front", "back") else sz
                 out.append(Zone(pid, n.need, side, n.strength, hard, comfortable, width, y0, y1,
-                                floor_based, n.posture, exempt, n.why, estimate, say))
+                                floor_based, n.posture, exempt, n.why, estimate, say, n.mechanism))
     return out
 
 
