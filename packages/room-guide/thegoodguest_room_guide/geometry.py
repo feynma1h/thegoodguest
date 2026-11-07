@@ -212,9 +212,20 @@ class FloorGrid:
         return (np.abs(loc[:, 0]) <= b.hx + grow) & (np.abs(loc[:, 1]) <= b.hz + grow)
 
 
-def clearance(grid: FloorGrid, blockers: list[Box], poly: np.ndarray) -> np.ndarray:
-    """For each cell: distance to the nearest wall or blocking footprint (0 off the floor)."""
-    d = polygon_edge_distance(grid.points, np.asarray(poly, dtype=float))
+def clearance(grid: FloorGrid, blockers: list[Box], poly: np.ndarray,
+              walls: list[tuple[Vec2, Vec2]] | None = None) -> np.ndarray:
+    """For each cell: distance to the nearest wall or blocking footprint (0 off the floor).
+
+    `walls` are the solid stretches of wall; by default the whole polygon edge.
+    Leaving a doorway out of them is what lets a path through a door be as wide
+    as the door rather than cut short by the wall line across it.
+    """
+    if walls is None:
+        d = polygon_edge_distance(grid.points, np.asarray(poly, dtype=float))
+    else:
+        d = np.full(len(grid.points), np.inf)
+        for a, b in walls:
+            d = np.minimum(d, segment_distance(grid.points, a, b))
     for b in blockers:
         d = np.minimum(d, footprint_distance(b, grid.points))
     return np.where(grid.inside, d, 0.0)

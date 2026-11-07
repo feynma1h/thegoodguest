@@ -5,8 +5,11 @@ What a room needs comes from its needs file, which Claude writes per room
 people, and no category. If a furniture word appears in that code as a name or
 a string, a rule specific to some rooms has crept in, and this test fails.
 
-Docstrings and comments may use furniture as examples; prompt text lives in
-modules listed in TEXT_MODULES and is data, not rules.
+Docstrings and comments may use furniture as examples, and so may sentences
+meant for people (a string with a space in it, like the rulebook's words). A
+rule keyed on furniture would need a bare token, like "bed", and those are
+what this test looks for. Prompt text lives in modules listed in TEXT_MODULES
+and is data, not rules.
 """
 import ast
 import re
@@ -50,7 +53,8 @@ def test_engine_code_names_no_furniture():
         docs = _docstring_nodes(tree)
         for node in ast.walk(tree):
             text = None
-            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs
+                    and not re.search(r"\s", node.value)):
                 text = node.value
             elif isinstance(node, ast.Name):
                 text = node.id
