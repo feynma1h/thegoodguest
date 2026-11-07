@@ -1,0 +1,29 @@
+[project]
+name = "thegoodguest-room-guide"
+version = "0.1.0"
+description = "The room guide: a room's laws and needs, the layout engine, the motion planner and the guide that talks about them"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.24",
+    "pillow>=10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+]
+
+# The guide reasons about one room at a time. This package holds everything
+# that decides what is allowed in that room (laws, needs, the engine, the
+# motion planner) so the local harness and api-public's conversation route
+# run the same code.
+#
+# Install editable during dev:
+#   pip install -e packages/room-guide
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["thegoodguest_room_guide*"]

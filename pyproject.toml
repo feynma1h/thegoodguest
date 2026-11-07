@@ -40,6 +40,7 @@ testpaths = [
     "packages/schemas/tests",
     "packages/api-core/tests",
     "packages/room-look/tests",
+    "packages/room-guide/tests",
     "services/api-internal/tests",
     "services/api-public/tests",
     "services/scene-finish/tests",
