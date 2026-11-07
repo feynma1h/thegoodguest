@@ -67,10 +67,12 @@ def test_solids_default_to_the_whole_box_and_take_an_export():
     assert len(room2.pieces["dresser"].solids()) == 2
 
 
-def test_an_export_bigger_than_the_piece_is_not_believed():
+def test_an_exported_part_is_trimmed_to_its_piece():
     scene = bedroom().scene()
     room = room_from_scene(scene, {"dresser": [[0, 0.4, 0, 0.9, 0.4, 0.2]]})
-    assert room.pieces["dresser"].parts_from == "box"
+    part = room.pieces["dresser"].parts[0]
+    assert room.pieces["dresser"].parts_from == "builder"
+    assert part.hx == 0.5 and part.cx == 0.0
 
 
 def test_margin_follows_how_a_size_was_measured():

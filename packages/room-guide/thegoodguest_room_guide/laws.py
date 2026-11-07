@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from .geometry import Box, box_inside_polygon, footprint_penetration, penetration
+from .geometry import Box, box_inside_polygon, footprint_penetration, penetration, vertical_overlap
 from .model import Arrangement, Piece, Pose, Room, carry, pose_in
 
 # Interpenetration below this is measurement noise, not a collision.
@@ -65,13 +65,22 @@ def solids_at(piece: Piece, pose: Pose) -> list[Box]:
 
 
 def pair_penetration(a: Piece, pa: Pose, b: Piece, pb: Pose) -> float:
-    """How deep two pieces' solids interpenetrate at these poses (<= 0: apart)."""
-    if footprint_penetration(a.box(pa), b.box(pb)) <= 0:
+    """How deep two pieces' solids interpenetrate at these poses (<= 0: apart).
+
+    Each piece's parts are first tested against the other's whole box, so only
+    the parts that could touch are tested against each other.
+    """
+    ba, bb = a.box(pa), b.box(pb)
+    if footprint_penetration(ba, bb) <= 0 or vertical_overlap(ba, bb) <= 0:
         return -1.0
+    sa = [s for s in a.solids(pa) if penetration(s, bb) > 0]
+    if not sa:
+        return -1.0
+    sb = [s for s in b.solids(pb) if penetration(s, ba) > 0]
     best = -1.0
-    for sa in a.solids(pa):
-        for sb in b.solids(pb):
-            best = max(best, penetration(sa, sb))
+    for x in sa:
+        for y in sb:
+            best = max(best, penetration(x, y))
     return best
 
 

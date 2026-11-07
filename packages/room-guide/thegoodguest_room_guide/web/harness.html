@@ -1,0 +1,70 @@
+<!doctype html>
+<!-- The local guide harness: the diorama viewer on the left, the guide's conversation
+     on the right. Served by harness.py; panel.js drives it and injects player.js into
+     the viewer's frame. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Room Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;1,8..60,400&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f9f2ec; --ink: #282723; --accent: #c04d3e; --accent-deep: #a54235;
+    --ink-70: rgba(40, 39, 35, 0.7); --ink-55: rgba(40, 39, 35, 0.55); --ink-15: rgba(40, 39, 35, 0.15);
+    --ink-08: rgba(40, 39, 35, 0.08);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink);
+    font-family: "Instrument Sans", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  body { display: grid; grid-template-columns: 1fr 400px; height: 100vh; overflow: hidden; }
+  #viewer { border: 0; width: 100%; height: 100%; display: block; }
+  aside { display: flex; flex-direction: column; border-left: 1px solid var(--ink-15); min-height: 0; }
+  header { padding: 18px 20px 12px; border-bottom: 1px solid var(--ink-08); }
+  header h1 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
+  header p { margin: 4px 0 0; font-size: 12px; color: var(--ink-55); }
+  #log { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+  .guest { font-family: "Source Serif 4", Georgia, serif; font-size: 15.5px; line-height: 1.55; }
+  .person { align-self: flex-end; max-width: 85%; background: rgba(40, 39, 35, 0.06); padding: 8px 12px;
+    border-radius: 12px; font-size: 14px; line-height: 1.45; }
+  .note { font-size: 12px; color: var(--ink-55); }
+  .card { border: 1px solid var(--ink-15); border-radius: 12px; padding: 12px 14px; background: #fffaf6; }
+  .card ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+  .card .meta { font-size: 11.5px; color: var(--ink-55); margin-top: 6px; }
+  .card button, #actions button { font: inherit; font-size: 13px; border-radius: 999px; padding: 6px 14px;
+    border: 1px solid var(--ink-15); background: var(--paper); color: var(--ink); cursor: pointer; margin-top: 10px; }
+  .card button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .card button:disabled { opacity: 0.4; cursor: default; }
+  details { font-size: 12.5px; color: var(--ink-70); }
+  details summary { cursor: pointer; color: var(--ink-55); }
+  details li { margin: 4px 0; }
+  .sev3 { color: var(--accent-deep); }
+  #actions { display: flex; gap: 8px; padding: 0 20px; flex-wrap: wrap; }
+  #actions button { margin-top: 0; }
+  form { display: flex; gap: 8px; padding: 12px 20px 18px; border-top: 1px solid var(--ink-08); }
+  input { flex: 1; font: inherit; font-size: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--ink-15);
+    background: #fffaf6; color: var(--ink); }
+  form button { font: inherit; font-size: 14px; border: 0; border-radius: 10px; padding: 0 16px; background: var(--ink); color: var(--paper); cursor: pointer; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; color: var(--ink-55); }
+  @media (max-width: 860px) {
+    body { grid-template-columns: 1fr; grid-template-rows: 55vh 45vh; }
+    aside { border-left: 0; border-top: 1px solid var(--ink-15); }
+  }
+</style>
+</head>
+<body>
+<iframe id="viewer" title="Your room" src="about:blank"></iframe>
+<aside>
+  <header><h1>The guest</h1><p id="roomline">opening the room…</p></header>
+  <div id="log" aria-live="polite"></div>
+  <div id="actions">
+    <button id="look" type="button">What would you change?</button>
+    <button id="undo" type="button" disabled>Put it back</button>
+  </div>
+  <form id="ask"><input id="text" autocomplete="off" placeholder="Ask about your room" aria-label="Ask about your room"><button>Send</button></form>
+</aside>
+<script type="module" src="/guide/panel.js"></script>
+</body>
+</html>

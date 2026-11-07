@@ -43,11 +43,6 @@ MARGIN_MEASURED = 0.02
 MARGIN_HELD = 0.04
 MARGIN_ESTIMATED = 0.06
 
-# A solid part may stick out of its piece's box by this much before the export
-# is treated as disagreeing with the scene.
-_PART_TOLERANCE = 0.02
-
-
 @dataclass(frozen=True)
 class Part:
     """A solid box in a piece's local frame: centre and half extents."""
@@ -262,19 +257,67 @@ _SUPPORT = {"floor": "floor", "on_object": "object", "wall": "wall", "ceiling": 
 
 
 def _parts(piece_id: str, size: tuple[float, float, float], exported: list | None) -> tuple[tuple[Part, ...], str]:
+    """A piece's solids: the exported part boxes, each trimmed to the piece's own box
+    (a pillow drawn a little proud of the bed is still the bed), or the whole box."""
     whole = (Part(0.0, size[1] / 2, 0.0, size[0] / 2, size[1] / 2, size[2] / 2),)
     if not exported:
         return whole, "box"
+    hx, hy, hz = size[0] / 2, size[1], size[2] / 2
     parts = []
     for row in exported:
-        cx, cy, cz, hx, hy, hz = (float(v) for v in row)
-        if (abs(cx) + hx > size[0] / 2 + _PART_TOLERANCE or abs(cz) + hz > size[2] / 2 + _PART_TOLERANCE
-                or cy - hy < -_PART_TOLERANCE or cy + hy > size[1] + _PART_TOLERANCE):
-            return whole, "box"
-        if min(hx, hy, hz) <= 0:
+        cx, cy, cz, px, py, pz = (float(v) for v in row)
+        x0, x1 = max(cx - px, -hx), min(cx + px, hx)
+        y0, y1 = max(cy - py, 0.0), min(cy + py, hy)
+        z0, z1 = max(cz - pz, -hz), min(cz + pz, hz)
+        if x1 - x0 <= 1e-3 or y1 - y0 <= 1e-3 or z1 - z0 <= 1e-3:
             continue
-        parts.append(Part(cx, cy, cz, hx, hy, hz))
-    return (tuple(parts), "builder") if parts else (whole, "box")
+        parts.append(Part((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2))
+    if not parts:
+        return whole, "box"
+    return tuple(_reduce(parts)), "builder"
+
+
+MAX_PARTS = 8
+
+
+def _vol(q: Part) -> float:
+    return 8 * q.hx * q.hy * q.hz
+
+
+def _merged(a: Part, b: Part) -> Part:
+    x0, x1 = min(a.cx - a.hx, b.cx - b.hx), max(a.cx + a.hx, b.cx + b.hx)
+    y0, y1 = min(a.cy - a.hy, b.cy - b.hy), max(a.cy + a.hy, b.cy + b.hy)
+    z0, z1 = min(a.cz - a.hz, b.cz - b.hz), max(a.cz + a.hz, b.cz + b.hz)
+    return Part((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2)
+
+
+def _inside(a: Part, b: Part, tol: float = 1e-3) -> bool:
+    return (abs(a.cx - b.cx) + a.hx <= b.hx + tol and abs(a.cy - b.cy) + a.hy <= b.hy + tol
+            and abs(a.cz - b.cz) + a.hz <= b.hz + tol)
+
+
+def _reduce(parts: list[Part]) -> list[Part]:
+    """At most MAX_PARTS boxes covering every part: parts inside others are dropped,
+    then the pair whose joint box adds the least empty space is merged, until few
+    enough remain. A desk keeps its top and legs apart (merging them would fill the
+    knee space, the costliest merge there is); a shelf of books becomes one block."""
+    parts = sorted(parts, key=_vol, reverse=True)
+    kept: list[Part] = []
+    for q in parts:
+        if not any(_inside(q, k) for k in kept):
+            kept.append(q)
+    while len(kept) > MAX_PARTS:
+        best, pair = None, None
+        for i in range(len(kept)):
+            for j in range(i + 1, len(kept)):
+                m = _merged(kept[i], kept[j])
+                waste = _vol(m) - _vol(kept[i]) - _vol(kept[j])
+                if best is None or waste < best:
+                    best, pair = waste, (i, j, m)
+        i, j, m = pair
+        kept = [k for n, k in enumerate(kept) if n not in (i, j)]
+        kept = [k for k in kept if not _inside(k, m)] + [m]
+    return kept
 
 
 def room_from_scene(scene: dict, solids: dict | None = None) -> Room:

@@ -332,6 +332,8 @@ class Engine:
             return f"{name} goes against {wall_name(self.room, meta['wall'])}"
         if "beside" in meta:
             return f"{name} goes beside {the(self.room, meta['beside'])}"
+        if "at" in meta:
+            return f"{name} goes to {the(self.room, meta['at'])}, set at its front"
         if "turn" in meta:
             q = meta["turn"] % 4
             words = {1: "a quarter turn to the left", 2: "turned round", 3: "a quarter turn to the right"}[q]
