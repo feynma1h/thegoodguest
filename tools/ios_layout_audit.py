@@ -99,7 +99,9 @@ TITLE = (34, 39)
 # The pinned pill's bottom, up from the safe area's bottom edge (`Frame`). One
 # bar for every screen (`RSPinnedBar`), so one number for each thing that can
 # sit under the pill: nothing, the bar's own 4; a quiet action, its 50 and the
-# 2 between; a caption, its line and the 10 above it. DEFAULT SIZE ONLY: what
+# 2 between; a caption, its line and the 10 above it; a caption over a quiet
+# action, both (deletion with no account ID says why its pill is grey, then
+# offers "Not now"). DEFAULT SIZE ONLY: what
 # sits under the pill grows at AX5 and lifts it, which is the layout working
 # (0252). The pill is a filled shape measured to the pixel, so the 2pt either
 # way is rounding, not typography.
@@ -107,7 +109,7 @@ TITLE = (34, 39)
 # Before the bar, each screen padded its own: a lone pill sat at 4 on the room
 # screen and guidance and 8 on home; deletion's caption, held at a control's
 # height, put its pill 14pt above where home's first-run caption put one.
-BUTTON_UP = {"-": (2, 6), "q": (54, 58), "c": (28, 34)}
+BUTTON_UP = {"-": (2, 6), "q": (54, 58), "c": (28, 34), "cq": (80, 86)}
 
 # ---------------------------------------------------------------------------
 # Which screens are held to the grid.
@@ -341,7 +343,8 @@ def pinned_action(f):
 
 
 def under(f, bottom, left, right):
-    """What sits under the pill: nothing, a quiet action, or a caption.
+    """What sits under the pill: nothing, a quiet action, a caption, or a
+    caption over a quiet action.
 
     Looked for only across the pill's own width. On an iPad the window's
     resize grip sits in the bottom corner, beside the bar, and read as a
@@ -359,10 +362,15 @@ def under(f, bottom, left, right):
     rows = np.where(f.ink[start:lo, left:right + 1].sum(axis=1) > 3)[0]
     if not len(rows):
         return "-"
+    def full_ink(lines):
+        grey = f.rgb[lines, left:right + 1].mean(axis=2)
+        return np.abs(grey - f.ground[lines].mean(axis=1)[:, None]).max() > 195
+
     first = rows[rows <= rows[0] + f.px(24)] + start
-    grey = f.rgb[first, left:right + 1].mean(axis=2)
-    contrast = np.abs(grey - f.ground[first].mean(axis=1)[:, None]).max()
-    return "q" if contrast > 195 else "c"
+    if full_ink(first):
+        return "q"
+    rest = rows[rows > rows[0] + f.px(24)] + start
+    return "cq" if len(rest) and full_ink(rest) else "c"
 
 
 # ---------------------------------------------------------------------------

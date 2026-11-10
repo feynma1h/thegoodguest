@@ -90,6 +90,17 @@ def test_what_sits_under_the_pill_is_told_by_its_ink(tmp_path, under, colour, ex
     assert b["height"] == pytest.approx(60, abs=0.5)
 
 
+def test_a_caption_over_a_quiet_action_is_both(tmp_path):
+    # Deletion with no account ID: the grey pill, why it is grey, then "Not now".
+    a = phone()
+    bottom = 874 - 120
+    pill(a, 16, bottom - 60, 386, bottom, INK)
+    box(a, 150, bottom - 38, 250, bottom - 24, WHITE)       # its label
+    box(a, 120, bottom + 18, 280, bottom + 30, INK2)        # the caption
+    box(a, 170, bottom + 62, 230, bottom + 74, INK)         # the quiet action under it
+    assert audit.measure(save(tmp_path, a))["button"]["under"] == "cq"
+
+
 def test_a_filled_button_in_the_content_is_not_the_pinned_one(tmp_path):
     # Account's sign-in pills are filled and full width, high in the content.
     a = phone()
