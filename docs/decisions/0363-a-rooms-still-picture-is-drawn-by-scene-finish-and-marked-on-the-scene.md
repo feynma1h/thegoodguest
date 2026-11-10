@@ -76,6 +76,16 @@ background would be a copy that drifts. The marker keeps a list call free of
 bucket traffic and makes "is there a picture" a fact written by the one thing
 that made the picture.
 
+## Measured on the first deploy (2026-11-10)
+
+`scene-finish-00001-poy`, render-only, drew both ready rooms through the
+queue: 14.0 s for the first (Chrome starting on the instance), 6.8 s for the
+second on a warm browser. Memory peaked near 7% of the 8 GiB and CPU near 10%
+of the 4 vCPU (per-minute p99): the sizing is the Claude layer's, not the
+still's. An operator's own identity token passes the platform gate and `/still`
+refuses it (401), so drawing one by hand goes through the queue
+(`tools/enqueue_still.py`).
+
 ## What would change this decision
 
 - The website's room page drawing a bare shell another way (a diorama, near
