@@ -115,8 +115,8 @@ struct ReviewView: View {
                     RSScreenTitle(content.title)
 
                     stage
-                        .background(Color.rsInset, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .background(Color.rsInset, in: RoundedRectangle(cornerRadius: RSLayout.cardRadius, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: RSLayout.cardRadius, style: .continuous))
                         .padding(.top, 18)
 
                     VStack(alignment: .leading, spacing: 8) {

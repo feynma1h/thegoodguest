@@ -31,8 +31,8 @@ struct RoomScreen: View {
 
                 RoomStepsView(steps: status.steps)
                     .padding(EdgeInsets(top: 18, leading: 16, bottom: 18, trailing: 18))
-                    .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .shadow(color: Color.rsInk.opacity(0.05), radius: 14, y: 8)
+                    .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: RSLayout.cardRadius, style: .continuous))
+                    .rsCardShadow()
                     .padding(.top, 22)
 
                 if let note = status.note {
@@ -245,7 +245,7 @@ struct ReadyScreen: View {
             VStack(alignment: .leading, spacing: 0) {
                 RoomPicture(sceneId: sceneId, stillURL: stillURL, stillNightURL: stillNightURL, night: true)
                     .rsHeroFrame()
-                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: RSLayout.heroRadius, style: .continuous))
 
                 RSScreenTitle("Your room is ready.", size: .display(38), onDusk: true)
                     .padding(.top, 24)

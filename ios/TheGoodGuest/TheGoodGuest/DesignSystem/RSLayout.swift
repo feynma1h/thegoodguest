@@ -60,6 +60,10 @@ enum RSLayout {
     /// 340 on every phone 390pt wide or more; on an iPhone SE it is about 280,
     /// and on a phone on its side about 140, where 340 was the whole screen.
     static let heroShare: CGFloat = 0.58
+    /// A card's corner: the website's room card (`rounded-3xl`, 24px).
+    static let cardRadius: CGFloat = 24
+    /// A hero picture's corner: the website's panels (`rounded-[28px]`).
+    static let heroRadius: CGFloat = 28
 }
 
 extension View {
@@ -78,6 +82,14 @@ extension View {
         padding(.top, RSLayout.titleTop)
             .padding(.bottom, RSLayout.contentBottom)
             .rsColumn()
+    }
+
+    /// A card's lift, the website's room card's (`RoomCard.tsx`): a hairline
+    /// 1pt under it and a soft shadow 14 down, both in ink. CSS blurs by
+    /// twice what SwiftUI calls the radius, so its 34px is 17 here.
+    func rsCardShadow() -> some View {
+        shadow(color: Color.rsInk.opacity(0.04), radius: 0, y: 1)
+            .shadow(color: Color.rsInk.opacity(0.06), radius: 17, y: 14)
     }
 
     /// A hero picture's height: `height` (the canvas's, 340 unless the screen

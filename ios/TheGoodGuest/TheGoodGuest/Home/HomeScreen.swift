@@ -92,7 +92,7 @@ struct HomeScreen: View {
                         .padding(14)
                 }
                 .background(Color.rsInset)
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: RSLayout.heroRadius, style: .continuous))
 
                 RSScreenTitle("Meet your room again.", size: .display())
                     .padding(.top, 26)
@@ -197,9 +197,9 @@ struct HomeCardView: View {
                 row
             }
         }
-        .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: Color.rsInk.opacity(0.05), radius: 14, y: 8)
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: RSLayout.cardRadius, style: .continuous))
+        .rsCardShadow()
+        .contentShape(RoundedRectangle(cornerRadius: RSLayout.cardRadius, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens this room")
     }
@@ -323,7 +323,7 @@ private struct SkeletonCard: View {
             Spacer()
         }
         .padding(12)
-        .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: RSLayout.cardRadius, style: .continuous))
         .accessibilityHidden(true)
     }
 }
@@ -359,6 +359,6 @@ private struct UnreachableCard: View {
         }
         .padding(EdgeInsets(top: 20, leading: 18, bottom: 10, trailing: 18))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: RSLayout.cardRadius, style: .continuous))
     }
 }
