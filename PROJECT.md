@@ -301,27 +301,39 @@ capture shows the camera on every scan. `RoomCards`, `RoomStatusCopy` and
 `SurfacePlacement` are the routing tables, all pure and table-tested. The
 pinned action is opaque and full-bleed: content scrolls BEHIND it, so a
 transparent bar is one the body copy renders through (0287). `RSScreen`'s grid
-(0257) went with the screens it measured.
+(0257) went with the screens it measured; one column came back as `RSLayout`
+(0367).
 
-`tools/ios_screenshot_gallery.py` photographs **69 states** — one frame per
-distinct state rather than one per screen — at the default text size and AX5,
-and `tools/ios_contact_sheet.py` turns a pass into one page for review. **The
-layout audit (`tools/ios_layout_audit.py`) measures the new screens on any
-phone** (recalibrated 2026-11-10): it reads each frame's size, finds the
-navigation bar in the frame and states every vertical bound from the bar's
-centre, which sat at 84pt on an 874pt simulator and at 69 on an 844pt one, with
-every number under it the same. The bounds are the new screens' own, read
-against the canvas: containers on 16 and titles on the 20pt text column, a
-title 36-40 under the bar's centre (home's large title 44), and the pinned pill
-20 from each edge and 38, 90 or 66 off the bottom as nothing, a quiet action or
-a caption sits under it. A frame shot blank or mid-transition is reported,
-never skipped. **It exits 1 on the app as built: 42 of 56 enforced states, at
-both sizes on both phones**, from four screens not yet fixed — deletion's last
-four states lose their bar and the title jumps 54pt; home's large title sits on
-16 and its pill 4pt high; the room screen's title sits on 16; guidance sits on
-22, as the canvas draws it. **Two of its bounds are default-size only and are
-not enforced at AX5** — the title's top and the pill's offset off the bottom
-can both move legitimately when the type around them grows (0252).
+**One column, after the website (0367).** `RSLayout` holds the grid: every
+screen's title, lines, cards and pinned button start on one column, 16pt in on
+a phone (the website's `px-4`); on a wider window the column stops at 520pt,
+the website's paragraph measure, and centres (at 640 an iPad's lines ran to 94
+characters). `RSScreenTitle` sets every title in the content, home's included,
+with its last two words held together when they are short. `RSPinnedBar` is the
+one action bar, fading in over 22pt as the canvas's did. A hero picture is
+340pt, or 58% of what the screen shows. Cards take the website's 24pt corner
+and its card shadow (`rsCardShadow()`), hero pictures its 28. Sizes print to
+one decimal, as the website prints them. No Dark Mode (0366), enforced by
+`UIUserInterfaceStyle`.
+
+`tools/ios_screenshot_gallery.py` photographs **70 states** — one frame per
+distinct state rather than one per screen — at any Dynamic Type size, light or
+dark, with or without Bold Text (`--bold`), on any simulator, and
+`tools/ios_contact_sheet.py` turns a pass into one page for review. **The
+layout audit (`tools/ios_layout_audit.py`) measures that column on any
+device**, reading each frame's size, scale and safe area from the image:
+titles, content and the pinned button's sides on the column, a title 34–39pt
+under the bar's centre, and the button's height above the safe area by what
+sits under it (nothing, a quiet action, a caption, or a caption over a quiet
+action). A frame shot blank, mid-transition or of something else is reported,
+never measured. Measured 2026-11-11 on an iPhone SE, 17 Pro, 17 Pro Max and
+iPad Pro 13 at default and AX5, and on the SE at AX5 with Bold Text: **every
+enforced state on the column except deletion's four that lose their bar**
+(open defects, iOS). **Two of its bounds are default-size only and are not
+enforced at AX5** — the title's top and the pill's offset off the bottom can
+both move legitimately when the type around them grows (0252). **The audit is
+a tripwire, not the judge** (0367): the frames, read against the design rules
+and the website, decide whether a screen is right.
 
 **Type stops at a CEILING, and tiers stop some of it earlier** (0258). The app
 holds Dynamic Type at `RSTypeSize.ceiling` — `.accessibility2`, body 17 → 33pt
@@ -330,8 +342,11 @@ between every pair of styles stays exactly where the default size has it: the
 accessibility layout is the same layout, larger. Within that, serif titles stop
 at **1.4×** (`RSTypeCap.display`), machine data at **1.6×** (`.mono`), and a
 control's label is clamped at `xxxLarge` by `rsControlLabel()` so a button keeps
-the shape its fixed padding gives it. Reading text scales freely to the ceiling
-and is capped by nothing else.
+the shape its fixed padding gives it, as is a label set on a picture (home's
+"An example room"). Reading text scales freely to the ceiling and is capped by
+nothing else. **With Bold Text on, every style steps a weight heavier**
+(`RSFont.bolder`: Regular to Semibold, Light to Medium, Semibold to Bold), as
+the system's faces do; the bundled faces are variable, so every step exists.
 
 **Mono is for measurements only** (0366): sizes in JetBrains Mono, in
 text-sized terracotta. The capture screen's tracker is a glass pill that
@@ -341,15 +356,19 @@ status readout duplicates the channel the app already has for advice. Its dot
 is lit, in lamplight, only while tracking is good. All four strings sit in one
 switch in `LiveCaptureView.trackingPill`.
 
-**Nothing is dropped, reordered or restacked to fit.** Under the ceiling each
-screen has one layout, larger; the `isAccessibilitySize` re-compositions that
-preceded it went with the screens they served.
+**Nothing is dropped, reordered or restacked to fit**, with one exception:
+the account ID goes on its own line under its label wherever the whole ID won't
+fit beside it, because data is never cut to keep a layout (0367). Under the
+ceiling each screen has one layout, larger; the `isAccessibilitySize`
+re-compositions that preceded it went with the screens they served, and the
+operator ruled against bringing any back for particular sizes (0367).
 
 `tools/ios_density_guard.py` bounds crowding by arithmetic rather than by taste
 — ink area scales with the SQUARE of type size, so the same content at 1.94× is
 3.77× denser with nothing wrong. On the redesigned screens **0 of 56** exceed it
-on either phone, and the mean screen goes from 7.5% to 10.3% inked (1.38×, on
-the 874pt simulator). Read a ratio well BELOW the square as the interesting
+on any of four devices (SE, 17 Pro, 17 Pro Max, iPad Pro 13), and the mean
+screen is 1.26× (SE) to 1.43× (Pro Max) more inked at AX5 than at the default
+size. Read a ratio well BELOW the square as the interesting
 signal — it means content is falling off the bottom of the frame.
 
 **What it costs, plainly:** someone who sets the top step asks for 53pt body
@@ -935,6 +954,11 @@ re-argued here.
   churn's cause is known makes orphaning less visible, not less real. (0115)
 - **The room screen's failure states have never rendered on hardware** — a
   server-side scene failure, a stalled upload, missing files (0365).
+- **Deletion's last four states lose their navigation bar.** A bar with no item
+  and no title is dropped, so the title jumps 54pt; the layout audit reports
+  exactly these four on every device (4 of 56). `ready-guest`, with no share
+  button, drops its bar the same way and its picture sits 54pt higher than
+  `ready`'s. The canvas keeps a header on all of them. (0367)
 - **The 401 recovery-*success* leaf is untested.** The live test used a garbage
   token, exercising the give-up branch.
 - **Live boxes have not been walked on a phone in this form.** Offline: the
@@ -1247,7 +1271,7 @@ The iOS suite is **667 tests total** (was 666; `BundleClockTests` added 1, the c
 
 **Posture: fail-closed-live, not fail-open.** Each integration test calls `XCTSkipIf(!RUN_INTEGRATION_TESTS)` — the fail-open default — but because the sole scheme always sets the flag, that skip path is never taken here. With the flag set they hit the live `/upload_session` contract and go **red if the backend is unreachable**. Running the suite therefore requires a reachable backend; an offline run will fail those 4 (expected, not a regression).
 
-**Honest count:** report as "941 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 6 that skip by design + 4 live integration tests (require a reachable backend)", total 953 — not a bare total: the 2 stubs assert nothing, the 6 skips need something the tree deliberately lacks, and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-11-10, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **949** with 0 failures, and that suite holds exactly 4 tests, so the total is 953. **Six of the 949 skip at runtime**: `AuthLinkingTests.test_appBundle_registersRedirectSchemeForLiveClientID`, which gates on the live Google client id, and five `LiveBoxesModelTests`, which need the detector model that is never in git (0295). 949 − 2 − 6 = 941 assert. The figures this replaced (667 total, 2026-09-15) predate the live-boxes tests and the redesign.
+**Honest count:** report as "949 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 6 that skip by design + 4 live integration tests (require a reachable backend)", total 961 — not a bare total: the 2 stubs assert nothing, the 6 skips need something the tree deliberately lacks, and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-11-10, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **949** with 0 failures, and that suite holds exactly 4 tests, so the total is 953. **Six of the 949 skip at runtime**: `AuthLinkingTests.test_appBundle_registersRedirectSchemeForLiveClientID`, which gates on the live Google client id, and five `LiveBoxesModelTests`, which need the detector model that is never in git (0295). 949 − 2 − 6 = 941 assert. The figures this replaced (667 total, 2026-09-15) predate the live-boxes tests and the redesign.
 
 **No known flakes.** The one that was recorded here — `BlobUploadManagerTests.test_gate_lastDecrement_afterDrain_firesHandler` at roughly 1 run in 15 — was a production defect rather than a test defect, and is fixed (0239): the drain gate's last-decrement trigger hopped onto the actor through an unstructured `Task` that nothing held a handle on, so the test's `await Task.yield()` was a guess at how long the hop takes. The decrement is actor-isolated now and fires the gate inside `handleTaskCompletion`'s own defer, so awaiting that call IS the signal. Measured 2026-08-24 by holding the yield-less tests fixed and swapping only `BlobUploadManager.swift`: **2 failures in 16** with the hop, **0 in 22** without it. **A red suite is now a finding, not a re-run.**
 

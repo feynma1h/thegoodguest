@@ -1,8 +1,8 @@
 # Decision notes
 
-318 notes. **265 of them are `Decided`** -- those govern code that
+319 notes. **265 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
-other 53 record decisions that were carried out, replaced, or
+other 54 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
 because they constrain you.
 
@@ -19,7 +19,7 @@ The status vocabulary and the numbering rule live in
 |---|---|---|
 | `Refuted` | 16 | a measured negative -- read before proposing it again |
 | `Superseded` | 10 | replaced by a later note |
-| `Amended` | 11 | partly corrected by a later note |
+| `Amended` | 12 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
 | `Decided` | 265 | governs code that ships today |
 
@@ -63,7 +63,7 @@ The status vocabulary and the numbering rule live in
 | [0265](0265-five-instruments-one-unrun-experiment.md) | five instruments for one choice, and the experiment none of them needs | Superseded by 0266 |
 | [0297](0297-the-review-opens-from-the-home-screen-and-asks-again-when-roomplan-withholds-depth.md) | the review opens from the Home Screen, and asks again when RoomPlan withholds depth | Superseded by 0301 |
 
-## Amended (11)
+## Amended (12)
 
 *Partly corrected by a later note.*
 
@@ -76,10 +76,11 @@ The status vocabulary and the numbering rule live in
 | [0146](0146-view-selection-does-not-predict-reconstruction-quality.md) | view selection does not predict reconstruction quality | Amended by 0153 |
 | [0152](0152-every-view-is-a-partial-view.md) | every view is a partial view, and that is the regime | Amended by 0153 |
 | [0173](0173-the-guest-cannot-tell-which-room-its-facts-describe.md) | the guest reads its own re-derived facts as stale, and says so | Amended by 0174 |
-| [0257](0257-one-grid-and-an-instrument-to-check-it.md) | one grid for every screen, and an instrument to check it | Amended by 0365 |
+| [0257](0257-one-grid-and-an-instrument-to-check-it.md) | one grid for every screen, and an instrument to check it | Amended by 0367 |
 | [0259](0259-disqualify-a-frame-do-not-rank-it.md) | disqualify a frame, do not rank it | Amended by 0270 |
 | [0299](0299-glass-is-boxed-from-its-outlines-and-covering-counts-four-times-filling.md) | glass is boxed from its outlines, and covering counts four times filling | Amended by 0300 |
 | [0302](0302-the-scan-screen-may-show-a-camera.md) | the Scan screen may show a camera behind the boxes | Amended by 0365 |
+| [0365](0365-home-is-your-rooms-and-each-room-has-one-screen.md) | home is your rooms, and each room has one screen | Amended by 0367 |
 
 ## Spent (16)
 
@@ -371,5 +372,5 @@ The status vocabulary and the numbering rule live in
 | [0359](0359-the-local-run-proves-the-wiring-not-the-quality.md) | The local run proves the wiring, not the quality | Decided |
 | [0360](0360-which-models-may-see-a-room-and-what-the-operator-ruled-on-sending.md) | Which models may see a room, and what the operator ruled on sending | Decided |
 | [0364](0364-every-iphone-scans.md) | every iPhone scans | Decided |
-| [0365](0365-home-is-your-rooms-and-each-room-has-one-screen.md) | home is your rooms, and each room has one screen | Decided |
 | [0366](0366-the-app-speaks-the-websites-language.md) | the app speaks the website's language | Decided |
+| [0367](0367-one-column-after-the-website.md) | one column, after the website | Decided |

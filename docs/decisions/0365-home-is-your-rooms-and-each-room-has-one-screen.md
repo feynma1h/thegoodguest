@@ -1,7 +1,7 @@
 # 0365 — home is your rooms, and each room has one screen
 
 **Date:** 2026-11-10
-**Status:** Decided
+**Status:** Amended by 0367 — the column it retired comes back as a component, `RSLayout`; the rest stands
 
 Supersedes 0254. Amends 0257 (the grid, not the instrument) and 0302 (the
 camera now shows on every scan).

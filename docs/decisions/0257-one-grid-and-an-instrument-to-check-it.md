@@ -1,7 +1,7 @@
 # 0257 — one grid for every screen, and an instrument to check it
 
 **Date:** 2026-08-28
-**Status:** Amended by 0365 — `RSScreen`'s grid is retired with the screens it measured; the instrument stands, recalibrated to the new screens
+**Status:** Amended by 0367 — the grid is one column again, `RSLayout`, after 0365 retired `RSScreen`'s; the instrument stands, recalibrated to it and kept as a tripwire
 
 ## Context
 
