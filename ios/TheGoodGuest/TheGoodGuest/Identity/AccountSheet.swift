@@ -167,21 +167,30 @@ struct AccountSheet: View {
                 .foregroundStyle(Color.rsInk)
             Spacer(minLength: 8)
             if let uid {
-                Text(Self.shortened(uid))
-                    .rsFont(.ui, size: 15)
-                    .monospacedDigit()
-                    .foregroundStyle(Color.rsInk2)
-                    .lineLimit(1)
+                // The ID and its icon are one button: the icon alone was a
+                // 32pt target, and iOS asks for 44. Together they are wider
+                // than that, and 44 tall inside the row's 52, so nothing moves.
                 Button {
                     UIPasteboard.general.string = uid
                     RSHaptics.fire(.scanTapped)
                     copied = true
                 } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .foregroundStyle(Color.rsInk)
-                        .frame(width: 32, height: 32)
+                    HStack(spacing: 12) {
+                        Text(Self.shortened(uid))
+                            .rsFont(.ui, size: 15)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.rsInk2)
+                            .lineLimit(1)
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .foregroundStyle(Color.rsInk)
+                            .frame(width: 32, height: 32)
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel(copied ? "Copied" : "Copy your account ID")
+                .accessibilityValue(Self.shortened(uid))
             } else {
                 Text("Not ready yet")
                     .rsFont(.ui, size: 15)
