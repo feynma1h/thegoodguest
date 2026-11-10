@@ -71,12 +71,13 @@ nonisolated struct DeleteAccountCopy: Equatable {
     /// BY having confirmed, and asking a second time would charge someone for
     /// a failure that was not theirs.
     ///
-    /// Colour is deliberately not carried here. Rust is the app's primary
-    /// button colour rather than an error cue (see RSColor), so inking this
-    /// screen's buttons differently would say something the palette does not
+    /// Colour is deliberately not carried here. Ink is the app's one filled
+    /// button and terracotta never fills a control (0366), so colouring this
+    /// screen's buttons as a warning would say something the palette does not
     /// mean.
     let requiresConfirmation: Bool
-    /// The one closing line under the primary. Never two — see RSActions.
+    /// The one closing line under the primary. Never two: the pinned block is
+    /// one filled button and one line, so a second line would move the button.
     let closing: String
     /// Whether the header offers a way out. False while a pass is running:
     /// the request is already on the wire and closing the screen would not
