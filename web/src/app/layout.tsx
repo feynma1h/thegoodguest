@@ -31,9 +31,10 @@ export const metadata: Metadata = {
   title: BRAND_NAME,
   description:
     "Scan a room with your phone. Meet it again on your desk — real, in 3D, exactly as you live in it — with a guest who understands it.",
-  // Share card. The PNG is re-exported from docs/product/og-card.html
-  // whenever the identity moves. og/twitter title + description inherit
-  // the fields above.
+  // Share card. The PNG is drawn by the site itself and re-exported from
+  // app/share-card/page.tsx (its header has the command) whenever the
+  // landing's claim or the identity moves. og/twitter title + description
+  // inherit the fields above.
   metadataBase: new URL("https://thegoodguest.web.app"),
   openGraph: {
     type: "website",
@@ -43,7 +44,7 @@ export const metadata: Metadata = {
         url: "/og-card.png",
         width: 1200,
         height: 630,
-        alt: "Every home contains a version of itself its owner has never seen — beside the measured floor plan of a scanned room.",
+        alt: "Meet your room again. Walk a room with your iPhone and it stands back up in 3D, at its true size — beside a sample room, cut away so you can see in.",
       },
     ],
   },
