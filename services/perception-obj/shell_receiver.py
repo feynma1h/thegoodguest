@@ -2,7 +2,8 @@
 architecture / 0069 parametric surfaces / 0077 polygon-wall shells).
 
 Enqueued by /process's success path after release_ready (fire-and-forget;
-see shell_enqueue.py). Assembles the measured floor + wall set from the
+see shell_enqueue.py); a ready shell in turn enqueues scene-finish's /still,
+the room's picture for the app (still_enqueue.py, decision 0363). Assembles the measured floor + wall set from the
 bundle's plane anchors (room_planes via shell_geometry), closes the
 envelope (0069: wall→floor, wall→wall seams, common top, floor snapped
 and bounded to wall lines — joints, never loops), observes each plane
@@ -1070,5 +1071,16 @@ async def handle_shell(
     except Exception as exc:
         logger.exception("shell: unexpected failure for scene %s", req.scene_id)
         return JSONResponse(status_code=500, content={"status": "error", "reason": str(exc)})
+
+    # A ready shell can be drawn: ask scene-finish for the room's still
+    # picture (decision 0363). Fire-and-forget, like this stage's own enqueue:
+    # a failure logs, and the shell and the room stand.
+    if body.get("status") == "ready":
+        try:
+            from still_enqueue import enqueue_still_task  # deferred, like the GCS imports
+
+            enqueue_still_task(scene_id=req.scene_id)
+        except Exception as exc:
+            logger.warning("still enqueue failed (shell stands) scene %s: %s", req.scene_id, exc)
 
     return JSONResponse(body)
