@@ -23,6 +23,8 @@
 import type * as T from "three";
 import type { OrbitControls as OrbitControlsT } from "three/addons/controls/OrbitControls.js";
 
+import { formatM } from "@/lib/card/layout";
+
 export interface SampleRoomLib {
   THREE: typeof import("three");
   OrbitControls: typeof import("three/addons/controls/OrbitControls.js").OrbitControls;
@@ -743,13 +745,17 @@ export function mountSampleRoom(lib: SampleRoomLib, canvas: HTMLCanvasElement, o
   scene.add(outline);
 
   // One dimension line per wall, outside the plinth; shown on the cut side.
+  // Printed the way the product prints a measurement (lib/card/layout's
+  // formatM): one decimal, because a scan does not measure to the
+  // centimetre and the sample must not teach a precision the product
+  // refuses to claim.
   const OFF = T_WALL + 0.38;
   const dims: Dim[] = (
     [
-      { wall: "front", a: [X0, Z1 + OFF], b: [X1, Z1 + OFF], text: "4.40 m", at: [0, Z1 + OFF + 0.3] },
-      { wall: "back", a: [X0, Z0 - OFF], b: [X1, Z0 - OFF], text: "4.40 m", at: [0, Z0 - OFF - 0.3] },
-      { wall: "right", a: [X1 + OFF, Z0], b: [X1 + OFF, Z1], text: "3.60 m", at: [X1 + OFF + 0.42, 0] },
-      { wall: "left", a: [X0 - OFF, Z0], b: [X0 - OFF, Z1], text: "3.60 m", at: [X0 - OFF - 0.42, 0] },
+      { wall: "front", a: [X0, Z1 + OFF], b: [X1, Z1 + OFF], text: formatM(W), at: [0, Z1 + OFF + 0.3] },
+      { wall: "back", a: [X0, Z0 - OFF], b: [X1, Z0 - OFF], text: formatM(W), at: [0, Z0 - OFF - 0.3] },
+      { wall: "right", a: [X1 + OFF, Z0], b: [X1 + OFF, Z1], text: formatM(D), at: [X1 + OFF + 0.42, 0] },
+      { wall: "left", a: [X0 - OFF, Z0], b: [X0 - OFF, Z1], text: formatM(D), at: [X0 - OFF - 0.42, 0] },
     ] as const
   ).map((d) => {
     const material = new THREE.MeshBasicMaterial({ color: MODES[o.mode].dim, transparent: true, opacity: 0, depthWrite: false });
