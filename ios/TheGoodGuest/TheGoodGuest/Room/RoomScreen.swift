@@ -199,7 +199,9 @@ private struct StepMark: View {
                         withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathe = true }
                     }
             case .waiting:
-                Circle().strokeBorder(Color.rsInk.opacity(0.22), lineWidth: 1.5)
+                // The chevrons' grey: 3.5:1 on the card, where ink at 22%
+                // was 1.6:1 and read as a disabled control (WCAG 1.4.11).
+                Circle().strokeBorder(Color.rsInk3, lineWidth: 1.5)
             case .paused:
                 Circle().strokeBorder(Color.rsInk, lineWidth: 1.5)
                 Image(systemName: "pause.fill")
