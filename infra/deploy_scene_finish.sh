@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Deploy scene-finish to Cloud Run. WRITTEN, NOT RUN: nothing in this script has
-# been executed against the project; the coordinator reads it, then runs it.
+# Deploy scene-finish to Cloud Run.
 #
 # Run from the repo root:
 #     ./infra/deploy_scene_finish.sh               # deploy, straight to 100%
@@ -12,10 +11,15 @@
 # L4 instance at concurrency 1 with a ~195 s model load, and the finish work wants
 # many small parallel workers that cannot starve SAM.
 #
-# Prerequisites (infra/secrets.md):
-#   1. The 'anthropic-api-key' secret exists (perception-obj already uses it).
-#   2. The Cloud Tasks queue 'perception-dispatch' and tasks-invoker@ exist.
-#   3. Cloud Run Admin, Artifact Registry and Cloud Build APIs enabled.
+# WHAT THIS DEPLOYS IS RENDER-ONLY (decision 0363): /health, /render and /still,
+# the room's still picture for the app. The Claude-layer routes (/finish,
+# /furniture-piece, /furniture-merge) are not registered in finish_server.py, so
+# no Anthropic key is mounted and none is granted; switching that layer on adds
+# both back, with the secret-scoped grant perception-obj and api-public use.
+#
+# Prerequisites:
+#   1. The Cloud Tasks queue 'perception-dispatch' and tasks-invoker@ exist.
+#   2. Cloud Run Admin, Artifact Registry and Cloud Build APIs enabled.
 #
 # Sizing is an ESTIMATE (design 3, from a 10-core Mac measurement): 4 vCPU,
 # 8 GiB, concurrency 1, 900 s. Software GL is multithreaded, so a render is
@@ -43,6 +47,10 @@ REPO="thegoodguest"
 # 0090): everything it is granted is enumerated in ensure_runtime_iam below.
 RUNTIME_SA="scene-finish-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
 INVOKER_SA="tasks-invoker@${PROJECT_ID}.iam.gserviceaccount.com"
+# The service's own URL: the audience its task routes check (task_auth.py).
+# Cloud Run names a service URL from the service, the project and the region,
+# so it is known before the first deploy; the end of this script checks it.
+RECEIVER_URL="https://${SERVICE}-o4dhc34kqq-as.a.run.app"
 IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:${IMAGE_TAG}"
 
@@ -71,15 +79,22 @@ ensure_runtime_iam() {
         --role="roles/storage.objectViewer" \
         --project="${PROJECT_ID}" >/dev/null
 
-    # Perception outputs: read shell.json/boxes.json, write finish.json,
-    # furniture.json and work/ (the same managed role perception-obj holds).
+    # Perception outputs: read shell.json/finish.json/furniture.json, write
+    # and delete scenes/<id>/still.jpg and still-night.jpg (and, once the
+    # Claude layer runs, finish.json, furniture.json and work/). The same
+    # managed role perception-obj holds.
     gcloud storage buckets add-iam-policy-binding "gs://thegoodguest-perception-outputs" \
         --member="serviceAccount:${RUNTIME_SA}" \
         --role="roles/storage.objectAdmin" \
         --project="${PROJECT_ID}" >/dev/null
 
-    # No Firestore: these stages never write scene state, so they cannot
-    # un-ready a room (design 4.5).
+    # Firestore, for one field: /still marks the scene document `still` after
+    # writing the pictures (decision 0363), with update(), never touching
+    # status, so it still cannot un-ready a room (design 4.5). Firestore IAM
+    # has no per-collection role; this is the role perception-obj holds.
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${RUNTIME_SA}" \
+        --role="roles/datastore.user" --condition=None >/dev/null
 
     gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member="serviceAccount:${RUNTIME_SA}" \
@@ -87,12 +102,6 @@ ensure_runtime_iam() {
     gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member="serviceAccount:${RUNTIME_SA}" \
         --role="roles/monitoring.metricWriter" --condition=None >/dev/null
-
-    # Anthropic key, SECRET-scoped (the api-public / perception-obj pattern).
-    gcloud secrets add-iam-policy-binding anthropic-api-key \
-        --member="serviceAccount:${RUNTIME_SA}" \
-        --role="roles/secretmanager.secretAccessor" \
-        --project="${PROJECT_ID}" --quiet >/dev/null
 
     # The finish route enqueues one piece task per boxed object, and a piece
     # enqueues the merge: enqueue rights on the queue and actAs on the OIDC
@@ -131,10 +140,13 @@ gcloud artifacts repositories describe "${REPO}" \
 echo "=== 2/3: Build container via Cloud Build ==="
 echo "Image:   ${IMAGE_URI}"
 echo "Config:  ${CLOUDBUILD_CONFIG}"
+# Its own upload list: the repo's .gcloudignore leaves out web/, which this
+# image is built from (infra/cloudbuild/scene-finish.gcloudignore).
 gcloud builds submit . \
     --project="${PROJECT_ID}" \
     --region="${REGION}" \
     --config="${CLOUDBUILD_CONFIG}" \
+    --ignore-file="infra/cloudbuild/scene-finish.gcloudignore" \
     --substitutions="_IMAGE_URI=${IMAGE_URI}"
 
 ensure_runtime_iam
@@ -155,10 +167,9 @@ if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
 fi
 # concurrency=1: a render holds a Chrome and several GB; parallelism comes from
 # more instances (max 12 = one per piece of a typical room), not more requests.
-# --no-cpu-throttling: the container is billed through Claude waits, which the
-# design accepts (~$1 a scan) to avoid splitting render from wait.
-# ANTHROPIC_API_KEY is mounted for the Claude-layer routes that land next; the
-# skeleton's routes do not read it.
+# CPU is billed per request (the default throttling): a still is one request of
+# tens of seconds and nothing runs between requests. The Claude layer's design
+# wants --no-cpu-throttling (billed through Claude waits); it brings that back.
 gcloud run deploy "${SERVICE}" \
     --image="${IMAGE_URI}" \
     --region="${REGION}" \
@@ -171,16 +182,13 @@ gcloud run deploy "${SERVICE}" \
     --concurrency=1 \
     --timeout=900 \
     --port=8080 \
-    --no-cpu-throttling \
     --cpu-boost \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=2,periodSeconds=3,failureThreshold=10,timeoutSeconds=3 \
-    --set-env-vars=PERCEPTION_OUTPUTS_BUCKET=thegoodguest-perception-outputs,CAPTURES_BUCKET=thegoodguest-captures,CLOUD_TASKS_INVOKER_SA="${INVOKER_SA}",CLOUD_TASKS_PROJECT="${PROJECT_ID}",CLOUD_TASKS_LOCATION="${REGION}",CLOUD_TASKS_QUEUE=perception-dispatch \
-    --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
+    --set-env-vars=ENVIRONMENT=production,PERCEPTION_OUTPUTS_BUCKET=thegoodguest-perception-outputs,CAPTURES_BUCKET=thegoodguest-captures,FIRESTORE_PROJECT="${PROJECT_ID}",RECEIVER_URL="${RECEIVER_URL}",CLOUD_TASKS_INVOKER_SA="${INVOKER_SA}",CLOUD_TASKS_PROJECT="${PROJECT_ID}",CLOUD_TASKS_LOCATION="${REGION}",CLOUD_TASKS_QUEUE=perception-dispatch,GIT_SHA="$(git rev-parse --short HEAD)"
     # --set-env-vars REPLACES the whole list: a variable missing from this line
-    # silently does not ship. RECEIVER_URL (the service's own URL, the OIDC
-    # audience base) is not known before the first deploy; the routes that need
-    # it add it with `gcloud run services update --update-env-vars` and a line
-    # here, the way perception-obj carries it.
+    # silently does not ship. ENVIRONMENT=production makes a missing
+    # RECEIVER_URL or CLOUD_TASKS_INVOKER_SA an error on the first task rather
+    # than an unchecked route (task_auth.py).
 
 EFFECTIVE_SA=$(gcloud run services describe "${SERVICE}" \
     --region="${REGION}" --project="${PROJECT_ID}" \
@@ -205,10 +213,16 @@ URL=$(gcloud run services describe "${SERVICE}" \
 echo ""
 echo "=== Done ==="
 echo "Service URL: ${URL}"
+if [[ "${URL}" != "${RECEIVER_URL}" ]]; then
+    echo "WARNING: the service URL is not RECEIVER_URL (${RECEIVER_URL}); every task" >&2
+    echo "         would fail its audience check. Fix RECEIVER_URL here and in" >&2
+    echo "         deploy_perception.sh (SCENE_FINISH_URL), then redeploy." >&2
+fi
 if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
     echo ""
     echo "Smoke the candidate (platform-gated, so it needs an identity token):"
     echo "  curl -H \"Authorization: Bearer \$(gcloud auth print-identity-token)\" <candidate url>/health"
+    echo "  python3 tools/enqueue_still.py <scene_id> --candidate   # a real still, through the queue"
     echo "Then flip traffic:"
     echo "  gcloud run services update-traffic ${SERVICE} --to-latest --region=${REGION} --project=${PROJECT_ID}"
 fi
