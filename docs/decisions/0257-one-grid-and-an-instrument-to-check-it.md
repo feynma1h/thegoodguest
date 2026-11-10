@@ -1,7 +1,7 @@
 # 0257 — one grid for every screen, and an instrument to check it
 
 **Date:** 2026-08-28
-**Status:** Decided
+**Status:** Amended by 0365 — `RSScreen`'s grid is retired with the screens it measured; the instrument stands, recalibrated to the new screens
 
 ## Context
 

@@ -1,7 +1,7 @@
 # 0057 — Good Guest design language: warm hospitality supersedes 0056's visual specifics
 
 **Date:** 2026-07-20
-**Status:** Decided (supersedes 0056's design-language section; 0056's 3D-stack
+**Status:** Amended by 0366 — the iOS app no longer uses this language; it follows the website's November redesign. Was: Decided (supersedes 0056's design-language section; 0056's 3D-stack
 gating and conversation sequencing stand)
 
 ## Context
