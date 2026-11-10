@@ -223,6 +223,11 @@ def test_favicon_carries_the_three_legacy_sizes():
 
 
 def test_mark_colours_match_the_web_design_tokens():
+    """The mark's ink is the web's --accent, everywhere and exactly.
+
+    The app icon's tiles (LIGHT_GROUND, DARK_GROUND) no longer equal the web's
+    grounds: the web left cream in decision 0361, and the icon's tiles are the
+    iOS redesign's to decide. Only the ink is shared."""
     css = (REPO / "web/src/app/globals.css").read_text()
 
     def token(name: str) -> str:
@@ -231,8 +236,6 @@ def test_mark_colours_match_the_web_design_tokens():
         return match.group(1).lower()
 
     assert gen_mark.BRAND_INK == token("accent")
-    assert gen_mark.LIGHT_GROUND == token("paper")
-    assert gen_mark.DARK_GROUND == token("ink")
 
 
 def test_mark_colours_match_the_ios_design_tokens():

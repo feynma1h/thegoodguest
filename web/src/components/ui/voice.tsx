@@ -1,15 +1,15 @@
 /**
- * The Good Guest voice primitives (design file: "Good Guest — Product
- * System"; decision 0057). Two registers used everywhere, so the voice
- * stays one voice:
+ * The Good Guest voice primitives (decisions 0057 and 0361). Two registers
+ * used everywhere, so the voice stays one voice:
  *
- *   GuestLine — the guest speaking: italic serif, warm ink. Reserved for
- *     lines written in the guest's first person; UI copy stays sans.
- *   Eyebrow — quiet mono section label, uppercase-tracked. Labels a zone;
- *     never a sentence.
+ *   GuestLine — the guest speaking: italic serif. Reserved for lines written
+ *     in the guest's first person; interface copy stays sans.
+ *   Eyebrow — a quiet zone label in the interface face, sentence case. It
+ *     is never mono and never tracked capitals (decision 0361); mono is for
+ *     measurements.
  *
- * `tone="cream"` flips either for dark ink panels (thresholds, terminal
- * failure, footer strips).
+ * `tone="cream"` flips either for the dusk register (thresholds, terminal
+ * failure, the room page).
  */
 
 export function GuestLine({
@@ -24,7 +24,7 @@ export function GuestLine({
   return (
     <p
       className={`font-serif italic leading-relaxed ${
-        tone === "cream" ? "text-paper" : "text-ink"
+        tone === "cream" ? "text-on-dusk" : "text-ink"
       } ${className ?? ""}`}
     >
       {children}
@@ -43,8 +43,8 @@ export function Eyebrow({
 }) {
   return (
     <p
-      className={`font-mono text-[10px] font-medium uppercase tracking-[0.14em] ${
-        tone === "cream" ? "text-paper/55" : "text-ink/50"
+      className={`text-[13px] font-medium ${
+        tone === "cream" ? "text-on-dusk-2" : "text-ink-2"
       } ${className ?? ""}`}
     >
       {children}

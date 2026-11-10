@@ -102,7 +102,7 @@ export default function AccountMenu() {
         onClick={() => (open ? closeMenu() : setOpen(true))}
         aria-label="Account"
         aria-expanded={open}
-        className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-ink/25 text-ink/60 transition-colors hover:border-ink/50 hover:text-ink"
+        className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-parchment text-ink transition-colors hover:bg-[#d8dee4]"
       >
         <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden>
           <circle cx="7.5" cy="5.2" r="2.4" stroke="currentColor" strokeWidth="1.2" />

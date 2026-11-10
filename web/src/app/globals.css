@@ -1,58 +1,74 @@
 @import "tailwindcss";
 
-/* The Good Guest design language (brand artwork 2026-08-26, decision 0248;
-   the warm register of 0057 carried onto the new palette). Cream ground,
-   warm near-black ink, terracotta for the brand and for actions, muted gold
-   STRICTLY as light/sun indicators — never ornament. Dark ink panels are the
-   emphasis register (thresholds, terminal failure).
+/* The Good Guest design language (decision 0361, 2026-11-10), which replaces
+   the cream register of 0057 and 0248. A daylight ground that turns to dusk
+   where a room is lit, slate ink, and colour left to the room itself.
 
-   Type roles: serif (Source Serif 4) is the guest's voice (italic) and
-   display statements; sans (Instrument Sans) is all UI; mono (JetBrains
-   Mono) is eyebrow labels and machine data (ids, coordinates).
+   Type roles: serif (Newsreader) sets display headlines and the guest's voice
+   (italic); sans (Albert Sans) is all interface text; mono (JetBrains Mono) is
+   for measurements only, never a label.
 
-   WHY THERE ARE TWO TERRACOTTAS. `--accent` is the BRAND ink — the exact
-   value the mark is drawn in, so a person meets one terracotta on the app
-   icon, the tab and the page. It reaches 4.33:1 on this cream, which clears
-   AA for large text and for UI shapes but NOT the 4.5:1 that normal-size
-   text needs. So anything text-sized — links, small emphasis, hover — uses
-   `--accent-deep` at 5.52:1 instead. The two are the same hue and saturation;
-   only lightness moves. Do not set body-sized text in `--accent`. */
+   Colour roles:
+   - paper, surface, parchment: the daylight ground, raised white, and inset.
+   - ink, ink-2, ink-3: text. ink-2 is body-safe at 6.3:1 on paper; ink-3
+     reaches only 3.2:1, so it is for large text (24px and up) alone.
+   - dusk, dusk-2, dusk-3, on-dusk, on-dusk-2: the dark register — the room
+     page, the evening close, the footer.
+   - accent: terracotta, the exact ink the mark is drawn in. The mark, the
+     wordmark and measurement lines; never a button fill.
+   - accent-deep: the same terracotta, text-safe (5.8:1 on paper). Do not set
+     body-sized text in accent (decision 0249).
+   - sun: warm lamplight, used only as light (a lit or active indicator on
+     dusk), never as ornament. */
 :root {
-  --paper: #f9f2ec; /* screen background, cream text on dark panels */
-  --parchment: #ebe5df; /* recessed/inset tone */
-  --ink: #282723; /* text; also the dark-panel surface */
-  --accent: #c04d3e; /* terracotta — the brand ink, and the mark's own */
-  --accent-deep: #a54235; /* the same terracotta, text-safe: links, hover */
-  --sun: #c9a25e; /* light indicators only (capture time, listening) */
+  --paper: #f5f6f8;
+  --surface: #ffffff;
+  --parchment: #e4e9ed;
+  --ink: #121a23;
+  --ink-2: #4a5664;
+  --ink-3: #808b98;
+  --dusk: #0d141c;
+  --dusk-2: #121b25;
+  --dusk-3: #1d2834;
+  --on-dusk: #eef2f6;
+  --on-dusk-2: #a7b2bf;
+  --accent: #c04d3e;
+  --accent-deep: #a54235;
+  --sun: #f0b26a;
 }
 
 @theme inline {
-  /* Aliases kept so background/foreground utilities stay coherent. */
   --color-background: var(--paper);
   --color-foreground: var(--ink);
   --color-paper: var(--paper);
+  --color-surface: var(--surface);
   --color-parchment: var(--parchment);
   --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-dusk: var(--dusk);
+  --color-dusk-2: var(--dusk-2);
+  --color-dusk-3: var(--dusk-3);
+  --color-on-dusk: var(--on-dusk);
+  --color-on-dusk-2: var(--on-dusk-2);
   --color-accent: var(--accent);
   --color-accent-deep: var(--accent-deep);
   --color-sun: var(--sun);
-  --font-sans: var(--font-instrument-sans);
-  --font-serif: var(--font-source-serif);
+  --font-sans: var(--font-albert-sans);
+  --font-serif: var(--font-newsreader);
   --font-mono: var(--font-jetbrains-mono);
 }
 
 @theme {
-  /* Warm ink shadows — lift (cards), float (overlays), deep (modals). */
-  --shadow-lift: 0 2px 8px rgba(40, 39, 35, 0.08);
-  --shadow-float: 0 8px 24px rgba(40, 39, 35, 0.12);
-  --shadow-deep: 0 12px 32px rgba(40, 39, 35, 0.16);
+  /* Slate shadows — lift (cards), float (overlays), deep (sheets). */
+  --shadow-lift: 0 1px 0 rgba(18, 26, 35, 0.04), 0 14px 34px rgba(18, 26, 35, 0.06);
+  --shadow-float: 0 10px 30px rgba(18, 26, 35, 0.1);
+  --shadow-deep: 0 2px 6px rgba(18, 26, 35, 0.05), 0 24px 60px rgba(18, 26, 35, 0.16);
 }
 
-/* Placeholder stage texture — where a room will be but isn't rendered
-   (card thumbs, forming states). Straight from the design file's splat
-   placeholder hatch. */
+/* Placeholder stage texture — where a room will be but isn't rendered. */
 @utility hatch {
-  background: repeating-linear-gradient(45deg, #f1e8dd 0 12px, #e9dfd1 12px 24px);
+  background: repeating-linear-gradient(45deg, #eef1f4 0 12px, #e7ebef 12px 24px);
 }
 
 /* Ambient breathe for forming states — atmosphere, not progress. CSS so
@@ -77,11 +93,26 @@
   }
 }
 
+html,
+body {
+  overflow-x: clip;
+}
+
 body {
   background: var(--paper);
   color: var(--ink);
 }
 
 ::selection {
-  background: rgba(192, 77, 62, 0.18);
+  background: rgba(192, 77, 62, 0.2);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+::placeholder {
+  color: #5b6673;
+  opacity: 1;
 }

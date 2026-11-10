@@ -24,19 +24,21 @@ export const SPRING: Transition = { type: "spring", stiffness: 180, damping: 24 
 
 export const MotionLink = motion.create(Link);
 
-/* Pill actions per the Good Guest system: rust fill for the primary act,
- * quiet ink outline for the alternative, cream fill on dark panels. */
+/* Pill actions (decision 0361): an ink fill for the primary act on the
+ * daylight ground, a hairline ring for the alternative, and the same pair
+ * reversed on dusk. Terracotta never fills a button; it belongs to the mark.
+ * The `cream` names are kept for their call sites: they are the dusk pair. */
 const PILL_VARIANTS = {
   primary:
-    "rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-paper hover:bg-accent-deep",
+    "rounded-full bg-ink px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#2a3644]",
   ghost:
-    "rounded-full border-[1.5px] border-ink/35 px-6 py-2.5 text-sm font-medium text-ink hover:border-ink/60",
+    "rounded-full px-6 py-2.5 text-sm font-semibold text-ink ring-1 ring-inset ring-ink/20 hover:ring-ink/45",
   quiet:
-    "rounded-full border-[1.5px] border-ink/20 px-6 py-2.5 text-sm font-medium text-ink/60 hover:border-ink/40 hover:text-ink",
+    "rounded-full px-6 py-2.5 text-sm font-medium text-ink-2 ring-1 ring-inset ring-ink/15 hover:text-ink hover:ring-ink/35",
   cream:
-    "rounded-full bg-paper px-6 py-2.5 text-sm font-semibold text-ink hover:bg-white",
+    "rounded-full bg-on-dusk px-6 py-2.5 text-sm font-semibold text-dusk hover:bg-white",
   creamGhost:
-    "rounded-full border-[1.5px] border-paper/35 px-6 py-2.5 text-sm font-medium text-paper/85 hover:border-paper/60 hover:text-paper",
+    "rounded-full px-6 py-2.5 text-sm font-semibold text-on-dusk ring-1 ring-inset ring-on-dusk/25 hover:ring-on-dusk/50",
 } as const;
 
 /** A pill CTA with the standard spring press/hover behavior. */
