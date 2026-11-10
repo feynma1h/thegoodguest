@@ -5,11 +5,17 @@
     python3 tools/ios_layout_audit.py /tmp/shots/default    # measure
 
     python3 tools/ios_screenshot_gallery.py /tmp/shots --udid <sim> --settle 3
+    python3 tools/ios_screenshot_gallery.py /tmp/shots --sizes xs,default,ax5 --appearance dark
 
 The catalogue is parsed out of ScreenGallery.swift rather than duplicated here,
 so a state added there is photographed without editing this file. The default
 UDID below is the operator's booted simulator; `--udid` points it at any other
 booted one, of any size — the audit reads the frame size from each image.
+
+`--sizes` picks the Dynamic Type sizes, by the labels in SIZES (default and ax5
+unless told otherwise; the app holds type at AX2, so ax2-ax5 photograph the
+same). `--appearance dark` shoots with the phone in dark mode, into
+`<size>-dark/`, so a pass can be compared against its light twin.
 
 `--settle` adds seconds to the wait of every entry that does not name its own
 `delay`. A freshly created simulator draws slowly — for its first ten minutes
@@ -52,8 +58,15 @@ GALLERY = Path("ios/TheGoodGuest/TheGoodGuest/Support/ScreenGallery.swift")
 OUT = Path("/tmp/rs-shots")
 SETTLE = 0.0
 
-SIZES = [("default", "large"),
-         ("ax5", "accessibility-extra-extra-extra-large")]
+# Every Dynamic Type size, by the label its pass directory takes.
+SIZES = {
+    "xs": "extra-small", "s": "small", "m": "medium",
+    "default": "large",
+    "xl": "extra-large", "xxl": "extra-extra-large", "xxxl": "extra-extra-extra-large",
+    "ax1": "accessibility-medium", "ax2": "accessibility-large",
+    "ax3": "accessibility-extra-large", "ax4": "accessibility-extra-extra-large",
+    "ax5": "accessibility-extra-extra-extra-large",
+}
 
 # One field, one regex, applied INSIDE a balanced `.init(...)` block rather than
 # to the file. A single regex over the whole declaration was fine at four fields
@@ -159,8 +172,15 @@ def main():
                     help="seconds added to every entry that names no delay")
     ap.add_argument("--only", default="",
                     help="comma-separated ids to re-shoot; the index keeps the rest")
+    ap.add_argument("--sizes", default="default,ax5",
+                    help=f"comma-separated, from: {','.join(SIZES)}")
+    ap.add_argument("--appearance", choices=("light", "dark"), default="light")
     args = ap.parse_args()
     UDID, OUT, SETTLE = args.udid, Path(args.out), args.settle
+    sizes = args.sizes.split(",")
+    if set(sizes) - set(SIZES):
+        sys.exit(f"unknown sizes: {sorted(set(sizes) - set(SIZES))}")
+    suffix = "-dark" if args.appearance == "dark" else ""
 
     screens = catalogue()
     if not screens:
@@ -178,11 +198,13 @@ def main():
     still = [s for s in screens if not s["reduceMotion"]]
     reduced = [s for s in screens if s["reduceMotion"]]
     print(f"{len(screens)} states ({len(reduced)} under reduce motion) "
-          f"x {len(SIZES)} type sizes = {len(screens) * len(SIZES)} shots")
+          f"x {len(sizes)} type sizes, {args.appearance} = {len(screens) * len(sizes)} shots")
 
+    sh("xcrun", "simctl", "ui", UDID, "appearance", args.appearance)
     made, failed = [], []
-    for label, size in SIZES:
-        set_type_size(size)
+    for size_label in sizes:
+        label = size_label + suffix
+        set_type_size(SIZES[size_label])
         time.sleep(0.6)
         # Ordered by the device setting, not interleaved: writing it costs a
         # spawn and it applies to whatever launches next.
@@ -202,6 +224,7 @@ def main():
 
     set_type_size("large")
     set_reduce_motion(False)
+    sh("xcrun", "simctl", "ui", UDID, "appearance", "light")
     sh("xcrun", "simctl", "terminate", UDID, BUNDLE, check=False)
 
     index = OUT / "index.json"
@@ -212,7 +235,7 @@ def main():
         redone = {(m["id"], m["pass"]) for m in made}
         made += [r for r in json.loads(index.read_text())
                  if (r["id"], r["pass"]) not in redone]
-        passes = [label for label, _ in SIZES]
+        passes = sorted({r["pass"] for r in made})
         made.sort(key=lambda r: (passes.index(r["pass"]),
                                  catalogue_order.get(r["id"], len(ids))))
     index.write_text(json.dumps(made, indent=1))

@@ -21,13 +21,13 @@ redesigned screens measure, with the frames that set it, read against the
 approved canvas (`34s5yipxMgr3bZUBCPiwM1`, drawn at 390x844), which is where
 the intent comes from when the screens disagree.
 
-NOTHING IS TIED TO ONE PHONE. The frame size and scale are read from each
+NOTHING IS TIED TO ONE DEVICE. The frame size and scale are read from each
 image. The navigation bar is found in the frames rather than assumed at a
 height, and every vertical bound below it is stated from the bar's centre,
 which sits the same distance above everything under it on every iPhone; the
 previous version assumed an 874pt phone and crashed on an 844pt one. The pinned
-action is measured up from the bottom edge, which is the 34pt home-indicator
-inset on every iPhone without a home button.
+action is measured up from the safe area's bottom edge, read from the frame's
+shape, and the column from the frame's width.
 
 For each screen it finds, in points:
   bar     the centre of the navigation bar's row of items (back, close,
@@ -37,7 +37,7 @@ For each screen it finds, in points:
   t-left  that title's left edge
   margin  the content's outermost column: a container's edge (a card,
           picture, plan or list), or the text where there is none
-  button  the pinned filled pill: how far its bottom sits off the bottom edge
+  button  the pinned filled pill: how far its bottom sits above the safe area
           and what sits under it (`-` nothing, `q` a quiet action, `c` a
           caption), its left edge, and its right edge's inset
 """
@@ -51,25 +51,31 @@ from PIL import Image
 # The bounds. Each is stated once, with where it comes from.
 # ---------------------------------------------------------------------------
 
-# Two edges, by design: a container (card, picture, plan, list) sits 16pt in,
-# and text and titles sit on the text column 4pt inside that, at 20. The canvas
-# draws every title on 20 and every container on 16, the room screen and
-# guidance excepted. Measured on an 874pt phone: home's cards, the room's steps
-# card, review's plan, account's lists and home's example room all at 16.0;
-# deletion, which has no container, at 20.7; titles on review, account and
-# deletion at 20.0-21.3, and 22.0 at AX5.
+# ONE COLUMN (`RSLayout`). Every screen's content starts on one left edge — its
+# title, its lines, its cards and pictures, and the pinned pill — 16pt in on a
+# phone. That is the website's phone gutter (`px-4`: the "Your house" title,
+# the line under it and the room cards all start there) and UIKit's own margin
+# on most phones. On a window wider than the readable width plus both margins,
+# an iPad, the column centres at that width. Both mirror `RSLayout`.
 #
-# So the content's outermost column is one or the other: 16 where a screen has
-# a container, the text column where it has none. Which one a column is cannot
-# be told reliably from its pixels — a glyph's outermost column is
-# antialiased, so it reads as faint as a card's fill — and nothing is lost by
-# not trying: the title's left edge below is the exact check on the text column.
-# A container edge is exact to the pixel. Text is measured from ink, and a
-# capital's ink starts inside its box by a side bearing that grows with the
-# face: measured 0.3pt for an Albert Sans "T" at 16pt, 1.2 for a Newsreader
-# "D" at 30, 2.0 for its "S" at 42 (AX5).
-CONTAINER_EDGE = (15, 17)
-TEXT_COLUMN = (19.5, 22.5)
+# Before the column, the redesign's screens put titles on three edges — 16 on
+# home and a room, 20 on review, account and deletion, 22 on guidance — because
+# the canvas they were drawn from set text 4pt inside the cards' edge and each
+# screen chose where to apply the 4.
+MARGIN = 16
+READABLE_WIDTH = 640
+# A container's edge is exact to the pixel, give or take antialiasing. Text is
+# measured from ink, and a capital's ink starts inside its box by a side
+# bearing that grows with the face: 0.3pt for an Albert Sans "T" at 16pt, 1.2
+# for a Newsreader "D" at 30, 2.0 for its "S" at 42 (AX5).
+EDGE = 1
+BEARING = 2.5
+
+
+def column(f):
+    """Where this frame's column starts, in points from the left edge."""
+    w = f.pt(f.W)
+    return MARGIN if w - 2 * MARGIN <= READABLE_WIDTH else (w - READABLE_WIDTH) / 2
 
 # The navigation bar's row. Every screen on one phone puts its bar items at one
 # height; the few points of spread are the glyphs (a 15pt mark, a 22pt person
@@ -80,38 +86,26 @@ TEXT_COLUMN = (19.5, 22.5)
 BAR_SPREAD = 3
 
 # From the bar's centre down to the top of the title's ink. DEFAULT SIZE ONLY:
-# the large title grows upward from a fixed baseline (measured 44.3 -> 35.7 at
-# AX5), and a title in a larger face may start its ink lower.
+# a title in a larger face starts its ink lower (0252).
 #
-# A title in the content sits right under an inline bar: measured 36.3 on the
-# room screen, review and guidance, which set 4pt above it, and 40.0 on
-# account and deletion, which set 8. Those two are the account sheet's, so the
-# 4pt never meets itself on one screen; it is in the band rather than flagged.
-TITLE = (35, 42)
-# Home's title is a navigation-bar large title, set by UIKit under the bar
-# rather than in the content. Measured 44.3.
-LARGE_TITLE = (42, 46)
+# Every screen's title is the first line of its content, home's included
+# (`RSScreenTitle`, `RSLayout.titleTop` under the bar). Home's used to be the
+# navigation bar's large title, set by UIKit on its own margin — the column on
+# some phones and not on others, and never on an iPad.
+TITLE = (34, 39)
 
-# The pinned pill's bottom, up from the bottom edge. DEFAULT SIZE ONLY: what
+# The pinned pill's bottom, up from the safe area's bottom edge (`Frame`). One
+# bar for every screen (`RSPinnedBar`), so one number for each thing that can
+# sit under the pill: nothing, the bar's own 4; a quiet action, its 50 and the
+# 2 between; a caption, its line and the 10 above it. DEFAULT SIZE ONLY: what
 # sits under the pill grows at AX5 and lifts it, which is the layout working
-# (0252).
+# (0252). The pill is a filled shape measured to the pixel, so the 2pt either
+# way is rounding, not typography.
 #
-# There is no longer one number, because there is no longer one action block:
-# the canvas's block (`.actions`: 34 under the last item, 2 between items)
-# puts a lone pill at 34, one over a 50pt quiet action at 86 and one over a
-# caption at 62. The build adds 4 under the last item, so, measured:
-#   nothing under it      38.0 — the room screen, guidance
-#   a quiet action        90.0 — the room screen, review
-#   a caption             65.7 — home's first run
-# Each is a filled shape measured to the pixel, so the tolerance is not
-# typography: 2pt absorbs deletion's 4pt gap where the others use 2 (92.0),
-# which nobody sees; a whole step of the bar's padding (4) is out. (The first
-# two measured the same at AX5 — the quiet action's 50pt holds — and only a
-# caption grew; the rule is kept whole, as 0252 has it.)
-BUTTON_UP = {"-": (36, 40), "q": (88, 92), "c": (64, 68)}
-# The pill's sides: every pinned bar is padded 20 on both sides (the canvas's
-# `.actions` too). Exact, at every size.
-BUTTON_SIDE = (19, 21)
+# Before the bar, each screen padded its own: a lone pill sat at 4 on the room
+# screen and guidance and 8 on home; deletion's caption, held at a control's
+# height, put its pill 14pt above where home's first-run caption put one.
+BUTTON_UP = {"-": (2, 6), "q": (54, 58), "c": (28, 34)}
 
 # ---------------------------------------------------------------------------
 # Which screens are held to the grid.
@@ -132,9 +126,6 @@ CEREMONIAL_PREFIXES = (
 # the first ink under the bar. The sheet beneath it is `account-guest`,
 # measured there.
 SYSTEM_ALERT = {"account-conflict"}
-# Home's title is the navigation bar's large title; every other screen's is
-# the first line of its content.
-LARGE_TITLE_PREFIX = "home"
 # Home's first run has no title in its bar — the welcome's headline sits under
 # the example room — so the first thing under the bar is a picture, and there
 # is no title band to measure. Everything else on it is held to the grid.
@@ -155,8 +146,6 @@ def kind(sid):
 # in grey levels. A card's shadow is at most 8 off and a 5%-opacity fill 9-17;
 # text is 160 (the second ink) to 230.
 INK = 60
-# The bottom of every iPhone without a home button: the home indicator's zone.
-HOME_INDICATOR = 34
 
 
 class Frame:
@@ -172,9 +161,15 @@ class Frame:
         self.path = Path(path)
         self.rgb = np.asarray(Image.open(path).convert("RGB")).astype(int)
         self.H, self.W = self.rgb.shape[:2]
-        # Every iPhone this app runs on is 375-440pt wide: 1125-1320px at 3x,
-        # 750-880px at 2x. Nothing else about the phone is assumed.
-        self.S = 3.0 if self.W > 1000 else 2.0
+        # The scale, from the width in pixels, which does not overlap between
+        # devices: an iPhone is 375-440pt wide, 750-880px at 2x and 1125-1320
+        # at 3x; an iPad is 744-1032pt at 2x, 1488-2064px.
+        self.S = 3.0 if 1000 < self.W < 1400 else 2.0
+        # The safe area's bottom, from the frame's shape: an iPhone without a
+        # home button is ~19.5:9 and keeps 34pt for the home indicator, one
+        # with a button is 16:9 and keeps none, and an iPad keeps 20.
+        w, h = self.W / self.S, self.H / self.S
+        self.bottom_inset = 20 if w >= 600 else (34 if h / w >= 2 else 0)
         a, b = self.px(2), self.px(8)
         strips = np.concatenate([self.rgb[:, a:b], self.rgb[:, self.W - b:self.W - a]], axis=1)
         self.ground = np.median(strips, axis=1)                      # (H, 3)
@@ -194,7 +189,7 @@ class Frame:
         """Runs of inked rows, merged across gaps under 4pt (a line's own leading)."""
         on = self.ink.sum(axis=1) > 3
         on[:3] = False
-        on[self.H - self.px(HOME_INDICATOR):] = False
+        on[self.H - self.px(self.bottom_inset):] = False
         rows = np.where(on)[0]
         if not len(rows):
             return []
@@ -306,13 +301,16 @@ def pinned_action(f):
     the content, never lower than ~380pt off the bottom even at AX5.
     """
     rgb, W, H = f.rgb, f.W, f.H
-    x0, x1 = int(W * 0.15), int(W * 0.85)
+    # Searched inside the column, which on an iPad is a band in the middle.
+    col = f.px(column(f))
+    width = W - 2 * col
+    x0, x1 = col + int(width * 0.15), col + int(width * 0.85)
     span = rgb[:, x0:x1]
     med = np.median(span, axis=1)                                     # (H, 3)
     uniform = (np.abs(span - med[:, None, :]).max(axis=2) < 30).mean(axis=1) > 0.85
     differs = np.abs(med - f.ground).max(axis=1) > 60
     solid = np.where(uniform & differs)[0]
-    solid = solid[(solid > H * 0.6) & (solid < H - f.px(HOME_INDICATOR))]
+    solid = solid[(solid > H * 0.6) & (solid < H - f.px(f.bottom_inset))]
     if not len(solid):
         return None
     runs = np.split(solid, np.where(np.diff(solid) > 2)[0] + 1)
@@ -331,16 +329,21 @@ def pinned_action(f):
             bot += 1
         shape = match[top:bot + 1]
         xs = np.where(shape.any(axis=0))[0]
-        if not len(xs) or f.pt(xs.max() - xs.min()) < 0.75 * f.pt(W):
+        if not len(xs) or xs.max() - xs.min() < 0.75 * width:
             continue
         return {"top": f.pt(top), "bottom_up": f.pt(H - 1 - bot),
                 "left": f.pt(xs.min()), "right_in": f.pt(W - 1 - xs.max()),
-                "height": f.pt(bot - top + 1), "under": under(f, bot)}
+                "height": f.pt(bot - top + 1),
+                "under": under(f, bot, xs.min(), xs.max())}
     return None
 
 
-def under(f, bottom):
+def under(f, bottom, left, right):
     """What sits under the pill: nothing, a quiet action, or a caption.
+
+    Looked for only across the pill's own width. On an iPad the window's
+    resize grip sits in the bottom corner, beside the bar, and read as a
+    caption under every lone pill in the app.
 
     Told apart by how dark the first line is, which is the one thing the design
     keeps distinct between them: a quiet action is set in full ink, a caption in
@@ -350,12 +353,12 @@ def under(f, bottom):
     # From 2pt under the pill: its own bottom edge, where it falls between two
     # pixel rows, is an antialiased row of half-ink. The nearest line under a
     # pill in this app starts 15pt down.
-    start, lo = bottom + 1 + f.px(2), f.H - f.px(HOME_INDICATOR)
-    rows = np.where(f.ink[start:lo].sum(axis=1) > 3)[0]
+    start, lo = bottom + 1 + f.px(2), f.H - f.px(f.bottom_inset)
+    rows = np.where(f.ink[start:lo, left:right + 1].sum(axis=1) > 3)[0]
     if not len(rows):
         return "-"
     first = rows[rows <= rows[0] + f.px(24)] + start
-    grey = f.rgb[first].mean(axis=2)
+    grey = f.rgb[first, left:right + 1].mean(axis=2)
     contrast = np.abs(grey - f.ground[first].mean(axis=1)[:, None]).max()
     return "q" if contrast > 195 else "c"
 
@@ -364,7 +367,12 @@ def under(f, bottom):
 # A frame that was not photographed settled.
 # ---------------------------------------------------------------------------
 
-def unsettled(f, status):
+# The app's two grounds, daylight and dusk. An ordinary screen sits on one of
+# them out to the frame's edges.
+GROUNDS = np.array([(245, 246, 248), (13, 20, 28)])
+
+
+def unsettled(f, status, ordinary=False):
     """Why this frame is not a photograph of the screen, or None.
 
     A slow simulator — a fresh one analysing its photo library, or a build
@@ -373,19 +381,33 @@ def unsettled(f, status):
     rather than as nothing. The previous version skipped a blank frame without
     a word, so the screen it stood for went unchecked and the count still read
     as complete.
+
+    And on the first launch after an install the app can still be coming up
+    when the shot is taken, which photographs the HOME SCREEN: icons on a
+    wallpaper, measured as if they were the app. An ordinary screen's edges are
+    daylight or dusk, and a frame whose edges are mostly neither is not it.
     """
+    if ordinary:
+        edges = f.ground[f.px(80):f.H - f.px(80)]
+        near = (np.abs(edges[:, None, :] - GROUNDS[None]).max(axis=2) < 12).any(axis=1)
+        if near.mean() < 0.6:
+            return "not the app: the frame's edges are not its ground (the home screen, mid-launch?)"
     after = status[1] if status else 0
     if not any(top >= after for top, _ in f.bands):
         return "blank: only the status bar was drawn"
-    body = slice(after, f.H - f.px(HOME_INDICATOR))
+    body = slice(after, f.H - f.px(f.bottom_inset))
     d = np.abs(f.rgb[body] - f.ground[body][:, None, :]).max(axis=2)
-    contrast = np.percentile(d, 99.9)
     # In the channel that differs most: ink on the ground is ~230 off, the light
     # on dusk ~225, the splash's terracotta mark 186, a screen behind an alert's
-    # dimming ~200. A push caught mid-fade measured 91. In grey the mark alone
-    # is 136, which is why this is not grey.
-    if contrast < 150:
-        return f"faded: content contrast {contrast:.0f}, still transitioning"
+    # dimming ~200. A push caught mid-fade measured 91 at its strongest. In
+    # grey the mark alone is 136, which is why this is not grey.
+    #
+    # COUNTED, not a percentile: the splash's thin mark is under 0.1% of an
+    # iPad's frame, so a 99.9th percentile read the ground and called a settled
+    # splash faded. A frame mid-fade has no pixel that strong at all.
+    strong = int((d > 150).sum())
+    if strong < f.px(6) ** 2:
+        return f"faded: {strong} pixels at full contrast, still transitioning"
     return None
 
 
@@ -396,7 +418,8 @@ def unsettled(f, status):
 def measure(path):
     f = Frame(path)
     status = status_bar(f)
-    r = {"frame": f, "status": status, "unsettled": unsettled(f, status)}
+    ordinary = kind(Path(path).stem) == "screen"
+    r = {"frame": f, "status": status, "unsettled": unsettled(f, status, ordinary)}
     if r["unsettled"]:
         return r
     after = status[1] if status else 0
@@ -413,9 +436,10 @@ def measure(path):
     return r
 
 
-def judge(sid, r, bar_px, size_invariant):
+def judge(sid, r, bar_px, default_size):
     """The deviations of one enforced screen, as short strings."""
     f, out = r["frame"], []
+    col = column(f)
     if r["bar_px"] is None:
         out.append("no bar")
     elif abs(f.pt(r["bar_px"] - bar_px)) > BAR_SPREAD:
@@ -423,27 +447,25 @@ def judge(sid, r, bar_px, size_invariant):
 
     title = f.pt(r["title_px"] - bar_px) if r["title_px"] is not None else None
     if sid not in NO_TITLE and title is not None:
-        large = sid.startswith(LARGE_TITLE_PREFIX)
-        lo, hi = LARGE_TITLE if large else TITLE
-        if size_invariant and not lo <= title <= hi:
+        if default_size and not TITLE[0] <= title <= TITLE[1]:
             out.append(f"title {title:.0f}")
-        if not TEXT_COLUMN[0] <= r["title_left"] <= TEXT_COLUMN[1]:
+        if not col - EDGE <= r["title_left"] <= col + BEARING:
             out.append(f"title left {r['title_left']:.0f}")
 
     x = r["margin"]
-    if x is not None and not (CONTAINER_EDGE[0] <= x <= CONTAINER_EDGE[1]
-                              or TEXT_COLUMN[0] <= x <= TEXT_COLUMN[1]):
+    if x is not None and not col - EDGE <= x <= col + BEARING:
         out.append(f"margin {x:.0f}")
 
     b = r["button"]
     if b:
-        if size_invariant:
+        up = b["bottom_up"] - f.bottom_inset
+        if default_size:
             lo, hi = BUTTON_UP[b["under"]]
-            if not lo <= b["bottom_up"] <= hi:
-                out.append(f"button {b['bottom_up']:.0f}{b['under']} off bottom")
-        if not BUTTON_SIDE[0] <= b["left"] <= BUTTON_SIDE[1]:
+            if not lo <= up <= hi:
+                out.append(f"button {up:.0f}{b['under']} above the safe area")
+        if abs(b["left"] - col) > EDGE:
             out.append(f"button left {b['left']:.0f}")
-        if not BUTTON_SIDE[0] <= b["right_in"] <= BUTTON_SIDE[1]:
+        if abs(b["right_in"] - col) > EDGE:
             out.append(f"button right {b['right_in']:.0f}")
     return out
 
@@ -461,11 +483,11 @@ def catalogue_ids():
 def main(argv):
     shots = Path(argv[1] if len(argv) > 1 else "/tmp/rs-all/default")
     # Which text size these frames were taken at, from the directory the
-    # capture script wrote them to. Two bounds are default-size only — the
-    # title's top and the pill's offset — because what is above the one and
-    # under the other grows at AX5 (0252). The bar, the margins and the pill's
-    # sides are stated in points and hold at every size.
-    size_invariant = shots.name != "ax5"
+    # capture script wrote them to (`default`, `ax5`, `xs`, `default-dark`...).
+    # Two bounds are default-size only — the title's top and the pill's offset
+    # — because what is above the one and under the other moves with the type
+    # (0252). The bar, the column and the pill's sides hold at every size.
+    default_size = shots.name.split("-")[0] == "default"
     paths = sorted(shots.glob("*.png"))
     if not paths:
         sys.exit(f"no frames in {shots}")
@@ -489,7 +511,7 @@ def main(argv):
         else:
             top = (r["status"][1] if r["status"] else 0) + f.px(4)
         b = r["button"]
-        bottom = f.px(b["top"] - 14) if b else f.H - f.px(HOME_INDICATOR)
+        bottom = f.px(b["top"] - 14) if b else f.H - f.px(f.bottom_inset)
         r["margin"] = margin(f, int(top), int(bottom))
 
     rows, bad, unsettled_ids = [], 0, []
@@ -504,7 +526,7 @@ def main(argv):
             # With no bar anywhere in the pass there is nothing to measure the
             # titles from, and that is itself every screen deviating — never a
             # pass that checked nothing.
-            flags = judge(sid, r, bar_px, size_invariant) if bar_px is not None else ["no bar"]
+            flags = judge(sid, r, bar_px, default_size) if bar_px is not None else ["no bar"]
         bad += bool(flags)
         rows.append((sid, k, r, flags))
 
@@ -523,7 +545,7 @@ def main(argv):
         tl = f"{r['title_left']:.0f}" if r["title_left"] is not None else "—"
         mg = f"{r['margin']:.0f}" if r["margin"] is not None else "—"
         b = r["button"]
-        bu = f"{b['bottom_up']:.0f}{b['under']}" if b else "—"
+        bu = f"{b['bottom_up'] - f.bottom_inset:.0f}{b['under']}" if b else "—"
         bl = f"{b['left']:.0f}" if b else "—"
         br = f"{b['right_in']:.0f}" if b else "—"
         print(f"{sid:{w}} {k:10} {bar:>5} {title:>5} {tl:>6} {mg:>7} {bu:>6} "
@@ -531,12 +553,13 @@ def main(argv):
 
     f0 = next(iter(settled.values()))["frame"] if settled else None
     n = sum(1 for _, k, r, _ in rows if k == "screen" and r is not None)
-    scope = ("bar, title, margins and the pinned pill" if size_invariant
-             else "bar, margins and the pill's sides (the title's top and the "
+    scope = ("bar, title, column and the pinned pill" if default_size
+             else "bar, column and the pill's sides (the title's top and the "
                   "pill's offset are default-size bounds and not enforced here)")
     print()
     if f0:
         print(f"frames {f0.W}x{f0.H} at {f0.S:.0f}x ({f0.pt(f0.W):.0f}x{f0.pt(f0.H):.0f}pt); "
+              f"the column {column(f0):.0f}pt in; the safe area's bottom {f0.bottom_inset}pt; "
               f"the bar's centre {f0.pt(bar_px):.0f}pt down" if bar_px else "no bar found in any frame")
     print(f"{bad} of {n} enforced screens deviate on {scope}")
     failed = bad

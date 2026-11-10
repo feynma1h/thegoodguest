@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ios_layout_audit import HOME_INDICATOR, Frame, kind, status_bar, unsettled
+from ios_layout_audit import Frame, kind, status_bar, unsettled
 
 SHOTS = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/rs-all")
 
@@ -72,10 +72,10 @@ def reading(path):
     f = Frame(path)
     status = status_bar(f)
     top = status[1] if status else 0
-    rows = slice(top, f.H - f.px(HOME_INDICATOR))
+    rows = slice(top, f.H - f.px(f.bottom_inset))
     grey = f.rgb[rows].mean(axis=2)
     ink = float((np.abs(grey - f.ground[rows].mean(axis=1)[:, None]) > 30).mean())
-    return ink, unsettled(f, status)
+    return ink, unsettled(f, status, ordinary=True)
 
 
 def main():
