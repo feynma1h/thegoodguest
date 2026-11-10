@@ -17,15 +17,20 @@ behaving exactly as Dynamic Type asks.
 
 CEREMONIAL AND FULL-BLEED SCREENS ARE EXCLUDED, for the reason the layout audit
 excludes them: their ink is a drawn graphic rather than type, so the ratio
-measures the artwork rather than the layout. The doorway is 0.95x for that
-reason alone.
+measures the artwork rather than the layout. The doorway, before the 2026-11-10
+redesign, was 0.95x for that reason alone. The classification is the audit's
+own, imported rather than copied, so the two cannot drift apart.
+
+A FRAME THAT WAS NOT PHOTOGRAPHED SETTLED IS REPORTED, NOT MEASURED. A blank AX5
+frame is almost no ink at all, which reads as a screen that lost its content
+off the bottom — the very signal this exists to show.
 """
-import json
 import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+
+from ios_layout_audit import HOME_INDICATOR, Frame, kind, status_bar, unsettled
 
 SHOTS = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/rs-all")
 
@@ -49,39 +54,53 @@ CEILING_SCALE = 33 / 17
 # A screen ABOVE it is drawing more than it did, which should be impossible.
 LIMIT = CEILING_SCALE ** 2
 
-# Same classification the layout audit uses, and for the same reason.
-SKIP_PREFIXES = ("capture", "doorway", "splash")
-SKIP = {"gotroom", "unsupported", "qr"}
-
 
 def density(path):
-    """Fraction of the body area that is drawn, against a per-row background.
+    """Fraction of the body area that is drawn, against a per-row ground.
 
-    Per row because the parchment is a gradient — the same reason the layout
-    audit samples it that way. The status bar and the home indicator are cut
-    off: both are system chrome and neither scales with the app's type.
+    Per row, from the audit's own reading of the frame, because a single
+    background colour is wrong across dusk and the scanning HUD. The status
+    bar and the home indicator's zone are cut off — both are system chrome and
+    neither scales with the app's type — at wherever this phone puts them,
+    read from the frame rather than fixed for one phone.
     """
-    a = np.asarray(Image.open(path).convert("L")).astype(int)
-    body = a[200:2480]
-    bg = np.median(np.concatenate([body[:, 14:56], body[:, 1150:1192]], axis=1), axis=1)
-    return float((np.abs(body - bg[:, None]) > 30).mean())
+    return reading(path)[0]
+
+
+def reading(path):
+    """The frame's density, and why it is unsettled (None when it is not)."""
+    f = Frame(path)
+    status = status_bar(f)
+    top = status[1] if status else 0
+    rows = slice(top, f.H - f.px(HOME_INDICATOR))
+    grey = f.rgb[rows].mean(axis=2)
+    ink = float((np.abs(grey - f.ground[rows].mean(axis=1)[:, None]) > 30).mean())
+    return ink, unsettled(f, status)
 
 
 def main():
-    rows, bad = [], 0
+    rows, bad, unsettled_ids = [], 0, []
     for p in sorted((SHOTS / "default").glob("*.png")):
         sid = p.stem
-        if sid.startswith(SKIP_PREFIXES) or sid in SKIP:
+        if kind(sid) != "screen":
             continue
         ax = SHOTS / "ax5" / f"{sid}.png"
         if not ax.exists():
             continue
-        d, x = density(p), density(ax)
+        (d, why_d), (x, why_x) = reading(p), reading(ax)
+        if why_d or why_x:
+            unsettled_ids.append(sid)
+            continue
         ratio = x / d if d else float("inf")
         over = ratio > LIMIT
         bad += over
         rows.append((sid, d, x, ratio, over))
 
+    if not rows:
+        print(f"no screen measured at both sizes in {SHOTS}")
+        if unsettled_ids:
+            print(f"{len(unsettled_ids)} UNSETTLED — re-shoot: {','.join(unsettled_ids)}")
+        return 1
     rows.sort(key=lambda r: -r[3])
     w = max(len(r[0]) for r in rows) + 1
     print(f"{'screen':{w}} {'default':>8} {'AX5':>8} {'ratio':>7}")
@@ -93,7 +112,10 @@ def main():
     print(f"\nmean {mean_d*100:.1f}% -> {mean_x*100:.1f}%  ({mean_x/mean_d:.2f}x)")
     print(f"type ceiling {CEILING_SCALE:.2f}x  ->  same content predicts {LIMIT:.2f}x")
     print(f"{bad} of {len(rows)} screens denser than the ceiling accounts for")
-    return bad
+    if unsettled_ids:
+        print(f"{len(unsettled_ids)} not measured, a frame UNSETTLED — re-shoot: "
+              f"{','.join(unsettled_ids)}")
+    return bad + len(unsettled_ids)
 
 
 if __name__ == "__main__":

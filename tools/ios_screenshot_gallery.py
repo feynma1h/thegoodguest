@@ -4,9 +4,20 @@
     python3 tools/ios_screenshot_gallery.py /tmp/shots      # photograph
     python3 tools/ios_layout_audit.py /tmp/shots/default    # measure
 
+    python3 tools/ios_screenshot_gallery.py /tmp/shots --udid <sim> --settle 3
+
 The catalogue is parsed out of ScreenGallery.swift rather than duplicated here,
-so a state added there is photographed without editing this file. The UDID below
-is the operator's booted simulator; change it or boot that device.
+so a state added there is photographed without editing this file. The default
+UDID below is the operator's booted simulator; `--udid` points it at any other
+booted one, of any size — the audit reads the frame size from each image.
+
+`--settle` adds seconds to the wait of every entry that does not name its own
+`delay`. A freshly created simulator draws slowly — for its first ten minutes
+or so it is also analysing its photo library (`mediaanalysisd`, several cores)
+— and a frame taken on the usual wait there comes out blank; so does one taken
+while a build runs on the same machine. An entry that names a delay is a MOMENT
+in a timeline, not a settle, and is left alone: three seconds added to the
+splash's beats photographs the empty ground after the splash has finished.
 
 THREE THINGS THIS HAS TO GET RIGHT, each of which produced a wrong contact
 sheet before it was handled:
@@ -27,6 +38,7 @@ sheet before it was handled:
   settle between shots is what keeps a long pass from dying partway; the same
   pacing fixed `test-without-building` runs crashing with signal kill.
 """
+import argparse
 import json
 import re
 import subprocess
@@ -37,7 +49,8 @@ from pathlib import Path
 UDID = "84D7059A-C756-4DE6-B3BD-4C88A38D16DB"
 BUNDLE = "com.thegoodguest.TheGoodGuest"
 GALLERY = Path("ios/TheGoodGuest/TheGoodGuest/Support/ScreenGallery.swift")
-OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/rs-shots")
+OUT = Path("/tmp/rs-shots")
+SETTLE = 0.0
 
 SIZES = [("default", "large"),
          ("ax5", "accessibility-extra-extra-extra-large")]
@@ -107,6 +120,7 @@ def catalogue():
         for k in ("title", "note", "group"):
             if e[k]:
                 e[k] = e[k].replace('\\"', '"').replace("\\\\", "\\")
+        e["moment"] = e["delay"] is not None
         e["delay"] = float(e["delay"]) if e["delay"] else 2.0
         e["reduceMotion"] = e["reduceMotion"] == "true"
         entries.append(e)
@@ -137,6 +151,17 @@ def shoot(screen_id, dest, delay):
 
 
 def main():
+    global UDID, OUT, SETTLE
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("out", nargs="?", default=str(OUT))
+    ap.add_argument("--udid", default=UDID, help="a booted simulator")
+    ap.add_argument("--settle", type=float, default=SETTLE,
+                    help="seconds added to every entry that names no delay")
+    ap.add_argument("--only", default="",
+                    help="comma-separated ids to re-shoot; the index keeps the rest")
+    args = ap.parse_args()
+    UDID, OUT, SETTLE = args.udid, Path(args.out), args.settle
+
     screens = catalogue()
     if not screens:
         sys.exit("no screens parsed from ScreenGallery.swift")
@@ -144,6 +169,12 @@ def main():
     if len(set(ids)) != len(ids):
         dupes = sorted({i for i in ids if ids.count(i) > 1})
         sys.exit(f"duplicate ids in the catalogue: {dupes}")
+    catalogue_order = {i: n for n, i in enumerate(ids)}
+    if args.only:
+        wanted = set(args.only.split(","))
+        if wanted - set(ids):
+            sys.exit(f"not in the catalogue: {sorted(wanted - set(ids))}")
+        screens = [s for s in screens if s["id"] in wanted]
     still = [s for s in screens if not s["reduceMotion"]]
     reduced = [s for s in screens if s["reduceMotion"]]
     print(f"{len(screens)} states ({len(reduced)} under reduce motion) "
@@ -163,17 +194,29 @@ def main():
             d.mkdir(parents=True, exist_ok=True)
             for s in group:
                 dest = d / f"{s['id']}.png"
-                ok = shoot(s["id"], dest, s["delay"])
+                wait = s["delay"] + (0 if s["moment"] else SETTLE)
+                ok = shoot(s["id"], dest, wait)
                 print(f"  [{label}{'/rm' if rm else ''}] {s['id']:<28} "
-                      f"{s['delay']:>4.1f}s  {'ok' if ok else 'FAILED'}")
+                      f"{wait:>4.1f}s  {'ok' if ok else 'FAILED'}", flush=True)
                 (made if ok else failed).append({**s, "pass": label, "path": str(dest)})
 
     set_type_size("large")
     set_reduce_motion(False)
     sh("xcrun", "simctl", "terminate", UDID, BUNDLE, check=False)
 
-    (OUT / "index.json").write_text(json.dumps(made, indent=1))
-    print(f"\n{len(made)} shots -> {OUT}")
+    index = OUT / "index.json"
+    shot = len(made)
+    if args.only and index.exists():
+        # A re-shoot replaces its own rows and keeps every other one, so the
+        # index still describes the whole pass.
+        redone = {(m["id"], m["pass"]) for m in made}
+        made += [r for r in json.loads(index.read_text())
+                 if (r["id"], r["pass"]) not in redone]
+        passes = [label for label, _ in SIZES]
+        made.sort(key=lambda r: (passes.index(r["pass"]),
+                                 catalogue_order.get(r["id"], len(ids))))
+    index.write_text(json.dumps(made, indent=1))
+    print(f"\n{shot} shots -> {OUT}")
     if failed:
         print(f"{len(failed)} FAILED: {[f['id'] for f in failed]}")
     return 1 if failed else 0
