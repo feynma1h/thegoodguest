@@ -160,13 +160,40 @@ struct AccountSheet: View {
             .padding(.bottom, 8)
     }
 
+    /// The label and the whole ID on one row where they fit side by side.
+    /// Where they don't (the largest text sizes on a 402pt phone or
+    /// narrower), the ID goes on a line of its own under its label instead
+    /// of losing its end, as iOS's own Settings rows do. The one place a
+    /// screen restacks to fit (operator, 2026-11-11): PROJECT.md otherwise
+    /// keeps each screen's layout at every size.
     private var idRow: some View {
-        HStack(spacing: 12) {
-            Text("Account ID")
-                .rsFont(.ui, size: 17)
-                .foregroundStyle(Color.rsInk)
-            Spacer(minLength: 8)
-            if let uid {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                idLabel
+                Spacer(minLength: 8)
+                idValue
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                idLabel
+                idValue
+            }
+            .padding(.vertical, 8)
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var idLabel: some View {
+        Text("Account ID")
+            .rsFont(.ui, size: 17)
+            .foregroundStyle(Color.rsInk)
+    }
+
+    @ViewBuilder
+    private var idValue: some View {
+        if let uid {
+            HStack(spacing: 12) {
                 Text(Self.shortened(uid))
                     .rsFont(.ui, size: 15)
                     .monospacedDigit()
@@ -189,15 +216,12 @@ struct AccountSheet: View {
                 // every phone.
                 .padding(.horizontal, -6)
                 .accessibilityLabel(copied ? "Copied" : "Copy your account ID")
-            } else {
-                Text("Not ready yet")
-                    .rsFont(.ui, size: 15)
-                    .foregroundStyle(Color.rsInk2)
             }
+        } else {
+            Text("Not ready yet")
+                .rsFont(.ui, size: 15)
+                .foregroundStyle(Color.rsInk2)
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 52)
-        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
