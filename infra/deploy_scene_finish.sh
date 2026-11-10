@@ -4,6 +4,7 @@
 # Run from the repo root:
 #     ./infra/deploy_scene_finish.sh               # deploy, straight to 100%
 #     ./infra/deploy_scene_finish.sh --candidate   # hold the revision at 0%, smoke, then flip
+#     CANDIDATE_TAG=<lane> ./infra/deploy_scene_finish.sh --candidate   # your own tag per lane
 #
 # scene-finish is a CPU-only service (decision 0330 and the phase 2 design): it
 # draws the room viewer in headless Chrome with software GL, so it needs no GPU,
@@ -46,6 +47,7 @@ REPO="thegoodguest"
 # Dedicated least-privilege runtime SA, the perception-obj pattern (decision
 # 0090): everything it is granted is enumerated in ensure_runtime_iam below.
 RUNTIME_SA="scene-finish-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+CANDIDATE_TAG="${CANDIDATE_TAG:-candidate}"
 INVOKER_SA="tasks-invoker@${PROJECT_ID}.iam.gserviceaccount.com"
 # The service's own URL: the audience its task routes check (task_auth.py).
 # Cloud Run names a service URL from the service, the project and the region,
@@ -163,7 +165,7 @@ if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
     else
         echo "[deploy] WARNING: ${SERVICE} has no prior revision; --no-traffic cannot be honored."
     fi
-    DEPLOY_FLAGS+=(--tag=candidate)
+    DEPLOY_FLAGS+=(--tag="${CANDIDATE_TAG}")
 fi
 # concurrency=1: a render holds a Chrome and several GB; parallelism comes from
 # more instances (max 12 = one per piece of a typical room), not more requests.
@@ -222,7 +224,8 @@ if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
     echo ""
     echo "Smoke the candidate (platform-gated, so it needs an identity token):"
     echo "  curl -H \"Authorization: Bearer \$(gcloud auth print-identity-token)\" <candidate url>/health"
-    echo "  python3 tools/enqueue_still.py <scene_id> --candidate   # a real still, through the queue"
+    echo "  CANDIDATE_URL=https://${CANDIDATE_TAG}---${SERVICE}-o4dhc34kqq-as.a.run.app \\"
+    echo "    python3 tools/enqueue_still.py <scene_id> --candidate   # a real still, through the queue"
     echo "Then flip traffic:"
     echo "  gcloud run services update-traffic ${SERVICE} --to-latest --region=${REGION} --project=${PROJECT_ID}"
 fi

@@ -7,6 +7,7 @@
 #
 # Run from the repo root:
 #   ./infra/deploy_api_public.sh
+#   CANDIDATE_TAG=<lane> ./infra/deploy_api_public.sh   # your own tag per lane
 #
 # The script is fully idempotent: safe to re-run after a failed deploy or to
 # refresh IAM bindings after a change.
@@ -26,6 +27,10 @@ SERVICE_NAME="api-public"
 REPO="thegoodguest"
 IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE_NAME}:${IMAGE_TAG}"
+
+# The Cloud Run tag the new revision is reachable under before the flip. Each
+# lane uses its own, so two lanes' candidates never take each other's URL.
+CANDIDATE_TAG="${CANDIDATE_TAG:-candidate}"
 
 RUNTIME_SA_NAME="api-public-runtime"
 RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -236,7 +241,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --env-vars-file="infra/api-public.env.yaml" \
     --set-secrets="ANTHROPIC_API_KEY=${ANTHROPIC_SECRET_NAME}:latest" \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
-    ${TRAFFIC_FLAGS[@]+"${TRAFFIC_FLAGS[@]}"} --tag=candidate
+    ${TRAFFIC_FLAGS[@]+"${TRAFFIC_FLAGS[@]}"} --tag="${CANDIDATE_TAG}"
 
 # ── Step 7: Print candidate revision URL ──────────────────────────────────────
 echo ""
@@ -247,10 +252,10 @@ SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" \
 CANDIDATE_URL="$(gcloud run services describe "${SERVICE_NAME}" \
     --region="${REGION}" --project="${PROJECT_ID}" \
     --format='json(status.traffic)' \
-    | jq -r '.status.traffic[] | select(.tag == "candidate") | .url // empty')"
+    | jq -r --arg tag "${CANDIDATE_TAG}" '.status.traffic[] | select(.tag == $tag) | .url // empty')"
 
 if [[ -z "${CANDIDATE_URL}" ]]; then
-    echo "ERROR: could not resolve candidate revision URL from --tag=candidate traffic entry."
+    echo "ERROR: could not resolve candidate revision URL from --tag=${CANDIDATE_TAG} traffic entry."
     echo "Service describe output:"
     gcloud run services describe "${SERVICE_NAME}" \
         --region="${REGION}" --project="${PROJECT_ID}" \
