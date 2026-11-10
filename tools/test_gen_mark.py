@@ -288,15 +288,23 @@ def test_no_surface_sets_the_mark_beside_the_name():
     Checked as a string proximity rather than by reading each layout, because
     the failure mode is someone adding the name back next to an existing mark
     without knowing the rule -- which is exactly what these files used to do.
+
+    Every Swift file in the app is checked, not a list: a hand-kept list named
+    two screens the iOS redesign deleted (0365), and a new screen that draws
+    the mark is covered without anyone remembering to add it.
     """
     name = "The Good Guest"
+    ios_sources = sorted(
+        str(path.relative_to(REPO))
+        for path in (REPO / "ios" / "TheGoodGuest").rglob("*.swift")
+        if "/build/" not in str(path)
+    )
+    drawing = []
     for relative in (
         "web/src/components/Wordmark.tsx",
         "web/src/components/SiteNav.tsx",
         "web/src/app/room/page.tsx",
-        "ios/TheGoodGuest/TheGoodGuest/DesignSystem/Wordmark.swift",
-        "ios/TheGoodGuest/TheGoodGuest/Home/HomeView.swift",
-        "ios/TheGoodGuest/TheGoodGuest/Gating/UnsupportedDeviceView.swift",
+        *ios_sources,
     ):
         text = (REPO / relative).read_text()
         # Strip comments and docstrings, which discuss the rule by name.
@@ -322,6 +330,10 @@ def test_no_surface_sets_the_mark_beside_the_name():
             f"{relative} draws the mark AND renders the name -- see the rule in "
             "web/src/components/Wordmark.tsx"
         )
+        if draws_mark:
+            drawing.append(relative)
+    # Not a vacuous pass: home's navigation bar carries the mark.
+    assert "ios/TheGoodGuest/TheGoodGuest/Home/HomeScreen.swift" in drawing, drawing
 
 
 # ------------------------------------------------------------------ wordmark --
