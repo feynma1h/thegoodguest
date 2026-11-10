@@ -1,21 +1,10 @@
 "use client";
 
 /**
- * Landing — one claim, one image, one action (design §1). The thesis in
- * serif, "Scan your first room" as the action, and — as the only image —
- * a real room measuring itself.
- *
- * THE HERO IS THE REVEAL, NOT A ROOM (decision 0122). What plays here is
- * the first two movements of the reveal choreography against a real
- * capture's GEOMETRY: the measured boundary drawing itself, then the
- * surfaces materializing in place. No object splats — the reasoning, and
- * the ?hero=b taste probe, live in lib/heroRoom.
- *
- * THE COPY AND THE ROOM ARRIVE TOGETHER. Both enter on the same stagger
- * from the page's first frame, so the claim is readable while the
- * boundary is still being traced. Neither waits on the other: a landing
- * page whose words are held behind a renderer reads as slow, however
- * good the beat it is waiting for.
+ * Landing. A first-time visitor gets components/Landing.tsx (decision 0361,
+ * which supersedes 0122's one-screen reveal hero): the pitch told around a
+ * sample room they can turn in their hands. Its words never wait on the
+ * renderer — a page whose claim is held behind WebGL reads as slow.
  *
  * A returning visitor — anyone whose scene list isn't empty — never sees
  * the pitch: the guest greets them and points at their newest room. A
@@ -30,12 +19,11 @@
 import { motion } from "motion/react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
-import HeroRoom from "@/components/HeroRoom";
+import Landing from "@/components/Landing";
 import { PillLink } from "@/components/ui/spring";
 import { GuestLine } from "@/components/ui/voice";
 import { apiMode, getApiClient } from "@/lib/api";
 import type { SceneSummary } from "@/lib/api/types";
-import { heroVariant } from "@/lib/heroRoom";
 import { statusMeta } from "@/lib/status";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -93,11 +81,6 @@ function greetingFor(latest: SceneSummary): {
 
 export default function Home() {
   const [state, setState] = useState<HomeState>({ phase: "deciding" });
-  const variant = useSyncExternalStore(
-    emptySubscribe,
-    () => heroVariant(window.location.search),
-    () => "a" as const,
-  );
 
   // What did last visit's list say? Decides what "deciding" looks like.
   const hasRoomsHint = useSyncExternalStore(
@@ -168,43 +151,5 @@ export default function Home() {
     );
   }
 
-  return (
-    <section className="mx-auto grid max-w-6xl gap-10 px-6 pb-16 pt-14 lg:min-h-[calc(100vh-3.5rem)] lg:grid-cols-[minmax(0,42fr)_minmax(0,58fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-8 lg:pb-8">
-      {/* On one column the room goes first: it is the hero. */}
-      <div className="order-2 flex flex-col justify-center lg:order-1 lg:pr-6">
-        <motion.h1
-          {...enter(0)}
-          className="max-w-2xl text-balance font-serif text-[clamp(2.1rem,3.4vw,2.85rem)] font-normal leading-[1.24] tracking-[-0.01em]"
-        >
-          Every home contains a version of itself its owner has never seen.
-        </motion.h1>
-        <motion.p
-          {...enter(1)}
-          className="mt-6 max-w-[430px] text-pretty text-base leading-relaxed text-ink/70"
-        >
-          Scan a room with your phone. Meet it again on your desk — real, in
-          3D, exactly as you live in it — with a guest who understands it and
-          talks it through with you.
-        </motion.p>
-        <motion.div
-          {...enter(2)}
-          className="mt-9 flex flex-wrap items-center gap-3"
-        >
-          <PillLink href="/new" className="!px-7 !py-3">
-            Scan your first room
-          </PillLink>
-        </motion.div>
-        <motion.p {...enter(3)} className="mt-7 text-xs text-ink/45">
-          No photos generated. No feed. Your rooms are yours.
-        </motion.p>
-      </div>
-
-      {/* Deliberately NOT inside a motion fade: the stage is the page's
-          first frame, arriving WITH the copy rather than instead of it.
-          The room's own arrival is SplatViewer's job. */}
-      <div className="order-1 lg:order-2 lg:my-2">
-        <HeroRoom variant={variant} className="lg:h-full" />
-      </div>
-    </section>
-  );
+  return <Landing />;
 }
