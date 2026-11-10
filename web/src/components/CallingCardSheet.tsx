@@ -47,7 +47,7 @@ import { roomTitle } from "@/lib/voice";
 /** Every user-visible string this feature owns. The artifact's name is the
  * operator's and is still open; change it here and nowhere else. */
 const COPY = {
-  open: "make a card",
+  open: "Make a card",
   heading: "A card for this room",
   /** §9's obligation: the flow says what is about to be visible. At rung 0
    * the honest answer is short, and it includes what a floor plan with true
@@ -289,8 +289,12 @@ export function CallingCardButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="pointer-events-auto cursor-pointer whitespace-nowrap rounded-full border border-ink/15 bg-paper/90 px-3.5 py-1.5 text-xs text-ink/70 transition-colors hover:border-ink/35 hover:text-ink"
+      className="pointer-events-auto inline-flex h-[42px] cursor-pointer items-center gap-2 whitespace-nowrap rounded-full px-4 text-sm font-medium text-on-dusk ring-1 ring-inset ring-on-dusk/20 transition-colors hover:bg-dusk-3"
     >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="M7 15h5" />
+      </svg>
       {COPY.open}
     </button>
   );

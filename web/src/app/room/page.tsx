@@ -27,7 +27,6 @@ import { Suspense, useEffect, useState } from "react";
 
 import SignInPanel from "@/components/SignInPanel";
 import RoomStage from "@/components/RoomStage";
-import { Mark } from "@/components/Wordmark";
 import { PillLink } from "@/components/ui/spring";
 import { DisabledComposer, GuestLine } from "@/components/ui/voice";
 import { getApiClient } from "@/lib/api";
@@ -43,56 +42,61 @@ type Result =
 
 /** Floating chrome shared by every room-page state: the way back, the
  * placeholder wordmark, the room's derived name, and a right-side slot. */
+/** The room's top bar (decision 0361): the way back to the house, then the
+ * room's name in the display face. It carries neither the mark nor the
+ * wordmark — the guest's rail holds the mark, and the name never sits beside
+ * it. `railGap` keeps it clear of the conversation rail on wide screens. */
 function RoomChrome({
   tone,
   title,
   right,
+  railGap = false,
 }: {
   tone: "ink" | "cream";
   title: string;
   right?: React.ReactNode;
+  railGap?: boolean;
 }) {
-  const dim = tone === "cream" ? "text-paper/55 hover:text-paper" : "text-ink/55 hover:text-ink";
+  const dark = tone === "cream";
   return (
-    <header className="pointer-events-none absolute inset-x-0 top-0 z-30 flex h-14 items-center justify-between px-6">
-      <div className="flex items-baseline gap-4">
+    <header
+      className={`pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-4 px-5 py-4 sm:px-7 sm:py-5 ${
+        railGap ? "lg:right-[460px]" : ""
+      }`}
+    >
+      <div className="flex min-w-0 items-center gap-4">
         <Link
           href="/rooms"
-          className={`pointer-events-auto whitespace-nowrap text-xs font-medium transition-colors ${dim}`}
-        >
-          ← your house
-        </Link>
-        <Link
-          href="/"
-          className="pointer-events-auto hidden transition-opacity hover:opacity-70 sm:block"
-        >
-          <Mark height="20px" tone={tone === "cream" ? "reverse" : "ink"} />
-        </Link>
-        <span
-          className={`hidden font-serif text-[15px] italic sm:inline ${
-            tone === "cream" ? "text-paper/85" : "text-ink/85"
+          className={`pointer-events-auto inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium transition-colors ${
+            dark ? "text-on-dusk-2 hover:text-on-dusk" : "text-ink-2 hover:text-ink"
           }`}
         >
-          {title}
-        </span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+          Your house
+        </Link>
+        <span aria-hidden className={`hidden h-[22px] w-px sm:block ${dark ? "bg-on-dusk/15" : "bg-ink/15"}`} />
+        <h1 className={`hidden truncate font-serif text-2xl leading-tight sm:block ${dark ? "text-on-dusk" : "text-ink"}`}>
+          {title.charAt(0).toUpperCase() + title.slice(1)}
+        </h1>
       </div>
       {right && <div className="pointer-events-auto">{right}</div>}
     </header>
   );
 }
 
-/** "as captured · 1:38 pm" — the capture moment is real data; the sun
- * dial only arrives with lighting simulation. Gold = light, never
- * ornament. */
+/** "Captured at 1:38 pm" — the capture moment is real data. The lamplight
+ * dot is light, never ornament. */
 function CapturedChip({ createdAt }: { createdAt: string }) {
   const time = new Date(createdAt).toLocaleTimeString(undefined, {
     hour: "numeric",
     minute: "2-digit",
   });
   return (
-    <span className="flex items-center gap-2 whitespace-nowrap rounded-full border border-ink/15 bg-paper/90 px-3.5 py-1.5 text-xs text-ink/75">
+    <span className="flex items-center gap-2 whitespace-nowrap rounded-full bg-dusk-3 px-3.5 py-2 text-[13px] text-on-dusk-2">
       <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-sun" />
-      as captured · {time}
+      Captured at {time}
     </span>
   );
 }
@@ -280,7 +284,7 @@ function RoomDetail() {
 
   if (scene.status === "ready") {
     return (
-      <div className="relative min-h-dvh bg-[#181715]">
+      <div className="relative min-h-dvh bg-dusk">
         <RoomStage
           key={scene.scene_id}
           sceneId={scene.scene_id}
@@ -291,6 +295,7 @@ function RoomDetail() {
           tone="cream"
           title={roomTitle(scene.created_at)}
           right={<CapturedChip createdAt={scene.created_at} />}
+          railGap
         />
       </div>
     );

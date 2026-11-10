@@ -1408,15 +1408,11 @@ export default function SplatViewer({
         frameless ? "" : "rounded-xl border border-ink/15"
       } ${className ?? ""}`}
       style={{
-        // The stage's atmosphere: warm lamplight dark (the palette's
-        // ambient register — §11's family, dimmed). CSS, not clear-color,
-        // so it can be a gradient.
-        // Finished room: a seamless warm studio grey (the diorama
-        // look), not the dark stage.
-        background:
-          finish && shellFinishEnabled()
-            ? "radial-gradient(120% 95% at 50% 40%, #f1eee9 0%, #e2ddd5 60%, #cfc9c0 100%)"
-            : "radial-gradient(120% 90% at 50% 42%, #36342f 0%, #23221e 55%, #181715 100%)",
+        // The stage's atmosphere: the dusk register of decision 0361, for
+        // the finished room and the scanned one alike, so the room page's
+        // light-on-dark chrome reads over either. CSS, not clear-color, so
+        // it can be a gradient.
+        background: "radial-gradient(120% 95% at 50% 40%, #1a2531 0%, #121b25 55%, #0d141c 100%)",
       }}
     >
       <div ref={containerRef} className="absolute inset-0" />
@@ -1424,12 +1420,7 @@ export default function SplatViewer({
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
-        style={{
-          boxShadow:
-            finish && shellFinishEnabled()
-              ? "inset 0 0 120px 30px rgba(110, 100, 85, 0.16)"
-              : "inset 0 0 110px 32px rgba(18, 12, 6, 0.5)",
-        }}
+        style={{ boxShadow: "inset 0 0 120px 30px rgba(5, 9, 14, 0.45)" }}
       />
       {showLoadingNotice && (
         <Overlay>
