@@ -167,30 +167,28 @@ struct AccountSheet: View {
                 .foregroundStyle(Color.rsInk)
             Spacer(minLength: 8)
             if let uid {
-                // The ID and its icon are one button: the icon alone was a
-                // 32pt target, and iOS asks for 44. Together they are wider
-                // than that, and 44 tall inside the row's 52, so nothing moves.
+                Text(Self.shortened(uid))
+                    .rsFont(.ui, size: 15)
+                    .monospacedDigit()
+                    .foregroundStyle(Color.rsInk2)
+                    .lineLimit(1)
                 Button {
                     UIPasteboard.general.string = uid
                     RSHaptics.fire(.scanTapped)
                     copied = true
                 } label: {
-                    HStack(spacing: 12) {
-                        Text(Self.shortened(uid))
-                            .rsFont(.ui, size: 15)
-                            .monospacedDigit()
-                            .foregroundStyle(Color.rsInk2)
-                            .lineLimit(1)
-                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                            .foregroundStyle(Color.rsInk)
-                            .frame(width: 32, height: 32)
-                    }
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .foregroundStyle(Color.rsInk)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                // A 44pt target, as iOS asks, laid out at the icon's old 32
+                // so the row shares its width as before: the 6pt either side
+                // overhangs. Making the ID and the icon one button instead
+                // gave the label the row's width at AX5 and cut the ID on
+                // every phone.
+                .padding(.horizontal, -6)
                 .accessibilityLabel(copied ? "Copied" : "Copy your account ID")
-                .accessibilityValue(Self.shortened(uid))
             } else {
                 Text("Not ready yet")
                     .rsFont(.ui, size: 15)
