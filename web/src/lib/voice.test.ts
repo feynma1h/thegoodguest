@@ -9,7 +9,9 @@ import { describe, expect, it } from "vitest";
 import {
   arrivalLine,
   countsLine,
-  elapsedPhrase,
+  agoPhrase,
+  capitalize,
+  missingPiecesLine,
   roomTitle,
   settledLine,
   smallCount,
@@ -36,15 +38,39 @@ describe("roomTitle", () => {
   });
 });
 
-describe("elapsedPhrase", () => {
+describe("agoPhrase", () => {
   const t0 = Date.parse("2026-07-20T12:00:00Z");
-  it("speaks minutes and hours without ever going negative", () => {
-    expect(elapsedPhrase("2026-07-20T12:00:30Z", t0)).toBe("moments in"); // clock skew
-    expect(elapsedPhrase("2026-07-20T11:59:30Z", t0)).toBe("moments in");
-    expect(elapsedPhrase("2026-07-20T11:58:59Z", t0)).toBe("a minute in");
-    expect(elapsedPhrase("2026-07-20T11:56:00Z", t0)).toBe("4 minutes in");
-    expect(elapsedPhrase("2026-07-20T10:59:00Z", t0)).toBe("an hour in");
-    expect(elapsedPhrase("2026-07-20T09:00:00Z", t0)).toBe("3 hours in");
+  it("speaks minutes, hours and days without ever going negative", () => {
+    expect(agoPhrase("2026-07-20T12:00:30Z", t0)).toBe("moments ago"); // clock skew
+    expect(agoPhrase("2026-07-20T11:59:30Z", t0)).toBe("moments ago");
+    expect(agoPhrase("2026-07-20T11:58:59Z", t0)).toBe("a minute ago");
+    expect(agoPhrase("2026-07-20T11:56:00Z", t0)).toBe("4 minutes ago");
+    expect(agoPhrase("2026-07-20T10:59:00Z", t0)).toBe("an hour ago");
+    expect(agoPhrase("2026-07-20T09:00:00Z", t0)).toBe("3 hours ago");
+    expect(agoPhrase("2026-07-19T11:00:00Z", t0)).toBe("a day ago");
+    expect(agoPhrase("2026-07-16T12:00:00Z", t0)).toBe("4 days ago");
+  });
+});
+
+describe("capitalize", () => {
+  it("raises the first letter only, so a derived title can open a line", () => {
+    expect(capitalize("the July 12 room")).toBe("The July 12 room");
+    expect(capitalize("")).toBe("");
+  });
+});
+
+describe("missingPiecesLine", () => {
+  it("counts what never arrived in words, and says how to finish", () => {
+    expect(missingPiecesLine(1)).toBe(
+      "One piece of the scan never arrived. Open the app to finish sending it.",
+    );
+    expect(missingPiecesLine(2)).toBe(
+      "Two pieces of the scan never arrived. Open the app to finish sending it.",
+    );
+    // No list on the record: the shortfall is real but uncounted.
+    expect(missingPiecesLine(0)).toBe(
+      "Part of the scan never arrived. Open the app to finish sending it.",
+    );
   });
 });
 

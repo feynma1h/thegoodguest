@@ -87,8 +87,43 @@
   }
 }
 
+/* The guest thinking (three dots, staggered) and an answer arriving (a
+   lamplight caret). Both stand still under reduced motion. */
+@keyframes gg-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.gg-dot {
+  animation: gg-dot 1.4s ease-in-out infinite;
+}
+.gg-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.gg-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes gg-caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.gg-caret {
+  animation: gg-caret 1s steps(1) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .breathe {
+  .breathe,
+  .gg-dot,
+  .gg-caret {
     animation: none;
   }
 }

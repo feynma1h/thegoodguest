@@ -14,9 +14,11 @@
  *
  * It fills the room page's rail (decision 0361): the current exchange above
  * the composer, the person's words in a bubble, the guest's in its italic.
- * Earlier exchanges collapse to
- * stubs labeled with the user's own truncated words, tap-to-expand. No
- * truncation note is ever shown — the record is exactly what was said.
+ * Earlier exchanges fold under one "Two earlier questions" control; open,
+ * they are shown in full — the record is exactly what was said. Thinking
+ * is three breathing dots, an answer arriving carries a lamplight caret,
+ * and a failed turn says what went wrong with the person's words kept in
+ * the composer.
  *
  * Conversation is an enhancement layer: if the initial GET fails
  * (403/404/network), onUnavailable() fires and the room page falls back to
@@ -47,12 +49,12 @@ import {
   splitAtSentenceBoundary,
   type ComposerState,
 } from "@/lib/conversation/reducer";
+import { capitalize, smallCount } from "@/lib/voice";
 
 const FLUSH_MS = 200;
 const CONFIRM_POLL_MS = 4_000;
 const BLOCKED_POLL_MS = 5_000;
 const REST_POLL_MS = 15_000;
-const STUB_CHARS = 44;
 
 /** Quiet, non-voice notes (sans, never italic serif — the guest didn't say
  * these; the interface did). */
@@ -70,9 +72,24 @@ function noteFor(code: string): string {
   return NOTES[code] ?? NOTES.turn_failed;
 }
 
-function stubLabel(text: string): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length <= STUB_CHARS ? oneLine : `${oneLine.slice(0, STUB_CHARS)}…`;
+/** "Two earlier questions": the fold's label, counted in words. */
+function earlierLabel(n: number): string {
+  if (n === 1) return "One earlier question";
+  return `${capitalize(smallCount(n))} earlier questions`;
+}
+
+/** A kept-words note: what went wrong leads, in lamplight; what to do
+ * follows in the plain ink. Interface words, never the guest's italic. */
+function NoteCard({ text }: { text: string }) {
+  const cut = text.indexOf(". ");
+  const lead = cut === -1 ? text : text.slice(0, cut + 1);
+  const rest = cut === -1 ? "" : text.slice(cut + 2);
+  return (
+    <div role="status" className="rounded-[14px] bg-[#1a232e] px-4 py-3.5 text-[14.5px] leading-[1.5] text-on-dusk">
+      <span className="font-semibold text-sun">{lead}</span>
+      {rest && ` ${rest}`}
+    </div>
+  );
 }
 
 function prefersReducedMotion(): boolean {
@@ -101,7 +118,7 @@ export default function Conversation({
 }) {
   const [state, dispatch] = useReducer(composerReducer, COMPOSER_IDLE);
   const [turns, setTurns] = useState<ConversationTurn[] | null>(null);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [showEarlier, setShowEarlier] = useState(false);
   const mounted = useRef(true);
   const stateRef = useRef<ComposerState>(COMPOSER_IDLE);
   // Read at call time so a changing callback identity never re-creates the
@@ -338,35 +355,31 @@ export default function Conversation({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-0 flex-1 flex-col justify-end gap-3 overflow-y-auto px-6 pb-4 pt-2">
-        {/* Earlier exchanges: the user's own words, truncated, tap-to-expand. */}
+        {/* Earlier exchanges fold under one control (decision 0361); open,
+            they are exactly what was said, in full. */}
         {stubs.length > 0 && (
-          <ul className="space-y-1.5">
-            {stubs.map((turn) => (
-              <li key={turn.turn_index}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setExpanded(expanded === turn.turn_index ? null : turn.turn_index)
-                  }
-                  className="w-full cursor-pointer rounded-xl bg-dusk-3/60 px-3.5 py-2 text-left transition-colors hover:bg-dusk-3"
-                >
-                  <span className="block truncate text-[13px] text-on-dusk-2">
-                    {stubLabel(turn.user_text)}
-                  </span>
-                  {expanded === turn.turn_index && (
-                    <span className="mt-2 block border-t border-on-dusk/10 pt-2">
-                      <span className="block text-[13.5px] text-on-dusk">
-                        {turn.user_text}
-                      </span>
-                      <GuestLine tone="cream" className="mt-1.5 text-[15px]">
-                        {turn.assistant_text}
-                      </GuestLine>
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="flex flex-col gap-3">
+            <button
+              type="button"
+              onClick={() => setShowEarlier((v) => !v)}
+              aria-expanded={showEarlier}
+              className="inline-flex h-[34px] cursor-pointer items-center gap-2 self-start rounded-full px-3.5 text-[14px] font-medium text-on-dusk ring-1 ring-inset ring-on-dusk/[0.18] transition-colors hover:bg-dusk-3"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={showEarlier ? "rotate-180" : ""}>
+                <path d="M6 15l6-6 6 6" />
+              </svg>
+              {showEarlier ? "Hide earlier questions" : earlierLabel(stubs.length)}
+            </button>
+            {showEarlier &&
+              stubs.map((turn) => (
+                <div key={turn.turn_index} className="flex flex-col gap-3 opacity-80">
+                  <p className={you}>{turn.user_text}</p>
+                  <GuestLine tone="cream" className="text-[17px] leading-[1.45]">
+                    {turn.assistant_text}
+                  </GuestLine>
+                </div>
+              ))}
+          </div>
         )}
 
         {/* The current exchange. Entrance-only springs — exit choreography
@@ -386,14 +399,17 @@ export default function Conversation({
               {state.phase === "streaming" && state.partial ? (
                 <GuestLine tone="cream" className={guest}>
                   {state.partial}
+                  <span aria-hidden className="gg-caret ml-0.5 inline-block h-[1.05em] w-0.5 bg-sun align-[-2px]" />
                 </GuestLine>
               ) : state.phase === "confirming" ? (
                 <p className="text-[13.5px] text-on-dusk-2">
                   Making sure that reached the room…
                 </p>
               ) : (
-                <p className="text-[19px] text-on-dusk-2" aria-label="the guest is thinking">
-                  <span className="breathe inline-block">…</span>
+                <p role="status" aria-label="The guest is thinking" className="flex h-[27px] items-center gap-1.5">
+                  {[0, 1, 2].map((i) => (
+                    <span key={i} aria-hidden className="gg-dot h-[7px] w-[7px] rounded-full bg-on-dusk" />
+                  ))}
                 </p>
               )}
             </>
@@ -404,9 +420,7 @@ export default function Conversation({
                   {latest.assistant_text}
                 </GuestLine>
               )}
-              <p className="rounded-[14px] bg-dusk-3/70 px-4 py-3 text-[14px] leading-[1.5] text-on-dusk">
-                {noteFor(state.code)}
-              </p>
+              <NoteCard text={noteFor(state.code)} />
             </>
           ) : state.phase === "rested" ? (
             state.guestLine ? (
@@ -477,7 +491,7 @@ export default function Conversation({
           <button
             type="submit"
             disabled={composerDisabled || !draft.trim()}
-            aria-label={state.phase === "reoffer" ? "send again" : "send"}
+            aria-label={state.phase === "reoffer" ? "Send again" : "Send"}
             className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-full bg-on-dusk text-dusk transition-colors hover:bg-white disabled:cursor-default disabled:bg-on-dusk/15 disabled:text-on-dusk/40"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

@@ -17,7 +17,7 @@
  */
 
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CallingCardSheet, {
   CallingCardButton,
@@ -47,6 +47,7 @@ import {
   orphanNote,
   type ProposedScene,
 } from "@/lib/designSpec";
+import { measureRoom, type RoomMeasure } from "@/lib/card/measure";
 import { hasSeenReveal, markRevealSeen } from "@/lib/seen";
 import { statusMeta } from "@/lib/status";
 import {
@@ -92,10 +93,14 @@ export default function RoomStage({
   sceneId,
   status,
   createdAt,
+  onMeasure,
 }: {
   sceneId: string;
   status: string;
   createdAt: string;
+  /** The room's measurement, once its shell has arrived (null when there
+   * is no measured floor) — the top bar prints its floor area. */
+  onMeasure?: (measure: RoomMeasure | null) => void;
 }) {
   const [result, setResult] = useState<AssetsResult | null>(null);
   // Reading localStorage in the initializer is safe here: this component
@@ -180,6 +185,17 @@ export default function RoomStage({
       cancelled = true;
     };
   }, [sceneId]);
+
+  // The measured floor, for the top bar. Read at call time, so a new
+  // callback identity never re-measures.
+  const onMeasureRef = useRef(onMeasure);
+  useEffect(() => {
+    onMeasureRef.current = onMeasure;
+  });
+  useEffect(() => {
+    if (assets.phase !== "ready") return;
+    onMeasureRef.current?.(measureRoom(assets.shellDoc, assets.manifest));
+  }, [assets]);
 
   // --- The proposed arrangement (decision 0131). The spec is a SIBLING
   // document, so it is fetched separately and overlaid; a room nobody has
@@ -471,17 +487,20 @@ export default function RoomStage({
           <motion.div
             initial={false}
             exit={{ opacity: 0, transition: { duration: 0.5 } }}
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-ink px-6 text-center"
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-dusk px-6 text-center"
           >
-            <GuestLine tone="cream" className="max-w-md text-[19px]">
+            <GuestLine
+              tone="cream"
+              className="max-w-[620px] text-[clamp(26px,2.8vw,34px)] leading-[1.3] tracking-[-0.01em]"
+            >
               It&rsquo;s ready. Come in when you have a minute — this is worth
               your full attention.
             </GuestLine>
-            <PillButton variant="cream" onClick={comeIn} className="mt-9">
-              come in
+            <PillButton variant="cream" size="lg" onClick={comeIn} className="mt-9 px-7">
+              Come in
             </PillButton>
-            <p className="mt-5 text-xs text-paper/45">
-              in your own time — it holds still until you&rsquo;re ready
+            <p className="mt-[22px] text-[14.5px] text-on-dusk-2">
+              It holds still until you&rsquo;re ready.
             </p>
           </motion.div>
         )}

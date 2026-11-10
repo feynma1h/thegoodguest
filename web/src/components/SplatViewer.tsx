@@ -1424,19 +1424,19 @@ export default function SplatViewer({
       />
       {showLoadingNotice && (
         <Overlay>
-          <p className="animate-pulse text-sm text-paper/60">Assembling the room…</p>
+          <p className="breathe text-[15px] text-on-dusk-2">Assembling the room…</p>
         </Overlay>
       )}
       {phase === "empty" && (
         <Overlay>
-          <p className="text-sm text-paper/45">Nothing to render yet.</p>
+          <p className="text-[15px] text-on-dusk-2">Nothing to show here yet.</p>
         </Overlay>
       )}
       {phase === "error" && (
         <Overlay>
           <div className="max-w-sm text-center">
-            <p className="text-sm font-medium text-[#e0a9a1]">Viewer error</p>
-            <p className="mt-1 break-words text-xs text-paper/50">{error}</p>
+            <p className="text-[15px] font-semibold text-sun">The room couldn&rsquo;t be drawn</p>
+            <p className="mt-1.5 break-words text-[13px] text-on-dusk-2">{error}</p>
           </div>
         </Overlay>
       )}

@@ -21,9 +21,13 @@ export function GuestLine({
   tone?: "ink" | "cream";
   className?: string;
 }) {
+  // A caller's own line height replaces the default rather than racing it:
+  // two leading utilities on one element resolve by stylesheet order, not
+  // by the order they are written in.
+  const leading = /(^|\s)leading-/.test(className ?? "") ? "" : "leading-relaxed";
   return (
     <p
-      className={`font-serif italic leading-relaxed ${
+      className={`font-serif italic ${leading} ${
         tone === "cream" ? "text-on-dusk" : "text-ink"
       } ${className ?? ""}`}
     >
@@ -49,29 +53,5 @@ export function Eyebrow({
     >
       {children}
     </p>
-  );
-}
-
-/**
- * The composer's silhouette, shipped disabled and saying so. Stage-1
- * conversation has no backend yet; this reserves the composer's place in
- * the layout (design §3/§5) without pretending to listen — the resting
- * text explains itself, and nothing here is focusable or submittable.
- */
-export function DisabledComposer({ className }: { className?: string }) {
-  return (
-    <div
-      className={`flex items-center gap-3 rounded-full bg-white/95 py-3 pl-5 pr-3 opacity-80 shadow-float ${className ?? ""}`}
-    >
-      <span className="min-w-0 flex-1 truncate text-sm text-ink/40">
-        The guest hasn&rsquo;t arrived yet — this is where you&rsquo;ll talk.
-      </span>
-      <span
-        aria-hidden
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink/10 font-semibold text-ink/30"
-      >
-        ↑
-      </span>
-    </div>
   );
 }

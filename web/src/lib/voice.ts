@@ -39,15 +39,36 @@ export function minutesSince(sinceIso: string, now: number = Date.now()): number
   return Math.max(0, Math.floor((now - new Date(sinceIso).getTime()) / 60_000));
 }
 
-/** Elapsed time in the guest's register: "moments ago", "4 minutes in",
- * "an hour in". Used while a room is being rebuilt. */
-export function elapsedPhrase(sinceIso: string, now: number = Date.now()): string {
+/** How long since something happened, in plain words: "moments ago",
+ * "4 minutes ago", "an hour ago", "3 days ago". A room in flight says it
+ * arrived this long ago — the one moment its record actually holds. */
+export function agoPhrase(sinceIso: string, now: number = Date.now()): string {
   const minutes = minutesSince(sinceIso, now);
-  if (minutes < 1) return "moments in";
-  if (minutes === 1) return "a minute in";
-  if (minutes < 60) return `${minutes} minutes in`;
+  if (minutes < 1) return "moments ago";
+  if (minutes === 1) return "a minute ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
   const hours = Math.floor(minutes / 60);
-  return hours === 1 ? "an hour in" : `${hours} hours in`;
+  if (hours < 24) return hours === 1 ? "an hour ago" : `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "a day ago" : `${days} days ago`;
+}
+
+/** The first letter raised, so a derived title ("the July 12 room") can
+ * open a line or head a card. */
+export function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A scan that partly arrived: how much is missing, counted in words, and
+ * the one thing that finishes it (reopening the iOS app resumes uploads). */
+export function missingPiecesLine(missing: number): string {
+  const what =
+    missing <= 0
+      ? "Part of the scan"
+      : missing === 1
+        ? "One piece of the scan"
+        : `${capitalize(smallCount(missing))} pieces of the scan`;
+  return `${what} never arrived. Open the app to finish sending it.`;
 }
 
 /** The wait, narrated as arrival — never as pipeline states (design §3).
