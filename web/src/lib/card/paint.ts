@@ -32,11 +32,14 @@ export interface PaintFonts {
 }
 
 /** Last-resort stacks, used only if the CSS variables are missing (a bare
- * canvas in a test page, say). The real families come from next/font. */
+ * canvas in a test page, say). The real families come from next/font.
+ * Every name must be valid in a canvas font shorthand: an unquoted family
+ * with a token starting with a digit invalidates the whole string, and a
+ * canvas ignores an invalid font and paints at its 10px default. */
 const FALLBACK: PaintFonts = {
-  serif: "Source Serif 4, Georgia, serif",
-  sans: "Instrument Sans, system-ui, sans-serif",
-  mono: "IBM Plex Mono, ui-monospace, monospace",
+  serif: "Newsreader, Georgia, serif",
+  sans: "Albert Sans, system-ui, sans-serif",
+  mono: "JetBrains Mono, ui-monospace, monospace",
 };
 
 /**
@@ -56,9 +59,10 @@ export function resolveFonts(doc: Document): PaintFonts {
       return value.length > 0 ? value : fallback;
     };
     return {
-      serif: pick("--font-source-serif", FALLBACK.serif),
-      sans: pick("--font-instrument-sans", FALLBACK.sans),
-      mono: pick("--font-plex-mono", FALLBACK.mono),
+      // The variables app/layout.tsx sets (decision 0361).
+      serif: pick("--font-newsreader", FALLBACK.serif),
+      sans: pick("--font-albert-sans", FALLBACK.sans),
+      mono: pick("--font-jetbrains-mono", FALLBACK.mono),
     };
   } catch {
     return FALLBACK;

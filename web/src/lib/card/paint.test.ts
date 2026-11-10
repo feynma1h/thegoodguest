@@ -141,18 +141,36 @@ describe("paintCard", () => {
     expect(fonts.mono).toMatch(/monospace/);
   });
 
-  it("reads next/font's hashed families off the document", () => {
+  it("keeps every fallback a valid canvas font", () => {
+    // An unquoted family with a token that starts with a digit ("Source
+    // Serif 4") makes the whole font shorthand invalid, and a canvas
+    // silently ignores an invalid font and paints at its 10px default.
+    const fonts = resolveFonts({ body: {}, documentElement: {} } as unknown as Document);
+    for (const family of [fonts.serif, fonts.sans, fonts.mono]) {
+      for (const name of family.split(",")) {
+        const trimmed = name.trim();
+        if (/^["']/.test(trimmed)) continue;
+        expect(trimmed.split(/\s+/).every((token) => !/^\d/.test(token))).toBe(true);
+      }
+    }
+  });
+
+  it("reads the site's own families off the document (decision 0361)", () => {
     const style = {
       getPropertyValue: (name: string) =>
         ({
-          "--font-source-serif": "__Source_Serif_4_abc123",
-          "--font-instrument-sans": "__Instrument_Sans_abc123",
-          "--font-plex-mono": "__IBM_Plex_Mono_abc123",
+          "--font-newsreader": "__Newsreader_abc123",
+          "--font-albert-sans": "__Albert_Sans_abc123",
+          "--font-jetbrains-mono": "__JetBrains_Mono_abc123",
         })[name] ?? "",
     };
     vi.stubGlobal("getComputedStyle", () => style);
     const fonts = resolveFonts({ body: {} } as unknown as Document);
-    expect(fonts.mono).toBe("__IBM_Plex_Mono_abc123");
+    expect(fonts).toEqual({
+      serif: "__Newsreader_abc123",
+      sans: "__Albert_Sans_abc123",
+      mono: "__JetBrains_Mono_abc123",
+    });
     vi.unstubAllGlobals();
   });
 });
