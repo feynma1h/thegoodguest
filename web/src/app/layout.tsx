@@ -59,10 +59,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${albertSans.variable} ${newsreader.variable} ${jetbrainsMono.variable} min-h-screen bg-paper font-sans text-ink antialiased`}
+        className={`${albertSans.variable} ${newsreader.variable} ${jetbrainsMono.variable} flex min-h-dvh flex-col bg-paper font-sans text-ink antialiased`}
       >
         <SiteNav />
-        <main>{children}</main>
+        {/* flex-1: a short page still puts the footer at the window's foot. */}
+        <main className="flex-1">{children}</main>
         <SiteFooter />
       </body>
     </html>

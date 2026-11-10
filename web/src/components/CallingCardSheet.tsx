@@ -21,16 +21,14 @@
  * this feature's equivalent of the one-file seam in components/Wordmark.tsx.
  */
 
-import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
-import { PillButton, SPRING } from "@/components/ui/spring";
-import { Eyebrow, GuestLine } from "@/components/ui/voice";
+import { CloseButton, Dialog, SheetTitle } from "@/components/ui/Dialog";
+import { PillButton } from "@/components/ui/spring";
+import { GuestLine } from "@/components/ui/voice";
 import type { SceneManifest, ShellDoc } from "@/lib/api/types";
 import { cardEligibility, type CardRefusal } from "@/lib/card/eligibility";
 import {
-  CARD_FRAMES,
   layoutCard,
   type CardLayout,
   type CardVariant,
@@ -54,9 +52,9 @@ const COPY = {
    * dimensions does disclose (§3.2). */
   discloses:
     "It carries the room's shape and three of its measurements. No photographs, none of your things, and nothing that points back to your account — a floor plan and its dimensions, and that is all.",
-  download: "Download",
-  frameLandscape: "wide",
-  frameSquare: "square",
+  download: "Download the card",
+  frameLandscape: "Wide",
+  frameSquare: "Square",
 } as const;
 
 /** The refusals, in the guest's register: the real reason and the real
@@ -115,7 +113,7 @@ function CardCanvas({
 
   return (
     <div
-      className="relative w-full overflow-hidden rounded-xl border border-ink/10 shadow-lift"
+      className="relative w-full overflow-hidden rounded-[14px] ring-1 ring-inset ring-ink/[0.06]"
       style={{ aspectRatio: `${layout.width} / ${layout.height}` }}
     >
       {!painted && <div className="hatch breathe absolute inset-0" aria-hidden />}
@@ -153,15 +151,6 @@ export default function CallingCardSheet({
     canvasRef.current = canvas;
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
   const gate = cardEligibility({ status, created_at: createdAt });
   const title = roomTitle(createdAt);
   const measure = gate.eligible ? measureRoom(shell, manifest) : null;
@@ -185,101 +174,63 @@ export default function CallingCardSheet({
     }, "image/png");
   };
 
-  if (typeof document === "undefined") return null;
-
-  return createPortal(
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-6 backdrop-blur-sm"
-          onClick={onClose}
-          role="dialog"
-          aria-modal="true"
-          aria-label={COPY.heading}
-        >
-          <motion.div
-            initial={{ opacity: 0, y: 24, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.98 }}
-            transition={SPRING}
-            className="relative w-full max-w-3xl rounded-3xl border border-ink/15 bg-paper p-8 shadow-deep sm:p-10"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="absolute right-5 top-5 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-ink/50 transition-colors hover:bg-ink/[0.06] hover:text-ink"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-                <path
-                  d="M2 2l10 10M12 2L2 12"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-
-            {layout ? (
-              <>
-                <Eyebrow>{COPY.heading}</Eyebrow>
-                <div className="mt-4">
-                  <CardCanvas layout={layout} onReady={onReady} />
-                </div>
-                <p className="mt-5 max-w-xl text-[12.5px] leading-relaxed text-ink/60">
-                  {COPY.discloses}
-                </p>
-                <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
-                  <div
-                    className="flex items-center gap-1.5"
-                    role="group"
-                    aria-label="Card shape"
-                  >
-                    {(
-                      [
-                        ["landscape", COPY.frameLandscape],
-                        ["square", COPY.frameSquare],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setVariant(key)}
-                        aria-pressed={variant === key}
-                        className={`cursor-pointer rounded-full border px-3.5 py-1.5 text-[11.5px] transition-colors ${
-                          variant === key
-                            ? "border-ink/45 text-ink"
-                            : "border-ink/15 text-ink/50 hover:border-ink/30 hover:text-ink/75"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    <span className="ml-2 font-mono text-[10.5px] text-ink/35">
-                      {CARD_FRAMES[variant].w * EXPORT_SCALE}×
-                      {CARD_FRAMES[variant].h * EXPORT_SCALE}
-                    </span>
-                  </div>
-                  <PillButton onClick={download}>{COPY.download}</PillButton>
-                </div>
-              </>
-            ) : (
-              <div className="max-w-lg py-4">
-                <GuestLine className="text-[16px]">
-                  {gate.eligible ? NO_CONTOUR : refusalLine(gate.reason)}
-                </GuestLine>
-              </div>
-            )}
-          </motion.div>
-        </motion.div>
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      label={COPY.heading}
+      className={layout ? "max-w-[860px] p-6 sm:p-8" : "max-w-[520px] p-8"}
+    >
+      {layout ? (
+        <div className="grid items-center gap-8 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+          <CardCanvas layout={layout} onReady={onReady} />
+          <div>
+            <SheetTitle>{COPY.heading}</SheetTitle>
+            <p className="mt-3.5 text-[15.5px] leading-[1.55] text-ink-2">{COPY.discloses}</p>
+            <div className="mt-5 flex items-center gap-1.5" role="group" aria-label="Card shape">
+              {(
+                [
+                  ["landscape", COPY.frameLandscape],
+                  ["square", COPY.frameSquare],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setVariant(key)}
+                  aria-pressed={variant === key}
+                  className={`h-9 cursor-pointer rounded-full px-4 text-[14px] font-medium transition-colors ${
+                    variant === key
+                      ? "bg-parchment text-ink"
+                      : "text-ink-2 hover:bg-paper hover:text-ink"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-6 flex flex-wrap gap-2.5">
+              <PillButton onClick={download} className="h-12 px-6 text-[15px]">
+                {COPY.download}
+              </PillButton>
+              <PillButton variant="ghost" onClick={onClose} className="h-12 px-6 text-[15px]">
+                Close
+              </PillButton>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start justify-between gap-4">
+            <SheetTitle>{COPY.heading}</SheetTitle>
+            <CloseButton onClick={onClose} />
+          </div>
+          <GuestLine className="mt-4 text-[18px] leading-[1.5]">
+            {gate.eligible ? NO_CONTOUR : refusalLine(gate.reason)}
+          </GuestLine>
+        </>
       )}
-    </AnimatePresence>,
-    document.body,
+    </Dialog>
   );
 }
 

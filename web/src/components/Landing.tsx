@@ -15,6 +15,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useRef, useState } from "react";
 
+import { usePitchPresence } from "@/components/pitchPresence";
 import SampleRoom, { type SampleRoomHandle } from "@/components/SampleRoom";
 import { VIEW_COUNT } from "@/components/sampleRoomScene";
 import { Mark } from "@/components/Wordmark";
@@ -364,6 +365,7 @@ function Dusk() {
 }
 
 export default function Landing() {
+  usePitchPresence();
   return (
     <>
       <Hero />

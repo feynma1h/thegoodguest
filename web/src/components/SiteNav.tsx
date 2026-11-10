@@ -21,6 +21,8 @@ import { usePathname } from "next/navigation";
 
 import AccountMenu from "@/components/AccountMenu";
 import NewRoomSheet, { openNewRoomSheet } from "@/components/NewRoomSheet";
+import { usePitchShowing } from "@/components/pitchPresence";
+import { useAccount } from "@/components/useAccount";
 import { Wordmark } from "@/components/Wordmark";
 import { PillButton } from "@/components/ui/spring";
 
@@ -32,9 +34,13 @@ const LANDING_ANCHORS = [
 
 export default function SiteNav() {
   const pathname = usePathname();
+  const account = useAccount();
+  const pitchShowing = usePitchShowing();
   if (pathname === "/room") return null;
   const inHouse = pathname === "/rooms";
-  const onLanding = pathname === "/";
+  // The section links point into the pitch, so a returning visitor's
+  // greeting on "/" goes without them.
+  const onLanding = pathname === "/" && pitchShowing;
 
   return (
     <header className="sticky top-0 z-20 bg-paper/85 backdrop-blur-xl backdrop-saturate-150">
@@ -59,19 +65,32 @@ export default function SiteNav() {
           </div>
         )}
         <div className="flex items-center gap-5">
-          <Link
-            href="/rooms"
-            aria-current={inHouse ? "page" : undefined}
-            className={`hidden text-[15px] font-medium transition-colors hover:text-ink sm:block ${
-              inHouse ? "text-ink" : "text-ink-2"
-            }`}
+          {/* Nobody signed in: the house is where signing in happens, so
+              the one link says so. Nothing shows while Firebase restores a
+              session — a signed-in visitor must never see "Sign in" flash. */}
+          {account.phase !== "checking" && (
+            <Link
+              href="/rooms"
+              aria-current={inHouse ? "page" : undefined}
+              className={`text-[15px] font-medium transition-colors hover:text-ink ${
+                account.phase === "signedOut" ? "block" : "hidden sm:block"
+              } ${inHouse ? "text-ink" : "text-ink-2"}`}
+            >
+              {account.phase === "signedOut" ? "Sign in" : "Your house"}
+            </Link>
+          )}
+          {/* A phone has room for the wordmark at its legible floor and one
+              control beside it, so the scan pill steps back there; every
+              page and the footer still offer it. */}
+          <PillButton
+            onClick={openNewRoomSheet}
+            className="!h-10 !px-[18px] !py-0 !text-[14.5px] max-sm:!hidden"
           >
-            Your house
-          </Link>
-          <PillButton onClick={openNewRoomSheet} className="!px-[18px] !py-2.5 !text-[14.5px]">
             Scan a room
           </PillButton>
-          <AccountMenu />
+          {(account.phase === "signedIn" || account.phase === "demo") && (
+            <AccountMenu account={account} />
+          )}
         </div>
       </nav>
       <NewRoomSheet />
