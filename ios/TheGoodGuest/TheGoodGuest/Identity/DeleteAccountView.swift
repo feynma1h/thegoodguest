@@ -140,6 +140,11 @@ struct DeleteAccountView: View {
                     .buttonStyle(RSPrimaryButtonStyle())
                     .disabled(!canAct)
                     .opacity(canAct ? 1 : 0.4)
+                if !canAct {
+                    // A grey button with no reason reads as broken. These are
+                    // the account sheet's words for the same state.
+                    RSBarCaption("Your account ID isn't ready yet.")
+                }
             }
             closingLine
         }
