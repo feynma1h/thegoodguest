@@ -10,7 +10,7 @@
 /// classifiers would be two places for the conflict case to rot — the same
 /// argument decision 0094 made for the web's single `signInAsReader` body.
 ///
-/// Read by: AuthManager (link core), SignInSheet (classifying provider-flow
+/// Read by: AuthManager (link core), AccountSheet (classifying provider-flow
 ///          errors thrown before the link stage), AuthLinkingTests (pins).
 
 import AuthenticationServices
@@ -46,8 +46,8 @@ nonisolated struct LinkedProviders: Equatable {
     let apple: Bool
     let google: Bool
 
-    /// Linked to anything real — the "signed in" bit surfaces like ProfileView
-    /// and DoorwayView read. Anonymous users carry no providerData, so an
+    /// Linked to anything real — the "signed in" bit surfaces like AccountSheet
+    /// and the ready screen read. Anonymous users carry no providerData, so an
     /// empty list is the anonymous state.
     var any: Bool { apple || google }
 

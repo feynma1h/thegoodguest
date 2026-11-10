@@ -1,7 +1,7 @@
 /// What the deletion screen says, in each state it can be in, as a pure
 /// function.
 ///
-/// Same discipline as `HomeLine`, `Contents` and `SurfacePlacement`: the words
+/// Same discipline as `RoomStatusCopy`, `RoomCards` and `SurfacePlacement`: the words
 /// are a table so they can be read side by side and pinned as one, rather than
 /// spread through a SwiftUI body where a state's copy is only visible to
 /// whoever renders that state.
@@ -123,7 +123,7 @@ nonisolated enum DeleteAccountWording {
                 body: doneBody(counts, revocation),
                 primary: "Start again",
                 requiresConfirmation: false,
-                closing: "This device is a stranger now",
+                closing: "This iPhone has no account now",
                 dismissable: false
             )
 
@@ -224,7 +224,7 @@ nonisolated enum DeleteAccountWording {
             + "was left half-deleted."
         switch error {
         case .serverError:
-            return "I couldn't reach the desk, or it couldn't finish.\n\n" + intact
+            return "I couldn't reach the server, or it couldn't finish.\n\n" + intact
         case .unauthorized:
             return "I couldn't prove this device is you, so I didn't ask for "
                 + "anything to be removed.\n\n" + intact
@@ -234,7 +234,7 @@ nonisolated enum DeleteAccountWording {
             // A client-side or contract fault. The user cannot act on the
             // distinction, so it is not drawn for them — but it is not
             // disguised as a network problem either.
-            return "Something didn't line up between this app and the desk.\n\n"
+            return "Something didn't line up between this app and the server.\n\n"
                 + intact
         }
     }

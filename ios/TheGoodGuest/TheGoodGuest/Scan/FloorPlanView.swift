@@ -25,6 +25,10 @@ import simd
 
 // MARK: - The canvas
 
+/// How the plan is inked: lamplight on dusk while it draws itself, ink on a
+/// light inset once it is the room you got.
+enum PlanStyle { case lamp, ink }
+
 struct FloorPlanCanvas: View {
     var snapshot: FloorPlanSnapshot
     var camera: FloorPlanCamera? = nil
@@ -33,9 +37,15 @@ struct FloorPlanCanvas: View {
     /// Freezes the animation clock (tracking lost); the live wrapper also dims.
     var paused: Bool = false
     /// The surface behind the plan — door/window gaps are painted in it.
-    var backdrop: Color = .rsCaptureBase
+    var backdrop: Color = .rsDusk
     /// Fit padding inside the canvas, in points.
     var padding: CGFloat = 24
+    /// Lamplight on dusk (live) or ink on a light inset (review).
+    var style: PlanStyle = .lamp
+    /// The room's overall size as terracotta measurement annotations, along
+    /// the top and the right of the walls. Review only: the live plan is
+    /// still growing, and a size drawn mid-walk would be a guess.
+    var showsDimensions: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -74,6 +84,8 @@ struct FloorPlanCanvas: View {
 
     private func draw(_ context: inout GraphicsContext, size: CGSize, now: Date) {
         let instant = !animated || reduceMotion
+        let ink = style == .ink
+        let line: Color = ink ? .rsInk : .rsLamp
 
         // 1. Grid heading, smoothed shortest-arc mod 90°.
         let targetGrid = FloorPlanMath.gridHeading(walls: snapshot.walls)
@@ -110,8 +122,8 @@ struct FloorPlanCanvas: View {
             var path = Path()
             path.addLines(snapshot.floorPolygon.map(at))
             path.closeSubpath()
-            context.fill(path, with: .color(Color.rsGold.opacity(0.055 * alpha)))
-            context.stroke(path, with: .color(Color.rsGold.opacity(0.22 * alpha)),
+            context.fill(path, with: .color(ink ? Color.rsSurface.opacity(alpha) : Color.rsLamp.opacity(0.055 * alpha)))
+            context.stroke(path, with: .color(line.opacity(0.22 * alpha)),
                            style: StrokeStyle(lineWidth: 0.8))
         }
 
@@ -125,11 +137,11 @@ struct FloorPlanCanvas: View {
             var path = Path()
             path.move(to: lerp(mid, s, p))
             path.addLine(to: lerp(mid, e, p))
-            context.stroke(path, with: .color(Color.rsGoldLight.opacity(0.85)),
-                           style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            context.stroke(path, with: .color(line.opacity(ink ? 1 : 0.85)),
+                           style: StrokeStyle(lineWidth: ink ? 2.2 : 1.6, lineCap: .round))
             if p > 0.97 {
-                dot(&context, at: s, radius: 1.8, color: Color.rsGold.opacity(0.55))
-                dot(&context, at: e, radius: 1.8, color: Color.rsGold.opacity(0.55))
+                dot(&context, at: s, radius: ink ? 1.4 : 1.8, color: line.opacity(0.55))
+                dot(&context, at: e, radius: ink ? 1.4 : 1.8, color: line.opacity(0.55))
             }
         }
 
@@ -146,20 +158,21 @@ struct FloorPlanCanvas: View {
             switch cut.kind {
             case .door:
                 // Jamb dots at both ends of the gap.
-                dot(&context, at: s, radius: 1.6, color: Color.rsGoldLight.opacity(0.8 * alpha))
-                dot(&context, at: e, radius: 1.6, color: Color.rsGoldLight.opacity(0.8 * alpha))
+                dot(&context, at: s, radius: 1.6, color: line.opacity(0.8 * alpha))
+                dot(&context, at: e, radius: 1.6, color: line.opacity(0.8 * alpha))
             case .window:
                 // The glass line, thin, centered in the gap.
                 var glass = Path()
                 glass.move(to: s); glass.addLine(to: e)
-                context.stroke(glass, with: .color(Color.rsGoldLight.opacity(0.45 * alpha)),
+                context.stroke(glass, with: .color(line.opacity(0.45 * alpha)),
                                style: StrokeStyle(lineWidth: 0.9))
             case .opening, .wall:
                 break   // an opening is just the gap
             }
         }
 
-        // 7. Furniture boxes settle in, labeled where confidence allows.
+        // 7. Furniture boxes settle in. Unlabelled: the language has no mono
+        // labels, and a detected category can be wrong.
         for box in snapshot.boxes {
             let p = easeOut(reveal.progress(.entity(box.id), now: now,
                                             duration: 0.5, instant: instant))
@@ -177,28 +190,18 @@ struct FloorPlanCanvas: View {
             boxCtx.scaleBy(x: settle, y: settle)
             let rect = CGRect(x: -w / 2, y: -h / 2, width: w, height: h)
             let shape = Path(roundedRect: rect, cornerRadius: min(3, min(w, h) / 4))
-            boxCtx.fill(shape, with: .color(Color.rsGold.opacity(0.07 * p)))
-            boxCtx.stroke(shape, with: .color(Color.rsGoldLight.opacity(0.8 * p)),
+            boxCtx.fill(shape, with: .color(ink ? Color.rsGround.opacity(p) : Color.rsLamp.opacity(0.07 * p)))
+            boxCtx.stroke(shape, with: .color(ink ? Color.rsInk2.opacity(p) : Color.rsLamp.opacity(0.8 * p)),
                           style: StrokeStyle(lineWidth: 1.2))
+        }
 
-            // Upright label (machine data, cream mono), only where it fits
-            // inside the rotated footprint's screen box.
-            if let label = FloorPlanVoice.boxLabel(categoryToken: box.categoryToken,
-                                                   confidence: box.confidence) {
-                let text = Text(label)
-                    .font(RSFont.resolved(role: .mono, size: 8.5, weight: .semibold,
-                                          relativeTo: .caption2, maxSize: 11,
-                                          typeSize: typeSize))
-                    .tracking(0.8)
-                    .foregroundStyle(Color.rsOnDark.opacity(0.78 * p))
-                let resolved = context.resolve(text)
-                let textSize = resolved.measure(in: CGSize(width: 200, height: 40))
-                let boundW = abs(w * cos(angle)) + abs(h * sin(angle))
-                let boundH = abs(w * sin(angle)) + abs(h * cos(angle))
-                if textSize.width <= boundW - 6, textSize.height <= boundH - 2 {
-                    context.draw(resolved, at: center)
-                }
-            }
+        // 7b. The room's overall size, as measurement annotations: a
+        // terracotta dimension line along the top and the right of the walls,
+        // each with its length. Terracotta here is the language's one allowed
+        // use besides the mark — a measurement.
+        if showsDimensions {
+            drawDimensions(&context, walls: snapshot.walls.filter { $0.kind == .wall },
+                           toGrid: toGrid, fit: fit, size: size)
         }
 
         // 8. The camera — where the scan's light is being cast now.
@@ -217,13 +220,64 @@ struct FloorPlanCanvas: View {
                         clockwise: false)
             cone.closeSubpath()
             context.fill(cone, with: .radialGradient(
-                Gradient(colors: [Color.rsGold.opacity(0.30), Color.rsGold.opacity(0)]),
+                Gradient(colors: [Color.rsLamp.opacity(0.30), Color.rsLamp.opacity(0)]),
                 center: cam, startRadius: 2, endRadius: radius))
 
-            dot(&context, at: cam, radius: 9, color: Color.rsGold.opacity(0.20))
-            dot(&context, at: cam, radius: 4.5, color: Color.rsGold.opacity(0.95))
-            dot(&context, at: cam, radius: 1.8, color: Color.rsOnDark.opacity(0.9))
+            dot(&context, at: cam, radius: 9, color: Color.rsLamp.opacity(0.20))
+            dot(&context, at: cam, radius: 4.5, color: Color.rsLamp.opacity(0.95))
+            dot(&context, at: cam, radius: 1.8, color: Color.rsOnDusk.opacity(0.9))
         }
+    }
+
+    /// Dimension lines with end ticks and their lengths, set in mono terracotta
+    /// on a small plate of the backdrop so they read over the floor.
+    private func drawDimensions(_ context: inout GraphicsContext, walls: [FloorPlanWall],
+                                toGrid: (SIMD2<Float>) -> SIMD2<Float>,
+                                fit: FloorPlanMath.Fit, size: CGSize) {
+        guard !walls.isEmpty else { return }
+        var lo = SIMD2<Float>(.greatestFiniteMagnitude, .greatestFiniteMagnitude)
+        var hi = SIMD2<Float>(-.greatestFiniteMagnitude, -.greatestFiniteMagnitude)
+        for w in walls {
+            for p in [toGrid(w.start), toGrid(w.end)] { lo = simd_min(lo, p); hi = simd_max(hi, p) }
+        }
+        let corners = [SIMD2(lo.x, lo.y), SIMD2(hi.x, lo.y), SIMD2(lo.x, hi.y), SIMD2(hi.x, hi.y)]
+            .map { fit.apply($0, in: size) }
+        let minX = corners.map(\.x).min()!, maxX = corners.map(\.x).max()!
+        let minY = corners.map(\.y).min()!, maxY = corners.map(\.y).max()!
+        let across = Double(hi.x - lo.x), down = Double(hi.y - lo.y)
+        guard across > 0.2, down > 0.2 else { return }
+        let terracotta = Color.rsTerracotta
+        let tick: CGFloat = 5, gap: CGFloat = 16
+
+        var top = Path()
+        top.move(to: CGPoint(x: minX, y: minY - gap)); top.addLine(to: CGPoint(x: maxX, y: minY - gap))
+        top.move(to: CGPoint(x: minX, y: minY - gap - tick)); top.addLine(to: CGPoint(x: minX, y: minY - gap + tick))
+        top.move(to: CGPoint(x: maxX, y: minY - gap - tick)); top.addLine(to: CGPoint(x: maxX, y: minY - gap + tick))
+        var right = Path()
+        right.move(to: CGPoint(x: maxX + gap, y: minY)); right.addLine(to: CGPoint(x: maxX + gap, y: maxY))
+        right.move(to: CGPoint(x: maxX + gap - tick, y: minY)); right.addLine(to: CGPoint(x: maxX + gap + tick, y: minY))
+        right.move(to: CGPoint(x: maxX + gap - tick, y: maxY)); right.addLine(to: CGPoint(x: maxX + gap + tick, y: maxY))
+        let stroke = StrokeStyle(lineWidth: 1.4, lineCap: .round)
+        context.stroke(top, with: .color(terracotta), style: stroke)
+        context.stroke(right, with: .color(terracotta), style: stroke)
+
+        func label(_ metres: Double, at point: CGPoint, rotated: Bool) {
+            let text = Text(String(format: "%.2f m", metres))
+                .font(RSFont.resolved(role: .mono, size: 11, weight: .medium,
+                                      relativeTo: .caption2, maxSize: 15, typeSize: typeSize))
+                .foregroundStyle(Color.rsTerracottaText)
+            let resolved = context.resolve(text)
+            let measured = resolved.measure(in: CGSize(width: 200, height: 40))
+            var plate = context
+            plate.translateBy(x: point.x, y: point.y)
+            if rotated { plate.rotate(by: .degrees(90)) }
+            let rect = CGRect(x: -measured.width / 2 - 5, y: -measured.height / 2 - 2,
+                              width: measured.width + 10, height: measured.height + 4)
+            plate.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(backdrop))
+            plate.draw(resolved, at: .zero)
+        }
+        label(across, at: CGPoint(x: (minX + maxX) / 2, y: minY - gap), rotated: false)
+        label(down, at: CGPoint(x: maxX + gap, y: (minY + maxY) / 2), rotated: true)
     }
 
     private func dot(_ context: inout GraphicsContext, at p: CGPoint,
@@ -340,8 +394,8 @@ struct LiveGuestLineView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { timeline in
-            GuestLine(line(now: timeline.date), size: 17, onDark: true,
-                      alignment: .center, maxSize: 22)
+            GuestLine(line(now: timeline.date), size: 19, onDark: true,
+                      alignment: .center, maxSize: 26)
                 .contentTransition(.opacity)
         }
         .animation(.easeInOut(duration: 0.3), value: line(now: Date()))
@@ -373,7 +427,7 @@ struct LiveGuestLineView: View {
 
 #Preview("Mid-scan") {
     ZStack {
-        Color.rsCaptureBase.ignoresSafeArea()
+        Color.rsDusk.ignoresSafeArea()
         FloorPlanCanvas(snapshot: .previewRoom, camera: .previewCamera)
             .padding(30)
     }
@@ -381,9 +435,9 @@ struct LiveGuestLineView: View {
 
 #Preview("Review card") {
     ZStack {
-        Color.rsCaptureRaised.ignoresSafeArea()
+        Color.rsRaised.ignoresSafeArea()
         FloorPlanCanvas(snapshot: .previewRoom, animated: false,
-                        backdrop: .rsCaptureRaised)
+                        backdrop: .rsRaised)
             .frame(height: 230)
             .padding(20)
     }

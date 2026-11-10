@@ -139,7 +139,7 @@
   <key>NSPrivacyAccessedAPITypes</key>
   <array>
     <!-- UserDefaults.standard: DismissedBundles in BundleRestore (which
-         CaptureReaper also reads through) and WhySignInSheet, plus the
+         CaptureReaper also reads through), plus the
          DEBUG-only StagingHooks and ScreenGallery.
 
          CA92.1 — read and write information that only the app itself can

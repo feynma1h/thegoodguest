@@ -65,60 +65,93 @@ final class RateLimitSurfaceTests: XCTestCase {
         XCTAssertNotEqual(LiveActivityPolicy.stage(for: .sendRateLimited(resetsAt: now)), .paused)
     }
 
-    // MARK: - Copy honesty
+    // MARK: - Copy honesty (the room screen, RoomStatusCopy)
+
+    private func limited(_ resetsAt: Date?, at time: Date? = nil) -> RoomStatus {
+        RoomStatusCopy.onItsWay(.rateLimited(resetsAt: resetsAt), now: time ?? now,
+                                locale: Locale(identifier: "en_GB"))
+    }
 
     func test_copyNeverPromisesATimeTheServerDidNotName() {
-        let line = DeskCopy.rateLimitLine(resetsAt: nil, now: now)
+        let status = limited(nil)
+        XCTAssertNil(status.note, "an unstated reset gets no time at all")
         for invented in ["tomorrow", "later today", "in an hour", "in about an hour"] {
-            XCTAssertFalse(line.lowercased().contains(invented),
+            XCTAssertFalse(status.guest.lowercased().contains(invented),
                            "an unstated reset must not be narrated as \(invented)")
         }
-        XCTAssertTrue(line.contains("safe on your phone"))
+        XCTAssertTrue(status.guest.contains("waiting on this phone"))
     }
 
     func test_copyDistinguishesLaterTodayFromTomorrow() {
         // A reset a few hours away on the same day must not be called "tomorrow" —
         // the quota rolls at UTC midnight, which lands mid-afternoon in some zones.
-        // Anchored at 09:00 LOCAL so the assertion holds in every time zone: a
-        // fixed UTC instant is late evening somewhere, where +4h really is tomorrow.
+        // Anchored at 09:00 LOCAL so the assertion holds in every time zone.
         let morning = Calendar.current.startOfDay(for: now).addingTimeInterval(9 * 3600)
-        let sameDay = DeskCopy.rateLimitLine(resetsAt: morning.addingTimeInterval(4 * 3600),
-                                                now: morning)
-        let nextDay = DeskCopy.rateLimitLine(resetsAt: morning.addingTimeInterval(30 * 3600),
-                                                now: morning)
-        XCTAssertTrue(sameDay.contains("later today"))
+        let sameDay = RoomStatusCopy.limitNote(resetsAt: morning.addingTimeInterval(4 * 3600), now: morning) ?? ""
+        let nextDay = RoomStatusCopy.limitNote(resetsAt: morning.addingTimeInterval(30 * 3600), now: morning) ?? ""
+        XCTAssertTrue(sameDay.contains("later today"), sameDay)
         XCTAssertFalse(sameDay.contains("tomorrow"))
-        XCTAssertTrue(nextDay.contains("tomorrow"))
+        XCTAssertTrue(nextDay.contains("tomorrow"), nextDay)
     }
 
     func test_copyRoundsShortWaitsHonestly() {
-        XCTAssertTrue(DeskCopy.rateLimitLine(resetsAt: now.addingTimeInterval(600), now: now)
+        XCTAssertTrue((RoomStatusCopy.limitNote(resetsAt: now.addingTimeInterval(600), now: now) ?? "")
             .contains("in under an hour"))
-        XCTAssertTrue(DeskCopy.rateLimitLine(resetsAt: now.addingTimeInterval(5400), now: now)
+        XCTAssertTrue((RoomStatusCopy.limitNote(resetsAt: now.addingTimeInterval(5400), now: now) ?? "")
             .contains("in about an hour"))
     }
 
     func test_aResetAlreadyPastIsTreatedAsUnstated() {
-        // Clock skew must not produce "I can take more in under an hour" for a
-        // moment that has already gone by.
-        let line = DeskCopy.rateLimitLine(resetsAt: now.addingTimeInterval(-60), now: now)
-        XCTAssertFalse(line.contains("I can take more"))
+        // Clock skew must not produce "in under an hour" for a moment that has
+        // already gone by.
+        XCTAssertNil(RoomStatusCopy.limitNote(resetsAt: now.addingTimeInterval(-60), now: now))
+    }
+
+    func test_theSendIsOfferedOnlyOnceTheLimitCanHaveLifted() {
+        XCTAssertNil(limited(now.addingTimeInterval(3600)).primary,
+                     "sending before the named reset is a refusal the person can predict")
+        XCTAssertEqual(limited(now.addingTimeInterval(-60)).primary?.action, .sendAgain)
+        XCTAssertEqual(limited(nil).primary?.action, .sendAgain,
+                       "no time named: trying is the only way to find out")
+        XCTAssertEqual(limited(now.addingTimeInterval(3600)).secondary?.action, .discard,
+                       "the scan can always be let go")
+    }
+
+    func test_whatToDoComesFirst() {
+        // 0293: the pinned "Let this scan go" ends the scan, and at the largest
+        // text sizes the end of the guest's line is below the fold under it.
+        // The one instruction that keeps the scan alive must be what is read
+        // first, whatever the reset.
+        for resets: Date? in [nil, now.addingTimeInterval(3600), now.addingTimeInterval(30 * 3600),
+                              now.addingTimeInterval(-60)] {
+            XCTAssertTrue(limited(resets).guest.hasPrefix(RoomStatusCopy.kept), "\(String(describing: resets))")
+        }
+    }
+
+    func test_aResetThatHasPassedIsNotCalledUnknown() {
+        let line = limited(now.addingTimeInterval(-60)).guest
+        XCTAssertFalse(line.contains("wasn\u{2019}t told"), "the server did name a time; it has passed")
+        XCTAssertTrue(line.contains("should take this one now"))
     }
 
     func test_copyOwnsTheLimitAndDoesNotBlameTheUser() {
         for resets: Date? in [nil, now.addingTimeInterval(3600), now.addingTimeInterval(30 * 3600)] {
-            let line = DeskCopy.rateLimitLine(resetsAt: resets, now: now).lowercased()
-            XCTAssertTrue(line.contains("i've hit my limit"), "the guest owns it")
-            for blame in ["you've uploaded too", "you have exceeded", "your limit", "too many"] {
+            let line = limited(resets).guest.lowercased()
+            XCTAssertTrue(line.contains("i\u{2019}ve hit my limit"), "the guest owns it")
+            for blame in ["you\u{2019}ve uploaded too", "you have exceeded", "your limit", "too many"] {
                 XCTAssertFalse(line.contains(blame), "copy blames the user: \(blame)")
             }
         }
     }
 
-    func test_resetStampIsMachineData() {
-        // Mono slot: an exact instant, not prose. The line above owns the reading.
-        let stamp = DeskCopy.resetStamp(Date(timeIntervalSince1970: 1_786_320_000))
-        XCTAssertTrue(stamp.hasPrefix("RESETS "))
-        XCTAssertFalse(stamp.contains("tomorrow"))
+    func test_theResetIsTheReadersOwnClock() {
+        var c = DateComponents(); c.year = 2026; c.month = 8; c.day = 8; c.hour = 4; c.minute = 20
+        let reset = Calendar.current.date(from: c)!
+        let before = reset.addingTimeInterval(-20 * 3600)
+        let british = RoomStatusCopy.limitNote(resetsAt: reset, now: before, locale: Locale(identifier: "en_GB")) ?? ""
+        let american = RoomStatusCopy.limitNote(resetsAt: reset, now: before, locale: Locale(identifier: "en_US")) ?? ""
+        XCTAssertTrue(british.contains("04:20"), british)
+        XCTAssertTrue(american.contains("4:20"), american)
+        XCTAssertFalse(british.uppercased() == british, "a time in words, not a machine stamp")
     }
 }

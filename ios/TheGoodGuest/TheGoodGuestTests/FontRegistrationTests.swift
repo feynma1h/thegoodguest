@@ -52,6 +52,24 @@ final class FontRegistrationTests: XCTestCase {
         XCTAssertFalse(title.fontDescriptor.symbolicTraits.contains(.traitItalic))
     }
 
+    func testTheNavigationBarTitlesAreTheLanguagesFaces() {
+        let standard = UITraitCollection(preferredContentSizeCategory: .large)
+        let large = RSNavigationBar.largeTitleFont(traits: standard)
+        let inline = RSNavigationBar.inlineTitleFont(traits: standard)
+        XCTAssertEqual(large.familyName, "Newsreader")
+        XCTAssertEqual(large.pointSize, 34, accuracy: 0.5)
+        XCTAssertEqual(axis("wght", of: large), 300)
+        XCTAssertEqual(inline.familyName, "Albert Sans")
+        XCTAssertEqual(inline.pointSize, 17, accuracy: 0.5)
+        XCTAssertEqual(axis("wght", of: inline), 600)
+    }
+
+    func testTheLargeTitleStopsAtTheDisplayTier() {
+        let largest = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
+        XCTAssertEqual(RSNavigationBar.largeTitleFont(traits: largest).pointSize,
+                       34 * RSTypeCap.display.rawValue, accuracy: 0.5)
+    }
+
     func testTitlesAreLightByDefaultAndWeightsReachTheAxis() {
         XCTAssertEqual(axis("wght", of: RSFont.uiFont(role: .display, size: 34, weight: nil)), 300)
         XCTAssertEqual(axis("wght", of: RSFont.uiFont(role: .ui, size: 17, weight: .semibold)), 600)

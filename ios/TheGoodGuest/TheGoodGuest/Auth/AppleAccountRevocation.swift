@@ -56,7 +56,7 @@ nonisolated enum AppleRevocation: Equatable {
 /// Runs one Sign in with Apple authorization purely to obtain a fresh
 /// authorization code.
 ///
-/// Deliberately NOT reusing `SignInSheet`'s button flow: that path links an
+/// Deliberately NOT reusing `AccountSheet`'s button flow: that path links an
 /// identity and carries conflict handling, and this one must not change who is
 /// signed in. It asks Apple for an authorization and reads one field off it.
 @MainActor

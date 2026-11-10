@@ -4,8 +4,7 @@
 /// the cream era's signatures, and the website's ground is flat too. Dusk
 /// screens set `rsDusk` themselves rather than through this.
 ///
-/// Read by every light screen through `rsGroundScreen()` and
-/// `RSScrollableScreen`.
+/// Read by every light screen, as a background or through `rsGroundScreen()`.
 
 import SwiftUI
 
@@ -21,32 +20,6 @@ extension View {
         ZStack {
             GroundBackground()
             self
-        }
-    }
-}
-
-/// A screen whose content scrolls when it outgrows the frame (accessibility
-/// sizes) and otherwise fills it, so a `Spacer` can still push content apart.
-struct RSScrollableScreen: ViewModifier {
-    var background: Color?
-    var transparent: Bool = false
-
-    func body(content: Content) -> some View {
-        GeometryReader { geo in
-            ScrollView {
-                content
-                    .frame(minHeight: geo.size.height)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            if transparent {
-                Color.clear
-            } else if let background {
-                background.ignoresSafeArea()
-            } else {
-                GroundBackground()
-            }
         }
     }
 }

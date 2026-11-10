@@ -22,185 +22,137 @@ import SwiftUI
 struct GuidanceSheet: View {
     var onStart: () -> Void = {}
     var onDismiss: () -> Void = {}
-    /// How the camera's authorization is read. Production asks AVFoundation;
-    /// nothing else does.
-    ///
-    /// A CLOSURE, not a captured value, because this is asked twice and the two
-    /// answers must be able to differ: once as the sheet appears, and again
-    /// every time the app comes back to the foreground, which is how returning
-    /// from Settings with access granted clears the denial. A stored status
-    /// would freeze the first answer and leave the sheet offering "Open
-    /// Settings" forever.
-    ///
-    /// It is a seam because the denied branch is otherwise unphotographable:
-    /// `simctl privacy` has no camera service, so a simulator cannot be put
-    /// into the state a person reaches by tapping Don't Allow. The screen still
-    /// decides for itself what counts as denied — the seam only supplies the
-    /// status, which is the same thing AVFoundation supplies.
     var cameraStatus: () -> AVAuthorizationStatus = {
         AVCaptureDevice.authorizationStatus(for: .video)
     }
+    /// What this iPhone measures with. Every iPhone scans (operator ruling,
+    /// 2026-11-10); a Pro with LiDAR measures more exactly, and the sheet says
+    /// which this one is rather than badging the good case.
+    var hasLidar: Bool = LiDARGate.isSupported
+    /// The boxing tip appears only where boxes can be made: furniture is
+    /// rebuilt from the boxes, and unboxed pieces do not appear (0323).
+    var showsBoxingTip: Bool = GuidanceSheet.boxesAvailable
 
     @State private var permissionDenied = false
     @Environment(\.scenePhase) private var scenePhase
 
+    static var boxesAvailable: Bool {
+        #if DEBUG
+        return LiveBoxesFeature.isEnabled
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
-        // Scrollable: at accessibility sizes this content exceeds even the .large
-        // detent, and without a scroll region the header, the close button and the
-        // rows overflow BOTH edges of the sheet — leaving no way to start a scan.
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-            header
-
-            proChip
-                .rsBelowHeader()
-
-            VStack(alignment: .leading, spacing: 18) {
-                GuidanceRow(
-                    symbol: "move.3d",
-                    title: "Move slowly, keep it level",
-                    detail: "A steady walking pace. Sweep the phone gently, like you're painting the walls with your eyes."
-                )
-                GuidanceRow(
-                    symbol: "circle.grid.cross",
-                    title: "Get every corner & the floor",
-                    detail: "Walls, floor, and where they meet. Corners are what tell the room its true shape."
-                )
-                GuidanceRow(
-                    symbol: "sun.max",
-                    title: "Turn the lights on",
-                    detail: "Even light helps me see truly. I'll tell you if it gets too dark to trust."
-                )
-                // The capture-time half of the person-observation gap. The server
-                // suppresses people it can detect, but a shoulder at the frame edge
-                // or an arm across a wall is not a person to a detector — it is just
-                // that wall's colour, and it ships as the wall's colour. Asking here
-                // is the only thing that catches those, and the WHY earns the ask:
-                // stated as what it costs the ROOM, not as a warning about privacy,
-                // which would make the guest sound like it is watching people.
-                GuidanceRow(
-                    symbol: "person.2.slash",
-                    title: "Ask people to step out",
-                    detail: "Anyone standing in the room gets measured as part of it — I'd read them as a wall. A minute alone in here and the room comes back as itself."
-                )
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Before you start")
+                        .rsFont(.display, size: 34, cap: .display)
+                        .tracking(-0.7)
+                        .foregroundStyle(Color.rsInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    VStack(alignment: .leading, spacing: 18) {
+                        GuidanceRow(symbol: "arrow.up.and.down.and.arrow.left.and.right",
+                                    title: "Move slowly, keep it level",
+                                    detail: "A steady walking pace. Sweep the phone gently across every wall.")
+                        GuidanceRow(symbol: "viewfinder",
+                                    title: "Get every corner and the floor",
+                                    detail: "Corners are what tell me the room’s true shape.")
+                        GuidanceRow(symbol: "sun.max",
+                                    title: "Turn the lights on",
+                                    detail: "Even light helps me see truly. I’ll tell you if it gets too dark.")
+                        GuidanceRow(symbol: "person.2",
+                                    title: "Ask people to step out",
+                                    detail: "Anyone standing in the room gets measured as part of it.")
+                        if showsBoxingTip {
+                            GuidanceRow(symbol: "cube",
+                                        title: "Tap a dot to box a piece",
+                                        detail: "Box the furniture you want rebuilt, then walk round it.")
+                        }
+                    }
+                    .padding(.top, 22)
+                    VStack(alignment: .leading, spacing: 10) {
+                        fact(symbol: hasLidar ? "dot.radiowaves.left.and.right" : "camera",
+                             text: hasLidar
+                                ? "This iPhone measures with LiDAR, its depth sensor."
+                                : "This iPhone measures with its camera. Pro models with LiDAR measure walls and sizes more exactly.")
+                        fact(symbol: "lock",
+                             text: "Nothing leaves your phone until you send it.")
+                    }
+                    .padding(.top, 18)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Color.rsHairline).frame(height: 1).offset(y: 0)
+                    }
+                    .padding(.top, 20)
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 4)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding(.top, 24)
-
-            privacyLine
-                .padding(.top, 20)
+            .background(GroundBackground())
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: onDismiss) { Image(systemName: "xmark") }
+                        .accessibilityLabel("Close")
+                }
             }
-            .padding(.horizontal, RSScreen.horizontal)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
+                    if permissionDenied {
+                        Label {
+                            Text("The camera is off for \(RSBrand.name). Turn it on in Settings, then come back.")
+                                .rsFont(.ui, size: 15, weight: .semibold)
+                                .foregroundStyle(Color.rsInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "exclamationmark.circle").foregroundStyle(Color.rsInk)
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                    startButton
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+                .background(Color.rsGround.ignoresSafeArea(edges: .bottom))
+            }
         }
-        .safeAreaInset(edge: .bottom) {
-            // Pinned OUTSIDE the scroll region: the one action this sheet exists for
-            // must stay on screen at every text size.
-            // The closing line is the same one home uses, for the same reason:
-            // it is true, it is one line, and one line is what keeps this
-            // screen's button level with every other screen's. The privacy
-            // disclosure stays in the scroll region where it can be two lines
-            // without moving anything.
-            RSActions {
-                startButton
-            } closing: {
-                Text("Takes about two minutes")
-                    .font(RSFont.ui(.footnote))
-                    .foregroundStyle(Color.rsOnDark.opacity(0.5))
-            }
-            .rsPinnedActions(surface: .rsCaptureRaised)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.rsCaptureRaised.ignoresSafeArea())
+        .tint(Color.rsInk)
         .onAppear { permissionDenied = Self.isDenied(cameraStatus()) }
-        // Coming back from Settings with permission granted must clear the denied
-        // state; otherwise the sheet keeps offering "Open Settings" forever.
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             permissionDenied = Self.isDenied(cameraStatus())
         }
     }
 
-    // MARK: - Pieces
-
-    /// The shared header band, on the dark surface. The title is set at the
-    /// same size as every other screen's now that this is a screen rather than
-    /// a card — it was two-thirds that when it was something you peered at over
-    /// the top of home.
-    private var header: some View {
-        ScreenHeaderFrame {
-            Text("Before you start")
-                .rsFont(.display, size: 22, weight: .medium, maxSize: 30, cap: .display)
-                .foregroundStyle(Color.rsOnDark)
+    private func fact(symbol: String, text: String) -> some View {
+        Label {
+            Text(text)
+                .rsFont(.ui, size: 14)
+                .foregroundStyle(Color.rsInk2)
                 .fixedSize(horizontal: false, vertical: true)
-        } trailing: {
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.rsOnDark)
-                    .frame(width: 32, height: 32)
-                    .background(Color.rsOnDark.opacity(0.12), in: Circle())
-                    .contentShape(Circle())
-            }
-            .accessibilityLabel("Close")
-        }
-    }
-
-    private var proChip: some View {
-        HStack(spacing: 7) {
-            Circle().fill(Color.rsGold).frame(width: 7, height: 7)
-            Text("LiDAR READY · PRO CAPTURE")
-                .rsFont(.mono, size: 11, weight: .medium, cap: .mono)
-                .tracking(0.8)
-                .foregroundStyle(Color.rsGoldLight)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-            Capsule().fill(Color.rsGold.opacity(0.16))
-                .overlay(Capsule().stroke(Color.rsGold.opacity(0.4), lineWidth: 1))
-        )
-    }
-
-    private var privacyLine: some View {
-        HStack(alignment: .top, spacing: 7) {
-            Image(systemName: "lock")
-                .font(.system(size: 12))
-                .foregroundStyle(Color.rsOnDark.opacity(0.5))
-                .padding(.top, 1)
-            Text("\(RSBrand.name) uses the camera & LiDAR to measure your room. Nothing is uploaded until you finish.")
-                .font(RSFont.ui(.footnote))
-                .foregroundStyle(Color.rsOnDark.opacity(0.5))
-                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: symbol)
+                .font(.system(size: 14))
+                .foregroundStyle(Color.rsInk)
         }
     }
 
     @ViewBuilder
     private var startButton: some View {
         if permissionDenied {
-            Button {
-                openSettings()
-            } label: {
-                Label("Open Settings", systemImage: "gear")
-            }
-            .buttonStyle(RSGoldButtonStyle())
+            Button("Open Settings") { openSettings() }
+                .buttonStyle(RSPrimaryButtonStyle())
         } else {
-            Button {
-                requestCameraThenStart()
-            } label: {
-                // No glyph, matching home's scan action. Apple's viewfinder was
-                // the generic stock symbol on both, and the two buttons that
-                // start a capture should look like each other.
-                Text("Start scanning")
-            }
-            .buttonStyle(RSGoldButtonStyle())
+            Button("Start scanning") { requestCameraThenStart() }
+                .buttonStyle(RSPrimaryButtonStyle())
         }
     }
 
-    // MARK: - Camera permission (in context)
-
-    /// One reading of "denied", shared by the first render and every return
-    /// from Settings — the two used to be written out separately, which is how
-    /// they would come to disagree about `.restricted`.
     static func isDenied(_ status: AVAuthorizationStatus) -> Bool {
         status == .denied || status == .restricted
     }
@@ -235,26 +187,29 @@ private struct GuidanceRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: symbol)
-                .font(.system(size: 19, weight: .regular))
-                .foregroundStyle(Color.rsGoldLight)
-                .frame(width: 38, height: 38)
-                .background(Color.rsOnDark.opacity(0.1), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .font(.system(size: 17, weight: .regular))
+                .foregroundStyle(Color.rsInk)
+                .frame(width: 40, height: 40)
+                .background(Color.rsInset, in: Circle())
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(RSFont.ui(.callout, weight: .semibold))
-                    .foregroundStyle(Color.rsOnDark)
+                    .rsFont(.ui, size: 16, weight: .semibold)
+                    .foregroundStyle(Color.rsInk)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(detail)
-                    .font(RSFont.ui(.subheadline))
-                    .foregroundStyle(Color.rsOnDark.opacity(0.6))
+                    .rsFont(.ui, size: 14)
+                    .foregroundStyle(Color.rsInk2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.top, 2)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
 #Preview {
-    Color.rsBackground.ignoresSafeArea()
+    Color.rsGround.ignoresSafeArea()
         .sheet(isPresented: .constant(true)) {
             GuidanceSheet()
                 .presentationDetents([.medium, .large])

@@ -31,47 +31,6 @@ struct RSPrimaryButtonStyle: ButtonStyle {
     }
 }
 
-/// The filled pill on dusk. Kept as its own name for the call sites that
-/// said "gold" when the old doorway and guidance sheet were dark.
-struct RSGoldButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        RSPrimaryButtonStyle(onDusk: true).makeBody(configuration: configuration)
-    }
-}
-
-/// A smaller pill, for an action inside a card or over the camera.
-struct RSSmallPillStyle: ButtonStyle {
-    var onDusk = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(RSFont.ui(.subheadline, weight: .semibold))
-            .rsControlLabel()
-            .foregroundStyle(onDusk ? Color.rsDusk : Color.white)
-            .padding(.horizontal, 16)
-            .frame(minHeight: 40)
-            .background(onDusk ? Color.rsOnDusk : Color.rsInk, in: Capsule())
-            .contentShape(Capsule())
-            .opacity(configuration.isPressed ? 0.8 : 1)
-    }
-}
-
-/// A light pill on light screens: the secondary action that still needs a
-/// shape (Sign in with Google, beside the system's black Apple button).
-struct RSLightButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(RSFont.ui(.headline, weight: .semibold))
-            .rsControlLabel()
-            .foregroundStyle(Color.rsInk)
-            .frame(maxWidth: .infinity, minHeight: 56)
-            .background(Color.rsSurface, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.rsInk.opacity(0.16), lineWidth: 1))
-            .contentShape(Capsule())
-            .opacity(configuration.isPressed ? 0.8 : 1)
-    }
-}
-
 /// The quiet action: words in ink, no shape, a full-width 50pt target.
 struct RSQuietButtonStyle: ButtonStyle {
     var onDark = false
@@ -141,37 +100,6 @@ struct GuestVoice: View {
                 .accessibilityLabel("The guest: \(text)")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// A small label over a group. Sentence case, interface type: the language
-/// has no capitals-and-tracking eyebrows and no mono labels.
-struct Eyebrow: View {
-    let text: String
-    var onDark = false
-
-    init(_ text: String, onDark: Bool = false) {
-        self.text = text
-        self.onDark = onDark
-    }
-
-    var body: some View {
-        Text(text)
-            .rsFont(.ui, size: 13, weight: .medium, cap: .display)
-            .foregroundStyle(onDark ? Color.rsOnDusk2 : Color.rsInk2)
-    }
-}
-
-/// A white card on the ground, with generous radius and a soft lift.
-struct RSCard<Content: View>: View {
-    var padding: CGFloat = 16
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        content
-            .padding(padding)
-            .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .shadow(color: Color.rsInk.opacity(0.05), radius: 14, y: 8)
     }
 }
 

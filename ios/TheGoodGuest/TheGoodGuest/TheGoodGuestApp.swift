@@ -25,6 +25,8 @@ struct TheGoodGuestApp: App {
     init() {
         // Before any view: every type role names a bundled face.
         RSFontFiles.registerAll()
+        // The bar's titles take the faces too; needs the fonts registered.
+        RSNavigationBar.apply()
         // Reads GoogleService-Info.plist from the app bundle.
         // Skipped gracefully if the plist is absent (simulator tests without the file).
         // For production / on-device use, add GoogleService-Info.plist via Xcode:

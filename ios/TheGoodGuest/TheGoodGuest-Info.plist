@@ -34,9 +34,19 @@
   ever stops being true — a bundled cipher, a custom protocol, anything
   encrypting user data with keys the app manages — this value has to change
   and the CCATS question becomes real.
+
+  UILaunchScreen names the ground (LaunchGround, #f5f6f8 — rsGround) so a
+  launch does not flash white before the splash's ground arrives. The
+  generated launch screen is otherwise plain white. LaunchScreenTests pins
+  that the colour and rsGround stay the same.
 -->
 <plist version="1.0">
 <dict>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchGround</string>
+	</dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>CFBundleURLTypes</key>
