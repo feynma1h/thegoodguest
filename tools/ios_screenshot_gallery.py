@@ -15,7 +15,10 @@ booted one, of any size — the audit reads the frame size from each image.
 `--sizes` picks the Dynamic Type sizes, by the labels in SIZES (default and ax5
 unless told otherwise; the app holds type at AX2, so ax2-ax5 photograph the
 same). `--appearance dark` shoots with the phone in dark mode, into
-`<size>-dark/`, so a pass can be compared against its light twin.
+`<size>-dark/`, so a pass can be compared against its light twin. `--bold`
+shoots as with Bold Text on, into `<size>-bold/`: the simulator has no switch
+for it, so the gallery's `-rs.gallery.bold` launch argument sets SwiftUI's
+`legibilityWeight`, which is what the app's faces read.
 
 `--settle` adds seconds to the wait of every entry that does not name its own
 `delay`. A freshly created simulator draws slowly — for its first ten minutes
@@ -57,6 +60,7 @@ BUNDLE = "com.thegoodguest.TheGoodGuest"
 GALLERY = Path("ios/TheGoodGuest/TheGoodGuest/Support/ScreenGallery.swift")
 OUT = Path("/tmp/rs-shots")
 SETTLE = 0.0
+BOLD = False
 
 # Every Dynamic Type size, by the label its pass directory takes.
 SIZES = {
@@ -157,14 +161,15 @@ def set_reduce_motion(on):
 def shoot(screen_id, dest, delay):
     sh("xcrun", "simctl", "terminate", UDID, BUNDLE, check=False)
     time.sleep(0.45)
-    sh("xcrun", "simctl", "launch", UDID, BUNDLE, "-rs.gallery.screen", screen_id)
+    bold = ("-rs.gallery.bold", "YES") if BOLD else ()
+    sh("xcrun", "simctl", "launch", UDID, BUNDLE, "-rs.gallery.screen", screen_id, *bold)
     time.sleep(delay)
     sh("xcrun", "simctl", "io", UDID, "screenshot", "--type=png", str(dest))
     return dest.exists() and dest.stat().st_size > 0
 
 
 def main():
-    global UDID, OUT, SETTLE
+    global UDID, OUT, SETTLE, BOLD
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("out", nargs="?", default=str(OUT))
     ap.add_argument("--udid", default=UDID, help="a booted simulator")
@@ -175,12 +180,14 @@ def main():
     ap.add_argument("--sizes", default="default,ax5",
                     help=f"comma-separated, from: {','.join(SIZES)}")
     ap.add_argument("--appearance", choices=("light", "dark"), default="light")
+    ap.add_argument("--bold", action="store_true",
+                    help="as with Bold Text on, into <size>-bold/")
     args = ap.parse_args()
-    UDID, OUT, SETTLE = args.udid, Path(args.out), args.settle
+    UDID, OUT, SETTLE, BOLD = args.udid, Path(args.out), args.settle, args.bold
     sizes = args.sizes.split(",")
     if set(sizes) - set(SIZES):
         sys.exit(f"unknown sizes: {sorted(set(sizes) - set(SIZES))}")
-    suffix = "-dark" if args.appearance == "dark" else ""
+    suffix = ("-dark" if args.appearance == "dark" else "") + ("-bold" if BOLD else "")
 
     screens = catalogue()
     if not screens:

@@ -53,6 +53,20 @@ enum ScreenGallery {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// `-rs.gallery.bold YES`: render as with Bold Text on. The simulator has
+    /// no switch for it (`simctl ui` sets appearance, contrast and size), so
+    /// the scene's traits say it, which is what the setting itself changes;
+    /// every hosting controller reads `legibilityWeight` from them. Setting
+    /// the SwiftUI environment value instead changed no pixel on the screens.
+    static var boldText: Bool { UserDefaults.standard.bool(forKey: "rs.gallery.bold") }
+
+    @MainActor static func applyBoldText() {
+        guard boldText else { return }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.traitOverrides.legibilityWeight = .bold
+        }
+    }
+
     /// One photographable state.
     struct Entry {
         let id: String
@@ -333,6 +347,7 @@ struct ScreenGalleryView: View {
 
     var body: some View {
         content
+            .onAppear { ScreenGallery.applyBoldText() }
     }
 
     @ViewBuilder

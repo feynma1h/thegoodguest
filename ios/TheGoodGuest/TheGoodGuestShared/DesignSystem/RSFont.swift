@@ -184,21 +184,47 @@ enum RSFont {
     /// Display defaults to Light, which is how the language sets titles; the
     /// guest and the interface default to Regular, measurements to Medium.
     static func uiFont(role: RSFontRole, size: CGFloat, weight: Font.Weight?) -> UIFont {
+        let weight = weight ?? defaultWeight(role)
         switch role {
         case .guest:
             return Face.variable(Face.serifItalicDefault, size: size,
-                                 weight: Face.axisWeight(weight ?? .regular, range: 200...800),
+                                 weight: Face.axisWeight(weight, range: 200...800),
                                  opticalSize: size)
         case .display:
             return Face.variable(Face.serifDefault, size: size,
-                                 weight: Face.axisWeight(weight ?? .light, range: 200...800),
+                                 weight: Face.axisWeight(weight, range: 200...800),
                                  opticalSize: size)
         case .ui:
             return Face.variable(Face.sansDefault, size: size,
-                                 weight: Face.axisWeight(weight ?? .regular, range: 100...900))
+                                 weight: Face.axisWeight(weight, range: 100...900))
         case .mono:
             return Face.variable(Face.monoDefault, size: size,
-                                 weight: Face.axisWeight(weight ?? .medium, range: 100...800))
+                                 weight: Face.axisWeight(weight, range: 100...800))
+        }
+    }
+
+    /// A role's weight when the call site names none.
+    static func defaultWeight(_ role: RSFontRole) -> Font.Weight {
+        switch role {
+        case .guest, .ui: .regular
+        case .display:    .light
+        case .mono:       .medium
+        }
+    }
+
+    /// The weight a style takes with Bold Text on: a step heavier, as the
+    /// system's own faces go (Regular to Semibold, Semibold to Bold). The
+    /// bundled faces are variable, so every step exists. Without this the
+    /// setting changed nothing in the app: its faces are set at explicit
+    /// weights, and only the system's fonts follow the setting by themselves.
+    static func bolder(_ weight: Font.Weight) -> Font.Weight {
+        switch weight {
+        case .ultraLight, .thin: .light
+        case .light:             .medium
+        case .medium, .semibold: .bold
+        case .bold:              .heavy
+        case .heavy, .black:     .black
+        default:                 .semibold
         }
     }
 
@@ -381,6 +407,8 @@ enum RSFont {
 /// at the top of this file for why a plain `Font` cannot do this.
 private struct RSScaledFont: ViewModifier {
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// Bold Text, as SwiftUI reports it.
+    @Environment(\.legibilityWeight) private var legibilityWeight
 
     let role: RSFontRole
     let size: CGFloat
@@ -389,7 +417,10 @@ private struct RSScaledFont: ViewModifier {
     let maxSize: CGFloat?
 
     func body(content: Content) -> some View {
-        content.font(RSFont.resolved(
+        let weight = legibilityWeight == .bold
+            ? RSFont.bolder(weight ?? RSFont.defaultWeight(role))
+            : weight
+        return content.font(RSFont.resolved(
             role: role, size: size, weight: weight,
             relativeTo: relativeTo, maxSize: maxSize, typeSize: typeSize
         ))

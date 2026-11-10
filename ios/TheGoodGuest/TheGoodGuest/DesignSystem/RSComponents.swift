@@ -12,10 +12,13 @@ import SwiftUI
 /// The filled pill. Ink on light screens; on dusk, a light pill with dusk text.
 struct RSPrimaryButtonStyle: ButtonStyle {
     var onDusk = false
+    /// Bold Text: the label's face is named, so it follows the setting only
+    /// when asked to.
+    @Environment(\.legibilityWeight) private var legibilityWeight
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(RSFont.ui(.headline, weight: .semibold))
+            .font(RSFont.ui(.headline, weight: legibilityWeight == .bold ? RSFont.bolder(.semibold) : .semibold))
             .rsControlLabel()
             .foregroundStyle(onDusk ? Color.rsDusk : Color.white)
             .fixedSize(horizontal: false, vertical: true)
@@ -34,10 +37,11 @@ struct RSPrimaryButtonStyle: ButtonStyle {
 /// The quiet action: words in ink, no shape, a full-width 50pt target.
 struct RSQuietButtonStyle: ButtonStyle {
     var onDark = false
+    @Environment(\.legibilityWeight) private var legibilityWeight
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(RSFont.ui(.callout, weight: .semibold))
+            .font(RSFont.ui(.callout, weight: legibilityWeight == .bold ? RSFont.bolder(.semibold) : .semibold))
             .rsControlLabel()
             .foregroundStyle(onDark ? Color.rsOnDusk : Color.rsInk)
             .frame(maxWidth: .infinity, minHeight: 50)
