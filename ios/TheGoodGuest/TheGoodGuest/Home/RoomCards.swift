@@ -90,9 +90,15 @@ nonisolated enum RoomCards {
                         calendar: Calendar = .current) -> HomeContent {
         let listed = rooms.knownRooms ?? []
         var local: [HomeCard] = []
+        // The room on its way is named by its day like any other. Until the
+        // server lists it, that day still counts against the listed rooms'.
+        var unlistedFlightDay: Date?
 
         if let flight, let card = flightCard(flight, listed: listed, now: now, calendar: calendar) {
             local.append(card)
+            if !listed.contains(where: { $0.bundleId == flight.bundleId }) {
+                unlistedFlightDay = flight.sentAt ?? now
+            }
         }
         if let earlierFailure, earlierFailure.bundleId != flight?.bundleId {
             let status = RoomStatusCopy.needsYou(.uploadFailed(reason: earlierFailure.reason))
@@ -121,7 +127,8 @@ nonisolated enum RoomCards {
             content.staleLine = stale ? staleText : nil
             content.countLine = listed.count > 1 ? "\(listed.count) rooms, newest first" : nil
             let others = listed.filter { $0.bundleId == nil || $0.bundleId != flight?.bundleId }
-            content.cards = local + roomCards(others, all: listed, now: now, calendar: calendar)
+            content.cards = local + roomCards(others, all: listed, onItsWay: unlistedFlightDay,
+                                              now: now, calendar: calendar)
             return content
         }
     }
@@ -131,8 +138,12 @@ nonisolated enum RoomCards {
     private static func flightCard(_ flight: HomeFlight, listed: [RoomSummary],
                                    now: Date, calendar: Calendar) -> HomeCard? {
         let scene = listed.first { $0.bundleId == flight.bundleId }
-        let title = RoomHistory.title(sentAt: flight.sentAt ?? scene?.sentAt ?? now, now: now,
-                                      withTime: false, calendar: calendar)
+        let sentAt = flight.sentAt ?? scene?.sentAt ?? now
+        // Against every listed room but its own scene, which it replaces.
+        let sharesDay = listed.contains { other in
+            other.id != scene?.id && other.sentAt.map { calendar.isDate($0, inSameDayAs: sentAt) } == true
+        }
+        let title = RoomHistory.title(sentAt: sentAt, now: now, withTime: sharesDay, calendar: calendar)
         let id = "flight-" + flight.bundleId
         switch flight.placement {
         case .desk(let state):
@@ -156,12 +167,15 @@ nonisolated enum RoomCards {
     }
 
     /// Rooms the server has, newest first as it sent them. Two rooms from one
-    /// day both carry their time, so neither title is ambiguous.
-    private static func roomCards(_ rooms: [RoomSummary], all: [RoomSummary],
+    /// day both carry their time, so neither title is ambiguous, and the room
+    /// on its way is one of them until the server lists it (`onItsWay`).
+    private static func roomCards(_ rooms: [RoomSummary], all: [RoomSummary], onItsWay: Date?,
                                   now: Date, calendar: Calendar) -> [HomeCard] {
         rooms.map { room in
             let sharesDay = room.sentAt.map { day in
-                all.filter { other in other.id != room.id && other.sentAt.map { calendar.isDate($0, inSameDayAs: day) } == true }.count > 0
+                all.contains { other in
+                    other.id != room.id && other.sentAt.map { calendar.isDate($0, inSameDayAs: day) } == true
+                } || onItsWay.map { calendar.isDate($0, inSameDayAs: day) } == true
             } ?? false
             let title = sharesDay
                 ? RoomHistory.title(sentAt: room.sentAt, now: now, withTime: true, calendar: calendar)

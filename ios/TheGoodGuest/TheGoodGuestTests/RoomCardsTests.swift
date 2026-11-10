@@ -92,6 +92,33 @@ final class RoomCardsTests: XCTestCase {
                                               "The 23 August room"])
     }
 
+    /// The room on its way is named like any other, so it is one of the two
+    /// when it shares a day with a room the server already has.
+    func testARoomOnItsWayAndOneFromEarlierThatDayBothCarryTheirTime() {
+        let sent = calendar.date(bySettingHour: 14, minute: 5, second: 0, of: now)!
+        let c = content(.loaded(rooms: [room("a", daysAgo: 0, hour: 9), room("b", daysAgo: 3)], stale: false),
+                        flight: HomeFlight(bundleId: "f", placement: .desk(.sending), sentAt: sent))
+        XCTAssertEqual(c.cards.map(\.title), ["The 28 August room, 2:05 pm",
+                                              "The 28 August room, 9:00 am",
+                                              "The 25 August room"])
+    }
+
+    /// At the doorway the flight's own scene is listed but not shown twice;
+    /// it still counts against the other room from its day, once.
+    func testARoomJustArrivedIsTimedAgainstAnotherFromItsDay() {
+        let arrived = room("s", daysAgo: 0, hour: 13, bundle: "f")
+        let c = content(.loaded(rooms: [arrived, room("a", daysAgo: 0, hour: 9)], stale: false),
+                        flight: HomeFlight(bundleId: "f", placement: .doorway))
+        XCTAssertEqual(c.cards.map(\.title), ["The 28 August room, 1:00 pm",
+                                              "The 28 August room, 9:00 am"])
+    }
+
+    func testARoomOnItsWayAloneOnItsDayHasNoTime() {
+        let c = content(.loaded(rooms: [room("a", daysAgo: 2)], stale: false),
+                        flight: HomeFlight(bundleId: "f", placement: .desk(.sending)))
+        XCTAssertEqual(c.cards.map(\.title), ["The 28 August room", "The 26 August room"])
+    }
+
     func testAFlightCardShowsWhichStepIsHappening() {
         func card(_ placement: SurfacePlacement) -> HomeCard? {
             content(.loaded(rooms: [], stale: false), flight: HomeFlight(bundleId: "f", placement: placement)).cards.first
