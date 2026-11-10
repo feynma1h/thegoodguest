@@ -4,9 +4,10 @@
 # Run from the repo root:
 #     ./infra/deploy_perception.sh obj               # deploy perception-obj, straight to 100%
 #     ./infra/deploy_perception.sh obj --candidate   # hold the new revision at 0%, smoke, then flip
+#     CANDIDATE_TAG=<lane> ./infra/deploy_perception.sh obj --candidate   # your own tag per lane
 #
 # --candidate is the same shape deploy_api_public.sh and deploy_api_internal.sh
-# use: the revision is created with --no-traffic --tag=candidate, reachable on
+# use: the revision is created with --no-traffic --tag=${CANDIDATE_TAG}, reachable on
 # its own tagged URL, and traffic moves only when you run the printed
 # update-traffic command. Prefer it for perception-obj — a revision that fails
 # at run time burns a full GPU request budget before anyone finds out, and the
@@ -54,6 +55,9 @@ REPO="thegoodguest"
 # that function IS the grant list, and it is idempotent so every deploy
 # reasserts it.
 OBJ_RUNTIME_SA="perception-obj-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+# The Cloud Run tag a candidate is reachable under before the flip. Each lane
+# uses its own, so one lane's candidate never takes another's tagged URL.
+CANDIDATE_TAG="${CANDIDATE_TAG:-candidate}"
 IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:${IMAGE_TAG}"
 
@@ -213,7 +217,7 @@ if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
     else
         echo "[deploy] WARNING: ${SERVICE} has no prior revision; --no-traffic cannot be honored and the new revision serves 100% on creation."
     fi
-    DEPLOY_FLAGS+=(--tag=candidate)
+    DEPLOY_FLAGS+=(--tag="${CANDIDATE_TAG}")
 fi
 gcloud run deploy "${SERVICE}" \
     --image="${IMAGE_URI}" \
@@ -330,9 +334,9 @@ if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
     CANDIDATE_URL=$(gcloud run services describe "${SERVICE}" \
         --region="${REGION}" --project="${PROJECT_ID}" \
         --format='json(status.traffic)' \
-        | jq -r '.status.traffic[] | select(.tag == "candidate") | .url // empty')
+        | jq -r --arg tag "${CANDIDATE_TAG}" '.status.traffic[] | select(.tag == $tag) | .url // empty')
     if [[ -z "${CANDIDATE_URL}" ]]; then
-        echo "ERROR: could not resolve the candidate revision URL from the --tag=candidate traffic entry." >&2
+        echo "ERROR: could not resolve the candidate revision URL from the --tag=${CANDIDATE_TAG} traffic entry." >&2
         gcloud run services describe "${SERVICE}" \
             --region="${REGION}" --project="${PROJECT_ID}" \
             --format='yaml(status.traffic)' >&2

@@ -677,10 +677,11 @@ uses `--accent-deep` at 5.52:1 instead (0249). Do not set body-sized text in
 - **Deploy is candidate → smoke → flip** on every service, perception-obj
   included. `infra/RUNBOOK.md` carries the phases. `deploy_perception.sh` moves
   the `serving` registry tag at the flip — do not skip it. Each lane deploys
-  under its own Cloud Run tag: `deploy_api_public.sh` and
-  `deploy_scene_finish.sh` take `CANDIDATE_TAG=<lane>`; `deploy_api_internal.sh`
-  and `deploy_perception.sh` still hardcode `candidate`. A brand-new service's
-  first revision serves 100% whatever the flags say.
+  under its own Cloud Run tag: `deploy_api_public.sh`,
+  `deploy_scene_finish.sh` and `deploy_perception.sh` take
+  `CANDIDATE_TAG=<lane>`; `deploy_api_internal.sh` still hardcodes
+  `candidate`. A brand-new service's first revision serves 100% whatever the
+  flags say.
 - **Registry cleanup is written, not applied.** `infra/artifact-cleanup-policy.json`
   would keep anything tagged `serving` or `buildcache`, the 3 newest
   `perception-obj` and the 10 newest `api-*`, and delete the rest of those at
