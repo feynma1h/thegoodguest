@@ -9,7 +9,10 @@
  * Every claim here is one the product makes good on: the guest moves, takes
  * out or turns a piece and shows it at once (api-public guest_tools), and it
  * never computes a distance, so no line here says it does. The room is a
- * hand-built sample and says so; "nothing is generated" speaks of yours.
+ * hand-built sample and says so. "Built from your scan" speaks of yours, and
+ * says how: walls measured, each piece modelled from the person's own
+ * photographs of it (the privacy page's §5c describes that step). It must
+ * never say nothing is generated — a modelled piece is.
  */
 
 import { AnimatePresence, motion } from "motion/react";
@@ -290,7 +293,7 @@ function GuestSection() {
 }
 
 const PROMISES = [
-  { title: "Nothing in your room is generated.", body: "Every wall and every piece comes from your own scan." },
+  { title: "Built from your scan.", body: "Walls are measured, and each piece is modelled from your own photographs of it, standing where your iPhone found it." },
   { title: "No feed and no strangers.", body: "Your rooms aren’t public, and there’s nothing to scroll." },
   { title: "Leave whenever you like.", body: "Delete your account, and every room goes with it." },
 ] as const;
