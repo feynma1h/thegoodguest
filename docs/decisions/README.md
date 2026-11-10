@@ -1,8 +1,8 @@
 # Decision notes
 
-315 notes. **266 of them are `Decided`** -- those govern code that
+316 notes. **266 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
-other 49 record decisions that were carried out, replaced, or
+other 50 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
 because they constrain you.
 
@@ -18,7 +18,7 @@ The status vocabulary and the numbering rule live in
 | status | count | means |
 |---|---|---|
 | `Refuted` | 16 | a measured negative -- read before proposing it again |
-| `Superseded` | 8 | replaced by a later note |
+| `Superseded` | 9 | replaced by a later note |
 | `Amended` | 9 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
 | `Decided` | 266 | governs code that ships today |
@@ -46,7 +46,7 @@ The status vocabulary and the numbering rule live in
 | [0280](0280-ray-convergence-does-not-separate-neighbours.md) | ray convergence does not separate a fragment from its neighbour | Refuted |
 | [0284](0284-appearance-calibrates-well-and-fails-in-the-room.md) | appearance separates the objects that have boxes, and merges the ones that do not | Refuted |
 
-## Superseded (8)
+## Superseded (9)
 
 *Replaced by a later note.*
 
@@ -56,6 +56,7 @@ The status vocabulary and the numbering rule live in
 | [0063](0063-sam3d-layout-convention-verdict.md) | SAM 3D layout conventions: measured verdict (systematic ~90°) and the fix candidate | Superseded by 0065 |
 | [0071](0071-room-boundary-source.md) | room-boundary source: raw plane anchors vs. RoomPlan vs. reconstructed geometry | Superseded by 0077 |
 | [0120](0120-perception-build-layer-cache.md) | perception-obj builds cache layers via BuildKit inline cache on a stable tag | Superseded by 0199, |
+| [0122](0122-hero-is-the-reveal.md) | the landing hero is the reveal, not a room | Superseded by 0361 |
 | [0179](0179-sam3d-takes-a-pointmap-and-we-let-it-guess.md) | SAM 3D takes a LiDAR pointmap, and we let it guess one instead | Superseded by 0180 |
 | [0263](0263-precision-is-a-gate-not-a-ranking.md) | precision against the box is a gate, not a ranking | Superseded by 0266 |
 | [0265](0265-five-instruments-one-unrun-experiment.md) | five instruments for one choice, and the experiment none of them needs | Superseded by 0266 |
@@ -198,7 +199,6 @@ The status vocabulary and the numbering rule live in
 | [0117](0117-composer-confirming-is-reachable.md) | the composer's `confirming` phase is reachable, and stays | Decided |
 | [0118](0118-ios-google-linking.md) | iOS Google linking: the second provider rides Apple's rails | Decided |
 | [0119](0119-google-config-seam-preflight.md) | Google's config seam: committed URL scheme, gitignored client ID, preflight instead of a crash | Decided |
-| [0122](0122-hero-is-the-reveal.md) | the landing hero is the reveal, not a room | Decided |
 | [0123](0123-render-payload-is-network-bound.md) | the render payload is network-bound; parse has no headroom to give | Decided |
 | [0125](0125-spz-is-a-transcode-not-a-re-bake.md) | the compressed tier is a transcode, and Spark already reads it | Decided |
 | [0126](0126-compressed-tier-sits-beside-the-ply.md) | the compressed tier sits beside the PLY, discovered by a sibling index | Decided |
@@ -370,3 +370,4 @@ The status vocabulary and the numbering rule live in
 | [0358](0358-observability-is-structured-log-lines-and-a-summary-with-no-pixels.md) | Observability is structured log lines and a summary with no pixels | Decided |
 | [0359](0359-the-local-run-proves-the-wiring-not-the-quality.md) | The local run proves the wiring, not the quality | Decided |
 | [0360](0360-which-models-may-see-a-room-and-what-the-operator-ruled-on-sending.md) | Which models may see a room, and what the operator ruled on sending | Decided |
+| [0361](0361-the-website-leaves-cream-for-daylight-slate-ink-and-dusk.md) | the website leaves cream for daylight, slate ink and dusk | Decided |

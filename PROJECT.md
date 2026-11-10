@@ -17,7 +17,7 @@ This file is the always-current state of the project. If something in here is wr
 
 **The thesis: every home contains a version of itself that its owner has never seen. This product makes that version visible, understandable, and achievable — one conversation at a time.** Every feature decision filters through this. The full founding vision lives at `docs/product/initial-idea-draft.md` (verbatim, with what's superseded vs durable mapped in decision 0055) — read it before making product-surface decisions.
 
-This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction is the *medium*; the product is helping people make AI-based decisions about improving their room. Three product layers frame everything: the **AI layer** (understands space structurally — object relationships, traffic flow, light, proportion — with algorithmic spatial analysis before any LLM is invoked, and reasoning traces on every design decision), the **emotional layer** (feels personal, not algorithmic — the experience bar is Linear/Vercel/Figma-tier premium consumer software; conversation is the primary post-reveal interface; the cinematic reveal is the defining moment; design language is Apple-grade restraint — the chrome stays quiet so the room carries the colour — in the warm Good Guest palette of 0057, which SUPERSEDES 0056's neutral-chrome-and-one-sans reading: the app ships parchment and ink with three type roles, the guest's serif for prose and mono for machine data only, and the **social layer** (rooms are identity — sharing, comparison, evolution over time). Direction, not yet commitments: room health scoring, taste graph, lighting simulation, budget-aware shopping, DAG version history. Deliberately out (per the founding draft, still sound): AR overlay, social feed, photorealistic image generation, floor plans, voice input; desktop-first.
+This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction is the *medium*; the product is helping people make AI-based decisions about improving their room. Three product layers frame everything: the **AI layer** (understands space structurally — object relationships, traffic flow, light, proportion — with algorithmic spatial analysis before any LLM is invoked, and reasoning traces on every design decision), the **emotional layer** (feels personal, not algorithmic — the experience bar is Linear/Vercel/Figma-tier premium consumer software; conversation is the primary post-reveal interface; the cinematic reveal is the defining moment; design language is Apple-grade restraint — the chrome stays quiet so the room carries the colour — in the daylight, slate-ink and dusk language of 0361 on the website, which replaced 0057's warm cream (itself the successor to 0056's neutral-chrome-and-one-sans reading): three type roles, the display serif that is also the guest's voice, the interface sans, and mono for measurements only, and the **social layer** (rooms are identity — sharing, comparison, evolution over time). Direction, not yet commitments: room health scoring, taste graph, lighting simulation, budget-aware shopping, DAG version history. Deliberately out (per the founding draft, still sound): AR overlay, social feed, photorealistic image generation, floor plans, voice input; desktop-first.
 
 **Naming: SETTLED 2026-08-23 as "The Good Guest" (0245)**, forced by the App Store listing when enrollment cleared. It is the register the whole product was built in (0072/0057) and the metaphor the calling card is already named from. Set as a STRING in three places — `web/src/components/Wordmark.tsx`'s `BRAND_NAME`, iOS `RSBrand.name`, and `INFOPLIST_KEY_CFBundleDisplayName` in `project.pbxproj`, which is what the Home Screen shows and which cannot read either constant (`tools/test_gen_mark.py` fails if they drift). **Until 2026-08-26 the Home Screen read "TheGoodGuest"** — the main target had no display name and fell through to `TARGET_NAME`, outside every "the name lives in N places" claim this file ever made. The card no longer prints the name at all: it carries the wordmark, which is a drawing. **The repo, GCP project, buckets and `thegoodguest:` localStorage keys deliberately keep the stand-in** — infrastructure, invisible, expensive to rename for no user-visible gain. **The card still prints `thegoodguest.web.app`, which is the TRUE hosting URL**: changing that string without moving hosting would print a falsehood on an artifact that leaves the browser. Re-open trigger is commerce, and renaming stays cheap until App Store submission — TestFlight needs only an app record.
 
@@ -571,13 +571,32 @@ load-bearing, see the Python test policy).
 
 ### Web app — `web/`, live at https://thegoodguest.web.app
 
-Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
-`/room?bundle=`, `/new`, `/viewer` (dev workbench, hidden in live mode),
-`/privacy`, `/terms`.
+Next.js static export on Firebase Hosting. Routes: `/` (the landing, or a
+returning visitor's greeting beside their newest room), `/rooms`,
+`/room?bundle=`, `/new`, `/privacy`, `/terms`; dev pages `/viewer` (hidden in
+live mode), `/shell-finish` and `/share-card` (inert unless their flags are
+set). Every unmatched address gets the site's own not-found page (`404.html`).
 
-- `SplatViewer.tsx` is the **only** module importing three.js or Spark. It
-  consumes a renderer-agnostic `PositionedSplat` contract, prefers the SPZ tier
-  and falls back to PLY, and plays the reveal score rather than deciding it.
+- **The look is 0361's** (daylight, slate ink, dusk; Newsreader, Albert Sans,
+  JetBrains Mono), redesigned 2026-11-10 with every screen approved on a canvas
+  before it was built. The room page sits on dusk in every state. Every sheet
+  sits in one `ui/Dialog`, and `useAccount` is the one source for who is here
+  (the nav offers "Sign in" when nobody is).
+- `SplatViewer.tsx` is the only module that draws a **person's room** with
+  three.js or Spark. It consumes a renderer-agnostic `PositionedSplat`
+  contract, prefers the SPZ tier and falls back to PLY, and plays the reveal
+  score rather than deciding it. `SampleRoom.tsx` (`sampleRoomScene.ts`) is the
+  second three.js entry point and draws only the landing's hand-built sample
+  room, on the product's diorama camera (0361).
+- **The house draws each ready room's measured plan** with the calling card's
+  own drawing (`lib/card/layout.ts` `layoutPlan`, rendered by `PlanFigure.tsx`),
+  so the plan and its one dimension follow the card's rules: the rendered
+  boundary, measured numbers only, one decimal.
+- **The share image** (`public/og-card.png`) is drawn by the site at
+  `/share-card` and exported by headless Chrome (the command is in that page's
+  header). `docs/product/og-card.html` is no longer its source. It stays as
+  the precedent `measure.test.ts` reproduces, and its own old export command
+  would bring back the cream card.
 - `lib/reveal.ts` is the choreography as a pure function: the measured boundary
   draws itself, surfaces fade up in place, pieces settle, then a beat of quiet
   before the guest speaks (0097). Objects gate per piece on bytes arriving.
@@ -618,14 +637,18 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
   suppression-armed revision (0221) — a card ships the shell and a person
   contaminates a measured albedo, so this is the rung where 0089 binds hardest.
 
-Suite **287** vitest (`main`, 2026-09-19).
+Suite **316** vitest (2026-11-10).
 
-The design tokens are the new identity's (0248): cream `--paper: #f9f2ec`, warm
-near-black `--ink: #282723`, terracotta `--accent: #c04d3e`. **There are two
-terracottas and the split is load-bearing** — `--accent` is the exact value the
-mark is drawn in and reaches only 4.33:1 on the cream, so anything text-sized
-uses `--accent-deep` at 5.52:1 instead (0249). Do not set body-sized text in
-`--accent`.
+The design tokens are 0361's: daylight `--paper: #f5f6f8`, slate
+`--ink: #121a23` with `--ink-2: #4a5664` and `--ink-3: #808b98` (3.20:1, large
+text only), dusk `--dusk: #0d141c`, lamplight `--sun: #f0b26a`, and terracotta
+`--accent: #c04d3e`. **There are still two terracottas and the split is still
+load-bearing** — `--accent` is the exact value the mark is drawn in and reaches
+only 4.44:1 on the daylight ground, so anything text-sized uses `--accent-deep`
+`#a54235` at 5.66:1 instead (0249). Do not set body-sized text in `--accent`.
+**The card painter reads the font variables by name** (`lib/card/paint.ts`
+`resolveFonts`): change the site's faces there too, or the downloadable card
+silently paints at a 10px default.
 
 ### Infra and operations
 
