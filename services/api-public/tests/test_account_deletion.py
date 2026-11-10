@@ -368,6 +368,19 @@ def test_leaves_other_users_untouched(world):
     assert objects[CAPTURES] == {"captures/bundle-x/bundle.pb"}
 
 
+def test_a_rooms_still_pictures_go_with_its_folder(world):
+    """The room's still pictures (decision 0363) live in scenes/<id>/ beside
+    the rest of the room, so the prefix delete takes them and nothing has to
+    name them; another user's stay."""
+    world["objects"][OUTPUTS] |= {
+        "scenes/scene-a/still.jpg",
+        "scenes/scene-a/still-night.jpg",
+        "scenes/scene-x/still.jpg",
+    }
+    world["deleter"].delete(UID)
+    assert world["objects"][OUTPUTS] == {"scenes/scene-x/manifest.json", "scenes/scene-x/still.jpg"}
+
+
 def test_turns_subcollection_is_deleted_explicitly(world):
     """Firestore does not cascade — the turns must be deleted by hand, and
     before the parent doc, or they become unreachable orphans."""

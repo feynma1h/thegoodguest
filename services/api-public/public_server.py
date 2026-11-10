@@ -15,7 +15,9 @@ Endpoints:
 
   GET  /scenes/by-bundle/{bundle_id}
       Read scene state for a bundle the caller owns. Auth: Firebase ID token.
-      Returns scene status, result_uri, missing_paths, and timestamps.
+      Returns scene status, result_uri, missing_paths, timestamps, and
+      still_url / still_night_url: signed links to the room's still picture
+      by day and by night, or null when there is none (decision 0363).
       Consumers: the iOS app's ScenePoller (production polling loop) and the
       smoke tool (tools/upload_test_bundle.py) after upload.
 
@@ -868,11 +870,56 @@ def _get_guest_streamer():
 # Serialization
 # ---------------------------------------------------------------------------
 
-def _scene_to_client_dict(scene) -> dict:
+def _still_uris(scene) -> list[str]:
+    """gs:// URIs of the scene's still pictures (decision 0363), day first.
+
+    Known from the scene document alone: scene-finish's /still sets `still`
+    only after writing the JPEGs beside the manifest, and says whether it drew
+    a night one. No marker (or no manifest yet) means no picture — so listing
+    rooms never asks the bucket whether a still exists."""
+    if not scene.still or not scene.result_uri:
+        return []
+    scene_dir = scene.result_uri.rsplit("/", 1)[0]
+    uris = [scene_dir + "/still.jpg"]
+    if scene.still.get("night"):
+        uris.append(scene_dir + "/still-night.jpg")
+    return uris
+
+
+def _sign_stills(scenes) -> dict[str, str]:
+    """{gs_uri: signed https url} for every still of these scenes, signed
+    concurrently (each signature is an IAM signBlob round trip). A still that
+    cannot be signed is absent — the client shows the room's outline — and
+    never fails the response."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    uris = [u for s in scenes for u in _still_uris(s)]
+    if not uris:
+        return {}
+    signer = _get_url_signer()
+
+    def _one(uri: str) -> tuple[str, str | None]:
+        try:
+            return uri, signer.sign(uri, _ASSET_URL_TTL_SECONDS)
+        except Exception as exc:
+            logger.warning("scenes: still link degraded to null for %s: %s", uri, exc)
+            return uri, None
+
+    with ThreadPoolExecutor(max_workers=max(1, min(_ASSET_SIGN_CONCURRENCY, len(uris)))) as pool:
+        return {uri: url for uri, url in pool.map(_one, uris) if url}
+
+
+def _scene_to_client_dict(scene, signed_stills: dict[str, str] | None = None) -> dict:
     """Client-facing Scene shape, shared by /scenes/by-bundle and /scenes.
 
     last_error and invalid_blobs are server-side only — excluded per
-    decision 0019."""
+    decision 0019. still_url / still_night_url are V4-signed links (the same
+    TTL as the assets route's) to the room's picture by day and by night, or
+    null when there is none (decision 0363); a caller listing many scenes
+    signs them all at once and passes `signed_stills`."""
+    uris = _still_uris(scene)
+    if signed_stills is None:
+        signed_stills = _sign_stills([scene])
     return {
         "scene_id": scene.scene_id,
         "bundle_id": scene.bundle_id,
@@ -881,6 +928,8 @@ def _scene_to_client_dict(scene) -> dict:
         "missing_paths": scene.missing_paths,
         "created_at": scene.created_at.isoformat(),
         "updated_at": scene.updated_at.isoformat(),
+        "still_url": signed_stills.get(uris[0]) if uris else None,
+        "still_night_url": signed_stills.get(uris[1]) if len(uris) > 1 else None,
     }
 
 
@@ -1175,7 +1224,8 @@ def get_scene_by_bundle(
     UID must match scene.user_id (ownership check).
 
     Response (200):
-      {scene_id, bundle_id, status, result_uri, missing_paths, created_at, updated_at}
+      {scene_id, bundle_id, status, result_uri, missing_paths, created_at, updated_at,
+       still_url, still_night_url}
 
     status is body-only — a scene in 'failed' or 'failed_incomplete' returns
     HTTP 200. 404 is reserved for "no scene exists for this bundle_id."
@@ -1280,9 +1330,10 @@ def list_scenes(
         )
 
     scenes = _get_scene_read_repo().list_by_user(user_id, limit=limit)
+    signed = _sign_stills(scenes)
     return JSONResponse(
         status_code=200,
-        content={"scenes": [_scene_to_client_dict(s) for s in scenes]},
+        content={"scenes": [_scene_to_client_dict(s, signed) for s in scenes]},
     )
 
 

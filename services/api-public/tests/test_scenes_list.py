@@ -2,6 +2,8 @@
 
 Covers:
   - 200 with the per-scene shape shared with /scenes/by-bundle
+  - still_url / still_night_url from the scene's marker alone (decision 0363):
+    signed when present, null otherwise, never a bucket call
   - newest-first ordering
   - only the caller's scenes appear (isolation)
   - empty list is 200 {"scenes": []}, not 404
@@ -80,6 +82,8 @@ class TestListScenesHappyPath:
             "missing_paths": None,
             "created_at": scene.created_at.isoformat(),
             "updated_at": scene.updated_at.isoformat(),
+            "still_url": None,
+            "still_night_url": None,
         }
 
     def test_newest_first(self, client) -> None:
@@ -129,3 +133,78 @@ class TestListScenesAuth:
         resp = _list(client, [], headers={"Authorization": "Bearer garbage"})
         assert resp.status_code == 401
         assert resp.json()["error"] == "invalid_token"
+
+
+class _Signer:
+    """Records what it signed; `fail` makes every signature raise."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[str] = []
+
+    def sign(self, gs_uri: str, ttl_seconds: int) -> str:
+        if self.fail:
+            raise RuntimeError("signblob unavailable")
+        assert ttl_seconds == server._ASSET_URL_TTL_SECONDS
+        self.calls.append(gs_uri)
+        return "https://signed.example/" + gs_uri[5:] + "?sig=1"
+
+
+class _NoBucket:
+    """Listing rooms must not ask the bucket anything about stills."""
+
+    def __getattr__(self, name):
+        raise AssertionError(f"the bucket was asked: {name}")
+
+
+def _ready(minute: int = 0, still: dict | None = None) -> Scene:
+    scene = _make_scene(minute=minute, status=SceneStatus.READY)
+    scene.result_uri = f"gs://outputs/scenes/{scene.scene_id}/manifest.json"
+    scene.still = still
+    return scene
+
+
+def _list_signed(client, scenes, signer):
+    with patch.object(server, "_url_signer", signer), patch.object(server, "_manifest_fetcher", _NoBucket()):
+        return _list(client, scenes)
+
+
+class TestListScenesStills:
+    def test_a_room_with_a_day_still_gets_one_link_and_no_night(self, client) -> None:
+        scene = _ready(still={"night": False, "rendered_at": _NOW})
+        signer = _Signer()
+        (entry,) = _list_signed(client, [scene], signer).json()["scenes"]
+        assert entry["still_url"] == f"https://signed.example/outputs/scenes/{scene.scene_id}/still.jpg?sig=1"
+        assert entry["still_night_url"] is None
+        assert signer.calls == [f"gs://outputs/scenes/{scene.scene_id}/still.jpg"]
+
+    def test_a_room_with_twins_gets_day_and_night(self, client) -> None:
+        scene = _ready(still={"night": True, "rendered_at": _NOW})
+        (entry,) = _list_signed(client, [scene], _Signer()).json()["scenes"]
+        assert entry["still_url"].endswith(f"/scenes/{scene.scene_id}/still.jpg?sig=1")
+        assert entry["still_night_url"].endswith(f"/scenes/{scene.scene_id}/still-night.jpg?sig=1")
+
+    def test_rooms_without_a_marker_are_null_and_cost_no_signature(self, client) -> None:
+        drawn = _ready(minute=30, still={"night": False, "rendered_at": _NOW})
+        waiting = _ready(minute=20)
+        queued = _make_scene(minute=10)
+        signer = _Signer()
+        entries = _list_signed(client, [drawn, waiting, queued], signer).json()["scenes"]
+        assert [e["still_url"] is not None for e in entries] == [True, False, False]
+        assert all(e["still_night_url"] is None for e in entries)
+        assert signer.calls == [f"gs://outputs/scenes/{drawn.scene_id}/still.jpg"]
+
+    def test_a_signing_failure_is_a_null_link_not_an_error(self, client) -> None:
+        scene = _ready(still={"night": True, "rendered_at": _NOW})
+        resp = _list_signed(client, [scene], _Signer(fail=True))
+        assert resp.status_code == 200
+        (entry,) = resp.json()["scenes"]
+        assert (entry["still_url"], entry["still_night_url"]) == (None, None)
+
+    def test_every_room_in_a_list_is_signed(self, client) -> None:
+        scenes = [_ready(minute=m, still={"night": m % 2 == 0, "rendered_at": _NOW}) for m in range(12)]
+        signer = _Signer()
+        entries = _list_signed(client, scenes, signer).json()["scenes"]
+        assert all(e["still_url"] for e in entries)
+        assert sum(1 for e in entries if e["still_night_url"]) == 6
+        assert len(signer.calls) == 18

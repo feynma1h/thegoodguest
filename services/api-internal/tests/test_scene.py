@@ -389,3 +389,18 @@ class TestFirestoreSerializationRoundTrip:
         doc_stub = _DocStub(scene.scene_id, doc_data)
         restored = FirestoreSceneRepository._from_doc(doc_stub)
         assert restored.invalid_blobs is None
+
+    def test_the_still_marker_is_read_but_never_written_here(self):
+        """scene-finish sets `still` on a ready scene (decision 0363). This
+        service creates documents and updates named fields only, so the marker
+        must never be in what it writes, or a write would erase the picture's
+        record; and a document carrying it must read back with it."""
+        scene = _scene(status=SceneStatus.READY)
+        scene.still = {"night": True, "rendered_at": _NOW}
+        doc_data = FirestoreSceneRepository._to_dict(scene)
+        assert "still" not in doc_data
+        restored = FirestoreSceneRepository._from_doc(
+            _DocStub(scene.scene_id, {**doc_data, "still": {"night": True, "rendered_at": _NOW}})
+        )
+        assert restored.still == {"night": True, "rendered_at": _NOW}
+        assert FirestoreSceneRepository._from_doc(_DocStub(scene.scene_id, doc_data)).still is None
