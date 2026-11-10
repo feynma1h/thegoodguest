@@ -34,7 +34,7 @@ import SwiftUI
 
 enum RSScreen {
     /// The margin every screen's content sits inside.
-    static let horizontal: CGFloat = 26
+    static let horizontal: CGFloat = 20
     /// Above the header band.
     static let headerTop: CGFloat = 8
     /// The header band itself. 44pt is the tap-target minimum, and using it
@@ -109,7 +109,7 @@ struct ScreenHeader: View {
         ScreenHeaderFrame {
             BackChevron(action: onClose)
             Text(title)
-                .rsFont(.display, size: 22, weight: .medium, maxSize: 30, cap: .display)
+                .rsFont(.display, size: 26, weight: .light, cap: .display)
                 .foregroundStyle(Color.rsInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -124,7 +124,7 @@ struct BackChevron: View {
         Button(action: action) {
             Image(systemName: "chevron.left")
                 .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Color.rsInkMuted)
+                .foregroundStyle(Color.rsInk)
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
@@ -193,7 +193,7 @@ extension View {
     /// `safeAreaInset` it changes the height the bar is offered, and profile's
     /// primary went from wrapping to two lines to truncating at "Sign in to
     /// kee…". This is the shape the guidance sheet has been using all along.
-    func rsPinnedActions(surface: Color = .rsBackground) -> some View {
+    func rsPinnedActions(surface: Color = .rsGround) -> some View {
         padding(.horizontal, RSScreen.horizontal)
             .background(surface)
     }
@@ -214,7 +214,7 @@ struct RSActionFootnoteStyle: ButtonStyle {
         configuration.label
             .font(RSFont.ui(.footnote))
             .rsControlLabel()
-            .foregroundStyle(Color.rsInkMuted)
+            .foregroundStyle(Color.rsInk)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 2)
             .opacity(configuration.isPressed ? 0.55 : 1)

@@ -99,7 +99,7 @@ struct ReviewView: View {
         }
         .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .rsParchmentScreen()
+        .rsGroundScreen()
     }
 
     // MARK: Copy

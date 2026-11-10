@@ -241,6 +241,6 @@ extension Color {
     MenuPeekMark()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(26)
-        .rsParchmentScreen()
+        .rsGroundScreen()
 }
 #endif

@@ -122,7 +122,7 @@ struct DeleteAccountView: View {
         }
         .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .rsParchmentScreen()
+        .rsGroundScreen()
         .safeAreaInset(edge: .bottom) { actions }
         .interactiveDismissDisabled(!copy.dismissable)
         .alert("Delete everything?", isPresented: $askingToConfirm) {

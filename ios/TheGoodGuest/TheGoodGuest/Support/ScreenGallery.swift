@@ -768,7 +768,7 @@ struct ScreenGalleryView: View {
                 .foregroundStyle(Color.rsAction)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .rsParchmentScreen()
+        .rsGroundScreen()
     }
 }
 

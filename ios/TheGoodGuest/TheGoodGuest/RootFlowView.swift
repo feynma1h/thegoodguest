@@ -548,14 +548,14 @@ struct RootFlowView: View {
             // user is held on. Hand them straight to it: they were watching
             // this room, so the kindest thing is to show them what happened
             // rather than bounce them home to be told something needs them.
-            ParchmentBackground()
+            GroundBackground()
                 .onAppear { toNotes() }
 
         case .nowhere:
             // Terminal-not-ours (decision 0074): the root-level onChange stands
             // this down on the same publish that produced it, so this renders
             // for at most a frame on the way home.
-            ParchmentBackground()
+            GroundBackground()
         }
     }
 

@@ -1,80 +1,68 @@
-/// The Good Guest palette, translated to SwiftUI (design spec §10, decision 0072).
+/// The Good Guest palette, translated to SwiftUI.
 ///
-/// These are brand constants — fixed warm values, not system-adaptive semantic
-/// colors. The app is deliberately light-first (ink-on-parchment); capture and
-/// terminal-failure screens choose the dark surfaces explicitly rather than
-/// relying on the system light/dark switch. Every screen composes from these
-/// tokens; no view hard-codes a hex.
+/// The website's language, approved 2026-11-10: a daylight ground with slate
+/// ink for everything you read, dusk only where the camera or the night is,
+/// terracotta only in the mark and in measurements, lamplight only as light.
+/// Cream, parchment and warm-brown ink are retired (they were decision 0057's).
 ///
-/// THE RULE OF GOLD survives translation intact: `rsGold` is a LIGHT-SEMANTIC
-/// indicator only — the mesh ink, the "enough"/ready moment, the doorway. It is
-/// never a generic accent and never success/error. Sensor/tracking colors
-/// (`rsSensorGood` etc.) sit *outside* the brand — they read as instrument
-/// truth, not decoration.
+/// These are brand constants, not system-adaptive colours: each screen picks
+/// light or dusk for itself, and the app does not follow the phone's Dark Mode
+/// (operator ruling, 2026-11-10). Every screen composes from these tokens; no
+/// view hard-codes a hex.
+///
+/// THE TWO RULES that survive every screen:
+///   • Terracotta (`rsTerracotta`) is the mark, the wordmark's rings and
+///     measurement annotations. It never fills a button and never colours a
+///     sentence. Text-sized measurements use `rsTerracottaText`.
+///   • Lamplight (`rsLamp`) is light: a lit or active indicator on dusk. It is
+///     never an accent on a light screen and never means success.
+///
+/// Read by every screen and by the Live Activity. `tools/test_gen_mark.py`
+/// pins `rsTerracotta`, `rsGround` and `rsInk` to the app icon's ink and tiles.
 
 import SwiftUI
 
 extension Color {
 
-    // MARK: Surfaces & ink (light chrome)
+    // MARK: Light screens
 
-    /// Parchment — grouped background for light screens.
-    static let rsBackground = Color(rsHex: 0xebe5df)
-    /// Cream — cards, sheets, secondary fills.
-    static let rsSurface = Color(rsHex: 0xf9f2ec)
-    /// Ink — primary label; also the dark capture & failure surface base.
-    static let rsInk = Color(rsHex: 0x282723)
+    /// The ground every light screen sits on.
+    static let rsGround = Color(rsHex: 0xf5f6f8)
+    /// Cards, sheets and lists on the ground.
+    static let rsSurface = Color(rsHex: 0xffffff)
+    /// Stages and tiles set into a surface: where a room or a plan is drawn.
+    static let rsInset = Color(rsHex: 0xe4e9ed)
+    /// Ink: titles, body, the filled button.
+    static let rsInk = Color(rsHex: 0x121a23)
+    /// Secondary ink. 6.9:1 on the ground, so it is allowed for body text.
+    static let rsInk2 = Color(rsHex: 0x4a5664)
+    /// Tertiary ink, for LARGE text only (3.3:1 on the ground): never a caption.
+    static let rsInk3 = Color(rsHex: 0x808b98)
+    /// Hairlines between rows.
+    static let rsHairline = Color(rsHex: 0x121a23).opacity(0.10)
 
-    /// Muted ink for support copy (~70% ink on parchment).
-    static let rsInkMuted = Color(rsHex: 0x282723).opacity(0.68)
-    /// Faint ink for eyebrows / tertiary (~50%).
-    static let rsInkFaint = Color(rsHex: 0x282723).opacity(0.5)
-    /// Hairline separators.
-    static let rsHairline = Color(rsHex: 0x282723).opacity(0.12)
+    // MARK: Terracotta — the mark and measurements only
 
-    // MARK: Actions
+    /// The brand ink: the mark, the wordmark's rings, measurement annotations.
+    static let rsTerracotta = Color(rsHex: 0xc04d3e)
+    /// Terracotta at text size (measurements set in mono), for contrast.
+    static let rsTerracottaText = Color(rsHex: 0xa54235)
 
-    /// Rust — the `.tint`; primary buttons, the capture shutter. NOT a light cue.
-    static let rsAction = Color(rsHex: 0xc04d3e)
-    /// Rust, pressed/hover.
-    static let rsActionPressed = Color(rsHex: 0xa54235)
+    // MARK: Dusk screens — the camera, the room by lamplight
 
-    // MARK: Gold — LIGHT-SEMANTIC ONLY
+    static let rsDusk = Color(rsHex: 0x0d141c)
+    static let rsRaised = Color(rsHex: 0x121b25)
+    static let rsRaised2 = Color(rsHex: 0x18222e)
+    /// Text on dusk.
+    static let rsOnDusk = Color(rsHex: 0xeef2f6)
+    /// Secondary text on dusk (8.6:1).
+    static let rsOnDusk2 = Color(rsHex: 0xa7b2bf)
 
-    /// Gold — mesh ink, "enough", the doorway, Pro-capture. Never a plain accent,
-    /// never success/error. See the rule of gold above.
-    static let rsGold = Color(rsHex: 0xc9a25e)
-    /// Gold, darkened for text on light surfaces (contrast).
-    static let rsGoldInk = Color(rsHex: 0x8e6a2e)
-    /// Warm highlight inside the gold family (mesh strokes, glow).
-    static let rsGoldLight = Color(rsHex: 0xe7cfa0)
+    // MARK: Lamplight — light only
 
-    // MARK: Dark capture surfaces
+    static let rsLamp = Color(rsHex: 0xf0b26a)
 
-    /// Deepest bezel/notch black.
-    static let rsBlack = Color(rsHex: 0x0e0d0b)
-    /// Warm dark — capture backdrop base.
-    static let rsCaptureBase = Color(rsHex: 0x181714)
-    /// Warm dark — one step up (guidance sheet, panels on dark).
-    static let rsCaptureRaised = Color(rsHex: 0x24231f)
-    /// Warm cream text on dark surfaces.
-    static let rsOnDark = Color(rsHex: 0xfbf5f2)
-
-    // MARK: Sensor / tracking — OUTSIDE the brand (instrument truth)
-
-    /// Tracking good — reads as sensor truth, not decoration.
-    static let rsSensorGood = Color(rsHex: 0x7fc8a0)
-    /// Slow down / re-find surface. (Shares the gold hue but is a sensor read.)
-    static let rsSensorWarn = Color(rsHex: 0xc9a25e)
-    /// Lost tracking / too dark.
-    static let rsSensorLost = Color(rsHex: 0xc04d3e)
-
-    // MARK: Positive affordance (the sign-in checklist ticks)
-
-    /// Sage — the "your rooms stay" reassurance ticks. Muted, never a brand accent.
-    static let rsAffirm = Color(rsHex: 0x7a8f5a)
-
-    /// Build a Color from a 24-bit RGB hex literal (e.g. 0xebe5df). Internal to
+    /// Build a Color from a 24-bit RGB hex literal (e.g. 0xf5f6f8). Internal to
     /// the design system — screens use the named tokens above, not raw hex.
     init(rsHex hex: UInt32) {
         self.init(

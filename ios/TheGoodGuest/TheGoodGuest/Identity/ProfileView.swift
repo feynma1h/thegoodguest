@@ -67,7 +67,7 @@ struct ProfileView: View {
         }
         .padding(.horizontal, RSScreen.horizontal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .rsParchmentScreen()
+        .rsGroundScreen()
         .safeAreaInset(edge: .bottom) { signInAction }
         .sheet(isPresented: $showSignIn) { SignInSheet() }
         .sheet(isPresented: $showDelete) {

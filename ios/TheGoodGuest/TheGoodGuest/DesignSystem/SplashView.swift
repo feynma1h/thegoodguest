@@ -111,7 +111,7 @@ private struct MorphingMark: View {
             ForEach(0..<min(start.count, end.count, slot.count), id: \.self) { i in
                 MorphingRing(gather: gather, landing: landing,
                              start: start[i], end: end[i], slot: slot[i])
-                    .fill(Color.rsAction, style: FillStyle(eoFill: true))
+                    .fill(Color.rsTerracotta, style: FillStyle(eoFill: true))
             }
         }
     }
@@ -149,8 +149,10 @@ private struct LetterPiece: View {
         let midX = (span.lowerBound + span.upperBound) / 2
         let home = CGPoint(x: midX, y: anchorStart.y)
 
+        // The letters are ink and only the rings are terracotta, as in the
+        // website's wordmark: the brand colour is the mark's, not the name's.
         FullScript(scale: scale, offset: offset)
-            .fill(Color.rsAction, style: FillStyle(eoFill: true))
+            .fill(Color.rsInk, style: FillStyle(eoFill: true))
             .clipShape(
                 Rectangle().path(
                     in: CGRect(
@@ -273,7 +275,7 @@ struct SplashView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .rsParchmentScreen()
+        .rsGroundScreen()
         .opacity(veil)
         .accessibilityElement()
         .accessibilityLabel(RSBrand.name)

@@ -223,6 +223,11 @@ def test_favicon_carries_the_three_legacy_sizes():
 
 
 def test_mark_colours_match_the_web_design_tokens():
+    """The mark's ink is the web's --accent, everywhere and exactly.
+
+    The app icon's tiles (LIGHT_GROUND, DARK_GROUND) no longer equal the web's
+    grounds: the web left cream in decision 0361, and the icon's tiles are the
+    iOS redesign's to decide. Only the ink is shared."""
     css = (REPO / "web/src/app/globals.css").read_text()
 
     def token(name: str) -> str:
@@ -231,8 +236,6 @@ def test_mark_colours_match_the_web_design_tokens():
         return match.group(1).lower()
 
     assert gen_mark.BRAND_INK == token("accent")
-    assert gen_mark.LIGHT_GROUND == token("paper")
-    assert gen_mark.DARK_GROUND == token("ink")
 
 
 def test_mark_colours_match_the_ios_design_tokens():
@@ -243,10 +246,11 @@ def test_mark_colours_match_the_ios_design_tokens():
         assert match, f"{name} not found in RSColor.swift"
         return "#" + match.group(1).lower()
 
-    assert gen_mark.BRAND_INK == token("rsAction")
-    assert gen_mark.REVERSE_INK == token("rsOnDark")
-    # The icon's two tile fields are the app's own surfaces, not new colours.
-    assert gen_mark.ICON_LIGHT.field == token("rsSurface")
+    assert gen_mark.BRAND_INK == token("rsTerracotta")
+    # The icon's two tile fields are the app's own ground and ink, not new
+    # colours. The app draws no reverse mark (the mark is terracotta on dusk
+    # too), so REVERSE_INK is the web's alone and is not pinned here.
+    assert gen_mark.ICON_LIGHT.field == token("rsGround")
     assert gen_mark.ICON_DARK.field == token("rsInk")
 
 
