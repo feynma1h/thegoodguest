@@ -59,7 +59,7 @@ def save(tmp_path, a, name="frame"):
     (390, 844, 3, 34, 16),     # iPhone 17e: the previous version crashed here
     (440, 956, 3, 34, 16),     # iPhone 17 Pro Max
     (375, 667, 2, 0, 16),      # iPhone SE: a home button, so no indicator inset
-    (1032, 1376, 2, 20, 196),  # iPad Pro 13-inch: the column centres at 640
+    (1032, 1376, 2, 20, 256),  # iPad Pro 13-inch: the column centres at 520
 ])
 def test_the_frame_column_and_safe_area_are_read_from_the_image(tmp_path, w, h, s, inset, col):
     a = phone(w, h, s)

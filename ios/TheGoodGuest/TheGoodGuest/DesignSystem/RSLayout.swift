@@ -32,9 +32,11 @@ enum RSLayout {
     /// website's phone gutter, and UIKit's own layout margin on every phone but
     /// the largest.
     static let margin: CGFloat = 16
-    /// How wide the column may grow before it centres. Near UIKit's readable
-    /// width; on a phone the column is always narrower than this.
-    static let readableWidth: CGFloat = 640
+    /// How wide the column may grow before it centres: the website's
+    /// paragraph measure (`max-w-[520px]`). At 640 an iPad's lines ran to 94
+    /// characters, and 31 states had lines over 75; reading wants 45 to 75.
+    /// On a phone the column is always narrower than this.
+    static let readableWidth: CGFloat = 520
     /// From the bottom of the navigation bar to a screen's title.
     static let titleTop: CGFloat = 4
     /// Under a screen's last line, so it can scroll clear of the pinned bar.

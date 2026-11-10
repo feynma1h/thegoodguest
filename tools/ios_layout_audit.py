@@ -56,14 +56,16 @@ from PIL import Image
 # phone. That is the website's phone gutter (`px-4`: the "Your house" title,
 # the line under it and the room cards all start there) and UIKit's own margin
 # on most phones. On a window wider than the readable width plus both margins,
-# an iPad, the column centres at that width. Both mirror `RSLayout`.
+# an iPad, the column centres at that width: 520, the website's paragraph
+# measure, after 640 let an iPad's lines run to 94 characters. Both mirror
+# `RSLayout`.
 #
 # Before the column, the redesign's screens put titles on three edges — 16 on
 # home and a room, 20 on review, account and deletion, 22 on guidance — because
 # the canvas they were drawn from set text 4pt inside the cards' edge and each
 # screen chose where to apply the 4.
 MARGIN = 16
-READABLE_WIDTH = 640
+READABLE_WIDTH = 520
 # A container's edge is exact to the pixel, give or take antialiasing. Text is
 # measured from ink, and a capital's ink starts inside its box by a side
 # bearing that grows with the face: 0.3pt for an Albert Sans "T" at 16pt, 1.2
