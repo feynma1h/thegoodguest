@@ -33,9 +33,12 @@ nonisolated struct RoomOutline: Equatable, Codable {
     let length: Double
     let width: Double
 
-    /// "4.40 × 3.60 m" — the room's overall extent, a measurement.
+    /// "4.4 × 3.6 m" — the room's overall extent, a measurement. One decimal,
+    /// as the website (`formatM`) and the guest (`scene_facts._format_m`)
+    /// print a size: RoomPlan does not measure to the centimetre, so a second
+    /// decimal is a claim the scan cannot support.
     var sizeText: String {
-        String(format: "%.2f × %.2f m", length, width)
+        String(format: "%.1f × %.1f m", length, width)
     }
 
     /// Build the outline from the shell's floor polygon. Points are

@@ -262,7 +262,8 @@ struct FloorPlanCanvas: View {
         context.stroke(right, with: .color(terracotta), style: stroke)
 
         func label(_ metres: Double, at point: CGPoint, rotated: Bool) {
-            let text = Text(String(format: "%.2f m", metres))
+            // One decimal, as every size the product prints (`RoomOutline.sizeText`).
+            let text = Text(String(format: "%.1f m", metres))
                 .font(RSFont.resolved(role: .mono, size: 11, weight: .medium,
                                       relativeTo: .caption2, maxSize: 15, typeSize: typeSize))
                 .foregroundStyle(Color.rsTerracottaText)

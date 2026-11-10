@@ -13,26 +13,33 @@ final class RoomOutlineTests: XCTestCase {
 
     func testARectangleReportsItsSidesLongestFirst() {
         let outline = RoomOutline.make(polygon: [[0, 0], [3.6, 0], [3.6, 4.4], [0, 4.4]])
-        XCTAssertEqual(outline?.sizeText, "4.40 × 3.60 m")
+        XCTAssertEqual(outline?.sizeText, "4.4 × 3.6 m")
     }
 
     func testTheSizeDoesNotDependOnHowTheRoomSitsInTheWorld() {
         let room = [[0, 0], [4.4, 0], [4.4, 3.6], [0, 3.6]]
         for degrees in [0.0, 17, 30, 45, 90, 133] {
-            XCTAssertEqual(RoomOutline.make(polygon: rotated(room, by: degrees))?.sizeText, "4.40 × 3.60 m", "\(degrees)°")
+            XCTAssertEqual(RoomOutline.make(polygon: rotated(room, by: degrees))?.sizeText, "4.4 × 3.6 m", "\(degrees)°")
         }
     }
 
     func testAnLShapedRoomReportsItsOverallExtent() {
         let outline = RoomOutline.make(polygon: [[0, 0], [4.4, 0], [4.4, 3.6], [1.2, 3.6], [1.2, 2.9], [0, 2.9]])
-        XCTAssertEqual(outline?.sizeText, "4.40 × 3.60 m")
+        XCTAssertEqual(outline?.sizeText, "4.4 × 3.6 m")
         XCTAssertEqual(outline?.points.count, 6)
     }
 
     func testWorldPointsAreReadAsXAndZ() {
         // RoomPlan's shell gives [x, y, z]; the floor's height is not part of the plan.
         let outline = RoomOutline.make(polygon: [[0, -1.4, 0], [5.2, -1.4, 0], [5.2, -1.4, 4.1], [0, -1.4, 4.1]])
-        XCTAssertEqual(outline?.sizeText, "5.20 × 4.10 m")
+        XCTAssertEqual(outline?.sizeText, "5.2 × 4.1 m")
+    }
+
+    /// One decimal, as the website and the guest print a size: RoomPlan does
+    /// not measure to the centimetre, so a second decimal claims too much.
+    func testTheSizeIsPrintedToOneDecimalLikeTheWebsite() {
+        let outline = RoomOutline.make(polygon: [[0, 0], [4.46, 0], [4.46, 3.04], [0, 3.04]])
+        XCTAssertEqual(outline?.sizeText, "4.5 × 3.0 m")
     }
 
     func testTheOutlineFitsItsFrame() {
