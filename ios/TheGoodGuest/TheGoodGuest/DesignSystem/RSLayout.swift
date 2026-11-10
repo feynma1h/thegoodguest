@@ -136,12 +136,33 @@ struct RSScreenTitle: View {
     }
 
     var body: some View {
-        Text(text)
+        Text(text.rsKeepingLastWordsTogether)
             .rsFont(.display, size: size.points, cap: .display)
             .tracking(size.tracking * size.points)
             .foregroundStyle(onDusk ? Color.rsOnDusk : Color.rsInk)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+extension String {
+    /// A title with its last two words held together by a no-break space, so
+    /// it never ends on one short word alone: at the largest sizes a card read
+    /// "The 28 August / room". SwiftUI has no line-break setting for it.
+    ///
+    /// Only when the pair is short (12 characters or fewer, "August room"):
+    /// a pair too wide for its line would break inside a word instead, and
+    /// the narrowest line a title gets (a card on an iPhone SE at AX5) holds
+    /// 13.
+    var rsKeepingLastWordsTogether: String {
+        guard let space = lastIndex(of: " "),
+              let previous = self[..<space].split(separator: " ").last
+        else { return self }
+        let last = self[index(after: space)...]
+        guard previous.count + 1 + last.count <= 12 else { return self }
+        var held = self
+        held.replaceSubrange(space...space, with: "\u{00A0}")
+        return held
     }
 }
 

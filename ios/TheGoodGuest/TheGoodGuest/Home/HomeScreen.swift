@@ -85,6 +85,10 @@ struct HomeScreen: View {
                     Text("An example room")
                         .rsFont(.ui, size: 13)
                         .foregroundStyle(Color.rsInk2)
+                        // A label on the picture, not reading text: past
+                        // XXXL it grew into the drawing (an SE and an iPad at
+                        // AX5). Held there as a control's label is (0258).
+                        .rsControlLabel()
                         .padding(14)
                 }
                 .background(Color.rsInset)
@@ -257,7 +261,7 @@ struct HomeCardView: View {
     }
 
     private var title: some View {
-        Text(card.title)
+        Text(card.title.rsKeepingLastWordsTogether)
             .rsFont(.ui, size: 17, weight: .semibold)
             .foregroundStyle(Color.rsInk)
             .fixedSize(horizontal: false, vertical: true)
