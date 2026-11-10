@@ -271,26 +271,34 @@ struct RoomPicture: View {
     @ObservedObject private var store = RoomPictureStore.shared
 
     var body: some View {
-        ZStack {
-            Rectangle().fill(night ? Color.rsRaised : Color.rsInset)
-            // By lamplight when asked and rendered; otherwise the day still,
-            // which is still the room, before falling back to its outline.
-            if let sceneId, let image = store.still(sceneId: sceneId, night: night)
-                                         ?? store.still(sceneId: sceneId, night: false) {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .accessibilityLabel("Your room, rebuilt")
-            } else if let sceneId, let outline = store.outlines[sceneId] {
-                outlineView(outline)
-            } else {
-                Image(systemName: "square.dashed")
-                    .font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(night ? Color.rsOnDusk2 : Color.rsInk2)
-                    .accessibilityHidden(true)
+        // THE GROUND SETS THE SIZE, the picture fills it. A still is 4:3 and
+        // asks for its own width at whatever height the caller gives it — 453pt
+        // at the ready screen's 340, wider than any phone — and in a ZStack the
+        // widest child is the stack's width. It made the ready screen wider
+        // than the window as soon as a room had a still: the title read "our
+        // room is ready." and the button ran off the left. As an overlay the
+        // picture is offered the ground's size and is cropped to it.
+        Rectangle()
+            .fill(night ? Color.rsRaised : Color.rsInset)
+            .overlay {
+                // By lamplight when asked and rendered; otherwise the day still,
+                // which is still the room, before falling back to its outline.
+                if let sceneId, let image = store.still(sceneId: sceneId, night: night)
+                                             ?? store.still(sceneId: sceneId, night: false) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .accessibilityLabel("Your room, rebuilt")
+                } else if let sceneId, let outline = store.outlines[sceneId] {
+                    outlineView(outline)
+                } else {
+                    Image(systemName: "square.dashed")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(night ? Color.rsOnDusk2 : Color.rsInk2)
+                        .accessibilityHidden(true)
+                }
             }
-        }
-        .clipped()
+            .clipped()
         // Keyed on whether a link exists, not only on the room: a picture is
         // drawn some seconds after a room is ready, so the link often arrives
         // on a later answer than the room did, and must be asked for then.

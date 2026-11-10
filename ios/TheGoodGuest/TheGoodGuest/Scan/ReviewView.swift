@@ -112,16 +112,9 @@ struct ReviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(content.title)
-                        .rsFont(.display, size: 34, cap: .display)
-                        .tracking(-0.7)
-                        .foregroundStyle(Color.rsInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4)
-                        .accessibilityAddTraits(.isHeader)
+                    RSScreenTitle(content.title)
 
                     stage
-                        .frame(height: 290)
                         .background(Color.rsInset, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .padding(.top, 18)
@@ -141,15 +134,11 @@ struct ReviewView: View {
                         }
                     }
                     .padding(.top, 16)
-                    .padding(.horizontal, 4)
 
                     GuestVoice(content.guest)
                         .padding(.top, 22)
-                        .padding(.horizontal, 4)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 24)
+                .rsScreenContent()
             }
             .background(GroundBackground())
             .toolbar {
@@ -169,38 +158,50 @@ struct ReviewView: View {
         }
     }
 
+    /// The plan, or in its place the reason there is none.
+    ///
+    /// The plan fills a hero-height stage. The reason sits in one at LEAST that
+    /// tall, and taller when its words need it: held to the stage's height, at
+    /// the largest text sizes on a small phone it truncated to "No floor plan
+    /// from t…" and "Measured with the c…".
     @ViewBuilder
     private var stage: some View {
         if let floorPlan, !floorPlan.isEmpty, content.noPlanTitle == nil {
             FloorPlanCanvas(snapshot: floorPlan, animated: false, backdrop: .rsInset,
                             padding: 44, style: .ink, showsDimensions: true)
                 .padding(8)
+                .rsHeroFrame(290)
         } else {
-            VStack(spacing: 6) {
-                Image(systemName: "map")
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(Color.rsInk2)
-                    .padding(.bottom, 6)
-                if let title = content.noPlanTitle {
-                    Text(title)
-                        .rsFont(.ui, size: 16, weight: .semibold)
-                        .foregroundStyle(Color.rsInk)
-                }
-                if let detail = content.noPlanDetail {
-                    Text(detail)
-                        .rsFont(.ui, size: 14)
+            ZStack {
+                Color.clear.rsHeroFrame(290)
+                VStack(spacing: 6) {
+                    Image(systemName: "map")
+                        .font(.system(size: 26, weight: .light))
                         .foregroundStyle(Color.rsInk2)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 6)
+                    if let title = content.noPlanTitle {
+                        Text(title)
+                            .rsFont(.ui, size: 16, weight: .semibold)
+                            .foregroundStyle(Color.rsInk)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let detail = content.noPlanDetail {
+                        Text(detail)
+                            .rsFont(.ui, size: 14)
+                            .foregroundStyle(Color.rsInk2)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .padding(24)
+                .frame(maxWidth: .infinity)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     private var actions: some View {
-        VStack(spacing: 2) {
+        RSPinnedBar {
             if content.canSend {
                 Button("Send it") { onSend() }
                     .buttonStyle(RSPrimaryButtonStyle())
@@ -222,9 +223,5 @@ struct ReviewView: View {
                     .buttonStyle(RSQuietButtonStyle())
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
-        .background(Color.rsGround.ignoresSafeArea(edges: .bottom))
     }
 }

@@ -27,12 +27,7 @@ struct RoomScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text(title)
-                    .rsFont(.display, size: 32, cap: .display)
-                    .tracking(-0.6)
-                    .foregroundStyle(Color.rsInk)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
+                RSScreenTitle(title, size: .title)
 
                 RoomStepsView(steps: status.steps)
                     .padding(EdgeInsets(top: 18, leading: 16, bottom: 18, trailing: 18))
@@ -52,12 +47,10 @@ struct RoomScreen: View {
                             .foregroundStyle(Color.rsInk2)
                     }
                     .padding(.top, 14)
-                    .padding(.horizontal, 4)
                 }
 
                 GuestVoice(status.guest)
                     .padding(.top, 26)
-                    .padding(.horizontal, 4)
 
                 if let details = status.details {
                     DisclosureGroup(isExpanded: $showsDetails) {
@@ -74,12 +67,9 @@ struct RoomScreen: View {
                     }
                     .tint(Color.rsInk)
                     .padding(.top, 20)
-                    .padding(.horizontal, 4)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 24)
+            .rsScreenContent()
         }
         .background(GroundBackground())
         .navigationBarTitleDisplayMode(.inline)
@@ -114,7 +104,7 @@ struct RoomScreen: View {
     }
 
     private var actions: some View {
-        VStack(spacing: 2) {
+        RSPinnedBar {
             if let primary = status.primary {
                 Button { perform(primary.action) } label: {
                     HStack(spacing: 10) {
@@ -131,10 +121,6 @@ struct RoomScreen: View {
                     .buttonStyle(RSQuietButtonStyle())
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
-        .background(Color.rsGround.ignoresSafeArea(edges: .bottom))
     }
 }
 
@@ -256,16 +242,11 @@ struct ReadyScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 RoomPicture(sceneId: sceneId, stillURL: stillURL, stillNightURL: stillNightURL, night: true)
-                    .frame(height: 340)
+                    .rsHeroFrame()
                     .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
 
-                Text("Your room is ready.")
-                    .rsFont(.display, size: 38, cap: .display)
-                    .tracking(-0.9)
-                    .foregroundStyle(Color.rsOnDusk)
-                    .fixedSize(horizontal: false, vertical: true)
+                RSScreenTitle("Your room is ready.", size: .display(38), onDusk: true)
                     .padding(.top, 24)
-                    .accessibilityAddTraits(.isHeader)
 
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     if let sceneId, let outline = pictures.outlines[sceneId] {
@@ -283,9 +264,7 @@ struct ReadyScreen: View {
                            onDark: true)
                     .padding(.top, 22)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 24)
+            .rsScreenContent()
         }
         .background(Color.rsDusk.ignoresSafeArea())
         .toolbarBackground(Color.rsDusk, for: .navigationBar)
@@ -310,7 +289,7 @@ struct ReadyScreen: View {
     }
 
     private var actions: some View {
-        VStack(spacing: 6) {
+        RSPinnedBar(surface: .rsDusk) {
             if canOpenWeb {
                 Button(action: onOpen) {
                     HStack(spacing: 8) {
@@ -320,30 +299,16 @@ struct ReadyScreen: View {
                     }
                 }
                 .buttonStyle(RSPrimaryButtonStyle(onDusk: true))
-                Text("Opens in Safari. If it asks, sign in with the same Apple ID or Google account.")
-                    .rsFont(.ui, size: 13)
-                    .foregroundStyle(Color.rsOnDusk2)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
+                RSBarCaption("Opens in Safari. If it asks, sign in with the same Apple ID or Google account.", onDusk: true)
                 Button("Scan another room", action: onScanAnother)
                     .buttonStyle(RSQuietButtonStyle(onDark: true))
             } else {
                 Button("Sign in to open it", action: onSignIn)
                     .buttonStyle(RSPrimaryButtonStyle(onDusk: true))
-                Text("Your rooms live on this iPhone for now. Sign in with Apple or Google, and this one opens on your computer too.")
-                    .rsFont(.ui, size: 13)
-                    .foregroundStyle(Color.rsOnDusk2)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
+                RSBarCaption("Your rooms live on this iPhone for now. Sign in with Apple or Google, and this one opens on your computer too.", onDusk: true)
                 Button("Not now", action: onDone)
                     .buttonStyle(RSQuietButtonStyle(onDark: true))
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
-        .background(Color.rsDusk.ignoresSafeArea(edges: .bottom))
     }
 }

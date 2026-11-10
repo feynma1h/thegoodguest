@@ -37,6 +37,7 @@
 
 import AVFoundation
 import SwiftUI
+import UIKit
 
 // MARK: - Catalogue
 
@@ -163,6 +164,8 @@ enum ScreenGallery {
               note: "The room by lamplight (its outline until the server renders a still), Open the room, and the honest Safari line."),
         .init(id: "ready-guest", group: "Your room is ready", title: "A guest",
               note: "The web cannot show an anonymous phone's rooms, so it offers sign-in."),
+        .init(id: "ready-still", group: "Your room is ready", title: "With its picture",
+              note: "The server's still, at its own 4:3 — wider than the picture's slot on every phone, so it must crop and never widen the screen."),
 
         // Account.
         .init(id: "account-guest", group: "Account", title: "A guest",
@@ -289,6 +292,22 @@ private enum GalleryFixture {
                 RoomPictureStore.shared.seed(sceneId: id, outline: outline)
             }
         }
+        // A room with its still, at the server's own shape (1600 x 1200, 4:3):
+        // the example room's picture, cropped to it. The simulator has no
+        // server; the shape is the point, being wider than the slot it fills.
+        if let polygon = outlines["s1"], let outline = RoomOutline.make(polygon: polygon),
+           let room = UIImage(named: "ExampleRoom") {
+            let size = CGSize(width: 1600, height: 1200)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let still = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                let scale = max(size.width / room.size.width, size.height / room.size.height)
+                let drawn = CGSize(width: room.size.width * scale, height: room.size.height * scale)
+                room.draw(in: CGRect(origin: CGPoint(x: (size.width - drawn.width) / 2,
+                                                     y: (size.height - drawn.height) / 2), size: drawn))
+            }
+            RoomPictureStore.shared.seed(sceneId: "s7", outline: outline, still: still, night: true)
+        }
     }
 
     static func home(_ rooms: RoomsLoadState, flight: SurfacePlacement? = nil,
@@ -389,6 +408,11 @@ struct ScreenGalleryView: View {
         case "ready-guest":
             NavigationStack {
                 ReadyScreen(roomTitle: today, sceneId: "s1", canOpenWeb: false)
+            }
+        case "ready-still":
+            NavigationStack {
+                ReadyScreen(roomTitle: today, sceneId: "s7", canOpenWeb: true,
+                            shareURL: URL(string: "https://thegoodguest.web.app/room?bundle=b-s7"))
             }
 
         // Account

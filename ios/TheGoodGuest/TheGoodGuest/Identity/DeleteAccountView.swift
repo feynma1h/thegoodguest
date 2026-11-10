@@ -102,12 +102,7 @@ struct DeleteAccountView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text(copy.title)
-                    .rsFont(.display, size: 30, cap: .display)
-                    .tracking(-0.5)
-                    .foregroundStyle(Color.rsInk)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
+                RSScreenTitle(copy.title, size: .title)
                 Text(copy.body)
                     .rsFont(.ui, size: 16)
                     .foregroundStyle(Color.rsInk2)
@@ -121,9 +116,7 @@ struct DeleteAccountView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 24)
+            .rsScreenContent()
         }
         .background(GroundBackground())
         .navigationBarTitleDisplayMode(.inline)
@@ -141,7 +134,7 @@ struct DeleteAccountView: View {
     }
 
     private var actions: some View {
-        VStack(spacing: 4) {
+        RSPinnedBar {
             if let label = copy.primary {
                 Button(label) { primaryTapped() }
                     .buttonStyle(RSPrimaryButtonStyle())
@@ -150,22 +143,18 @@ struct DeleteAccountView: View {
             }
             closingLine
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
-        .background(Color.rsGround.ignoresSafeArea(edges: .bottom))
     }
 
+    /// A way out where there is one, otherwise a caption. The caption is set
+    /// at its own height: held at a control's, it lifted the button above it
+    /// 14pt higher than the same button on the screen's other states.
     @ViewBuilder
     private var closingLine: some View {
         if copy.dismissable {
             Button(copy.closing) { onClose() }
                 .buttonStyle(RSQuietButtonStyle())
         } else {
-            Text(copy.closing)
-                .rsFont(.ui, size: 13)
-                .foregroundStyle(Color.rsInk2)
-                .frame(minHeight: 36)
+            RSBarCaption(copy.closing)
         }
     }
 

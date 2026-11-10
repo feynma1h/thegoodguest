@@ -48,12 +48,7 @@ struct GuidanceSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Before you start")
-                        .rsFont(.display, size: 34, cap: .display)
-                        .tracking(-0.7)
-                        .foregroundStyle(Color.rsInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
+                    RSScreenTitle("Before you start")
                     VStack(alignment: .leading, spacing: 18) {
                         GuidanceRow(symbol: "arrow.up.and.down.and.arrow.left.and.right",
                                     title: "Move slowly, keep it level",
@@ -88,10 +83,7 @@ struct GuidanceSheet: View {
                     }
                     .padding(.top, 20)
                 }
-                .padding(.horizontal, 22)
-                .padding(.top, 4)
-                .padding(.bottom, 24)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .rsScreenContent()
             }
             .background(GroundBackground())
             .toolbar {
@@ -101,7 +93,7 @@ struct GuidanceSheet: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(alignment: .leading, spacing: 12) {
+                RSPinnedBar {
                     if permissionDenied {
                         Label {
                             Text("The camera is off for \(RSBrand.name). Turn it on in Settings, then come back.")
@@ -111,14 +103,11 @@ struct GuidanceSheet: View {
                         } icon: {
                             Image(systemName: "exclamationmark.circle").foregroundStyle(Color.rsInk)
                         }
-                        .padding(.horizontal, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.bottom, 10)
                     }
                     startButton
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
-                .background(Color.rsGround.ignoresSafeArea(edges: .bottom))
             }
         }
         .tint(Color.rsInk)

@@ -8,6 +8,12 @@
 /// THE ACTION IS PINNED, the content scrolls (decisions 0224, 0287): the bar
 /// is opaque and full-bleed, so nothing reads through it at the largest sizes.
 ///
+/// ON THE COLUMN, with every other screen (`RSLayout`). The title is the
+/// content's first line rather than the navigation bar's large title: UIKit
+/// sets a large title on its own margin, which is the column on some phones and
+/// not on others, and never on an iPad. The bar keeps the name, for the way
+/// back and for VoiceOver, without drawing it.
+///
 /// Read by: RootFlowView.
 
 import SwiftUI
@@ -33,7 +39,8 @@ struct HomeScreen: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { scanBar }
         .background(GroundBackground())
         .navigationTitle(content.firstRun ? "" : "Your rooms")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(removing: .title)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Mark(height: 15)
@@ -62,11 +69,17 @@ struct HomeScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 ZStack(alignment: .bottomLeading) {
+                    // minWidth 0: a filled picture asks for its own width at
+                    // this height (358pt for this one), and a frame without a
+                    // minimum never shrinks below what its child asks for. On
+                    // a 375pt phone that made the whole screen 15pt wider than
+                    // the window, shifted half of it off the left and clipped
+                    // the right.
                     Image("ExampleRoom")
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 340)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .rsHeroFrame()
                         .clipped()
                         .accessibilityLabel("An example room in 3D, cut away so you can see in")
                     Text("An example room")
@@ -77,25 +90,16 @@ struct HomeScreen: View {
                 .background(Color.rsInset)
                 .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
 
-                Text("Meet your room again.")
-                    .rsFont(.display, size: 40, cap: .display)
-                    .tracking(-1)
-                    .foregroundStyle(Color.rsInk)
-                    .fixedSize(horizontal: false, vertical: true)
+                RSScreenTitle("Meet your room again.", size: .display())
                     .padding(.top, 26)
-                    .padding(.horizontal, 4)
-                    .accessibilityAddTraits(.isHeader)
                 Text("Walk one room slowly with your iPhone. It stands back up in 3D, at its true size, with a guest who can talk it through.")
                     .rsFont(.ui, size: 16)
                     .foregroundStyle(Color.rsInk2)
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 14)
-                    .padding(.horizontal, 4)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 24)
+            .rsScreenContent()
         }
     }
 
@@ -104,10 +108,13 @@ struct HomeScreen: View {
     private var rooms: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                if let countLine = content.countLine {
-                    lineText(countLine)
-                        .padding(.top, -4)
+                VStack(alignment: .leading, spacing: 4) {
+                    RSScreenTitle("Your rooms")
+                    if let countLine = content.countLine {
+                        lineText(countLine)
+                    }
                 }
+                .padding(.bottom, 6)
                 if let staleLine = content.staleLine {
                     Label {
                         lineText(staleLine)
@@ -142,9 +149,7 @@ struct HomeScreen: View {
                     UnreachableCard(onRetry: onRetry)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 24)
+            .rsScreenContent()
         }
         .refreshable { await onRefresh() }
     }
@@ -154,13 +159,12 @@ struct HomeScreen: View {
             .rsFont(.ui, size: 14)
             .foregroundStyle(Color.rsInk2)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 4)
     }
 
     // MARK: The pinned action
 
     private var scanBar: some View {
-        VStack(spacing: 8) {
+        RSPinnedBar {
             Button {
                 RSHaptics.fire(.scanTapped)
                 onScan()
@@ -169,16 +173,9 @@ struct HomeScreen: View {
             }
             .buttonStyle(RSPrimaryButtonStyle())
             if content.firstRun {
-                Text("Takes about two minutes")
-                    .rsFont(.ui, size: 13)
-                    .foregroundStyle(Color.rsInk2)
+                RSBarCaption("Takes about two minutes")
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .frame(maxWidth: .infinity)
-        .background(Color.rsGround.ignoresSafeArea(edges: .bottom))
     }
 }
 

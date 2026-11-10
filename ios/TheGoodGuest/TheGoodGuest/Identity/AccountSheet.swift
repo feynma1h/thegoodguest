@@ -49,13 +49,7 @@ struct AccountSheet: View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(isLinked ? "Signed in." : "You’re a guest, so far.")
-                        .rsFont(.display, size: 30, cap: .display)
-                        .tracking(-0.5)
-                        .foregroundStyle(Color.rsInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.horizontal, 4)
+                    RSScreenTitle(isLinked ? "Signed in." : "You’re a guest, so far.", size: .title)
                     Text(isLinked
                          ? "Rooms on this iPhone follow your account, to the website and to your next phone."
                          : "Your rooms are tied to this iPhone. Sign in and they follow you, to the website and to your next phone. Scanning never needs it.")
@@ -64,7 +58,6 @@ struct AccountSheet: View {
                         .lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)
-                        .padding(.horizontal, 4)
 
                     if isLinked {
                         linkedSection.padding(.top, 20)
@@ -87,7 +80,6 @@ struct AccountSheet: View {
                                 .foregroundStyle(Color.rsInk)
                         }
                         .padding(.top, 12)
-                        .padding(.horizontal, 4)
                     }
 
                     sectionLabel("This iPhone").padding(.top, 26)
@@ -120,9 +112,7 @@ struct AccountSheet: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 26)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
+                .rsScreenContent()
             }
             .background(GroundBackground())
             .navigationTitle("Account")
