@@ -306,12 +306,22 @@ transparent bar is one the body copy renders through (0287). `RSScreen`'s grid
 `tools/ios_screenshot_gallery.py` photographs **69 states** — one frame per
 distinct state rather than one per screen — at the default text size and AX5,
 and `tools/ios_contact_sheet.py` turns a pass into one page for review. **The
-layout audit (`tools/ios_layout_audit.py`) still measures the retired grid** and
-one phone size (it crashes on an 844pt simulator); until it is recalibrated, its
-verdicts on the new screens mean nothing. **Two of its bounds are default-size
-only and are not enforced at AX5** — the first content line and the button's
-offset off the bottom both move legitimately when the type around them grows
-(0252).
+layout audit (`tools/ios_layout_audit.py`) measures the new screens on any
+phone** (recalibrated 2026-11-10): it reads each frame's size, finds the
+navigation bar in the frame and states every vertical bound from the bar's
+centre, which sat at 84pt on an 874pt simulator and at 69 on an 844pt one, with
+every number under it the same. The bounds are the new screens' own, read
+against the canvas: containers on 16 and titles on the 20pt text column, a
+title 36-40 under the bar's centre (home's large title 44), and the pinned pill
+20 from each edge and 38, 90 or 66 off the bottom as nothing, a quiet action or
+a caption sits under it. A frame shot blank or mid-transition is reported,
+never skipped. **It exits 1 on the app as built: 42 of 56 enforced states, at
+both sizes on both phones**, from four screens not yet fixed — deletion's last
+four states lose their bar and the title jumps 54pt; home's large title sits on
+16 and its pill 4pt high; the room screen's title sits on 16; guidance sits on
+22, as the canvas draws it. **Two of its bounds are default-size only and are
+not enforced at AX5** — the title's top and the pill's offset off the bottom
+can both move legitimately when the type around them grows (0252).
 
 **Type stops at a CEILING, and tiers stop some of it earlier** (0258). The app
 holds Dynamic Type at `RSTypeSize.ceiling` — `.accessibility2`, body 17 → 33pt
@@ -337,9 +347,10 @@ preceded it went with the screens they served.
 
 `tools/ios_density_guard.py` bounds crowding by arithmetic rather than by taste
 — ink area scales with the SQUARE of type size, so the same content at 1.94× is
-3.77× denser with nothing wrong. It has not been re-run on the redesigned
-screens. Read a ratio well BELOW the square as the interesting signal — it means
-content is falling off the bottom of the frame.
+3.77× denser with nothing wrong. On the redesigned screens **0 of 56** exceed it
+on either phone, and the mean screen goes from 7.5% to 10.3% inked (1.38×, on
+the 874pt simulator). Read a ratio well BELOW the square as the interesting
+signal — it means content is falling off the bottom of the frame.
 
 **What it costs, plainly:** someone who sets the top step asks for 53pt body
 text and gets 33. That is a real reduction for the people the setting exists
