@@ -446,8 +446,24 @@ flip moves traffic and does not rename it. `tag: candidate` beside
 2026-11-11). `00003-qaq` and `00004-vam` (tagged `candidate`, 0%) and the
 service template set `PERCEPTION_SAM3_INTERACTIVE=1`; the serving `00002-qv6`
 does not, and neither does `deploy_perception.sh`, whose `--set-env-vars`
-replaces the whole list. A deploy from the script matches what serves and
-supersedes the parked configuration.
+replaces the whole list. A deploy from the script matches what serves; under
+its own `CANDIDATE_TAG` it leaves `00004-vam` reachable. The two are the YC
+demo's hand-mask click tool (`/mask_edit`, `/mask_reconstruct`, built
+2026-11-02), whose code is not on main; the operator left `00004-vam` parked
+(2026-11-11). `services describe` shows the template, which is the newest
+revision's, so read a serving revision's env with `revisions describe`.
+
+**The serving image is `main` as of 2026-08-31, and main has moved since**
+(checked 2026-11-11). `20260831-160150` was built from `8135ab1e`: its Cloud
+Build source matches that commit's perception-obj, schemas and build config
+byte for byte. So the next deploy from main brings the still trigger (0363),
+and it is also the first cloud run of 0322/0323's `/process` rewrite: no SAM 3D,
+no `/compress` enqueue, `boxes.json` from the person's boxes. New rooms then
+show no object splats until the furniture step is live. The operator deferred
+that deploy on 2026-11-11 (punchlist G2-07); until it happens, a new room's
+still is queued by hand with `tools/enqueue_still.py`. Prove the trigger with a
+new scan: a replayed `/shell` on a ready room noops (`already_present`) and
+never asks for a still.
 
 Runs as `perception-obj-runtime@` under least privilege (0090) and is
 platform-gated — only `tasks-invoker@` holds `run.invoker` (0106). Scales to
@@ -1395,7 +1411,7 @@ It is a single checkbox in the console.
 
 **The SAM 3D clone must stay PINNED, and the reason is the layer cache as much as reproducibility.** The shared `:buildcache` is written from the pinned form, so an unpinned `git clone --depth 1` misses at layer 4 and rebuilds the mamba env and both sam3d pip installs — a ~50 minute build instead of ~10. Observed and cancelled on 2026-08-30.
 
-**Give every concurrent lane its own Cloud Run tag (0275).** `deploy_perception.sh --candidate` uses `--tag=candidate`, which is ONE mutable pointer: a second lane's deploy moves it off the first lane's revision silently, and probes still authenticate because `segment_frames.py` and `track_frames.py` pin the OIDC audience to the STABLE url. Pass your own tag and point `CANDIDATE_URL` at it. `/track` now records `K_REVISION` in its output so a mis-addressed probe is detectable after the fact.
+**Give every concurrent lane its own Cloud Run tag (0275).** `deploy_perception.sh --candidate` uses `--tag=candidate` unless `CANDIDATE_TAG` names another, and `candidate` is ONE mutable pointer: a second lane's deploy moves it off the first lane's revision silently, and probes still authenticate because `segment_frames.py` and `track_frames.py` pin the OIDC audience to the STABLE url. Pass your own tag (`CANDIDATE_TAG=<lane>`) and point `CANDIDATE_URL` at it. `/track` now records `K_REVISION` in its output so a mis-addressed probe is detectable after the fact.
 
 **Old registry images are deleted by policy, and the live one is kept BY NAME
 (decision 0190).** `infra/artifact-cleanup-policy.json` is the source of truth
