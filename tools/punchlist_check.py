@@ -105,6 +105,27 @@ def check_ios_fcm_registration():
         return False, f"no {' and no '.join(missing)} anywhere under ios/"
     return True, "registers: " + "; ".join(f"{w} in {found[w][0]}" for w in wants)
 
+
+def check_perception_still_trigger():
+    """G2-07 — the revision serving perception-obj must carry SCENE_FINISH_URL,
+    the setting that makes a ready shell ask scene-finish for the room's still.
+    Reads the SERVING revision: `services describe` shows the newest revision's
+    settings, which were a parked candidate's when this entry was written."""
+    where = ["--region=asia-southeast1", "--project=thegoodguest", "--format=json"]
+    svc = json.loads(_run(["gcloud", "run", "services", "describe", "perception-obj", *where]))
+    traffic = svc.get("status", {}).get("traffic", [])
+    serving = [t["revisionName"] for t in traffic if t.get("percent") == 100]
+    if len(serving) != 1:
+        raise RuntimeError(f"no single revision serves 100%: {traffic}")
+    rev = json.loads(_run(["gcloud", "run", "revisions", "describe", serving[0], *where]))
+    env = {e.get("name") for e in rev["spec"]["containers"][0].get("env", [])}
+    if "SCENE_FINISH_URL" in env:
+        return True, f"{serving[0]} carries SCENE_FINISH_URL"
+    return False, f"{serving[0]} serves without SCENE_FINISH_URL — a new room's still is queued by hand"
+
+
+check_perception_still_trigger.tag = NET
+
 # ── Gate 3 ───────────────────────────────────────────────────────────────────
 
 RETENTION_FILES = [
@@ -207,6 +228,7 @@ check_unrestricted_api_key.tag = NET
 CHECKS = {
     "G2-01": check_live_site_name,
     "G2-05": check_ios_fcm_registration,
+    "G2-07": check_perception_still_trigger,
     "G3-01": check_retention_claim,
     "G3-03": check_per_room_deletion,
     "G4-01": check_alerting,
