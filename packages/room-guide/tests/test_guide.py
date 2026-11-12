@@ -156,6 +156,39 @@ def test_a_number_quoted_from_an_earlier_turn_is_not_flagged(study, tmp_path):
     assert first[-1][1]["flags"] == [] and second[-1][1]["flags"] == []
 
 
+class _Counting(Session):
+    """A session that counts each step's lines itself, as api-public's does."""
+
+    def __init__(self, *a, **kw):
+        self.marks: list[int] = []
+        super().__init__(*a, **kw)
+
+    def show(self, proposal_id):
+        out = super().show(proposal_id)
+        self.marks.append(len(self.proposals[proposal_id].words))
+        return out
+
+    def undo(self):
+        out = super().undo()
+        if self.marks:
+            self.marks.pop()
+        return out
+
+
+@pytest.mark.parametrize("kind", [Session, _Counting], ids=["harness", "counts-its-own"])
+def test_putting_back_a_two_piece_change_takes_both_its_lines_off(study, tmp_path, kind):
+    from thegoodguest_room_guide.guide import Turn
+    scene, needs = study
+    s = kind(scene, tmp_path / "work", mode="stub", stub=Script(needs, []))
+    t = Turn(s, lambda kind_, data: None)
+    p = t.t_look_for_changes("light", piece="desk")["proposals"][0]
+    assert len(p["words"]) == 2, "the desk and its chair"
+    t.call("show", {"proposal": p["id"]})
+    assert len(s.changes) == 2
+    t.call("put_back", {})
+    assert s.changes == []
+
+
 def test_a_number_from_nowhere_is_flagged():
     assert foreign_numbers("It has about 0.7 m in front.", ["there's about 0.7 m before the bed"]) == []
     assert foreign_numbers("It needs 1.2 m.", ["there's about 0.7 m before the bed"]) == ["1.2 m"]

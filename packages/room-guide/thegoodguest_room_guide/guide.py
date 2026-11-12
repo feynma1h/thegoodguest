@@ -167,6 +167,10 @@ class Turn:
         p = self.s.proposals[proposal]
         result = self.s.show(proposal)
         self.s.changes.extend(p.words)
+        if getattr(self.s, "marks", None) is None:
+            # A session that doesn't count each step's lines itself (api-public's does,
+            # in `marks`) has them counted here, so a step is put back whole.
+            self.s.__dict__.setdefault("shown_lines", []).append(len(p.words))
         self.emit("play", result)
         # What changed, as the engine judged it, not a list for the guide to diff.
         return {"shown": p.words, "fixed": [f.text for f in p.fixes],
@@ -176,9 +180,17 @@ class Turn:
     def t_put_back(self):
         if len(self.s.history) < 2:
             return {"refused": "nothing has been moved yet"}
+        # A step put back takes all its lines off the screen: a change that moved a
+        # desk and its chair is two lines, and leaving one would describe a room
+        # that isn't there.
+        marks = getattr(self.s, "marks", None)
+        if marks is not None:
+            lines = marks[-1] if marks else 1
+        else:
+            shown = self.s.__dict__.setdefault("shown_lines", [])
+            lines = shown.pop() if shown else 1
         result = self.s.undo()
-        if self.s.changes:
-            self.s.changes.pop()
+        del self.s.changes[max(0, len(self.s.changes) - lines):]
         self.emit("play", result)
         return {"put_back": True}
 
