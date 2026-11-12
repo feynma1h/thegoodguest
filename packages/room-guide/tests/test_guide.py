@@ -125,11 +125,6 @@ def test_a_number_from_nowhere_is_flagged():
 
 def test_only_the_two_allowed_models(study, tmp_path):
     s = session_with(study, tmp_path, [text("hello")])
-    from thegoodguest_room_guide import guide
-    old = guide.MODEL
-    guide.MODEL = "claude-haiku-5-5"
-    try:
-        with pytest.raises(ModelNotAllowed):
-            run(s, "hi")
-    finally:
-        guide.MODEL = old
+    s.model = "claude-haiku-5-5"
+    with pytest.raises(ModelNotAllowed):
+        run(s, "hi")

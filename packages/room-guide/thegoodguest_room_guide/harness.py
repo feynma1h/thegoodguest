@@ -26,7 +26,7 @@ from pathlib import Path
 
 from .analyzer import room_line, the
 from .engine import Engine, Proposal, Refusal
-from .gateway import Gateway, OracleNeeded
+from .gateway import ALLOWED_MODELS, DEFAULT_MODEL, Gateway, OracleNeeded
 from .laws import all_poses
 from .model import Arrangement, Pose, Room, load_room
 from .motion import NoPath, plan, plan_json
@@ -39,7 +39,9 @@ WEB = Path(__file__).resolve().parent / "web"
 class Session:
     """One room's state in the harness."""
 
-    def __init__(self, scene: Path, work: Path, mode: str | None = None, stub=None):
+    def __init__(self, scene: Path, work: Path, mode: str | None = None, stub=None,
+                 model: str = DEFAULT_MODEL):
+        self.model = model
         self.scene = Path(scene)
         self.work = Path(work)
         self.work.mkdir(parents=True, exist_ok=True)
@@ -60,7 +62,7 @@ class Session:
     def load(self) -> None:
         self.room: Room = load_room(self.scene, self.solids_path)
         try:
-            self.needs: RoomNeeds = run_rules_pass(self.room, self.gateway)
+            self.needs: RoomNeeds = run_rules_pass(self.room, self.gateway, model=self.model)
         except OracleNeeded as e:
             self.needs = default_needs(self.room)
             self.notes.append(f"the rules pass is waiting for an answer in {e.folder}")
@@ -241,9 +243,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--viewer", required=True)
     ap.add_argument("--port", type=int, default=8744)
     ap.add_argument("--llm", default=None, help="gateway mode: live, replay, oracle, stub, auto")
+    ap.add_argument("--model", default=DEFAULT_MODEL, choices=ALLOWED_MODELS)
     args = ap.parse_args(argv)
     import uvicorn
-    session = Session(Path(args.scene), Path(args.work), args.llm)
+    session = Session(Path(args.scene), Path(args.work), args.llm, model=args.model)
     uvicorn.run(make_app(session, Path(args.viewer)), host="127.0.0.1", port=args.port, log_level="warning")
 
 

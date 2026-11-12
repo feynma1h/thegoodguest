@@ -233,7 +233,8 @@ def _turn(session, text, emit, room, fs, first) -> str:
                                                  session.engine.current_findings, session.told, session.changes),
                    "cache_control": {"type": "ephemeral"}}]
         req = TurnRequest(stage="guide", prompt_version=GUIDE_VERSION, system=system,
-                          messages=session.messages, tools=TOOLS, model=MODEL, effort=EFFORT)
+                          messages=session.messages, tools=TOOLS, model=getattr(session, "model", MODEL),
+                          effort=EFFORT)
         answer = session.gateway.ask_turn(req, on_text=lambda t: emit("delta", {"text": t}))
         blocks = answer["content"]
         session.messages.append({"role": "assistant", "content": blocks})
