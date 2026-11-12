@@ -42,6 +42,11 @@ yarn-error.log*
 # pattern leaves it untracked and one `git add -A` from being committed.
 /public/dev-fixtures
 
+# The room guide's player and the diorama viewer (decision 0376), copied from
+# their own folders by scripts/guide-assets.mjs on every dev start and build.
+/public/guide
+/public/diorama
+
 # firebase hosting cache
 .firebase/
 

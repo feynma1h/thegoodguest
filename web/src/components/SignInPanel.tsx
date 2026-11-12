@@ -58,9 +58,13 @@ const LABEL: Record<Provider, string> = {
 
 export default function SignInPanel({
   compact = false,
+  tone = "light",
 }: {
-  /** Smaller paddings for tight homes (menus, side panels). */
+  /** Shorter buttons for tight homes (side panels). */
   compact?: boolean;
+  /** `dark` when the panel sits on dusk: Google's button keeps its white
+   * face, and the error line takes the dusk ink. */
+  tone?: "light" | "dark";
 }) {
   const [busy, setBusy] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -89,15 +93,15 @@ export default function SignInPanel({
     }
   };
 
-  const shared = `flex cursor-pointer items-center justify-center gap-2.5 rounded-full font-medium transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-60 ${
-    compact ? "px-4 py-2.5 text-[13px]" : "px-7 py-3 text-sm"
+  // Full-width pills (decision 0361): Apple's black, Google's white, one
+  // control's worth of width between them.
+  const shared = `flex w-full cursor-pointer items-center justify-center gap-2.5 rounded-full font-semibold transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-60 ${
+    compact ? "h-12 text-[15px]" : "h-[52px] text-base"
   }`;
 
   return (
-    <div className="flex flex-col items-center">
-      {/* items-stretch inside a shrink-to-fit column: both buttons take the
-          width of the wider label, so they read as one control. */}
-      <div className={`flex flex-col items-stretch ${compact ? "w-full" : ""}`}>
+    <div className="flex w-full flex-col">
+      <div className="flex flex-col gap-3">
         <button
           type="button"
           onClick={() => onClick("apple")}
@@ -112,7 +116,7 @@ export default function SignInPanel({
           type="button"
           onClick={() => onClick("google")}
           disabled={busy !== null}
-          className={`${shared} mt-2.5 border border-ink/15 bg-paper text-ink`}
+          className={`${shared} bg-white text-ink ring-1 ring-inset ring-ink/20`}
         >
           <GoogleMark />
           {busy === "google" ? "Signing in…" : LABEL.google}
@@ -121,8 +125,9 @@ export default function SignInPanel({
 
       {error && (
         <p
-          className={`mt-3 text-xs leading-relaxed text-accent-deep ${
-            compact ? "text-left" : "max-w-sm text-center"
+          role="alert"
+          className={`mt-4 text-[14px] leading-relaxed ${
+            tone === "dark" ? "text-sun" : "text-accent-deep"
           }`}
         >
           {error}

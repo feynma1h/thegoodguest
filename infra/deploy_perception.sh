@@ -4,9 +4,10 @@
 # Run from the repo root:
 #     ./infra/deploy_perception.sh obj               # deploy perception-obj, straight to 100%
 #     ./infra/deploy_perception.sh obj --candidate   # hold the new revision at 0%, smoke, then flip
+#     CANDIDATE_TAG=<lane> ./infra/deploy_perception.sh obj --candidate   # your own tag per lane
 #
 # --candidate is the same shape deploy_api_public.sh and deploy_api_internal.sh
-# use: the revision is created with --no-traffic --tag=candidate, reachable on
+# use: the revision is created with --no-traffic --tag=${CANDIDATE_TAG}, reachable on
 # its own tagged URL, and traffic moves only when you run the printed
 # update-traffic command. Prefer it for perception-obj — a revision that fails
 # at run time burns a full GPU request budget before anyone finds out, and the
@@ -54,6 +55,9 @@ REPO="thegoodguest"
 # that function IS the grant list, and it is idempotent so every deploy
 # reasserts it.
 OBJ_RUNTIME_SA="perception-obj-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+# The Cloud Run tag a candidate is reachable under before the flip. Each lane
+# uses its own, so one lane's candidate never takes another's tagged URL.
+CANDIDATE_TAG="${CANDIDATE_TAG:-candidate}"
 IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:${IMAGE_TAG}"
 
@@ -213,7 +217,7 @@ if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
     else
         echo "[deploy] WARNING: ${SERVICE} has no prior revision; --no-traffic cannot be honored and the new revision serves 100% on creation."
     fi
-    DEPLOY_FLAGS+=(--tag=candidate)
+    DEPLOY_FLAGS+=(--tag="${CANDIDATE_TAG}")
 fi
 gcloud run deploy "${SERVICE}" \
     --image="${IMAGE_URI}" \
@@ -233,7 +237,7 @@ gcloud run deploy "${SERVICE}" \
     --no-cpu-throttling \
     --cpu-boost \
     --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=5,periodSeconds=5,failureThreshold=6,timeoutSeconds=3 \
-    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=thegoodguest-perception-outputs,FIRESTORE_PROJECT=thegoodguest,CLOUD_TASKS_INVOKER_SA=tasks-invoker@thegoodguest.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-o4dhc34kqq-as.a.run.app,CLOUD_TASKS_PROJECT=thegoodguest,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15,SHELL_MATERIAL_MODEL=claude-sonnet-5,PERCEPTION_MASK_REFINE=1,PERCEPTION_ARM_SELECT=1 \
+    --set-env-vars=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,PERCEPTION_OUTPUTS_BUCKET=thegoodguest-perception-outputs,FIRESTORE_PROJECT=thegoodguest,CLOUD_TASKS_INVOKER_SA=tasks-invoker@thegoodguest.iam.gserviceaccount.com,RECEIVER_URL=https://perception-obj-o4dhc34kqq-as.a.run.app,CLOUD_TASKS_PROJECT=thegoodguest,CLOUD_TASKS_LOCATION=asia-southeast1,CLOUD_TASKS_QUEUE=perception-dispatch,SCENE_FINISH_URL=https://scene-finish-o4dhc34kqq-as.a.run.app,SHELL_WALL_MERGE_GAP_M=1.0,SHELL_WALL_NORMAL_TOL_DEG=15,SHELL_MATERIAL_MODEL=claude-sonnet-5,PERCEPTION_MASK_REFINE=1,PERCEPTION_ARM_SELECT=1 \
     --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
     # PERCEPTION_MASK_REFINE and PERCEPTION_ARM_SELECT are ON by operator
     # ruling (2026-08-23). They flip TOGETHER and refine goes first —
@@ -252,6 +256,10 @@ gcloud run deploy "${SERVICE}" \
     #   PERCEPTION_VISIBILITY_VETO — BLOCKED, not deferred: its long-tail
     #     regression check needs a GPU and has not run (0234).
     # Their absence is a ruling. Do not 'fix' it by adding them.
+    # SCENE_FINISH_URL is where a ready shell asks for the room's still
+    # picture (still_enqueue.py, decision 0363): scene-finish's own service
+    # URL, which is also the OIDC audience it checks. Absent, the request is
+    # skipped with a log line.
     # SHELL_MATERIAL_MODEL is the material-family classifier (decision
     # 0069; shell_material.py). Swapping it changes what families ship —
     # adjudicate on the reference room before widening. The secret mount
@@ -326,9 +334,9 @@ if [[ "${CANDIDATE_MODE}" -eq 1 ]]; then
     CANDIDATE_URL=$(gcloud run services describe "${SERVICE}" \
         --region="${REGION}" --project="${PROJECT_ID}" \
         --format='json(status.traffic)' \
-        | jq -r '.status.traffic[] | select(.tag == "candidate") | .url // empty')
+        | jq -r --arg tag "${CANDIDATE_TAG}" '.status.traffic[] | select(.tag == $tag) | .url // empty')
     if [[ -z "${CANDIDATE_URL}" ]]; then
-        echo "ERROR: could not resolve the candidate revision URL from the --tag=candidate traffic entry." >&2
+        echo "ERROR: could not resolve the candidate revision URL from the --tag=${CANDIDATE_TAG} traffic entry." >&2
         gcloud run services describe "${SERVICE}" \
             --region="${REGION}" --project="${PROJECT_ID}" \
             --format='yaml(status.traffic)' >&2

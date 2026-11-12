@@ -1,7 +1,7 @@
 # 0122 — the landing hero is the reveal, not a room
 
 **Date:** 2026-08-08
-**Status:** Decided
+**Status:** Superseded by 0361 — the landing is told around a hand-built sample room you can turn; the reveal stays on the room page
 
 ## Context
 

@@ -80,6 +80,11 @@ nonisolated struct SceneResponse: Decodable, Equatable {
     let missingPaths: [String]?
     let createdAt:    String
     let updatedAt:    String
+    /// Signed links to the server's stills of the finished room, by day and by
+    /// lamplight. Absent from servers that render none; the app then draws
+    /// the room's measured outline instead.
+    var stillUrl:      String? = nil
+    var stillNightUrl: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case sceneId      = "scene_id"
@@ -89,6 +94,8 @@ nonisolated struct SceneResponse: Decodable, Equatable {
         case missingPaths = "missing_paths"
         case createdAt    = "created_at"
         case updatedAt    = "updated_at"
+        case stillUrl      = "still_url"
+        case stillNightUrl = "still_night_url"
     }
 }
 

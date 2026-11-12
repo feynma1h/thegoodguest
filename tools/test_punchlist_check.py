@@ -19,6 +19,7 @@ it is the same mistake pointed the other way.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 from pathlib import Path
 
@@ -78,3 +79,55 @@ def test_automated_claims_have_a_probe(mod):
         if m and m.group(1) == "automated" and pid not in mod.CHECKS:
             overclaimed.append(pid)
     assert not overclaimed, f"claims automated, has no probe: {overclaimed}"
+
+
+def _fake_gcloud(traffic, envs):
+    """Stands in for `_run`: answers `services describe` with `traffic` and
+    `revisions describe <name>` with that revision's env names."""
+    def run(cmd, timeout=120):
+        if cmd[:4] == ["gcloud", "run", "services", "describe"]:
+            return json.dumps({"status": {"traffic": traffic}})
+        if cmd[:4] == ["gcloud", "run", "revisions", "describe"]:
+            env = [{"name": k, "value": "x"} for k in envs[cmd[4]]]
+            return json.dumps({"spec": {"containers": [{"env": env}]}})
+        raise AssertionError(f"unexpected command: {cmd}")
+    return run
+
+
+PARKED = {"revisionName": "perception-obj-00004-vam", "tag": "candidate"}
+SERVING = {"revisionName": "perception-obj-00002-qv6", "percent": 100}
+
+
+def test_still_trigger_probe_passes_once_the_serving_revision_has_the_url(mod, monkeypatch):
+    monkeypatch.setattr(mod, "_run", _fake_gcloud(
+        [SERVING, PARKED],
+        {"perception-obj-00002-qv6": ["RECEIVER_URL", "SCENE_FINISH_URL"]},
+    ))
+    done, detail = mod.check_perception_still_trigger()
+    assert done and "00002-qv6" in detail
+
+
+def test_still_trigger_probe_reads_the_serving_revision_not_the_newest(mod, monkeypatch):
+    """`services describe` shows the newest revision's settings, which on
+    2026-11-11 were a parked candidate's: the probe must read the revision
+    that serves."""
+    monkeypatch.setattr(mod, "_run", _fake_gcloud(
+        [SERVING, PARKED],
+        {
+            "perception-obj-00002-qv6": ["RECEIVER_URL"],
+            "perception-obj-00004-vam": ["RECEIVER_URL", "SCENE_FINISH_URL"],
+        },
+    ))
+    done, detail = mod.check_perception_still_trigger()
+    assert not done and "00002-qv6" in detail
+
+
+def test_still_trigger_probe_cannot_answer_for_split_traffic(mod, monkeypatch):
+    """Two revisions sharing traffic have no single answer; raising makes the
+    checker report UNKNOWN rather than a guess."""
+    monkeypatch.setattr(mod, "_run", _fake_gcloud(
+        [{"revisionName": "a", "percent": 50}, {"revisionName": "b", "percent": 50}],
+        {"a": ["SCENE_FINISH_URL"], "b": []},
+    ))
+    with pytest.raises(RuntimeError):
+        mod.check_perception_still_trigger()

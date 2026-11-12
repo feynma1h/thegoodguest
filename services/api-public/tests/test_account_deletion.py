@@ -30,6 +30,9 @@ from account_deletion import (
     CONVERSATIONS_COLLECTION,
     DESIGN_SPECS_COLLECTION,
     MINT_QUOTAS_COLLECTION,
+    ROOM_GUIDE_BUDGETS_COLLECTION,
+    ROOM_GUIDE_TURNS_SUBCOLLECTION,
+    ROOM_GUIDES_COLLECTION,
     SCENES_COLLECTION,
     UPLOAD_SESSIONS_COLLECTION,
     AccountDeleter,
@@ -205,6 +208,21 @@ def world():
             f"scene-x__{OTHER}": {"user_id": OTHER, "scene_id": "scene-x"},
         },
         MINT_QUOTAS_COLLECTION: {UID: {"count": 3}, OTHER: {"count": 1}},
+        # The room guide (decision 0376): a conversation per room and person,
+        # with its turns, and a daily budget per person.
+        ROOM_GUIDES_COLLECTION: {
+            f"scene-a__{UID}": {"user_id": UID, "scene_id": "scene-a"},
+            f"scene-x__{OTHER}": {"user_id": OTHER, "scene_id": "scene-x"},
+        },
+        f"{ROOM_GUIDES_COLLECTION}/scene-a__{UID}/{ROOM_GUIDE_TURNS_SUBCOLLECTION}": {
+            "000000": {"user_text": "", "messages_json": "[]"},
+            "000001": {"user_text": "move the desk", "messages_json": "[]"},
+            "000002": {"user_text": "put it back", "messages_json": "[]"},
+        },
+        f"{ROOM_GUIDES_COLLECTION}/scene-x__{OTHER}/{ROOM_GUIDE_TURNS_SUBCOLLECTION}": {
+            "000000": {"user_text": "theirs"},
+        },
+        ROOM_GUIDE_BUDGETS_COLLECTION: {UID: {"spent_usd": 0.4}, OTHER: {"spent_usd": 0.1}},
     }
     objects = {
         OUTPUTS: {
@@ -295,6 +313,9 @@ def test_deletion_covers_every_collection_the_source_declares():
         CONVERSATION_TURNS_SUBCOLLECTION,
         DESIGN_SPECS_COLLECTION,
         MINT_QUOTAS_COLLECTION,
+        ROOM_GUIDES_COLLECTION,
+        ROOM_GUIDE_TURNS_SUBCOLLECTION,
+        ROOM_GUIDE_BUDGETS_COLLECTION,
     }
     # Nothing is exempt today. A genuinely non-per-user collection goes here
     # WITH the reason it carries no user data — never to quiet this test.
@@ -350,6 +371,10 @@ def test_deletes_everything_owned(world):
     assert report.upload_sessions_deleted == 2
     assert report.conversations_deleted == 1
     assert report.conversation_turns_deleted == 2
+    assert report.room_guides_deleted == 1
+    assert report.room_guide_turns_deleted == 3
+    assert report.counts()["conversations"] == 2
+    assert report.counts()["conversation_messages"] == 5
     assert report.mint_quota_deleted
     # 4 outputs blobs (scene-a ×3, scene-b ×1) + 2 capture blobs.
     assert report.blobs_deleted == 6
@@ -364,8 +389,24 @@ def test_leaves_other_users_untouched(world):
     assert set(data[CONVERSATIONS_COLLECTION]) == {f"scene-x__{OTHER}"}
     assert set(data[MINT_QUOTAS_COLLECTION]) == {OTHER}
     assert data[f"{CONVERSATIONS_COLLECTION}/scene-x__{OTHER}/turns"]
+    assert set(data[ROOM_GUIDES_COLLECTION]) == {f"scene-x__{OTHER}"}
+    assert data[f"{ROOM_GUIDES_COLLECTION}/scene-x__{OTHER}/{ROOM_GUIDE_TURNS_SUBCOLLECTION}"]
+    assert set(data[ROOM_GUIDE_BUDGETS_COLLECTION]) == {OTHER}
     assert objects[OUTPUTS] == {"scenes/scene-x/manifest.json"}
     assert objects[CAPTURES] == {"captures/bundle-x/bundle.pb"}
+
+
+def test_a_rooms_still_pictures_go_with_its_folder(world):
+    """The room's still pictures (decision 0363) live in scenes/<id>/ beside
+    the rest of the room, so the prefix delete takes them and nothing has to
+    name them; another user's stay."""
+    world["objects"][OUTPUTS] |= {
+        "scenes/scene-a/still.jpg",
+        "scenes/scene-a/still-night.jpg",
+        "scenes/scene-x/still.jpg",
+    }
+    world["deleter"].delete(UID)
+    assert world["objects"][OUTPUTS] == {"scenes/scene-x/manifest.json", "scenes/scene-x/still.jpg"}
 
 
 def test_turns_subcollection_is_deleted_explicitly(world):
@@ -373,6 +414,21 @@ def test_turns_subcollection_is_deleted_explicitly(world):
     before the parent doc, or they become unreachable orphans."""
     world["deleter"].delete(UID)
     assert world["data"][f"{CONVERSATIONS_COLLECTION}/scene-a__{UID}/turns"] == {}
+    assert world["data"][f"{ROOM_GUIDES_COLLECTION}/scene-a__{UID}/{ROOM_GUIDE_TURNS_SUBCOLLECTION}"] == {}
+
+
+def test_a_room_guide_alone_is_not_an_empty_plan():
+    """A person who only talked to the room guide still has data to erase."""
+    plan = plan_account_deletion(UID, OwnedRecords(room_guide_doc_ids=(f"s1__{UID}",)))
+    assert not plan.is_empty and plan.room_guide_budget_doc_id == UID
+
+
+def test_the_room_guides_files_go_with_the_rooms_folder(world):
+    """scene.json, solids.json and needs.json (0376) sit in scenes/<id>/ beside
+    the manifest, so the prefix delete takes them."""
+    world["objects"][OUTPUTS] |= {"scenes/scene-a/scene.json", "scenes/scene-a/needs.json"}
+    world["deleter"].delete(UID)
+    assert world["objects"][OUTPUTS] == {"scenes/scene-x/manifest.json"}
 
 
 def test_ordering_gcs_then_firestore_then_identity(world):

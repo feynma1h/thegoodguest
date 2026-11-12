@@ -86,10 +86,10 @@ private struct DotMark: View {
                 .stroke(BoxInk.white.opacity(0.35), lineWidth: 1.5)
                 .frame(width: 26, height: 26)
             Circle()
-                .fill(Color.rsOnDark.opacity(0.92))
-                .overlay(Circle().stroke(Color.rsBlack.opacity(0.45), lineWidth: 1))
+                .fill(Color.rsOnDusk.opacity(0.92))
+                .overlay(Circle().stroke(Color.rsDusk.opacity(0.45), lineWidth: 1))
                 .frame(width: 14, height: 14)
-                .shadow(color: Color.rsBlack.opacity(0.4), radius: 2)
+                .shadow(color: Color.rsDusk.opacity(0.4), radius: 2)
         }
         .frame(width: 60, height: 60)
         .contentShape(Circle())

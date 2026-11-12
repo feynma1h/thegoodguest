@@ -25,8 +25,10 @@ import sys
 from collections import OrderedDict
 from pathlib import Path
 
-import numpy as np
 from PIL import Image
+
+from ios_density_guard import density
+from ios_layout_audit import kind
 
 PASSES = ("default", "ax5")
 # What the type ceiling accounts for: ink area scales with the square of type
@@ -34,14 +36,6 @@ PASSES = ("default", "ax5")
 # above this, because below it the screen is a faithful larger copy of itself.
 DENSITY_EXPECTED = (33 / 17) ** 2
 PASS_LABEL = {"default": "Default", "ax5": "AX5"}
-
-
-def density(path):
-    """Fraction of the body area that is inked — the same measure the density
-    guard gates on, so a card and the gate cannot disagree about a screen."""
-    a = np.asarray(Image.open(path).convert("L")).astype(int)[200:2480]
-    bg = np.median(np.concatenate([a[:, 14:56], a[:, 1150:1192]], axis=1), axis=1)
-    return float((np.abs(a - bg[:, None]) > 30).mean())
 
 
 def encode(path, width, quality):
@@ -98,8 +92,9 @@ def build(shots, out, budget_mb, seen_ids):
         d, x = shots / "default" / f"{st['id']}.png", shots / "ax5" / f"{st['id']}.png"
         # Skipped for the same screens the density guard skips: their ink is a
         # drawn graphic rather than type, so the ratio measures the artwork.
-        skip = st["id"].startswith(("capture", "doorway", "splash")) or \
-            st["id"] in {"gotroom", "unsupported", "qr"}
+        # The density is the guard's own function, so a card and the gate
+        # cannot disagree about a screen.
+        skip = kind(st["id"]) != "screen"
         if d.exists() and x.exists() and not skip:
             dd = density(d)
             st["ratio"] = density(x) / dd if dd else None

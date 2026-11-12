@@ -33,6 +33,14 @@
 //     "width": 800,            // output width in px (default 800)
 //     "outDir": "…" }          // where the PNGs go; the caller owns it
 //
+// A still job ("kind": "still") takes no frames: it draws the room the way the
+// website's room page opens it — the diorama's first corner view, at the page's
+// own aspect — and writes the whole page as it looks, background included:
+//   { "kind": "still", "shell", "finish", "furniture", "width": 1600,
+//     "height": 1200, "outDir" }
+//   -> still.png (day), and still-night.png only when the viewer drew twins
+//      (a room without twins has no night on the website either).
+//
 // The scene's own files are only read. Nothing leaves the machine: the page
 // talks to a loopback server this process starts and to nothing else.
 //
@@ -56,6 +64,10 @@ export const DEFAULT_WIDTH = 800;
 export const READY_TIMEOUT_MS = 180_000;
 /** One whole job (page load, ready, every frame) may take this long. */
 export const JOB_TIMEOUT_MS = 600_000;
+/** A still's page size: the app's room picture, 4:3. */
+export const STILL_SIZE = { width: 1600, height: 1200 };
+/** Animation frames drawn after switching to night before the screenshot. */
+export const NIGHT_SETTLE_FRAMES = 6;
 
 const GL_ARGS = {
   swiftshader: ["--use-angle=swiftshader", "--use-gl=angle", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
@@ -178,11 +190,89 @@ export async function launchRenderer({ chrome, webOut = path.resolve(HERE, "web-
     }
   }
 
+  /** Render one still job: the page as the website opens the room, at the
+   * job's size, by day and (when twins are drawn) by night. */
+  async function still(job) {
+    const t0 = Date.now();
+    const files = {};
+    for (const n of NAMES) {
+      if (job[n]) {
+        if (!fs.existsSync(job[n])) throw new Error(`${n} file not found: ${job[n]}`);
+        files[n] = job[n];
+      }
+    }
+    if (!files.shell) throw new Error("job has no shell");
+    const outDir = job.outDir;
+    if (!outDir) throw new Error("job has no outDir");
+    fs.mkdirSync(outDir, { recursive: true });
+    const viewport = { width: job.width ?? STILL_SIZE.width, height: job.height ?? STILL_SIZE.height };
+    current = { files, outDir, posted: [] };
+
+    if (!browser.isConnected()) browser = await chromium.launch({ executablePath: chrome, headless: true, args });
+    const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
+    const issues = [];
+    try {
+      const page = await context.newPage();
+      page.on("console", (m) => { if (m.type() === "error") issues.push("console: " + m.text().slice(0, 200)); });
+      page.on("pageerror", (e) => issues.push("pageerror: " + String(e).slice(0, 200)));
+      const origin = `http://127.0.0.1:${port}`;
+      const q = ["shell", "finish", "furniture"].filter((n) => files[n]).map((n) => `${n}=${origin}/${n}.json`);
+      if (!files.furniture) q.push("furniture=0");
+      q.push("still=1");
+      const tLoad = Date.now();
+      await page.goto(`${origin}/shell-finish.html?${q.join("&")}`, { waitUntil: "load", timeout: 60_000 });
+      try {
+        await page.waitForFunction(() => window.__shellFinishView && window.__shellFinishView.ready === true, null, {
+          timeout: READY_TIMEOUT_MS,
+        });
+      } catch (e) {
+        const text = await page.evaluate(() => document.body.innerText.slice(0, 300)).catch(() => "");
+        throw new Error(`viewer never settled: ${String(e).slice(0, 120)} page says: ${JSON.stringify(text)} issues: ${issues.slice(0, 3).join(" | ")}`);
+      }
+      const readyMs = Date.now() - tLoad;
+      const glInfo = await page.evaluate(() => {
+        const g = window.__shellFinishView.renderer.getContext();
+        const e = g.getExtension("WEBGL_debug_renderer_info");
+        return e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : "unknown";
+      });
+      // The harness exists only where the page drew the finish (it fit the shell).
+      const finished = await page.evaluate(() => Boolean(window.__shellFinishView.harness));
+      const shot = async (name) => {
+        const png = await page.screenshot({ type: "png", animations: "disabled", caret: "hide", scale: "css" });
+        fs.writeFileSync(path.join(outDir, `${name}.png`), png);
+        current.posted.push(`${name}.png`);
+      };
+      await shot("still");
+      // Night exists only where the viewer built twins (their lamps are the light).
+      const night = await page.evaluate(() => {
+        const f = window.__shellFinishView.furniture;
+        if (!f) return false;
+        f.setMode("night");
+        return true;
+      });
+      if (night) {
+        // The mode change marks the view dirty; let the viewer draw it a few times.
+        await page.evaluate(
+          (n) => new Promise((done) => { let k = 0; const step = () => (++k >= n ? done() : requestAnimationFrame(step)); requestAnimationFrame(step); }),
+          NIGHT_SETTLE_FRAMES,
+        );
+        await shot("still-night");
+      }
+      return {
+        ok: true, glRenderer: glInfo, images: current.posted.slice(), night, finished,
+        readyMs, totalMs: Date.now() - t0, outDir, issues: issues.slice(0, 5),
+      };
+    } finally {
+      current = null;
+      await context.close().catch(() => {});
+    }
+  }
+
   async function close() {
     await browser.close().catch(() => {});
     server.close();
   }
-  return { render, close };
+  return { render, still, close };
 }
 
 const arg = (k, d) => { const i = process.argv.indexOf("--" + k); return i > 0 ? process.argv[i + 1] : d; };
@@ -204,7 +294,7 @@ async function main() {
   const withDeadline = (p) =>
     Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`job exceeded ${JOB_TIMEOUT_MS} ms`)), JOB_TIMEOUT_MS).unref())]);
   const run = async (job) => {
-    try { return await withDeadline(renderer.render(job)); }
+    try { return await withDeadline(job.kind === "still" ? renderer.still(job) : renderer.render(job)); }
     catch (e) { return { ok: false, error: String(e.message ?? e).slice(0, 600) }; }
   };
   if (mode === "render") {

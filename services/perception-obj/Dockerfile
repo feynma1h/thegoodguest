@@ -260,6 +260,7 @@ COPY services/perception-obj/shell_observation.py /app/shell_observation.py
 COPY services/perception-obj/shell_material.py /app/shell_material.py
 COPY services/perception-obj/shell_receiver.py /app/shell_receiver.py
 COPY services/perception-obj/shell_enqueue.py /app/shell_enqueue.py
+COPY services/perception-obj/still_enqueue.py /app/still_enqueue.py
 COPY services/perception-obj/compress_receiver.py /app/compress_receiver.py
 COPY services/perception-obj/segment_receiver.py /app/segment_receiver.py
 COPY services/perception-obj/track_receiver.py /app/track_receiver.py
@@ -288,7 +289,7 @@ track_selection, \
 budget, room_planes, roomplan_room, box_placement, privacy, \
 mask_refine, oidc, receiver_repo, fcm, process_receiver, \
 shell_geometry, shell_envelope, shell_observation, shell_material, \
-shell_receiver, shell_enqueue, compress_receiver, \
+shell_receiver, shell_enqueue, still_enqueue, compress_receiver, \
 segment_receiver, track_receiver, anthropic"
 
 # ── The SPZ encoder: Node + Spark, for the /compress stage ───────────────────

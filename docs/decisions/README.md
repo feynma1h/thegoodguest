@@ -1,8 +1,8 @@
 # Decision notes
 
-319 notes. **270 of them are `Decided`** -- those govern code that
+326 notes. **271 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
-other 49 record decisions that were carried out, replaced, or
+other 55 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
 because they constrain you.
 
@@ -18,10 +18,10 @@ The status vocabulary and the numbering rule live in
 | status | count | means |
 |---|---|---|
 | `Refuted` | 16 | a measured negative -- read before proposing it again |
-| `Superseded` | 8 | replaced by a later note |
-| `Amended` | 9 | partly corrected by a later note |
+| `Superseded` | 11 | replaced by a later note |
+| `Amended` | 12 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
-| `Decided` | 270 | governs code that ships today |
+| `Decided` | 271 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -46,7 +46,7 @@ The status vocabulary and the numbering rule live in
 | [0280](0280-ray-convergence-does-not-separate-neighbours.md) | ray convergence does not separate a fragment from its neighbour | Refuted |
 | [0284](0284-appearance-calibrates-well-and-fails-in-the-room.md) | appearance separates the objects that have boxes, and merges the ones that do not | Refuted |
 
-## Superseded (8)
+## Superseded (11)
 
 *Replaced by a later note.*
 
@@ -55,27 +55,33 @@ The status vocabulary and the numbering rule live in
 | [0056](0056-design-language-and-stack-gating.md) | Design language: Apple-grade restraint; 3D-stack and conversation sequencing | Superseded by 0057, |
 | [0063](0063-sam3d-layout-convention-verdict.md) | SAM 3D layout conventions: measured verdict (systematic ~90°) and the fix candidate | Superseded by 0065 |
 | [0071](0071-room-boundary-source.md) | room-boundary source: raw plane anchors vs. RoomPlan vs. reconstructed geometry | Superseded by 0077 |
+| [0072](0072-ios-design-lidar-only-pivot.md) | iOS app design locked; LiDAR-only client pivot | Superseded by 0366 |
 | [0120](0120-perception-build-layer-cache.md) | perception-obj builds cache layers via BuildKit inline cache on a stable tag | Superseded by 0199, |
+| [0122](0122-hero-is-the-reveal.md) | the landing hero is the reveal, not a room | Superseded by 0361 |
 | [0179](0179-sam3d-takes-a-pointmap-and-we-let-it-guess.md) | SAM 3D takes a LiDAR pointmap, and we let it guess one instead | Superseded by 0180 |
+| [0254](0254-home-is-a-claim-a-sentence-and-an-action.md) | home is a claim, a sentence, and an action | Superseded by 0365 |
 | [0263](0263-precision-is-a-gate-not-a-ranking.md) | precision against the box is a gate, not a ranking | Superseded by 0266 |
 | [0265](0265-five-instruments-one-unrun-experiment.md) | five instruments for one choice, and the experiment none of them needs | Superseded by 0266 |
 | [0297](0297-the-review-opens-from-the-home-screen-and-asks-again-when-roomplan-withholds-depth.md) | the review opens from the Home Screen, and asks again when RoomPlan withholds depth | Superseded by 0301 |
 
-## Amended (9)
+## Amended (12)
 
 *Partly corrected by a later note.*
 
 | # | title | status |
 |---|---|---|
 | [0013](0013-capture-bundle-monotonic-timestamps.md) | Capture-bundle timestamps: device-monotonic, with wall-clock alongside | Amended by 0298 |
-| [0072](0072-ios-design-lidar-only-pivot.md) | iOS app design locked; LiDAR-only client pivot | Amended by 0302 |
+| [0057](0057-good-guest-design-language.md) | Good Guest design language: warm hospitality supersedes 0056's visual specifics | Amended by 0361 |
 | [0077](0077-roomplan-integration-design.md) | RoomPlan integration: CapturedRoom as room + object skeleton, JSON verbatim on the wire, boxes carry placement | Amended by 0302 |
 | [0099](0099-ci-scope-and-ios-posture.md) | CI scope, and why iOS CI is manual-only | Amended by measurement |
 | [0146](0146-view-selection-does-not-predict-reconstruction-quality.md) | view selection does not predict reconstruction quality | Amended by 0153 |
 | [0152](0152-every-view-is-a-partial-view.md) | every view is a partial view, and that is the regime | Amended by 0153 |
 | [0173](0173-the-guest-cannot-tell-which-room-its-facts-describe.md) | the guest reads its own re-derived facts as stale, and says so | Amended by 0174 |
+| [0257](0257-one-grid-and-an-instrument-to-check-it.md) | one grid for every screen, and an instrument to check it | Amended by 0367 |
 | [0259](0259-disqualify-a-frame-do-not-rank-it.md) | disqualify a frame, do not rank it | Amended by 0270 |
 | [0299](0299-glass-is-boxed-from-its-outlines-and-covering-counts-four-times-filling.md) | glass is boxed from its outlines, and covering counts four times filling | Amended by 0300 |
+| [0302](0302-the-scan-screen-may-show-a-camera.md) | the Scan screen may show a camera behind the boxes | Amended by 0365 |
+| [0365](0365-home-is-your-rooms-and-each-room-has-one-screen.md) | home is your rooms, and each room has one screen | Amended by 0367 |
 
 ## Spent (16)
 
@@ -100,7 +106,7 @@ The status vocabulary and the numbering rule live in
 | [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (270)
+## Decided (271)
 
 | # | title | status |
 |---|---|---|
@@ -151,7 +157,6 @@ The status vocabulary and the numbering rule live in
 | [0053](0053-splat-renderer-spark-webgl2.md) | Splat renderer: Spark (three.js/WebGL2), contained in one component | Decided |
 | [0054](0054-web-read-contract.md) | Web read contract: scene list, signed-assets endpoint, CORS posture | Decided |
 | [0055](0055-founding-vision-recovered.md) | Founding vision recovered: what survived the pivot, what didn't | Decided |
-| [0057](0057-good-guest-design-language.md) | Good Guest design language: warm hospitality supersedes 0056's visual specifics | Decided |
 | [0058](0058-conversation-stage-1-design.md) | Conversation stage 1: transport, grounding, state, the guest contract, cost, client | Decided |
 | [0059](0059-conversation-stage1-implementation-notes.md) | Conversation stage 1: implementation choices not in the design | Decided |
 | [0060](0060-stranded-scene-gap-and-reenqueue.md) | stranded scenes: platform-queued retries can't reclaim; out-of-band re-enqueue is the cure | Decided |
@@ -198,7 +203,6 @@ The status vocabulary and the numbering rule live in
 | [0117](0117-composer-confirming-is-reachable.md) | the composer's `confirming` phase is reachable, and stays | Decided |
 | [0118](0118-ios-google-linking.md) | iOS Google linking: the second provider rides Apple's rails | Decided |
 | [0119](0119-google-config-seam-preflight.md) | Google's config seam: committed URL scheme, gitignored client ID, preflight instead of a crash | Decided |
-| [0122](0122-hero-is-the-reveal.md) | the landing hero is the reveal, not a room | Decided |
 | [0123](0123-render-payload-is-network-bound.md) | the render payload is network-bound; parse has no headroom to give | Decided |
 | [0125](0125-spz-is-a-transcode-not-a-re-bake.md) | the compressed tier is a transcode, and Spark already reads it | Decided |
 | [0126](0126-compressed-tier-sits-beside-the-ply.md) | the compressed tier sits beside the PLY, discovered by a sibling index | Decided |
@@ -301,9 +305,7 @@ The status vocabulary and the numbering rule live in
 | [0251](0251-the-splash-carries-whole-letters.md) | the splash carries whole letters, and the cut is found by crossings | Decided |
 | [0252](0252-the-instrument-said-the-app-was-broken.md) | three more corrections to the layout audit, and the shape they share | Decided |
 | [0253](0253-the-pinned-action-rule-was-never-propagated.md) | the pinned-action rule was never propagated | Decided |
-| [0254](0254-home-is-a-claim-a-sentence-and-an-action.md) | home is a claim, a sentence, and an action | Decided |
 | [0255](0255-the-splash-hands-the-mark-over.md) | the splash hands the mark over, to a measured slot | Decided |
-| [0257](0257-one-grid-and-an-instrument-to-check-it.md) | one grid for every screen, and an instrument to check it | Decided |
 | [0258](0258-type-scales-by-what-it-does.md) | type scales by what it does, and control labels are clamped rather than capped | Decided |
 | [0260](0260-a-probe-must-not-be-able-to-become-pipeline-state.md) | a probe must not be able to become pipeline state | Decided |
 | [0261](0261-the-overlap-sort-rewards-a-mask-that-stops-early.md) | the overlap sort rewards a mask that stops early | Decided |
@@ -340,7 +342,6 @@ The status vocabulary and the numbering rule live in
 | [0298](0298-a-reason-code-belongs-to-one-category-and-the-clock-starts-at-capture.md) | a reason code belongs to one category, and the bundle's clock starts at capture | Decided |
 | [0300](0300-covering-counts-eight-times-filling-and-the-floor-shadow-says-nothing.md) | covering counts eight times filling, and the floor shadow says nothing | Decided |
 | [0301](0301-live-boxes-ride-the-captures-own-session.md) | live boxes ride the capture's own session | Decided |
-| [0302](0302-the-scan-screen-may-show-a-camera.md) | the Scan screen may show a camera behind the boxes | Decided |
 | [0303](0303-the-switches-live-boxes-keeps-off.md) | two things live boxes keeps in the code and leaves off | Decided |
 | [0310](0310-the-room-can-wear-a-designed-finish-that-only-a-local-flag-draws.md) | the room can wear a designed finish, drawn only behind a local flag | Decided |
 | [0311](0311-furniture-twins-are-placed-from-boxes-by-rules-that-record-their-fixes.md) | furniture twins are placed from boxes by rules that record their fixes | Decided |
@@ -370,7 +371,13 @@ The status vocabulary and the numbering rule live in
 | [0358](0358-observability-is-structured-log-lines-and-a-summary-with-no-pixels.md) | Observability is structured log lines and a summary with no pixels | Decided |
 | [0359](0359-the-local-run-proves-the-wiring-not-the-quality.md) | The local run proves the wiring, not the quality | Decided |
 | [0360](0360-which-models-may-see-a-room-and-what-the-operator-ruled-on-sending.md) | Which models may see a room, and what the operator ruled on sending | Decided |
+| [0361](0361-the-website-leaves-cream-for-daylight-slate-ink-and-dusk.md) | the website leaves cream for daylight, slate ink and dusk | Decided |
+| [0363](0363-a-rooms-still-picture-is-drawn-by-scene-finish-and-marked-on-the-scene.md) | A room's still picture is drawn by scene-finish and marked on the scene | Decided |
+| [0364](0364-every-iphone-scans.md) | every iPhone scans | Decided |
+| [0366](0366-the-app-speaks-the-websites-language.md) | the app speaks the website's language | Decided |
+| [0367](0367-one-column-after-the-website.md) | one column, after the website | Decided |
 | [0370](0370-room-rules-are-laws-in-code-and-needs-claude-writes-per-room.md) | Room rules are laws in code, and needs Claude writes per room | Decided |
 | [0371](0371-collision-uses-the-shapes-the-viewer-draws.md) | Collision uses the shapes the viewer draws | Decided |
 | [0372](0372-the-guide-offers-only-solved-changes-and-the-server-writes-every-motion.md) | The guide offers only solved changes, and the server writes every motion | Decided |
 | [0373](0373-the-guide-sees-the-semantic-room-and-quotes-every-number.md) | The guide sees the semantic room, and quotes every number it says | Decided |
+| [0376](0376-the-room-guide-is-in-the-product-behind-one-switch.md) | The room guide is in the product behind one switch | Decided |

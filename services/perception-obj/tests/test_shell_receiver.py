@@ -501,6 +501,91 @@ class TestHandleShell:
         assert json.loads(resp.body)["status"] == "ready"
 
 
+class TestStillEnqueue:
+    """A ready shell asks scene-finish for the room's still (decision 0363),
+    fire-and-forget; nothing else does."""
+
+    def _calls(self, monkeypatch, *, raises=None):
+        import still_enqueue
+
+        calls = []
+
+        def fake(**kwargs):
+            calls.append(kwargs)
+            if raises:
+                raise raises
+            return True
+
+        monkeypatch.setattr(still_enqueue, "enqueue_still_task", fake)
+        return calls
+
+    def test_a_ready_shell_asks_for_its_still(self, gcs, monkeypatch):
+        calls = self._calls(monkeypatch)
+        _seed_ready_scene(gcs)
+        assert json.loads(_call_handle().body)["status"] == "ready"
+        assert calls == [{"scene_id": _SCENE}]
+
+    @pytest.mark.parametrize("body", [
+        {"status": "unavailable", "reason": "capture_expired"},
+        {"status": "noop", "reason": "already_present"},
+    ])
+    def test_nothing_to_draw_asks_for_nothing(self, gcs, monkeypatch, body):
+        calls = self._calls(monkeypatch)
+        monkeypatch.setattr(shell_receiver, "run_shell", lambda **kw: body)
+        assert json.loads(_call_handle().body) == body
+        assert calls == []
+
+    def test_a_failed_enqueue_leaves_the_shell_answer_alone(self, gcs, monkeypatch):
+        self._calls(monkeypatch, raises=RuntimeError("queue down"))
+        _seed_ready_scene(gcs)
+        resp = _call_handle()
+        assert resp.status_code == 200
+        assert json.loads(resp.body)["status"] == "ready"
+
+    def test_unconfigured_skips_without_touching_the_queue(self, monkeypatch):
+        import sys
+
+        import still_enqueue
+
+        monkeypatch.delenv("SCENE_FINISH_URL", raising=False)
+        for k, v in {"CLOUD_TASKS_PROJECT": "p", "CLOUD_TASKS_LOCATION": "l", "CLOUD_TASKS_QUEUE": "q"}.items():
+            monkeypatch.setenv(k, v)
+        monkeypatch.setitem(sys.modules, "google.cloud.tasks_v2", None)  # importing it would raise
+        assert still_enqueue.enqueue_still_task(scene_id=_SCENE) is False
+
+    def test_the_task_targets_scene_finish_with_the_invoker_token(self, monkeypatch):
+        import sys
+        import types
+
+        import still_enqueue
+
+        created = []
+
+        class _Client:
+            def queue_path(self, *parts):
+                return "/".join(parts)
+
+            def create_task(self, request):
+                created.append(request)
+
+        fake = types.SimpleNamespace(CloudTasksClient=_Client, HttpMethod=types.SimpleNamespace(POST="POST"))
+        monkeypatch.setitem(sys.modules, "google.cloud.tasks_v2", fake)
+        if "google.cloud" in sys.modules:  # a real tasks_v2 imported earlier would win the from-import
+            monkeypatch.setattr(sys.modules["google.cloud"], "tasks_v2", fake, raising=False)
+        for k, v in {"SCENE_FINISH_URL": "https://scene-finish.example/", "CLOUD_TASKS_PROJECT": "p",
+                     "CLOUD_TASKS_LOCATION": "l", "CLOUD_TASKS_QUEUE": "q",
+                     "CLOUD_TASKS_INVOKER_SA": "tasks-invoker@p.iam.gserviceaccount.com"}.items():
+            monkeypatch.setenv(k, v)
+        assert still_enqueue.enqueue_still_task(scene_id=_SCENE) is True
+        (req,) = created
+        http = req["task"]["http_request"]
+        assert http["url"] == "https://scene-finish.example/still"
+        assert json.loads(http["body"]) == {"scene_id": _SCENE}
+        assert http["oidc_token"] == {"service_account_email": "tasks-invoker@p.iam.gserviceaccount.com"}
+        assert req["task"]["name"].startswith(f"p/l/q/tasks/still-{_SCENE}-")
+        assert req["task"]["dispatch_deadline"].seconds == 930
+
+
 # ---------------------------------------------------------------------------
 # Structural invariants
 # ---------------------------------------------------------------------------

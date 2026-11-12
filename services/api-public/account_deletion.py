@@ -24,6 +24,9 @@ THE MAP:
     conversations/{scene_id}__{uid}       where user_id == uid
       └─ turns/{index}  (SUBCOLLECTION — does not cascade; deleted explicitly)
     design_specs/{scene_id}__{uid}        where user_id == uid
+    room_guides/{scene_id}__{uid}         where user_id == uid (decision 0376)
+      └─ turns/{index}  (SUBCOLLECTION — does not cascade; deleted explicitly)
+    room_guide_budgets/{uid}              doc id IS the uid
 
   GCS
     gs://{captures}/captures/{bundle_id}/**   for every bundle_id the user
@@ -31,7 +34,9 @@ THE MAP:
                                               upload_sessions (see below)
     gs://{outputs}/scenes/{scene_id}/**       manifest, shell, splats,
                                               per-frame masks/objects,
-                                              roomplan/room.json
+                                              roomplan/room.json, and the
+                                              room guide's scene.json,
+                                              solids.json and needs.json
 
   Firebase Auth
     the user record itself — deleted LAST, and only on a complete pass
@@ -76,6 +81,7 @@ logger = logging.getLogger(__name__)
 # exists, so a rename there cannot silently desync this module. `conversations`
 # / `turns` are api-public's own (conversation_repo).
 from design_spec import FirestoreDesignSpecRepository
+from guide_repo import GUIDE_BUDGETS_COLLECTION, GUIDE_TURNS_SUBCOLLECTION, GUIDES_COLLECTION
 from thegoodguest_api_core.scene_read_repo import FirestoreSceneReadRepository
 from thegoodguest_api_core.upload_session_repo import FirestoreUploadSessionRepository
 
@@ -85,6 +91,11 @@ MINT_QUOTAS_COLLECTION = FirestoreUploadSessionRepository.QUOTA_COLLECTION
 DESIGN_SPECS_COLLECTION = FirestoreDesignSpecRepository.COLLECTION
 CONVERSATIONS_COLLECTION = "conversations"
 CONVERSATION_TURNS_SUBCOLLECTION = "turns"
+# The room guide's (guide_repo): one conversation per room and person, its turns,
+# and one budget document per person.
+ROOM_GUIDES_COLLECTION = GUIDES_COLLECTION
+ROOM_GUIDE_TURNS_SUBCOLLECTION = GUIDE_TURNS_SUBCOLLECTION
+ROOM_GUIDE_BUDGETS_COLLECTION = GUIDE_BUDGETS_COLLECTION
 
 # Concurrency for GCS blob deletes. Each delete is one small IO-bound HTTPS
 # call; measured scene footprints are 87–147 blobs, so a 7-scene account is
@@ -104,6 +115,7 @@ class OwnedRecords:
     upload_session_bundle_ids: tuple[str, ...] = ()
     conversation_doc_ids: tuple[str, ...] = ()
     design_spec_doc_ids: tuple[str, ...] = ()
+    room_guide_doc_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -118,6 +130,11 @@ class DeletionPlan:
     conversation_doc_ids: tuple[str, ...]
     design_spec_doc_ids: tuple[str, ...]
     mint_quota_doc_id: str
+    room_guide_doc_ids: tuple[str, ...] = ()
+
+    @property
+    def room_guide_budget_doc_id(self) -> str:
+        return self.user_id
 
     @property
     def is_empty(self) -> bool:
@@ -129,6 +146,7 @@ class DeletionPlan:
             or self.upload_session_ids
             or self.conversation_doc_ids
             or self.design_spec_doc_ids
+            or self.room_guide_doc_ids
         )
 
 
@@ -143,6 +161,8 @@ class DeletionReport:
     conversations_deleted: int = 0
     conversation_turns_deleted: int = 0
     design_specs_deleted: int = 0
+    room_guides_deleted: int = 0
+    room_guide_turns_deleted: int = 0
     mint_quota_deleted: bool = False
     identity_deleted: bool = False
     complete: bool = False
@@ -152,8 +172,8 @@ class DeletionReport:
         """Client-facing projection — counts only, no paths or ids."""
         return {
             "rooms": self.scenes_deleted,
-            "conversations": self.conversations_deleted,
-            "conversation_messages": self.conversation_turns_deleted,
+            "conversations": self.conversations_deleted + self.room_guides_deleted,
+            "conversation_messages": self.conversation_turns_deleted + self.room_guide_turns_deleted,
             "design_specs": self.design_specs_deleted,
             "upload_sessions": self.upload_sessions_deleted,
             "files": self.blobs_deleted,
@@ -178,6 +198,7 @@ def plan_account_deletion(user_id: str, records: OwnedRecords) -> DeletionPlan:
         conversation_doc_ids=tuple(sorted(records.conversation_doc_ids)),
         design_spec_doc_ids=tuple(sorted(records.design_spec_doc_ids)),
         mint_quota_doc_id=user_id,
+        room_guide_doc_ids=tuple(sorted(records.room_guide_doc_ids)),
     )
 
 
@@ -228,6 +249,9 @@ class AccountDeleter:
             ),
             design_spec_doc_ids=tuple(
                 snap.id for snap in self._query(DESIGN_SPECS_COLLECTION, user_id)
+            ),
+            room_guide_doc_ids=tuple(
+                snap.id for snap in self._query(ROOM_GUIDES_COLLECTION, user_id)
             ),
         )
 
@@ -284,6 +308,19 @@ class AccountDeleter:
             self._db.collection(DESIGN_SPECS_COLLECTION).document(doc_id).delete()
             report.design_specs_deleted += 1
 
+        # The room guide's conversations (0376), turns first, like the guest's,
+        # then its daily budget, whose doc id is the uid.
+        for doc_id in plan.room_guide_doc_ids:
+            guide_ref = self._db.collection(ROOM_GUIDES_COLLECTION).document(doc_id)
+            report.room_guide_turns_deleted += self._delete_subcollection(
+                guide_ref, ROOM_GUIDE_TURNS_SUBCOLLECTION
+            )
+            guide_ref.delete()
+            report.room_guides_deleted += 1
+        self._db.collection(ROOM_GUIDE_BUDGETS_COLLECTION).document(
+            plan.room_guide_budget_doc_id
+        ).delete()
+
         for scene_id in plan.scene_ids:
             self._db.collection(SCENES_COLLECTION).document(scene_id).delete()
             report.scenes_deleted += 1
@@ -321,9 +358,10 @@ class AccountDeleter:
         report.complete = True
         logger.info(
             "account_deletion: complete uid=%s rooms=%d conversations=%d "
-            "turns=%d specs=%d sessions=%d blobs=%d identity=%s",
+            "turns=%d specs=%d guides=%d guide_turns=%d sessions=%d blobs=%d identity=%s",
             user_id, report.scenes_deleted, report.conversations_deleted,
             report.conversation_turns_deleted, report.design_specs_deleted,
+            report.room_guides_deleted, report.room_guide_turns_deleted,
             report.upload_sessions_deleted,
             report.blobs_deleted, report.identity_deleted,
         )

@@ -17,7 +17,7 @@ This file is the always-current state of the project. If something in here is wr
 
 **The thesis: every home contains a version of itself that its owner has never seen. This product makes that version visible, understandable, and achievable — one conversation at a time.** Every feature decision filters through this. The full founding vision lives at `docs/product/initial-idea-draft.md` (verbatim, with what's superseded vs durable mapped in decision 0055) — read it before making product-surface decisions.
 
-This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction is the *medium*; the product is helping people make AI-based decisions about improving their room. Three product layers frame everything: the **AI layer** (understands space structurally — object relationships, traffic flow, light, proportion — with algorithmic spatial analysis before any LLM is invoked, and reasoning traces on every design decision), the **emotional layer** (feels personal, not algorithmic — the experience bar is Linear/Vercel/Figma-tier premium consumer software; conversation is the primary post-reveal interface; the cinematic reveal is the defining moment; design language is Apple-grade restraint — the chrome stays quiet so the room carries the colour — in the warm Good Guest palette of 0057, which SUPERSEDES 0056's neutral-chrome-and-one-sans reading: the app ships parchment and ink with three type roles, the guest's serif for prose and mono for machine data only, and the **social layer** (rooms are identity — sharing, comparison, evolution over time). Direction, not yet commitments: room health scoring, taste graph, lighting simulation, budget-aware shopping, DAG version history. Deliberately out (per the founding draft, still sound): AR overlay, social feed, photorealistic image generation, floor plans, voice input; desktop-first.
+This is NOT an "upload → generate a 3D scene" showcase. The 3D reconstruction is the *medium*; the product is helping people make AI-based decisions about improving their room. Three product layers frame everything: the **AI layer** (understands space structurally — object relationships, traffic flow, light, proportion — with algorithmic spatial analysis before any LLM is invoked, and reasoning traces on every design decision), the **emotional layer** (feels personal, not algorithmic — the experience bar is Linear/Vercel/Figma-tier premium consumer software; conversation is the primary post-reveal interface; the cinematic reveal is the defining moment; design language is Apple-grade restraint — the chrome stays quiet so the room carries the colour — in the daylight, slate-ink and dusk language of 0361 on the website, which replaced 0057's warm cream (itself the successor to 0056's neutral-chrome-and-one-sans reading): three type roles, the display serif that is also the guest's voice, the interface sans, and mono for measurements only, and the **social layer** (rooms are identity — sharing, comparison, evolution over time). Direction, not yet commitments: room health scoring, taste graph, lighting simulation, budget-aware shopping, DAG version history. Deliberately out (per the founding draft, still sound): AR overlay, social feed, photorealistic image generation, floor plans, voice input; desktop-first.
 
 **Naming: SETTLED 2026-08-23 as "The Good Guest" (0245)**, forced by the App Store listing when enrollment cleared. It is the register the whole product was built in (0072/0057) and the metaphor the calling card is already named from. Set as a STRING in three places — `web/src/components/Wordmark.tsx`'s `BRAND_NAME`, iOS `RSBrand.name`, and `INFOPLIST_KEY_CFBundleDisplayName` in `project.pbxproj`, which is what the Home Screen shows and which cannot read either constant (`tools/test_gen_mark.py` fails if they drift). **Until 2026-08-26 the Home Screen read "TheGoodGuest"** — the main target had no display name and fell through to `TARGET_NAME`, outside every "the name lives in N places" claim this file ever made. The card no longer prints the name at all: it carries the wordmark, which is a drawing. **The repo, GCP project, buckets and `thegoodguest:` localStorage keys deliberately keep the stand-in** — infrastructure, invisible, expensive to rename for no user-visible gain. **The card still prints `thegoodguest.web.app`, which is the TRUE hosting URL**: changing that string without moving hosting would print a falsehood on an artifact that leaves the browser. Re-open trigger is commerce, and renaming stays cheap until App Store submission — TestFlight needs only an app record.
 
@@ -57,6 +57,9 @@ packages/api-core/                shared logic consumed by both API services
     upload_session_repo.py           UploadSessionRepository ABC + Firestore/in-memory impls + gcs_mint_resumable_uri
   tests/                              unit tests for the scene model, repos, and manifest validation
 
+packages/room-look/               the room's look as an importable package (0330), used by scene-finish
+  thegoodguest_room_look/           shell_* (finish derivation, measurement), finish_* checks, furniture_*
+
 tools/                            local scripts (run from repo root)
   gen_proto.sh                      regenerate Python and Swift (ios/TheGoodGuest/TheGoodGuest/Generated/)
   gen_mark.py                       the identity's ONE source — regenerates the three app
@@ -72,6 +75,7 @@ tools/                            local scripts (run from repo root)
   track_map.py                      the object->frame map, and the id-stability measurement
   track_views.py                    per-instance contact sheets (candidate_views.py for tracked ids)
   track_select.py                   each tracked object's best frame, over a real capture
+  enqueue_still.py                  queue scene-finish /still by hand (rooms made before the trigger, candidate smokes)
 
 services/
   api-public/                     client-facing API (--allow-unauthenticated, Firebase JWT verify)
@@ -81,6 +85,8 @@ services/
                                     and track_receiver.py (0274; BUILT, in the serving image, not called by /process)
                                     and track_selection.py, per-object best-frame choice over the
                                     tracked segments (BUILT, no call site in the service yet)
+  scene-finish/                   headless Chrome drawing the website's own viewer (CPU, Cloud Tasks only, 0332);
+                                    deployed render-only: /health, /render, /still (0363)
 
 web/                              Next.js static-export web app (decision 0050); Spark splat viewer
                                   contained in src/components/SplatViewer.tsx (decision 0053)
@@ -122,7 +128,7 @@ the wipe.
 
 ## What works right now
 
-**Every Cloud Run revision number below other than the three service headers
+**Every Cloud Run revision number below other than the service headers
 refers to the RETIRED `roomstudio` project and no longer exists.** The stack
 moved to the `thegoodguest` project on 2026-08-31, where revision numbering
 restarted at 00001. Read revision numbers in the narrative as history, and
@@ -130,7 +136,7 @@ derive live state from `gcloud run services describe <svc> --region
 asia-southeast1 --project thegoodguest`.
 
 State, not history; the story of how it got this way is in `docs/decisions/`.
-The service headers and the suite counts below were re-verified 2026-09-19.
+The service headers were re-verified 2026-11-11, the suite counts 2026-09-19.
 
 ### The contract and shared packages
 
@@ -172,11 +178,12 @@ regression.
 
 ### iOS capture app — `ios/TheGoodGuest/`
 
-Pro-only by design (decision 0071): non-LiDAR hardware lands on
-`UnsupportedDeviceView`. `RootFlowView` is the app root and the navigation
-coordinator, binding the Good Guest design system (decision 0072) to the real
-capture, auth, upload, and polling stack. Upload begins on the review screen's
-"Send it home", not on `stopCapture`.
+**Every iPhone scans** (0364): a LiDAR phone measures with LiDAR and RoomPlan,
+any other with the camera, and the guidance, the scan and review each say which
+— `LiDARGate.isSupported` is the one check. `RootFlowView` is the app root and
+the navigation coordinator, binding the design system (0366) to the real
+capture, auth, upload, and polling stack. Upload begins on review's "Send it",
+not on `stopCapture`.
 
 - **Capture.** ARKit world tracking, gravity-aligned, `.sceneDepth` where
   available, keyframes accumulated by pose delta (10 cm / 5°). RoomPlan runs
@@ -194,18 +201,18 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   nothing is dropped and nothing is gated on the reading**, deliberately, and
   the durable fix is an additive proto field carrying the statistic on the
   bundle, triggered by the next `capture_bundle.proto` change for any reason.
-- **Live floor plan** drawn from the RoomPlan delegate stream, replacing the old
-  placeholder sketch. Confidence gates naming: a low-confidence object renders
-  unlabelled and the guest hedges.
+- **Live floor plan** drawn from the RoomPlan delegate stream, in a small card
+  over the camera on LiDAR phones (0365). Confidence gates naming: a
+  low-confidence object renders unlabelled and the guest hedges.
 - **Live boxes (Debug builds only).** The Scan screen shows the camera with a
   dot on every object a prompt-free YOLOE-26 detector found; a tap boxes the
   object, and the box glides to each better fit as the person walks round it.
   The detector rides the capture's own ARSession (`CaptureManager.frameTap`), so
   the bundle is exactly what a scan without it records, and no box or still ever
   enters it (0301). Depth is LiDAR, or Depth Anything v2 Small on a phone without
-  it. One constant, `LiveBoxesFeature.isEnabled`, gates the camera layer and the
-  detector start, default ON; off, the Scan screen is stock and the floor plan
-  shows (0302). The code is compiled only under `#if DEBUG` and the AGPL model
+  it. One constant, `LiveBoxesFeature.isEnabled`, gates the boxes' camera layer
+  and the detector start, default ON; off, the Scan screen shows the plain
+  camera (0302, 0365). The code is compiled only under `#if DEBUG` and the AGPL model
   is never in git (0295); `tools/test_live_boxes_boundaries.py` pins both. How a
   mask becomes a box is 0296; glass, boxed from its outlines and the floor, 0299
   amended by 0300; Depth Anything v3 and the RoomPlan comparison, kept and off,
@@ -223,10 +230,10 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   exercised on a device (punchlist G1-06). There is deliberately no iOS
   sign-out. **Deletion is the account operation the phone offers instead**, and
   it is the one guideline 5.1.1(v) requires: `DeleteAccountView` reached from
-  the profile, `AccountDeletionClient` against `DELETE /account`, and an
+  the account sheet, `AccountDeletionClient` against `DELETE /account`, and an
   explicit local sign-out afterwards so the next launch is an honest first run
   rather than a token rejection discovering it. Its words are a pure table
-  (`DeleteAccountWording`) for the same reason home's sentence is.
+  (`DeleteAccountWording`) for the same reason the room screen's words are.
   **An Apple-linked account has its token revoked FIRST** — 5.1.1(v) wants both
   halves and Apple checks it (TN3194). `AppleAccountRevocation` re-authorizes
   at the moment of deletion rather than spending a code stored at sign-in,
@@ -247,8 +254,10 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   background OS-relaunch as well as on a foreground open, so no AppDelegate
   co-trigger is carried.
 - **Surfaces.** Scene-status polling with a server-anchored elapsed clock, a
-  Live Activity on Lock Screen and Dynamic Island, terminal-failure banners, and
-  a mint-429 screen that names the reset time rather than sleeping. Declaring a
+  Live Activity on Lock Screen and Dynamic Island, and one screen per room whose
+  every state — sending, being rebuilt, paused, the daily limit (naming the reset
+  time rather than sleeping), a stalled upload, missing files, a refusal — comes
+  from one pure table, `RoomStatusCopy` (0365). Declaring a
   new flight stands the previous room's status down, so no surface can narrate a
   finished room over a scan still going up (0217).
 - **The way to the web.** `NetworkConfig.webBaseURL` is
@@ -257,20 +266,24 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   origin existing** (`RoomHistory.webHandoffLands`): rooms are scoped to the
   caller's token, an anonymous UID does not leave the phone, and Safari carries
   no session from the app — so an unlinked user following the link reaches a
-  page correctly asking them to sign in with an account they do not have. Every
-  surface that offers a room — the doorway CTA, the house's rows, the arrival
-  card — takes that one predicate, and for an unlinked identity they point at
-  signing in instead. **The doorway now takes ONE flag rather than two**: with an
-  origin configured, "is there a desk" and "will it recognise you" always agreed,
-  and the two states where they differed are not states the app has.
+  page correctly asking them to sign in with an account they do not have. The
+  one surface that offers a room on the web — the ready screen, reached from the
+  room just finished or from any ready room's card — takes that one predicate,
+  and for an unlinked identity it offers signing in instead.
 - **History.** `ScenesListClient` fetches `GET /scenes` — the caller's own
-  rooms, scoped to the token — and `RoomsStore` holds one answer for all three
-  surfaces that state a count: the returning-home strip, `RoomsListView`, and
-  `WhySignInSheet`'s invitation. The load state is four-way and its accessors
-  are Optional, so "no rooms" and "could not ask" cannot be collapsed (0206);
-  a failed fetch never renders as zero. Rows offer a tap only where one can
-  land — gated on `RoomHistory.webHandoffLands`, exactly as the doorway's CTA
-  is (see "The way to the web" above).
+  rooms, scoped to the token — and `RoomsStore` holds the one answer home's
+  cards are drawn from, through `RoomCards`, a pure table. The load state is
+  four-way and its accessors are Optional, so "no rooms" and "could not ask"
+  cannot be collapsed (0206); a failed fetch never renders as zero. Rooms are
+  named the way the website names them ("The 28 August room", with the time
+  added when two share a day).
+- **The room's picture** (`RoomPicture`) is scene-finish's still when the API
+  sends `still_url` / `still_night_url` (0363), and the measured floor outline
+  (`RoomOutline`, from the shell's floor polygon) until then. It is cached by
+  room, because the link is signed afresh on every call; asked for again when a
+  link arrives after the room did, because the still is drawn after ready; and
+  refreshed once per launch, because a furniture merge redraws it at the same
+  path.
 - **The mark.** `DesignSystem/Wordmark.swift` draws the same two interlocking
   rings as the app icon, from the generated `MarkGeometry.swift` (0193/0248).
   `RSBrand.name` stays the one-file swap for the name. **The mark and the name
@@ -285,38 +298,48 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
 - **Reclaim.** `CaptureReaper` frees a capture's record and files once the user
   has *seen* the outcome — never on mere upload success.
 
-**The screens were rebuilt to one shape (0254, 0257).** Home holds the claim,
-ONE sentence that reports, and the pinned action — nothing else. The sentence
-routes by priority (needs-you → Notes, arrival → the doorway, in flight → the
-desk, otherwise a standing fact → the house) and cannot stack, which is what
-stopped the claim being pushed down the page and what let it stop vanishing
-after the first scan. Everything home used to report moved to a screen of its
-own, reached from a **contents** screen behind the mark — a table of contents
-rather than a tab bar, so the four destinations are stated only when asked.
-`HomeLine`, `Contents` and `SurfacePlacement` are the three routing tables, all
-pure and table-tested; a test pins that the sentence and the contents sheet
-cannot disagree.
+**Home is your rooms, and each room has one screen (0365).** Home lists the
+rooms as cards, newest first, with the room on its way on top showing its three
+steps, Scan a room pinned and the account top right. A room's own screen
+replaces the desk, Notes and What's missing; ready is a dusk screen with the
+room's picture; account is one sheet; review takes in "I've got the room"; and
+capture shows the camera on every scan. `RoomCards`, `RoomStatusCopy` and
+`SurfacePlacement` are the routing tables, all pure and table-tested. The
+pinned action is opaque and full-bleed: content scrolls BEHIND it, so a
+transparent bar is one the body copy renders through (0287). `RSScreen`'s grid
+(0257) went with the screens it measured; one column came back as `RSLayout`
+(0367).
 
-**One grid, enforced and checkable.** `RSScreen` holds every shared
-measurement, `ScreenHeaderFrame` gives every header the same 44pt band, and
-`RSActions` fixes the action block's SHAPE — extras above, one filled button,
-then exactly one closing line — so a button's height off the bottom cannot
-depend on how many controls a screen has. A block pinned over a scroll region
-uses `rsPinnedActions`, which is opaque and full-bleed: `safeAreaInset` lets
-content scroll BEHIND what sits there, so a transparent bar is one the body
-copy renders through (0287).
+**One column, after the website (0367).** `RSLayout` holds the grid: every
+screen's title, lines, cards and pinned button start on one column, 16pt in on
+a phone (the website's `px-4`); on a wider window the column stops at 520pt,
+the website's paragraph measure, and centres (at 640 an iPad's lines ran to 94
+characters). `RSScreenTitle` sets every title in the content, home's included,
+with its last two words held together when they are short. `RSPinnedBar` is the
+one action bar, fading in over 22pt as the canvas's did. A hero picture is
+340pt, or 58% of what the screen shows. Cards take the website's 24pt corner
+and its card shadow (`rsCardShadow()`), hero pictures its 28. Sizes print to
+one decimal, as the website prints them. No Dark Mode (0366), enforced by
+`UIUserInterfaceStyle`.
 
-`tools/ios_screenshot_gallery.py` photographs **87 states** —
-one frame per distinct state rather than one per screen — at both the default
-text size and AX5, 174 frames, and `tools/ios_layout_audit.py` measures them and
-exits non-zero when an enforced screen deviates. `tools/ios_contact_sheet.py`
-turns a pass into one self-contained page for review. Last run 2026-08-28:
-**0 of 62 at both sizes**; default margin 25–29pt, header ink 81–89, first
-content 140–152, filled button 77–87pt off the bottom at left 26–28 and 346–350
-wide. **Two of the audit's five bounds are default-size only and are not
-enforced at AX5** — the first content line and the button's offset off the
-bottom both move legitimately when the header glyph above one and the closing
-line below the other grow (0252).
+`tools/ios_screenshot_gallery.py` photographs **70 states** — one frame per
+distinct state rather than one per screen — at any Dynamic Type size, light or
+dark, with or without Bold Text (`--bold`), on any simulator, and
+`tools/ios_contact_sheet.py` turns a pass into one page for review. **The
+layout audit (`tools/ios_layout_audit.py`) measures that column on any
+device**, reading each frame's size, scale and safe area from the image:
+titles, content and the pinned button's sides on the column, a title 34–39pt
+under the bar's centre, and the button's height above the safe area by what
+sits under it (nothing, a quiet action, a caption, or a caption over a quiet
+action). A frame shot blank, mid-transition or of something else is reported,
+never measured. Measured 2026-11-11 on an iPhone SE, 17 Pro, 17 Pro Max and
+iPad Pro 13 at default and AX5, and on the SE at AX5 with Bold Text: **every
+enforced state on the column except deletion's four that lose their bar**
+(open defects, iOS). **Two of its bounds are default-size only and are not
+enforced at AX5** — the title's top and the pill's offset off the bottom can
+both move legitimately when the type around them grows (0252). **The audit is
+a tripwire, not the judge** (0367): the frames, read against the design rules
+and the website, decide whether a screen is right.
 
 **Type stops at a CEILING, and tiers stop some of it earlier** (0258). The app
 holds Dynamic Type at `RSTypeSize.ceiling` — `.accessibility2`, body 17 → 33pt
@@ -325,57 +348,51 @@ between every pair of styles stays exactly where the default size has it: the
 accessibility layout is the same layout, larger. Within that, serif titles stop
 at **1.4×** (`RSTypeCap.display`), machine data at **1.6×** (`.mono`), and a
 control's label is clamped at `xxxLarge` by `rsControlLabel()` so a button keeps
-the shape its fixed padding gives it. Reading text scales freely to the ceiling
-and is capped by nothing else.
+the shape its fixed padding gives it, as is a label set on a picture (home's
+"An example room"). Reading text scales freely to the ceiling and is capped by
+nothing else. **With Bold Text on, every style steps a weight heavier**
+(`RSFont.bolder`: Regular to Semibold, Light to Medium, Semibold to Bold), as
+the system's faces do; the bundled faces are variable, so every step exists.
 
-**Machine truth is set in mono, uncontained — and the tracker now is too.**
-The capture screen's tracking indicator was a bordered capsule with a coloured
-status dot, the only element in the app in that shape; it is a mono readout in
-the same idiom as the coverage ticks below it and the desk's status line. Three
-things went with it: **the ordinary state is now the quiet one** (`.good` had
-carried the component's only glow, so nothing-is-wrong was the loudest thing on
-screen, and it is now set in the coverage labels' muted ink), the dot is gone
-and nothing replaces it (`.slowDown` and `.finding` share a colour, so it
-carried three values where the words carry four), and **the readout reports
-STATE while the guest's line keeps the instruction** — "Go a little slower"
-became `MOVING TOO FAST`, because an instruction in a status readout duplicates
-the channel the app already has for advice. All four strings sit in one switch
-in `LiveCaptureView.trackingReadout`.
+**Mono is for measurements only** (0366): sizes in JetBrains Mono, in
+text-sized terracotta. The capture screen's tracker is a glass pill that
+reports STATE — "Tracking", "Moving too fast", "Finding the room", "Too dark to
+see" — while the guest's line keeps the instruction, because an instruction in a
+status readout duplicates the channel the app already has for advice. Its dot
+is lit, in lamplight, only while tracking is good. All four strings sit in one
+switch in `LiveCaptureView.trackingPill`.
 
-**Nothing is dropped, reordered or restacked to fit.** The three
-`isAccessibilitySize` re-compositions are GONE — home's claim/sentence swap,
-the contents row stacking, the house's stamp dropping to its own line. Each was
-the right fix for unbounded type and each is dead weight under a ceiling: a
-second layout to verify, for no gain. `ContentsRowView` instead gives the title
-and the status `layoutPriority(1)` and lets the dot leaders yield, because a
-leader is filler — without that, "The house" wrapped to two lines at the ceiling
-while "The desk" did not.
+**Nothing is dropped, reordered or restacked to fit**, with one exception:
+the account ID goes on its own line under its label wherever the whole ID won't
+fit beside it, because data is never cut to keep a layout (0367). Under the
+ceiling each screen has one layout, larger; the `isAccessibilitySize`
+re-compositions that preceded it went with the screens they served, and the
+operator ruled against bringing any back for particular sizes (0367).
 
-**Measured across the 83 states that existed on 2026-08-29:** mean density 10.2% → 14.5%
-(**1.42×**), layout audit **0 of 62** at both sizes.
-`tools/ios_density_guard.py` bounds it by the arithmetic rather than by taste —
-ink area scales with the SQUARE of type size, so the same content at 1.94× is
-3.77× denser with nothing wrong, and **0 of 67** screens exceed that. A 2×
-target was arithmetically unreachable while showing everything: meeting it
-needed type below 1.41× or content removed, and both were ruled out. Read a
-ratio well BELOW the square as the interesting signal — it means content is
-falling off the bottom of the frame.
+`tools/ios_density_guard.py` bounds crowding by arithmetic rather than by taste
+— ink area scales with the SQUARE of type size, so the same content at 1.94× is
+3.77× denser with nothing wrong. On the redesigned screens **0 of 56** exceed it
+on any of four devices (SE, 17 Pro, 17 Pro Max, iPad Pro 13), and the mean
+screen is 1.26× (SE) to 1.43× (Pro Max) more inked at AX5 than at the default
+size. Read a ratio well BELOW the square as the interesting
+signal — it means content is falling off the bottom of the frame.
 
 **What it costs, plainly:** someone who sets the top step asks for 53pt body
 text and gets 33. That is a real reduction for the people the setting exists
 for, and it is why the ceiling is ONE constant.
 
 **The splash hands the mark over** rather than cutting to home (0255): the mark
-walks to the exact rectangle home publishes as an anchor preference, while home
-fades in behind it. Home's mark shows the way in by playing a dotted leader and
-the word MENU out from behind itself, once per launch — no caption, and the
-plate-and-chevron treatment that preceded it is gone.
+walks to home's own mark in the navigation bar while home fades in behind it. A
+bar item is hosted apart from the screen, so its anchor never reaches the
+splash's overlay; the bar mark reports its frame instead (`MarkSlotReport`). The
+launch screen is the same ground (`LaunchGround`), so nothing flashes white
+first.
 
-Suite **666**: 660 asserting offline tests + 2 boilerplate stubs + 4 live
-integration tests that require a reachable backend. See the iOS test policy
+Suite **953**: 941 asserting offline tests + 2 boilerplate stubs + 6 that skip
+by design + 4 live integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
-### api-public — `api-public-00003-dfq`, image `20260831-152649`
+### api-public — `api-public-00005-peg`, image `20261110-213446`
 
 Client-facing, `--allow-unauthenticated`, with in-app Firebase JWT verification
 as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
@@ -388,8 +405,13 @@ as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
   (0116).
 - `GET /scenes`, `GET /scenes/by-bundle/{bundle_id}`,
   `GET /scenes/{id}/assets` — the assets response carries the manifest and shell
-  verbatim, V4-signed splat URLs for placed objects, and an additive
-  `asset_urls_compressed` for the SPZ tier that never narrows the PLY fallback.
+  verbatim, V4-signed splat URLs for placed objects, an additive
+  `asset_urls_compressed` for the SPZ tier that never narrows the PLY fallback,
+  and `finish_url` / `furniture_url`, each null when the file is absent (0313).
+  Every scene in the two lists carries `still_url` / `still_night_url` (0363):
+  signed links to the room's still picture, decided from the scene document's
+  `still` field so a list never asks the bucket per room; null when there is
+  none.
 - `GET/POST /scenes/{id}/conversation` — the guest, at `FACTS_VERSION 4` and
   `PROMPT_VERSION 7`, SERVING since `api-public-00046-xig` (2026-08-25). SSE with a
   disconnect shield: the turn completes and persists even if the client stops
@@ -407,7 +429,7 @@ The guest has hands but not coordinates (0132): `propose`, `revert`, and `turn`
 carry no numeric field anywhere. A server-side solver owns geometry and refuses
 when it cannot ground an instruction.
 
-### api-internal — `api-internal-00001-hat`, image `20260831-144728`
+### api-internal — `api-internal-00002-jnm`, image `20260831-144728`
 
 `--no-allow-unauthenticated`, Cloud Run IAM gated. Hosts `/ingest/eventarc` and
 nothing else. Validates in order: `schema_version`, bundle_id cross-check
@@ -417,7 +439,7 @@ declared-blob presence (0105). A rejection is a `failed_invalid` or
 Terminal-failure scenes are stamped with `expire_at`; revival clears it; `ready`
 is never stamped.
 
-### perception-obj — `perception-obj-00001-dw6`, image `20260831-160150`
+### perception-obj — `perception-obj-00002-qv6`, image `20260831-160150`
 
 **Carries both ruled-on flags** (ruled 2026-08-25, 0243; verified from `gcloud`
 2026-09-19): the env has `PERCEPTION_MASK_REFINE=1` and `PERCEPTION_ARM_SELECT=1`,
@@ -430,6 +452,29 @@ rather than by recency.
 **A post-flip revision keeps the `candidate` tag it was deployed under** — the
 flip moves traffic and does not rename it. `tag: candidate` beside
 `percent: 100` is not a parked revision; read the traffic split, never the tag.
+
+**Two parked candidates carry a flag the serving revision does not** (checked
+2026-11-11). `00003-qaq` and `00004-vam` (tagged `candidate`, 0%) and the
+service template set `PERCEPTION_SAM3_INTERACTIVE=1`; the serving `00002-qv6`
+does not, and neither does `deploy_perception.sh`, whose `--set-env-vars`
+replaces the whole list. A deploy from the script matches what serves; under
+its own `CANDIDATE_TAG` it leaves `00004-vam` reachable. The two are the YC
+demo's hand-mask click tool (`/mask_edit`, `/mask_reconstruct`, built
+2026-11-02), whose code is not on main; the operator left `00004-vam` parked
+(2026-11-11). `services describe` shows the template, which is the newest
+revision's, so read a serving revision's env with `revisions describe`.
+
+**The serving image is `main` as of 2026-08-31, and main has moved since**
+(checked 2026-11-11). `20260831-160150` was built from `8135ab1e`: its Cloud
+Build source matches that commit's perception-obj, schemas and build config
+byte for byte. So the next deploy from main brings the still trigger (0363),
+and it is also the first cloud run of 0322/0323's `/process` rewrite: no SAM 3D,
+no `/compress` enqueue, `boxes.json` from the person's boxes. New rooms then
+show no object splats until the furniture step is live. The operator deferred
+that deploy on 2026-11-11 (punchlist G2-07); until it happens, a new room's
+still is queued by hand with `tools/enqueue_still.py`. Prove the trigger with a
+new scan: a replayed `/shell` on a ready room noops (`already_present`) and
+never asks for a still.
 
 Runs as `perception-obj-runtime@` under least privilege (0090) and is
 platform-gated — only `tasks-invoker@` holds `run.invoker` (0106). Scales to
@@ -478,7 +523,9 @@ Three pipeline stages plus a probe, all Cloud Tasks driven:
   geometry beside the rendered geometry, so closure never mutates measurement.
   Parametric materials come from a confidence-gated vision call over rectified
   evidence crops, with a load-bearing fallback: below the gate family is null
-  and the plane ships a clean matte in its measured albedo.
+  and the plane ships a clean matte in its measured albedo. After writing a
+  ready shell it asks scene-finish for the room's still (`still_enqueue.py`,
+  `SCENE_FINISH_URL`, 0363) — in the code, not yet in the serving revision.
 - **`/compress`** — transcodes each PLY to SPZ beside it plus a
   `compressed.json` index. ~5.8× smaller, Gaussian counts preserved exactly.
 - **Nested-mask collapse** rides association rather than being a stage:
@@ -569,15 +616,59 @@ Suite **1205 passed + 34 skipped** (`PYTHONPATH=<tree>/packages/schemas pytest
 services/perception-obj/tests`, `main`, 2026-09-19 — the PYTHONPATH is
 load-bearing, see the Python test policy).
 
+### scene-finish — `scene-finish-00001-poy`, image `20261110-213446`
+
+CPU only: 4 vCPU, 8 GiB, concurrency 1, scales to zero. Platform-gated like
+perception-obj (`--no-allow-unauthenticated`, `run.invoker` for
+`tasks-invoker@` only), and `/still` also checks the OIDC token's audience and
+email (`task_auth.py`): an operator's own identity token passes the gate and is
+refused by the route. `/render` has no check of its own beyond the gate. Runs as `scene-finish-runtime` (outputs
+bucket objectAdmin, captures objectViewer, `datastore.user`, queue enqueuer).
+The image holds the service, a Node driver, Playwright's Chromium headless
+shell and the website built with `NEXT_PUBLIC_SHELL_FINISH=1`; it draws with
+SwiftShader (0331, 0332).
+
+- **Deployed render-only (0363):** `/health`, `/render`, `/still`. The Claude
+  layer's routes (finish, furniture piece, furniture merge) are in the code but
+  not registered, and no Anthropic key is mounted.
+- **`/still {scene_id}`** opens the website's own room page at 1600 x 1200 from
+  its first corner view and writes `scenes/{id}/still.jpg`, plus
+  `still-night.jpg` only when twins are drawn; then it sets
+  `still: {night, rendered_at}` on the scene document with `update()`, never
+  `status`. A bare shell is drawn flat, as the room page draws it. Measured:
+  14 s on a fresh instance, 7 s warm.
+- **Who asks for a still:** perception-obj's `/shell` after a ready shell (once
+  it is deployed with `SCENE_FINISH_URL`), the furniture merge after it
+  publishes, and `tools/enqueue_still.py` by hand.
+
 ### Web app — `web/`, live at https://thegoodguest.web.app
 
-Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
-`/room?bundle=`, `/new`, `/viewer` (dev workbench, hidden in live mode),
-`/privacy`, `/terms`.
+Next.js static export on Firebase Hosting. Routes: `/` (the landing, or a
+returning visitor's greeting beside their newest room), `/rooms`,
+`/room?bundle=`, `/new`, `/privacy`, `/terms`; dev pages `/viewer` (hidden in
+live mode), `/shell-finish` and `/share-card` (inert unless their flags are
+set). Every unmatched address gets the site's own not-found page (`404.html`).
 
-- `SplatViewer.tsx` is the **only** module importing three.js or Spark. It
-  consumes a renderer-agnostic `PositionedSplat` contract, prefers the SPZ tier
-  and falls back to PLY, and plays the reveal score rather than deciding it.
+- **The look is 0361's** (daylight, slate ink, dusk; Newsreader, Albert Sans,
+  JetBrains Mono), redesigned 2026-11-10 with every screen approved on a canvas
+  before it was built. The room page sits on dusk in every state. Every sheet
+  sits in one `ui/Dialog`, and `useAccount` is the one source for who is here
+  (the nav offers "Sign in" when nobody is).
+- `SplatViewer.tsx` is the only module that draws a **person's room** with
+  three.js or Spark. It consumes a renderer-agnostic `PositionedSplat`
+  contract, prefers the SPZ tier and falls back to PLY, and plays the reveal
+  score rather than deciding it. `SampleRoom.tsx` (`sampleRoomScene.ts`) is the
+  second three.js entry point and draws only the landing's hand-built sample
+  room, on the product's diorama camera (0361).
+- **The house draws each ready room's measured plan** with the calling card's
+  own drawing (`lib/card/layout.ts` `layoutPlan`, rendered by `PlanFigure.tsx`),
+  so the plan and its one dimension follow the card's rules: the rendered
+  boundary, measured numbers only, one decimal.
+- **The share image** (`public/og-card.png`) is drawn by the site at
+  `/share-card` and exported by headless Chrome (the command is in that page's
+  header). `docs/product/og-card.html` is no longer its source. It stays as
+  the precedent `measure.test.ts` reproduces, and its own old export command
+  would bring back the cream card.
 - `lib/reveal.ts` is the choreography as a pure function: the measured boundary
   draws itself, surfaces fade up in place, pieces settle, then a beat of quiet
   before the guest speaks (0097). Objects gate per piece on bytes arriving.
@@ -618,25 +709,38 @@ Next.js static export on Firebase Hosting. Routes: `/` (hero), `/rooms`,
   suppression-armed revision (0221) — a card ships the shell and a person
   contaminates a measured albedo, so this is the rung where 0089 binds hardest.
 
-Suite **287** vitest (`main`, 2026-09-19).
+Suite **316** vitest (2026-11-10).
 
-The design tokens are the new identity's (0248): cream `--paper: #f9f2ec`, warm
-near-black `--ink: #282723`, terracotta `--accent: #c04d3e`. **There are two
-terracottas and the split is load-bearing** — `--accent` is the exact value the
-mark is drawn in and reaches only 4.33:1 on the cream, so anything text-sized
-uses `--accent-deep` at 5.52:1 instead (0249). Do not set body-sized text in
-`--accent`.
+The design tokens are 0361's: daylight `--paper: #f5f6f8`, slate
+`--ink: #121a23` with `--ink-2: #4a5664` and `--ink-3: #808b98` (3.20:1, large
+text only), dusk `--dusk: #0d141c`, lamplight `--sun: #f0b26a`, and terracotta
+`--accent: #c04d3e`. **There are still two terracottas and the split is still
+load-bearing** — `--accent` is the exact value the mark is drawn in and reaches
+only 4.44:1 on the daylight ground, so anything text-sized uses `--accent-deep`
+`#a54235` at 5.66:1 instead (0249). Do not set body-sized text in `--accent`.
+**The card painter reads the font variables by name** (`lib/card/paint.ts`
+`resolveFonts`): change the site's faces there too, or the downloadable card
+silently paints at a 10px default.
 
 ### Infra and operations
 
 - **Deploy is candidate → smoke → flip** on every service, perception-obj
   included. `infra/RUNBOOK.md` carries the phases. `deploy_perception.sh` moves
-  the `serving` registry tag at the flip — do not skip it.
-- **Registry cleanup is a policy** (`infra/artifact-cleanup-policy.json`): keep
-  anything tagged `serving` or `buildcache`, keep the 3 newest `perception-obj`
-  and 10 newest `api-*`, delete the rest at any age.
+  the `serving` registry tag at the flip — do not skip it. Each lane deploys
+  under its own Cloud Run tag: `deploy_api_public.sh`,
+  `deploy_scene_finish.sh` and `deploy_perception.sh` take
+  `CANDIDATE_TAG=<lane>`; `deploy_api_internal.sh` still hardcodes
+  `candidate`. A brand-new service's first revision serves 100% whatever the
+  flags say.
+- **Registry cleanup is written, not applied.** `infra/artifact-cleanup-policy.json`
+  would keep anything tagged `serving` or `buildcache`, the 3 newest
+  `perception-obj` and the 10 newest `api-*`, and delete the rest of those at
+  any age; the `thegoodguest` repository has no cleanup policy (checked
+  2026-11-11, 45 GB). scene-finish images match none of its rules.
 - **Cloud Build carries a layer cache** (`--cache-from :buildcache`), measured
-  at 5.1× on a source-only perception build.
+  at 5.1× on a source-only perception build. scene-finish uploads with
+  `infra/cloudbuild/scene-finish.gcloudignore`, because the root
+  `.gcloudignore` leaves out `web/`, which its image is built from.
 - **Eventarc** trigger `captures-bundle-pb-finalized` delivers to
   `api-internal/ingest/eventarc`, with app-side path filtering.
 - **Retention** is configured and live, verified against the buckets and TTL
@@ -921,36 +1025,6 @@ re-argued here.
   CONSUMERS — the generator warned, the test passed, and iOS's splash re-made the
   mistake anyway. All six other surfaces were audited and are correct, so this is
   a latent gap: the fix is a consumer-side pin. (0255)
-- **Notes has no past.** The design gives news an "EARLIER" list of observed
-  facts; that needs the phone to remember what it previously saw and diff
-  successive fetches. Deferred by operator ruling; the section does not render
-  rather than showing an empty shell. The arrival card is deferred with it, since
-  detecting an arrival is the same change detection.
-- **The menu peek's two greys are literal hexes**, given by the design brief and
-  named in one place in `MenuPeek.swift`. The only colours outside the token
-  system; they will not follow a brand repaint.
-- **The pinned-action rule reached ONE screen out of eleven when measured**, and
-  is now applied everywhere by `RSActions`. Kept for the finding: both named
-  screens are closed and **neither by a layout change to itself** — the rooms list
-  was replaced by `HouseView`, and `FailureView`'s buttons moved into a
-  `safeAreaInset`. Both were reachable by scrolling, which is why the suite was
-  green and why reading did not catch them. (0253, 0257)
-- **One filled button carries a glyph and two deliberately do not.** The guidance
-  sheet's denied CTA is `Label("Open Settings", systemImage: "gear")`; the two
-  buttons that START a capture ship bare, because at button size the product's
-  mark collapsed into a smudge and Apple's viewfinder was worse than nothing.
-  **This is a consistency question, not a layout one** — the label-wrap complaint
-  was fixed by the control-label clamp. Re-photograph before re-reporting it.
-  (0287)
-- **`WhySignInSheet` is presented by no call site** outside the screenshot
-  gallery, and its checklist reads "Your 1 rooms" where the sentence above reads
-  "one room". **Deliberately NOT fixed**: dead code accruing unverified fixes
-  rusts shut rather than staying ready. Give it a route or delete it; do not tidy
-  it. (0237)
-- **`RoomRow` centres its thumbnail against wrapped text.** At AX5 both lines wrap
-  and the tile rests between them. Exactly the `.center`-is-the-default form the
-  notice components were top-aligned to avoid; missed because the row is drawn in
-  a different file. (0253)
 - **A keyframe's manifest entry survives its JPEG failing to write.**
   `acceptFrame` appends synchronously while the encode happens later on
   `jpegQueue`, and both failure paths log and return without removing the entry.
@@ -971,8 +1045,13 @@ re-argued here.
 - **Foreign-record stand-down drains one record per launch**, so N phantoms need
   N relaunch cycles. Deliberately not fixed: quieting the symptom before the
   churn's cause is known makes orphaning less visible, not less real. (0115)
-- **Terminal-failure UI has never rendered on hardware** — server-side scene
-  failure and blob-failure banners.
+- **The room screen's failure states have never rendered on hardware** — a
+  server-side scene failure, a stalled upload, missing files (0365).
+- **Deletion's last four states lose their navigation bar.** A bar with no item
+  and no title is dropped, so the title jumps 54pt; the layout audit reports
+  exactly these four on every device (4 of 56). `ready-guest`, with no share
+  button, drops its bar the same way and its picture sits 54pt higher than
+  `ready`'s. The canvas keeps a header on all of them. (0367)
 - **The 401 recovery-*success* leaf is untested.** The live test used a garbage
   token, exercising the give-up branch.
 - **Live boxes have not been walked on a phone in this form.** Offline: the
@@ -1098,10 +1177,11 @@ re-argued here.
   gaps copy, so it had become the identity function — and `ReviewCopyTests`'s
   five tests went with it, since every one pinned that precedence. Re-open
   triggers are in 0294 and are measured, not felt.
-- **ARKIT_ONLY placement and shell quality investment is parked.** The product is
-  Pro-only / LiDAR-first; the shipped path stays live and is strictly better than
-  before, but no further merge-knob grinding. The non-LiDAR device is not a test
-  target and must not shape decisions. (0071)
+- **ARKIT_ONLY placement and shell quality investment is parked — but no longer
+  moot.** Every iPhone scans now (0364), so camera-only captures will arrive, and
+  the camera-only shell path (0077's legacy v2) has never run on a real one. No
+  merge-knob grinding before the first real camera-only scan is measured.
+  (0071, 0364)
 - **There are no lockups, on either platform.** The fork between mono and serif is
   not resolved, it is DISSOLVED: the mark is the "oo" of the name, so setting the
   two together prints those letters twice. Chrome takes the mark alone; the card
@@ -1139,6 +1219,10 @@ ever done or ruled, delete it — do not annotate it.
   207-entry tracker recorded nowhere else.
 - **`secondary_hex` is always null** — two-tone material separation was deferred
   as noisy.
+- **scene-finish's INFO logs never reach Cloud Logging.** `finish_server.py`
+  configures logging only when `LOG_LEVEL` is set, and `deploy_scene_finish.sh`
+  does not set it, so `/still`'s `still ok` line (render timings, GL renderer)
+  is dropped; warnings and errors still appear.
 - **The floor's rectangular stone pattern is real and detectable** and is the
   first candidate for `material.params` growth. Deliberately excluded from v1: a
   wrong pattern breaks recognition worse than a clean matte (0069).
@@ -1154,7 +1238,7 @@ ever done or ruled, delete it — do not annotate it.
   `didChange`/`didRemove` are deliberately unconsumed.
 - **Push is stubbed at a named seam** and waits on APNs. The QR bridge was the
   other one and is deleted (0294).
-  **The doorway handoff is LIVE and never needed an entitlement** — it is a
+  **The web handoff ("Open the room") is LIVE and never needed an entitlement** — it is a
   plain `open(_:)` of an https URL, and associated-domains governs only links
   an app CLAIMS, which this is not. "Pending associated-domains" was the wrong
   reading of why the link was missing; what was actually missing was a durable
@@ -1284,7 +1368,7 @@ The iOS suite is **667 tests total** (was 666; `BundleClockTests` added 1, the c
 
 **Posture: fail-closed-live, not fail-open.** Each integration test calls `XCTSkipIf(!RUN_INTEGRATION_TESTS)` — the fail-open default — but because the sole scheme always sets the flag, that skip path is never taken here. With the flag set they hit the live `/upload_session` contract and go **red if the backend is unreachable**. Running the suite therefore requires a reachable backend; an offline run will fail those 4 (expected, not a regression).
 
-**Honest count:** report as "661 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 667 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-09-15, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **663**, and that suite holds exactly 4 tests, so the total is 667 and the offline set is 661 once the two stubs come out. **One of the 663 is skipped at runtime** — `AuthLinkingTests.test_appBundle_registersRedirectSchemeForLiveClientID`, which gates on the live Google client id — so 660 actually assert; it was skipping before this pass too and is not counted out above, to keep the arithmetic the same shape it has always had. The figures this replaced were 610 in one sentence and 620 in the next, and the second did not add up — 604 + 2 + 4 is 610, not 620 — so both were wrong and the arithmetic said so without anyone running anything.
+**Honest count:** report as "949 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 6 that skip by design + 4 live integration tests (require a reachable backend)", total 961 — not a bare total: the 2 stubs assert nothing, the 6 skips need something the tree deliberately lacks, and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-11-10, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **949** with 0 failures, and that suite holds exactly 4 tests, so the total is 953. **Six of the 949 skip at runtime**: `AuthLinkingTests.test_appBundle_registersRedirectSchemeForLiveClientID`, which gates on the live Google client id, and five `LiveBoxesModelTests`, which need the detector model that is never in git (0295). 949 − 2 − 6 = 941 assert. The figures this replaced (667 total, 2026-09-15) predate the live-boxes tests and the redesign.
 
 **No known flakes.** The one that was recorded here — `BlobUploadManagerTests.test_gate_lastDecrement_afterDrain_firesHandler` at roughly 1 run in 15 — was a production defect rather than a test defect, and is fixed (0239): the drain gate's last-decrement trigger hopped onto the actor through an unstructured `Task` that nothing held a handle on, so the test's `await Task.yield()` was a guess at how long the hop takes. The decrement is actor-isolated now and fires the gate inside `handleTaskCompletion`'s own defer, so awaiting that call IS the signal. Measured 2026-08-24 by holding the yield-less tests fixed and swapping only `BlobUploadManager.swift`: **2 failures in 16** with the hop, **0 in 22** without it. **A red suite is now a finding, not a re-run.**
 
@@ -1337,7 +1421,7 @@ It is a single checkbox in the console.
 
 **The SAM 3D clone must stay PINNED, and the reason is the layer cache as much as reproducibility.** The shared `:buildcache` is written from the pinned form, so an unpinned `git clone --depth 1` misses at layer 4 and rebuilds the mamba env and both sam3d pip installs — a ~50 minute build instead of ~10. Observed and cancelled on 2026-08-30.
 
-**Give every concurrent lane its own Cloud Run tag (0275).** `deploy_perception.sh --candidate` uses `--tag=candidate`, which is ONE mutable pointer: a second lane's deploy moves it off the first lane's revision silently, and probes still authenticate because `segment_frames.py` and `track_frames.py` pin the OIDC audience to the STABLE url. Pass your own tag and point `CANDIDATE_URL` at it. `/track` now records `K_REVISION` in its output so a mis-addressed probe is detectable after the fact.
+**Give every concurrent lane its own Cloud Run tag (0275).** `deploy_perception.sh --candidate` uses `--tag=candidate` unless `CANDIDATE_TAG` names another, and `candidate` is ONE mutable pointer: a second lane's deploy moves it off the first lane's revision silently, and probes still authenticate because `segment_frames.py` and `track_frames.py` pin the OIDC audience to the STABLE url. Pass your own tag (`CANDIDATE_TAG=<lane>`) and point `CANDIDATE_URL` at it. `/track` now records `K_REVISION` in its output so a mis-addressed probe is detectable after the fact.
 
 **Old registry images are deleted by policy, and the live one is kept BY NAME
 (decision 0190).** `infra/artifact-cleanup-policy.json` is the source of truth
@@ -1523,41 +1607,6 @@ evidence for a human deleting an entry, not authority to.
 **No board is kept in this file** — the forward list is `docs/punchlist.md`
 (below). `docs/NOT-FINAL.md` lists what is unfinished and which parts of it go
 live on the next deploy.
-
-### Owed: the operator's eyes on 20 screen states
-
-Twenty states across six screens were added or changed on 2026-09-01 and **no
-human has looked at any of them.** The list is here so the next session does not
-have to re-derive it. Photograph with `-rs.gallery.screen <id>`; the ids are
-exactly these.
-
-**SHOW ALL TWENTY. What is settled is the measurement, not the looking.** Every
-one of them was already shot at the default size and AX5 and measured by
-`tools/ios_layout_audit.py` — **0 of 15 enforced screens deviate at either
-size**, inside the app's usual ranges — so there is nothing to gain from running
-the audit again. That is the only thing this paragraph excuses. **What is owed
-is COPY and PROMINENCE**, which no instrument in this repo measures, and it is
-owed on all twenty.
-
-(The other five of the twenty are the doorway, which is full-bleed, and the
-states with no primary button. The audit abstains on those rather than inventing
-a reading — they are not screens to skip, and each still carries a reason below.)
-
-| screen | ids | why it needs an eye |
-|---|---|---|
-| **Delete everything** (NEW) | `delete-confirm`, `delete-working`, `delete-done`, `delete-done-empty`, `delete-done-notrevoked`, `delete-partial`, `delete-noid` | Every word is new and unreviewed. `DeleteAccountWording` is a pure table — read all seven side by side rather than one at a time, which is what it is a table for. |
-| **You** (changed) | `profile`, `profile-linked`, `profile-noid` | Gained the "Delete everything" row. **The judgment is prominence**: App Review must find it, and nobody should tap it by accident. It is deliberately quiet — a hairline and muted ink, not a button. |
-| **The doorway** (changed) | `doorway`, `doorway-noweb` | Was four states, now two, and both captions were rewritten. The unlinked one points at signing in rather than promising a desk that would turn the person away. |
-| **Review** (changed) | `review`, `review-sketch`, `review-preparing`, `review-cannot-send` | The thin-coverage branch was deleted (0294). Confirm nothing reads as though an "add more" path still exists. |
-| **The house** (changed) | `rooms-openable`, `rooms-list` | Rows now open on the web, but only for a linked identity. Pixels are unchanged; the behaviour is not. |
-| **Notes** (changed) | `notes-news-open`, `notes-news` | The arrival card inherits the same gate as the rows. |
-
-**Two worth looking at first.** `delete-done-notrevoked` at AX5 is where this
-pass found its one real defect — the manual Apple-revocation instruction sat
-below the fold under a fully visible button that ends the interaction, which a
-green suite and a passing audit both missed (0293). And the `doorway` /
-`doorway-noweb` pair reads best side by side, because the whole point is that
-the two can no longer disagree.
 
 **`docs/punchlist.md` is the forward list** — 38 entries in six gates, in
 dependency order, each carrying a `Check:` line. Start there for "what should I

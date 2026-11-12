@@ -42,6 +42,12 @@ RUN pip install --no-cache-dir \
 COPY packages/api-core/ packages/api-core/
 RUN pip install --no-cache-dir packages/api-core/
 
+# ── Layer 2b: the room guide (decision 0376) ─────────────────────────────────
+# numpy and pillow only; nothing here touches protobuf, and like api-core it
+# goes in before the force-pin so nothing re-resolves after layer 3.
+COPY packages/room-guide/ packages/room-guide/
+RUN pip install --no-cache-dir packages/room-guide/
+
 # ── Layer 3: force protobuf>=7.35.0 then install thegoodguest-schemas ──────────
 # AFTER all service deps and api-core installs. Nothing may follow that
 # re-resolves the dep tree, or proto-plus will downgrade protobuf back to 6.x.

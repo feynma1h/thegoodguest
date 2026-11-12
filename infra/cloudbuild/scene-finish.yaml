@@ -16,8 +16,10 @@ steps:
       - services/scene-finish/Dockerfile
       - .   # repo root is the build context
 
-  # Smoke test before pushing: the imports the service needs, and the viewer
-  # build the driver serves (it must carry the finish page the harness lives on).
+  # Smoke test before pushing: the imports the service needs (including the
+  # cloud clients /still imports only on first use, and the schemas package,
+  # whose import fails if the protobuf pin regressed), and the viewer build the
+  # driver serves (it must carry the finish page the harness lives on).
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - run
@@ -26,7 +28,7 @@ steps:
       - sh
       - -c
       - |
-        python -c "import finish_server, thegoodguest_room_look.shell_finish, thegoodguest_schemas; print('import smoke: OK')" \
+        python -c "import finish_server, still_ports, task_auth, google.cloud.storage, google.cloud.firestore, google.oauth2.id_token, google.auth.transport.requests, thegoodguest_room_look.shell_finish, thegoodguest_schemas; print('import smoke: OK')" \
         && test -f "$$VIEWER_DIR/shell-finish.html" && echo "viewer build: OK"
 
   - name: 'gcr.io/cloud-builders/docker'

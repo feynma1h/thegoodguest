@@ -104,15 +104,15 @@ export function Mark({
 }
 
 /**
- * The name as artwork, at the given HEIGHT. For the artifacts that leave this
- * site and reach someone who does not know the product — never in chrome, and
- * never beside the mark.
+ * The name as artwork, at the given HEIGHT. For the surfaces that reach
+ * someone who does not know the product: the card, the share image, and since
+ * decision 0361 the site's header and footer. Never beside the mark.
  *
  * Mind the floor. The script's x-height is only 16% of its box, because the
  * loops run so far above and below it, so a wordmark set at 20px has an
  * x-height of 3.3px and is illegible. The design file's minimum is an x-height
  * of 8px, which puts the floor at a height of ~50px — about two and a half
- * times what you would guess. This is the reason chrome takes the mark.
+ * times what you would guess. Chrome that cannot give it 50px takes the mark.
  */
 export function Wordmark({
   height = "3em",

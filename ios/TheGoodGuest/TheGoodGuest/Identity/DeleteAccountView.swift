@@ -32,14 +32,14 @@
 /// the screen signs out explicitly and hands control back, so the next launch
 /// is an honest first run.
 ///
-/// Reached from: ProfileView. States photographed by: ScreenGallery.
+/// Reached from: AccountSheet. States photographed by: ScreenGallery.
 
 import SwiftUI
 
 struct DeleteAccountView: View {
 
     /// The caller's uid, echoed to the server as the accident control. Optional
-    /// for the same reason ProfileView's is: nil is a real state (offline first
+    /// for the same reason AccountSheet's is: nil is a real state (offline first
     /// launch), and with no uid there is nothing to delete and nothing to
     /// confirm — the screen says so rather than sending a request it knows is
     /// malformed.
@@ -100,95 +100,66 @@ struct DeleteAccountView: View {
     private var copy: DeleteAccountCopy { DeleteAccountWording.copy(for: current) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(copy.body)
-                        .font(RSFont.ui(.body))
-                        .foregroundStyle(Color.rsInkMuted)
-                        .fixedSize(horizontal: false, vertical: true)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                RSScreenTitle(copy.title, size: .title)
+                Text(copy.body)
+                    .rsFont(.ui, size: 16)
+                    .foregroundStyle(Color.rsInk2)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 12)
+                if case .working = current {
+                    ProgressView()
+                        .padding(.top, 24)
                         .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if case .working = current {
-                        ProgressView()
-                            .padding(.top, 24)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
                 }
-                .rsBelowHeader()
             }
+            .rsScreenContent()
         }
-        .padding(.horizontal, RSScreen.horizontal)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .rsParchmentScreen()
-        .safeAreaInset(edge: .bottom) { actions }
+        .background(GroundBackground())
+        .navigationBarTitleDisplayMode(.inline)
+        // No way back while the request is on the wire: a back button would
+        // promise a cancellation that does not exist.
+        .navigationBarBackButtonHidden(!copy.dismissable)
+        .safeAreaInset(edge: .bottom, spacing: 0) { actions }
         .interactiveDismissDisabled(!copy.dismissable)
         .alert("Delete everything?", isPresented: $askingToConfirm) {
             Button("Delete everything", role: .destructive) { start() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            // The alert does not repeat the screen. It states the one fact a
-            // person needs at the moment of committing, which is that there is
-            // no way back — not a second copy of the inventory above it.
             Text("Your rooms and everything in them go for good. This cannot be undone.")
         }
     }
 
-    // MARK: - Header
-
-    /// The back chevron appears only when the state offers a way out. While a
-    /// pass is running the request is already on the wire, so a chevron would
-    /// promise a cancellation that does not exist; after `.done` there is
-    /// nothing to go back TO, and the primary is the way forward.
-    @ViewBuilder
-    private var header: some View {
-        if copy.dismissable {
-            ScreenHeader(title: copy.title, onClose: onClose)
-        } else {
-            ScreenHeaderFrame {
-                Text(copy.title)
-                    .rsFont(.display, size: 22, weight: .medium, maxSize: 30, cap: .display)
-                    .foregroundStyle(Color.rsInk)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    // MARK: - Actions
-
-    @ViewBuilder
     private var actions: some View {
-        RSActions {
+        RSPinnedBar {
             if let label = copy.primary {
                 Button(label) { primaryTapped() }
                     .buttonStyle(RSPrimaryButtonStyle())
-                    // With no uid there is nothing to confirm and nothing to
-                    // send. Disabled rather than hidden: a button that vanishes
-                    // reads as a screen that does not offer deletion at all,
-                    // which is the claim this whole screen exists to deny.
                     .disabled(!canAct)
                     .opacity(canAct ? 1 : 0.4)
+                if !canAct {
+                    // A grey button with no reason reads as broken. These are
+                    // the account sheet's words for the same state.
+                    RSBarCaption("Your account ID isn't ready yet.")
+                }
             }
-        } closing: {
             closingLine
         }
-        .rsPinnedActions()
     }
 
-    /// The closing slot holds a way out where one exists, and a plain line
-    /// where it does not. One line either way — two would lift the primary off
-    /// the bottom and break the grid every other screen is measured against.
+    /// A way out where there is one, otherwise a caption. The caption is set
+    /// at its own height: held at a control's, it lifted the button above it
+    /// 14pt higher than the same button on the screen's other states.
     @ViewBuilder
     private var closingLine: some View {
         if copy.dismissable {
             Button(copy.closing) { onClose() }
-                .buttonStyle(RSActionFootnoteStyle())
+                .buttonStyle(RSQuietButtonStyle())
         } else {
-            Text(copy.closing)
-                .font(RSFont.ui(.footnote))
-                .foregroundStyle(Color.rsInkFaint)
+            RSBarCaption(copy.closing)
         }
     }
 

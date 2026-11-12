@@ -214,6 +214,10 @@ export interface SceneAssets {
    * which is the normal state; lib/shellExtras reads them. */
   finish_url?: string | null;
   furniture_url?: string | null;
+  /** Signed link to the diorama pipeline's scene.json, the same kind of
+   * sibling (decision 0376). Present = the room can have the room guide, when
+   * lib/guide/switch's ROOM_GUIDE_ENABLED is on. */
+  scene_url?: string | null;
   asset_urls: Record<string, string>; // gs:// URI -> signed HTTPS URL
   /** The compressed tier (decision 0126), keyed by the SAME gs:// URI as
    * `asset_urls` so a lookup picks a format rather than an object. Present

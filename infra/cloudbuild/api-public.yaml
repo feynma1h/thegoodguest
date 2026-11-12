@@ -30,6 +30,7 @@ steps:
       - |
         from thegoodguest_schemas import CaptureBundle, CaptureTier
         from thegoodguest_api_core.scene import Scene
+        from thegoodguest_room_guide.guide import run_turn
         print("import smoke: OK")
 
   - name: 'gcr.io/cloud-builders/docker'

@@ -143,6 +143,13 @@ class Scene:
         revival to queued, and NEVER set on ready scenes — ready rooms are
         product data and must not age out. None = no scheduled expiry.
         Server-side only; never serialized to clients.
+    still:
+        The room's still picture exists (decision 0363): {"night": bool,
+        "rendered_at": datetime}, set by scene-finish's /still with a
+        field-level update AFTER scenes/{id}/still.jpg (and, when "night" is
+        true, still-night.jpg) are written. None = no picture yet. api-public
+        reads it to sign still_url / still_night_url without asking the
+        bucket; the marker itself is never serialized.
     """
     scene_id: str
     device_id: str
@@ -159,6 +166,7 @@ class Scene:
     missing_paths: Optional[list] = None  # relative paths absent at existence-check time
     invalid_blobs: Optional[list] = None  # [{relative_path, reason}] for FAILED_INVALID scenes
     expire_at: Optional[datetime] = None  # TTL deadline for terminal-failure scenes (gap F6); server-side only
+    still: Optional[dict] = None          # {"night": bool, "rendered_at": datetime} once the still is drawn (0363)
 
     def __post_init__(self) -> None:
         if not self.scene_id:

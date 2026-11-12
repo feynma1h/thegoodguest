@@ -1,5 +1,5 @@
 /// Google Sign-In support for account linking (decisions 0094/0118) — the
-/// pieces kept out of AuthManager and SignInSheet so they are unit-testable
+/// pieces kept out of AuthManager and AccountSheet so they are unit-testable
 /// without a configured FirebaseApp, a GIDSignIn singleton, or a network.
 ///
 /// The load-bearing piece is `preflight`: GoogleSignIn raises an NSException
@@ -12,7 +12,7 @@
 /// bundle's registrations and refuses with a readable message instead of
 /// crashing; a test pins that the two files currently agree.
 ///
-/// Read by: SignInSheet (preflight before GIDSignIn), AuthLinkingTests (pins).
+/// Read by: AccountSheet (preflight before GIDSignIn), AuthLinkingTests (pins).
 
 import Foundation
 

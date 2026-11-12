@@ -15,7 +15,9 @@ Endpoints:
 
   GET  /scenes/by-bundle/{bundle_id}
       Read scene state for a bundle the caller owns. Auth: Firebase ID token.
-      Returns scene status, result_uri, missing_paths, and timestamps.
+      Returns scene status, result_uri, missing_paths, timestamps, and
+      still_url / still_night_url: signed links to the room's still picture
+      by day and by night, or null when there is none (decision 0363).
       Consumers: the iOS app's ScenePoller (production polling loop) and the
       smoke tool (tools/upload_test_bundle.py) after upload.
 
@@ -66,6 +68,17 @@ Endpoints:
       Discard the arrangement entirely — "back to measured", which 0133
       requires to be one action, always. Idempotent.
 
+  GET  /scenes/{scene_id}/guide
+  POST /scenes/{scene_id}/guide/turns
+  POST /scenes/{scene_id}/guide/show
+  POST /scenes/{scene_id}/guide/undo
+      The room guide (decision 0376), for a room whose pipeline wrote a
+      diorama scene.json beside its manifest: the conversation so far and
+      the room as it stands; one streamed turn (SSE: delta / card / play /
+      focus / note / done / error); "Show me" on a card; one step back. A
+      room without a scene.json answers 404 no_guide and keeps the guest
+      above. Consumer: the web room page, behind ROOM_GUIDE_ENABLED.
+
 Run locally (from services/api-public/):
   uvicorn public_server:app --reload --port 8080
 
@@ -92,18 +105,28 @@ Environment variables:
                         error; everything else works.
   GUEST_MODEL         — guest model id (default claude-sonnet-5)
   GUEST_DAILY_TURNS   — per-conversation daily turn quota (default 100)
+  GUIDE_MODEL         — the room guide's model: claude-opus-5-5 (default) or
+                        claude-sonnet-5-5, the only two that may see a room
+                        (decision 0360); anything else refuses every turn
+  GUIDE_DAILY_USD     — what the room guide may cost one person a day, in
+                        dollars across every room (default 2.00; 0 turns it off)
+  GUIDE_LLM           — local runs only: replay answers from GUIDE_LLM_CACHE
+                        or stub; production always calls Claude live
 
 Consumed by: the iOS capture app, the web app, and integration tests.
 """
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
 import sys
+import threading
 import uuid
-from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Optional
@@ -120,7 +143,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message
 logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Header
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from auth import TokenVerifier, NullTokenVerifier, TokenVerificationError
@@ -128,6 +151,7 @@ from conversation_repo import (
     ConversationRepository,
     InMemoryConversationRepository,
     TurnRecord,
+    next_utc_midnight,
 )
 from design_spec import (
     DesignSpec,
@@ -164,7 +188,7 @@ from scene_facts import (
 # Dockerfile and patching sys.path would be redundant.
 if os.environ.get("ENVIRONMENT") != "production":
     _repo_root = Path(__file__).resolve().parents[2]
-    for _pkg in ("packages/schemas", "packages/api-core"):
+    for _pkg in ("packages/schemas", "packages/api-core", "packages/room-guide"):
         _p = str(_repo_root / _pkg)
         if _p not in sys.path:
             sys.path.insert(0, _p)
@@ -183,6 +207,28 @@ from thegoodguest_api_core.scene_read_repo import (  # noqa: E402
     SceneReadRepository,
     InMemorySceneReadRepository,
     SceneNotFoundError,
+)
+import numpy as np  # noqa: E402
+
+from thegoodguest_room_guide.analyzer import room_line  # noqa: E402
+from thegoodguest_room_guide.gateway import ALLOWED_MODELS, Gateway  # noqa: E402
+from thegoodguest_room_guide.motion import NoPath  # noqa: E402
+
+from guide_repo import (  # noqa: E402
+    FirestoreGuideRepository,
+    GuideRepository,
+    GuideTurn,
+    InMemoryGuideRepository,
+)
+from guide_session import (  # noqa: E402
+    CardRefused,
+    GuideState,
+    dumps as guide_dumps,
+    load_scene,
+    run_guide_button,
+    run_guide_turn,
+    scene_dir_of,
+    transcript as guide_transcript,
 )
 
 
@@ -493,9 +539,22 @@ class GcsManifestFetcher:
         except Exception as exc:
             raise ManifestFetchError(f"exists check failed for {gs_uri}: {exc}") from exc
 
+    def put(self, gs_uri: str, data: bytes, content_type: str = "application/json") -> None:
+        """Write one object. The service's only write to the outputs bucket is the
+        room guide's needs.json beside a scene (decision 0376), which the runtime SA's
+        objectAdmin on that bucket already allows."""
+        from google.cloud import storage  # deferred
+
+        try:
+            bucket, path = _split_gs_uri(gs_uri)
+            storage.Client().bucket(bucket).blob(path).upload_from_string(data, content_type=content_type)
+        except Exception as exc:
+            raise ManifestFetchError(f"write failed for {gs_uri}: {exc}") from exc
+
 
 class InMemoryManifestFetcher:
-    """Test/dev fetcher: serves from a settable {gs_uri: bytes} store."""
+    """Test/dev fetcher: serves from a settable {gs_uri: bytes} store, and keeps
+    what is put into it."""
 
     def __init__(self, store: Optional[dict] = None) -> None:
         self.store: dict[str, bytes] = dict(store or {})
@@ -510,6 +569,9 @@ class InMemoryManifestFetcher:
 
     def exists(self, gs_uri: str) -> bool:
         return gs_uri in self.store
+
+    def put(self, gs_uri: str, data: bytes, content_type: str = "application/json") -> None:  # noqa: ARG002
+        self.store[gs_uri] = bytes(data)
 
 
 class IamV4UrlSigner:
@@ -868,11 +930,56 @@ def _get_guest_streamer():
 # Serialization
 # ---------------------------------------------------------------------------
 
-def _scene_to_client_dict(scene) -> dict:
+def _still_uris(scene) -> list[str]:
+    """gs:// URIs of the scene's still pictures (decision 0363), day first.
+
+    Known from the scene document alone: scene-finish's /still sets `still`
+    only after writing the JPEGs beside the manifest, and says whether it drew
+    a night one. No marker (or no manifest yet) means no picture — so listing
+    rooms never asks the bucket whether a still exists."""
+    if not scene.still or not scene.result_uri:
+        return []
+    scene_dir = scene.result_uri.rsplit("/", 1)[0]
+    uris = [scene_dir + "/still.jpg"]
+    if scene.still.get("night"):
+        uris.append(scene_dir + "/still-night.jpg")
+    return uris
+
+
+def _sign_stills(scenes) -> dict[str, str]:
+    """{gs_uri: signed https url} for every still of these scenes, signed
+    concurrently (each signature is an IAM signBlob round trip). A still that
+    cannot be signed is absent — the client shows the room's outline — and
+    never fails the response."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    uris = [u for s in scenes for u in _still_uris(s)]
+    if not uris:
+        return {}
+    signer = _get_url_signer()
+
+    def _one(uri: str) -> tuple[str, str | None]:
+        try:
+            return uri, signer.sign(uri, _ASSET_URL_TTL_SECONDS)
+        except Exception as exc:
+            logger.warning("scenes: still link degraded to null for %s: %s", uri, exc)
+            return uri, None
+
+    with ThreadPoolExecutor(max_workers=max(1, min(_ASSET_SIGN_CONCURRENCY, len(uris)))) as pool:
+        return {uri: url for uri, url in pool.map(_one, uris) if url}
+
+
+def _scene_to_client_dict(scene, signed_stills: dict[str, str] | None = None) -> dict:
     """Client-facing Scene shape, shared by /scenes/by-bundle and /scenes.
 
     last_error and invalid_blobs are server-side only — excluded per
-    decision 0019."""
+    decision 0019. still_url / still_night_url are V4-signed links (the same
+    TTL as the assets route's) to the room's picture by day and by night, or
+    null when there is none (decision 0363); a caller listing many scenes
+    signs them all at once and passes `signed_stills`."""
+    uris = _still_uris(scene)
+    if signed_stills is None:
+        signed_stills = _sign_stills([scene])
     return {
         "scene_id": scene.scene_id,
         "bundle_id": scene.bundle_id,
@@ -881,6 +988,8 @@ def _scene_to_client_dict(scene) -> dict:
         "missing_paths": scene.missing_paths,
         "created_at": scene.created_at.isoformat(),
         "updated_at": scene.updated_at.isoformat(),
+        "still_url": signed_stills.get(uris[0]) if uris else None,
+        "still_night_url": signed_stills.get(uris[1]) if len(uris) > 1 else None,
     }
 
 
@@ -1175,7 +1284,8 @@ def get_scene_by_bundle(
     UID must match scene.user_id (ownership check).
 
     Response (200):
-      {scene_id, bundle_id, status, result_uri, missing_paths, created_at, updated_at}
+      {scene_id, bundle_id, status, result_uri, missing_paths, created_at, updated_at,
+       still_url, still_night_url}
 
     status is body-only — a scene in 'failed' or 'failed_incomplete' returns
     HTTP 200. 404 is reserved for "no scene exists for this bundle_id."
@@ -1280,9 +1390,10 @@ def list_scenes(
         )
 
     scenes = _get_scene_read_repo().list_by_user(user_id, limit=limit)
+    signed = _sign_stills(scenes)
     return JSONResponse(
         status_code=200,
-        content={"scenes": [_scene_to_client_dict(s) for s in scenes]},
+        content={"scenes": [_scene_to_client_dict(s, signed) for s in scenes]},
     )
 
 
@@ -1416,6 +1527,7 @@ def get_scene_assets(
        shell: <verbatim shell.json> | null,
        finish_url: <signed https url of finish.json> | null,
        furniture_url: <signed https url of furniture.json> | null,
+       scene_url: <signed https url of scene.json> | null,
        asset_urls: {<gs_uri>: <signed https url>},
        asset_urls_compressed: {<gs_uri>: <signed https url>},
        expires_at: <ISO 8601>}
@@ -1448,6 +1560,11 @@ def get_scene_assets(
     with a log. The files are never read here and never touch asset_urls —
     the client fetches and validates them, and anything it cannot use leaves
     the room drawing as it always has.
+
+    scene_url (decision 0376) is the same kind of sibling: a signed link to the
+    diorama pipeline's scene.json, null when there is none, or when checking or
+    signing it fails. A room with one gets the room guide on the web (behind
+    ROOM_GUIDE_ENABLED); the file is never read here.
 
     Errors:
       400 invalid_scene_id — scene_id is not a UUIDv4
@@ -1502,6 +1619,8 @@ def get_scene_assets(
     scene_dir = scene.result_uri.rsplit("/", 1)[0]
     finish_url = _optional_sibling_url(scene_dir + "/finish.json", scene_id)
     furniture_url = _optional_sibling_url(scene_dir + "/furniture.json", scene_id)
+    # The diorama scene (decision 0376): the same optional-sibling rules.
+    scene_url = _optional_sibling_url(scene_dir + "/scene.json", scene_id)
 
     # The compressed tier (decision 0126): a sibling index, shell.json's
     # precedent. Absent = the tier was never built for this scene, which is
@@ -1562,6 +1681,7 @@ def get_scene_assets(
             "shell": shell,
             "finish_url": finish_url,
             "furniture_url": furniture_url,
+            "scene_url": scene_url,
             "asset_urls": asset_urls,
             "asset_urls_compressed": asset_urls_compressed,
             "expires_at": expires_at.isoformat(),
@@ -2279,3 +2399,431 @@ def delete_design_spec(scene_id: str, authorization: str = Header(...)) -> JSONR
     cleared = len(repo.get(scene_id, user_id).entries)
     repo.clear(scene_id, user_id)
     return JSONResponse(status_code=200, content={"cleared": cleared})
+
+
+# ---------------------------------------------------------------------------
+# The room guide (decision 0376)
+# ---------------------------------------------------------------------------
+#
+# A room whose pipeline wrote a diorama scene.json gets the room guide
+# (packages/room-guide) instead of the guest above. The guarantees are the
+# guest's (0058): Firebase auth and ownership, a daily budget, one turn at a
+# time per conversation (a lease that outlives the request), and a turn that
+# keeps going and is kept when the client disconnects. What differs:
+#
+#   - the budget is dollars per person per day, across every room, because the
+#     guide's gateway prices every call it makes;
+#   - a turn runs on a worker thread (the guide and its engine are synchronous)
+#     in a small pool of its own, so long turns never starve the event loop's
+#     default executor that every other route's blocking calls use;
+#   - the "Show me" and "Put it back" buttons take the same lease as a turn,
+#     because they change the same kept state.
+
+GUIDE_MODEL = os.environ.get("GUIDE_MODEL", "claude-opus-5-5")
+GUIDE_DAILY_USD = float(os.environ.get("GUIDE_DAILY_USD", "2.00"))
+# Local runs only (production is always live): replay answers recorded in
+# GUIDE_LLM_CACHE, or "stub" with a canned answer (tests patch _guide_stub).
+GUIDE_LLM = os.environ.get("GUIDE_LLM", "live")
+GUIDE_LLM_CACHE = os.environ.get("GUIDE_LLM_CACHE", "")
+# Inside Cloud Run's 120 s request envelope. The lease outlives both (as 0058's
+# does): a lease that expired under a turn still running would let a second
+# turn start beside it.
+GUIDE_TURN_TIMEOUT_S = 100.0
+GUIDE_LEASE_TTL_S = 150
+GUIDE_HISTORY_TURNS = 30           # turns of conversation sent to Claude each turn
+GUIDE_GET_TURN_LIMIT = 50          # turns the panel gets back on GET
+GUIDE_TURN_WORKERS = int(os.environ.get("GUIDE_TURN_WORKERS", "4"))
+
+if GUIDE_MODEL not in ALLOWED_MODELS:
+    logger.error("GUIDE_MODEL=%s may not see a room; every guide turn will refuse (allowed: %s)",
+                 GUIDE_MODEL, ", ".join(ALLOWED_MODELS))
+
+_guide_repo: GuideRepository | None = None
+_guide_stub = None                 # tests: the gateway's canned answer, for GUIDE_LLM=stub
+_guide_executor: ThreadPoolExecutor | None = None
+_guide_turn_tasks: set[asyncio.Task] = set()
+
+
+def _get_guide_repo() -> GuideRepository:
+    global _guide_repo
+    if _guide_repo is None:
+        project = os.environ.get("FIRESTORE_PROJECT")
+        if project:
+            _guide_repo = FirestoreGuideRepository(project=project)
+            logger.info("Using Firestore GuideRepository")
+        else:
+            _guide_repo = InMemoryGuideRepository()
+            logger.info("FIRESTORE_PROJECT unset — using in-memory GuideRepository")
+    return _guide_repo
+
+
+def _get_guide_executor() -> ThreadPoolExecutor:
+    global _guide_executor
+    if _guide_executor is None:
+        _guide_executor = ThreadPoolExecutor(
+            max_workers=GUIDE_TURN_WORKERS, thread_name_prefix="guide-turn"
+        )
+    return _guide_executor
+
+
+def _guide_mode() -> str:
+    return "live" if os.environ.get("ENVIRONMENT") == "production" else GUIDE_LLM
+
+
+def _guide_gateway(work: Path, remaining_usd: float) -> Gateway:
+    """The gateway for one turn: its ceiling is what is left of the person's day."""
+    mode = _guide_mode()
+    cache = Path(GUIDE_LLM_CACHE) if mode == "replay" and GUIDE_LLM_CACHE else None
+    return Gateway(work, cache_dir=cache, mode=mode, budget_usd=max(0.0, remaining_usd),
+                   stub=_guide_stub)
+
+
+def _guide_spend(gateway: Gateway) -> float:
+    """What a turn's calls cost: billed when live; what they would have cost when
+    replayed or stubbed, so a local run exercises the budget too."""
+    report = gateway.report()
+    return float(report["billed_usd"] if _guide_mode() == "live" else report["priced_usd"])
+
+
+def _guide_scene(scene_id: str, user_id: str):
+    """Shared gate for the guide routes, blocking: the owned, ready scene and its
+    diorama room. (scene, inputs, None) or (None, None, JSONResponse)."""
+    scene, err = _load_owned_ready_scene(scene_id, user_id)
+    if err is not None:
+        return None, None, err
+    try:
+        inputs = load_scene(
+            _get_manifest_fetcher().fetch_optional, scene_dir_of(scene.result_uri)
+        )
+    except Exception as exc:
+        logger.error("guide: scene unreadable for scene %s: %s", scene_id, exc)
+        return None, None, JSONResponse(
+            status_code=502,
+            content={"error": "upstream_error", "detail": "the room's scene is unavailable"},
+        )
+    if inputs is None:
+        return None, None, JSONResponse(
+            status_code=404,
+            content={"error": "no_guide", "detail": "this room has no diorama scene"},
+        )
+    return scene, inputs, None
+
+
+def _guide_json(status_code: int, payload) -> Response:
+    """A JSON response through the guide's encoder (numpy scalars in plans)."""
+    return Response(content=guide_dumps(payload), status_code=status_code,
+                    media_type="application/json")
+
+
+def _guide_sse(event: str, payload: dict) -> bytes:
+    return f"event: {event}\ndata: {guide_dumps(payload)}\n\n".encode()
+
+
+class GuideTurnRequest(BaseModel):
+    """Body for POST /scenes/{scene_id}/guide/turns. An opening carries no text:
+    the guide gives its first read of the room."""
+    client_msg_id: str
+    text: str = ""
+    opening: bool = False
+
+
+class GuideShowRequest(BaseModel):
+    """Body for POST /scenes/{scene_id}/guide/show."""
+    proposal_id: str
+
+
+@app.get("/scenes/{scene_id}/guide", summary="The room guide's conversation and the room as it stands")
+def get_guide(scene_id: str, authorization: str = Header(...)) -> Response:
+    """The caller's conversation with the room guide on this scene.
+
+    Response (200):
+      {scene_id, room: <the room in one line>, floor_m2: <its floor area>, turn_count,
+       transcript: [{turn_index, client_msg_id, opening, person: <text>|null,
+                     items: [{kind: "say", text} | {kind: "note", text} |
+                             {kind: "card", card: {id, words, fixes, adds, leaves,
+                                                   effort, goal, better, status}}]}],
+       state: {poses: {<piece>: {x, y, z, yaw}}, can_undo, cards: {<id>: status}},
+       rested_until: <ISO 8601>|null, busy}
+
+    A card's status is "ready" (the room is as it was when it was offered),
+    "shown" (its change is on screen), "stale" (the room has moved on) or "gone".
+    A conversation with no turns yet returns turn_count 0: the client asks for
+    the opening.
+
+    Errors: 400 invalid_scene_id, 401, 403, 404 not_found, 404 no_guide (no
+    scene.json: the room keeps the guest), 409 scene_not_ready, 502
+    upstream_error (scene.json unreadable).
+    """
+    user_id, err = _verify_bearer(authorization)
+    if err is not None:
+        return err
+    err = _validate_uuid4(scene_id, "invalid_scene_id")
+    if err is not None:
+        return err
+    scene, inputs, err = _guide_scene(scene_id, user_id)
+    if err is not None:
+        return err
+
+    repo = _get_guide_repo()
+    now = datetime.now(tz=UTC)
+    record = repo.get(scene_id, user_id)
+    state = GuideState.from_json(record.state_json if record else "")
+    turns = repo.turns(scene_id, user_id, GUIDE_GET_TURN_LIMIT)
+    rested = repo.spent_today(user_id, now) >= GUIDE_DAILY_USD
+    active = record.active if record else None
+    busy = bool(active and (now - active["started_at"]).total_seconds() < GUIDE_LEASE_TTL_S)
+    xs, zs = inputs.room.footprint[:, 0], inputs.room.footprint[:, 1]
+    floor_m2 = abs(float((xs * np.roll(zs, -1) - np.roll(xs, -1) * zs).sum())) / 2
+    return _guide_json(200, {
+        "scene_id": scene_id,
+        "room": room_line(inputs.room),
+        "floor_m2": round(floor_m2, 2),
+        "turn_count": record.turn_count if record else 0,
+        "transcript": guide_transcript(turns, state),
+        "state": state.view(),
+        "rested_until": next_utc_midnight(now).isoformat() if rested else None,
+        "busy": busy,
+    })
+
+
+async def _guide_replay_stream(scene_id: str, user_id: str, turn: GuideTurn) -> AsyncIterator[bytes]:
+    """Dedupe replay: the kept turn, never a second one (0058's rule)."""
+    record = await asyncio.to_thread(_get_guide_repo().get, scene_id, user_id)
+    state = GuideState.from_json(record.state_json if record else "")
+    for item in guide_transcript([turn], state)[0]["items"]:
+        if item["kind"] == "say":
+            yield _guide_sse("delta", {"text": item["text"]})
+        elif item["kind"] == "card":
+            yield _guide_sse("card", item["card"])
+        elif item["kind"] == "note":
+            yield _guide_sse("note", {"text": item["text"]})
+    yield _guide_sse("done", {"turn": {"turn_index": turn.turn_index, "client_msg_id": turn.client_msg_id},
+                              "state": state.view()})
+
+
+async def _run_guide_turn_task(*, queue: asyncio.Queue, scene_id: str, user_id: str,
+                               client_msg_id: str, text: str, opening: bool, inputs,
+                               remaining_usd: float, created_at: datetime) -> None:
+    """Play the turn on the guide's worker pool and feed its events to the SSE
+    queue. Runs as its own task so a client disconnect cannot stop it (the 0058
+    shield). On timeout the worker is told to stop at its next event; it still
+    charges what it spent and lets go of the lease when it does."""
+    loop = asyncio.get_running_loop()
+    cancel = threading.Event()
+
+    def emit(kind: str, data: dict) -> None:   # called on the worker thread
+        loop.call_soon_threadsafe(queue.put_nowait, (kind, data))
+
+    fetcher = _get_manifest_fetcher()
+    work = functools.partial(
+        run_guide_turn,
+        repo=_get_guide_repo(), scene_id=scene_id, user_id=user_id,
+        client_msg_id=client_msg_id, text=text, opening=opening, inputs=inputs,
+        fetch_optional=fetcher.fetch_optional, put=fetcher.put,
+        make_gateway=lambda path: _guide_gateway(path, remaining_usd),
+        spend_of=_guide_spend, model=GUIDE_MODEL, history_turns=GUIDE_HISTORY_TURNS,
+        emit=emit, cancel=cancel, created_at=created_at,
+    )
+    future = loop.run_in_executor(_get_guide_executor(), work)
+    try:
+        outcome = await asyncio.wait_for(asyncio.shield(future), timeout=GUIDE_TURN_TIMEOUT_S)
+    except TimeoutError:
+        cancel.set()
+        logger.warning("guide: turn exceeded %.0fs for scene %s", GUIDE_TURN_TIMEOUT_S, scene_id)
+        await queue.put(("error", {"code": "model_timeout"}))
+        return
+    except Exception:
+        logger.exception("guide: turn task failed for scene %s", scene_id)
+        await queue.put(("error", {"code": "turn_failed"}))
+        return
+    if outcome.error:
+        await queue.put(("error", {"code": outcome.error}))
+        return
+    logger.info(
+        "guide_turn scene_id=%s turn_index=%d model=%s opening=%s calls=%d cost_usd=%.4f flags=%s",
+        scene_id, outcome.turn.turn_index, GUIDE_MODEL, opening, outcome.calls,
+        outcome.cost_usd, ",".join(outcome.turn.flags) or "-",
+    )
+    await queue.put(("done", {
+        "turn": {"turn_index": outcome.turn.turn_index, "client_msg_id": client_msg_id},
+        "state": outcome.state,
+    }))
+
+
+async def _guide_turn_stream(**kwargs) -> AsyncIterator[bytes]:
+    """SSE body: forwards the turn task's events, pings during silence, and holds
+    the request open until the task is done if the client goes (the shield)."""
+    queue: asyncio.Queue = asyncio.Queue()
+    task = asyncio.create_task(_run_guide_turn_task(queue=queue, **kwargs))
+    _guide_turn_tasks.add(task)
+    task.add_done_callback(_guide_turn_tasks.discard)
+    try:
+        while True:
+            try:
+                kind, payload = await asyncio.wait_for(queue.get(), timeout=SSE_PING_INTERVAL_S)
+            except TimeoutError:
+                yield b": ping\n\n"
+                continue
+            yield _guide_sse(kind, payload)
+            if kind in ("done", "error"):
+                return
+    finally:
+        if not task.done():
+            deadline = asyncio.get_running_loop().time() + GUIDE_TURN_TIMEOUT_S + 10.0
+            while not task.done():
+                if asyncio.get_running_loop().time() > deadline:
+                    logger.error("guide: shield deadline exceeded for scene %s", kwargs.get("scene_id"))
+                    break
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=0.25)
+                except (TimeoutError, asyncio.CancelledError):
+                    continue
+                except Exception:
+                    break  # the task reports its own failures
+
+
+@app.post("/scenes/{scene_id}/guide/turns", summary="One room-guide turn, streamed (SSE)")
+async def post_guide_turn(scene_id: str, req: GuideTurnRequest, authorization: str = Header(...)):
+    """One turn with the room guide. Body {client_msg_id, text} or, for the
+    guide's first read of the room, {client_msg_id, opening: true}.
+
+    Success: 200 text/event-stream with events
+      delta {text}            the guide's words as they are written
+      card {id, words, fixes, adds, leaves, effort, goal, better, status}
+                              a "Show me" card
+      play {plan, state}      a checked motion plan to play now (plan_json of
+                              room-guide's motion.py), and the room after it
+      focus {pieces, zones}   what to light up
+      note {text}             an interface note ("Looking at every place…")
+      done {turn: {turn_index, client_msg_id}, state}
+      error {code}            budget_exhausted / model_timeout / model_unavailable /
+                              model_error / model_not_allowed / turn_failed
+    and ": ping" comments during silence.
+
+    Pre-stream errors: 400 invalid_scene_id / invalid_client_msg_id /
+    message_empty / message_too_long / invalid_turn, 401, 403, 404 not_found /
+    no_guide, 409 scene_not_ready / turn_in_flight / already_open, 429
+    budget_exhausted {error, guest_line, resets_at}, 502 upstream_error.
+
+    A repeated client_msg_id replays the kept turn, never a second one.
+    """
+    user_id, err = await asyncio.to_thread(_verify_bearer, authorization)
+    if err is not None:
+        return err
+    err = _validate_uuid4(scene_id, "invalid_scene_id")
+    if err is not None:
+        return err
+    try:
+        uuid.UUID(req.client_msg_id)
+    except ValueError:
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_client_msg_id", "detail": f"{req.client_msg_id!r} is not a UUID"})
+    if req.opening and req.text.strip():
+        return JSONResponse(status_code=400, content={
+            "error": "invalid_turn", "detail": "an opening carries no text"})
+    if not req.opening and not req.text.strip():
+        return JSONResponse(status_code=400, content={
+            "error": "message_empty", "detail": "text must not be empty"})
+    if len(req.text) > GUEST_MESSAGE_MAX_CHARS:
+        return JSONResponse(status_code=400, content={
+            "error": "message_too_long", "detail": f"text exceeds {GUEST_MESSAGE_MAX_CHARS} characters"})
+
+    scene, inputs, err = await asyncio.to_thread(_guide_scene, scene_id, user_id)
+    if err is not None:
+        return err
+
+    repo = _get_guide_repo()
+    now = datetime.now(tz=UTC)
+    outcome = await asyncio.to_thread(
+        repo.accept_turn, scene_id, user_id, req.client_msg_id,
+        opening=req.opening, daily_usd=GUIDE_DAILY_USD, ttl_s=GUIDE_LEASE_TTL_S, now=now,
+    )
+    if outcome.kind == "rested":
+        return JSONResponse(status_code=429, content={
+            "error": "budget_exhausted", "guest_line": GUEST_REST_LINE,
+            "resets_at": outcome.resets_at.isoformat()})
+    if outcome.kind == "busy":
+        return JSONResponse(status_code=409, content={
+            "error": "turn_in_flight", "detail": "the guide is already answering in this room"})
+    if outcome.kind == "opened":
+        return JSONResponse(status_code=409, content={
+            "error": "already_open", "detail": "this conversation has already begun"})
+    if outcome.kind == "replay":
+        return StreamingResponse(_guide_replay_stream(scene_id, user_id, outcome.replay_turn),
+                                 media_type="text/event-stream", headers=_SSE_HEADERS)
+    return StreamingResponse(
+        _guide_turn_stream(scene_id=scene_id, user_id=user_id, client_msg_id=req.client_msg_id,
+                           text=req.text, opening=req.opening, inputs=inputs,
+                           remaining_usd=outcome.remaining_usd, created_at=now),
+        media_type="text/event-stream", headers=_SSE_HEADERS,
+    )
+
+
+_CARD_REFUSAL_STATUS = {"no_such_proposal": 404}
+
+
+async def _guide_button(scene_id: str, authorization: str, press) -> Response:
+    """A button press ("Show me", "Put it back") under the conversation's lease."""
+    user_id, err = await asyncio.to_thread(_verify_bearer, authorization)
+    if err is not None:
+        return err
+    err = _validate_uuid4(scene_id, "invalid_scene_id")
+    if err is not None:
+        return err
+    scene, inputs, err = await asyncio.to_thread(_guide_scene, scene_id, user_id)
+    if err is not None:
+        return err
+
+    repo = _get_guide_repo()
+    holder = f"button:{uuid.uuid4()}"
+    taken = await asyncio.to_thread(
+        repo.take_lease, scene_id, user_id, holder,
+        ttl_s=GUIDE_LEASE_TTL_S, now=datetime.now(tz=UTC),
+    )
+    if not taken:
+        return JSONResponse(status_code=409, content={
+            "error": "turn_in_flight", "detail": "the guide is already answering in this room"})
+    try:
+        result, state_json = await asyncio.to_thread(
+            run_guide_button, repo=repo, scene_id=scene_id, user_id=user_id, inputs=inputs,
+            fetch_optional=_get_manifest_fetcher().fetch_optional, model=GUIDE_MODEL, press=press,
+        )
+    except CardRefused as refused:
+        await asyncio.to_thread(repo.release, scene_id, user_id, holder)
+        return JSONResponse(status_code=_CARD_REFUSAL_STATUS.get(refused.code, 409),
+                            content={"error": refused.code})
+    except NoPath:
+        await asyncio.to_thread(repo.release, scene_id, user_id, holder)
+        return JSONResponse(status_code=409, content={"error": "no_clear_path"})
+    except Exception:
+        logger.exception("guide: button failed for scene %s", scene_id)
+        await asyncio.to_thread(repo.release, scene_id, user_id, holder)
+        return JSONResponse(status_code=500, content={"error": "guide_failed"})
+    kept = await asyncio.to_thread(
+        repo.save_state, scene_id, user_id, holder,
+        state_json=state_json, now=datetime.now(tz=UTC),
+    )
+    if not kept:
+        return JSONResponse(status_code=409, content={
+            "error": "turn_in_flight", "detail": "the room changed while this was pressed"})
+    return _guide_json(200, result)
+
+
+@app.post("/scenes/{scene_id}/guide/show", summary="Show me: play a card's change")
+async def post_guide_show(scene_id: str, req: GuideShowRequest, authorization: str = Header(...)):
+    """Play an offered card's change. 200 {plan, state}: the checked motion plan
+    to play, and the room after it. The guide is told it is on the person's
+    screen, as when it shows a change itself.
+
+    Errors: the guide routes' gate (400/401/403/404/409/502), 404
+    no_such_proposal, 409 proposal_stale (the room has moved on since the card
+    was offered) / proposal_shown / no_clear_path / turn_in_flight.
+    """
+    return await _guide_button(scene_id, authorization, lambda s: s.show_card(req.proposal_id))
+
+
+@app.post("/scenes/{scene_id}/guide/undo", summary="Put it back: one step back")
+async def post_guide_undo(scene_id: str, authorization: str = Header(...)):
+    """Undo the last change on screen. 200 {plan, state}. 409 nothing_to_undo when
+    the room is as scanned; otherwise the errors of /guide/show."""
+    return await _guide_button(scene_id, authorization, lambda s: s.put_back())

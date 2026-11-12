@@ -1,9 +1,11 @@
 "use client";
 
 /**
- * Account deletion, from the account menu (decision 0095). App Store 5.1.1(v)
- * requires this path once an app offers Sign in with Apple, and there is no
- * iOS sign-out (0064), so this is the one place a user can end their account.
+ * Account deletion, opened from the account menu (decision 0095). App Store
+ * 5.1.1(v) requires this path once an app offers Sign in with Apple, and
+ * there is no iOS sign-out (0064), so this is the one place a user can end
+ * their account. Decision 0361 moves it out of the menu into its own alert
+ * dialog: an irreversible choice deserves the whole of someone's attention.
  *
  * The flow is deliberately three beats rather than one button:
  *   confirm  — states BOTH consequences (everything goes; the phone starts
@@ -19,6 +21,8 @@
 
 import { useEffect, useState } from "react";
 
+import { Dialog, SheetTitle } from "@/components/ui/Dialog";
+import { PillButton } from "@/components/ui/spring";
 import {
   PHONE_CONSEQUENCE,
   deletionConsequence,
@@ -32,17 +36,20 @@ type Phase =
   | { name: "done"; line: string; finished: boolean }
   | { name: "error"; line: string };
 
-export default function DeleteAccountPanel({
+export default function DeleteAccountDialog({
+  open,
   uid,
-  onCancel,
+  onClose,
 }: {
+  open: boolean;
   uid: string;
-  onCancel: () => void;
+  onClose: () => void;
 }) {
   const [phase, setPhase] = useState<Phase>({ name: "confirm" });
   const [rooms, setRooms] = useState<number | null>(null);
 
   useEffect(() => {
+    if (!open) return;
     let cancelled = false;
     getApiClient()
       .listScenes(100)
@@ -55,7 +62,16 @@ export default function DeleteAccountPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [open]);
+
+  // Closing abandons a half-made choice rather than leaving it armed for the
+  // next open; a request already running is never interrupted.
+  const close = () => {
+    if (phase.name === "working") return;
+    if (phase.name === "done" && phase.finished) return;
+    setPhase({ name: "confirm" });
+    onClose();
+  };
 
   const onDelete = async () => {
     setPhase({ name: "working" });
@@ -82,58 +98,47 @@ export default function DeleteAccountPanel({
     }
   };
 
-  if (phase.name === "done") {
-    return (
-      <div className="px-4 py-4">
-        <p className="text-sm font-medium text-ink">
-          {phase.finished ? "Your account is closed." : "Still working."}
-        </p>
-        <p className="mt-2 text-xs leading-relaxed text-ink/55">{phase.line}</p>
-        {!phase.finished && (
-          <button
-            type="button"
-            onClick={onDelete}
-            className="mt-3 cursor-pointer text-xs font-medium text-accent-deep hover:underline"
-          >
-            Try again
-          </button>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div className="px-4 py-4">
-      <p className="text-sm font-medium text-ink">Delete this account?</p>
-      <p className="mt-2 text-xs leading-relaxed text-ink/60">
-        {deletionConsequence(rooms)}
-      </p>
-      <p className="mt-2 text-xs leading-relaxed text-ink/60">
-        {PHONE_CONSEQUENCE}
-      </p>
+    <Dialog open={open} onClose={close} label="Delete this account?" alert className="max-w-[460px] p-8">
+      {phase.name === "done" ? (
+        <>
+          <SheetTitle>{phase.finished ? "Your account is closed." : "Still working."}</SheetTitle>
+          <p className="mt-4 text-[16.5px] leading-[1.55] text-ink-2">{phase.line}</p>
+          {!phase.finished && (
+            <div className="mt-7 flex flex-wrap gap-2.5">
+              <PillButton variant="danger" onClick={onDelete}>
+                Try again
+              </PillButton>
+              <PillButton variant="ghost" onClick={close}>
+                Close
+              </PillButton>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <SheetTitle>Delete this account?</SheetTitle>
+          <p className="mt-4 text-[16.5px] leading-[1.55] text-ink-2">
+            {deletionConsequence(rooms)}
+          </p>
+          <p className="mt-3 text-[16.5px] leading-[1.55] text-ink-2">{PHONE_CONSEQUENCE}</p>
 
-      {phase.name === "error" && (
-        <p className="mt-3 text-xs leading-relaxed text-accent-deep">{phase.line}</p>
+          {phase.name === "error" && (
+            <p role="alert" className="mt-4 text-[14.5px] leading-relaxed text-accent-deep">
+              {phase.line}
+            </p>
+          )}
+
+          <div className="mt-7 flex flex-wrap gap-2.5">
+            <PillButton variant="danger" onClick={onDelete} disabled={phase.name === "working"}>
+              {phase.name === "working" ? "Deleting…" : "Delete everything"}
+            </PillButton>
+            <PillButton variant="ghost" onClick={close} disabled={phase.name === "working"}>
+              Keep my account
+            </PillButton>
+          </div>
+        </>
       )}
-
-      <div className="mt-4 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={phase.name === "working"}
-          className="cursor-pointer rounded-full bg-accent-deep px-4 py-2 text-[13px] font-medium text-paper transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-60"
-        >
-          {phase.name === "working" ? "Deleting…" : "Delete everything"}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={phase.name === "working"}
-          className="cursor-pointer px-2 py-2 text-[13px] text-ink/60 transition-colors hover:text-ink disabled:opacity-60"
-        >
-          Keep it
-        </button>
-      </div>
-    </div>
+    </Dialog>
   );
 }

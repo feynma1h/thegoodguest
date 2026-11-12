@@ -6,6 +6,10 @@ which keeps Chrome open between jobs) and returns the PNGs the viewer's compare
 harness produced: for each frame `frame_<id>` (the look), `ids_<id>` (flat
 region ids) and `mask_<id>` (each furniture twin in its own id).
 
+`Renderer.render_still` draws the room's still picture instead (decision 0363):
+the page as the website's room page opens it, at 1600 x 1200, returned as JPEG
+by day and, when the viewer drew furniture twins, by night.
+
 The documents are written to a private temp directory for the driver to read
 and removed afterwards; the PNGs come back as bytes and are never written
 anywhere the caller did not ask. Nothing here logs pixels.
@@ -14,11 +18,13 @@ Failure policy (design 4.6): a crash, a hang or a driver that reports an error
 gets ONE retry in a fresh driver process (fresh Chrome); a second failure
 raises RenderError and the caller decides (a piece falls back to its stand-in).
 
-Read by: server.py (/render). Track C's piece and finish routes call it too.
+Read by: finish_server.py (/render) and routes_still.py (/still). Track C's
+piece and finish routes call it too.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import queue
@@ -39,6 +45,10 @@ JOB_TIMEOUT_S = 660.0
 DEFAULT_WIDTH_PX = 800
 MAX_FRAMES = 12
 MIN_WIDTH_PX, MAX_WIDTH_PX = 64, 1920
+# The app's room picture (the contract the iOS app is built against): 4:3, the
+# size of the driver's page, JPEG.
+STILL_WIDTH_PX, STILL_HEIGHT_PX = 1600, 1200
+STILL_JPEG_QUALITY = 88
 
 
 class RenderError(RuntimeError):
@@ -49,6 +59,28 @@ class RenderError(RuntimeError):
 class RenderResult:
     images: dict[str, bytes]
     info: dict = field(default_factory=dict)
+
+
+@dataclass
+class StillResult:
+    """JPEG bytes by day, and by night only when the viewer drew twins: a room
+    without them has no night on the website either."""
+
+    day: bytes
+    night: bytes | None
+    info: dict = field(default_factory=dict)
+
+
+def to_jpeg(png: bytes, size: tuple[int, int]) -> bytes:
+    """The driver's page screenshot as the JPEG the app reads; a wrong size is a failed render."""
+    from PIL import Image
+
+    with Image.open(io.BytesIO(png)) as im:
+        if im.size != size:
+            raise RenderError(f"still is {im.size[0]}x{im.size[1]}, expected {size[0]}x{size[1]}")
+        out = io.BytesIO()
+        im.convert("RGB").save(out, "JPEG", quality=STILL_JPEG_QUALITY, optimize=True)
+    return out.getvalue()
 
 
 class Renderer:
@@ -136,10 +168,7 @@ class Renderer:
         work = Path(tempfile.mkdtemp(prefix="scene-finish-render-"))
         try:
             job = {"frames": frames, "width": width, "outDir": str(work / "out")}
-            for name, doc in (("shell", shell), ("finish", finish), ("furniture", furniture)):
-                if doc is not None:
-                    (work / f"{name}.json").write_text(json.dumps(doc))
-                    job[name] = str(work / f"{name}.json")
+            _write_documents(work, job, shell=shell, finish=finish, furniture=furniture)
             with self._lock:
                 result = self._with_one_retry(job)
             images = {p.stem: p.read_bytes() for p in sorted((work / "out").glob("*.png"))}
@@ -148,6 +177,36 @@ class Renderer:
             if missing:
                 raise RenderError(f"driver reported success but {sorted(missing)[:3]} are missing")
             return RenderResult(images=images, info={k: result[k] for k in ("glRenderer", "readyMs", "runMs", "perFrameMs") if k in result})
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def render_still(
+        self,
+        *,
+        shell: dict,
+        finish: dict | None = None,
+        furniture: dict | None = None,
+    ) -> StillResult:
+        """The room as the website's room page opens it (its first corner view),
+        by day and, when twins are drawn, by night. What is drawn is the page's
+        call: a finish that does not fit the shell, or twins without a finish,
+        are left out there exactly as on the website."""
+        size = (STILL_WIDTH_PX, STILL_HEIGHT_PX)
+        work = Path(tempfile.mkdtemp(prefix="scene-finish-still-"))
+        try:
+            job = {"kind": "still", "width": size[0], "height": size[1], "outDir": str(work / "out")}
+            _write_documents(work, job, shell=shell, finish=finish, furniture=furniture)
+            with self._lock:
+                result = self._with_one_retry(job)
+            day = work / "out" / "still.png"
+            night = work / "out" / "still-night.png"
+            if not day.exists() or (result.get("night") and not night.exists()):
+                raise RenderError("driver reported success but a still is missing")
+            return StillResult(
+                day=to_jpeg(day.read_bytes(), size),
+                night=to_jpeg(night.read_bytes(), size) if result.get("night") else None,
+                info={k: result[k] for k in ("glRenderer", "readyMs", "totalMs", "night", "finished") if k in result},
+            )
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
@@ -164,3 +223,11 @@ class Renderer:
             self.close()  # the retry gets a fresh Chrome
             shutil.rmtree(job["outDir"], ignore_errors=True)
         raise RenderError(last)
+
+
+def _write_documents(work: Path, job: dict, **docs: dict | None) -> None:
+    """Write the room's documents where the driver reads them and name them in the job."""
+    for name, doc in docs.items():
+        if doc is not None:
+            (work / f"{name}.json").write_text(json.dumps(doc))
+            job[name] = str(work / f"{name}.json")

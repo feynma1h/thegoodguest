@@ -1,5 +1,8 @@
 """Path setup and public_server module pre-loading for services/api-public tests.
 
+The room guide (packages/room-guide) is on the path too: the guide routes run
+its code unchanged (decision 0376).
+
 Registers public_server (and auth) in sys.modules so test files can do
 ``import public_server`` regardless of pytest invocation directory.
 No collision with api-internal's ingest_server — distinct module names mean
@@ -22,6 +25,9 @@ for _p in (
     str(_svc_dir),
     str(_repo_root / "packages/api-core"),
     str(_repo_root / "packages/schemas"),
+    str(_repo_root / "packages/room-guide"),
+    # The guide tests' shared synthetic room (tests/guide_fixtures.py).
+    str(_svc_dir / "tests"),
 ):
     if _p not in sys.path:
         sys.path.insert(0, _p)

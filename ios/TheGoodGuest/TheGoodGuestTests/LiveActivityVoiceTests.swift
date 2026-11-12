@@ -50,16 +50,23 @@ final class LiveActivityVoiceTests: XCTestCase {
     // MARK: - Mirroring the app
 
     func test_titlesMirrorTheInAppSurfaces() {
-        // the desk's own titles.
-        XCTAssertEqual(RoomActivityVoice.title(.sending(sent: 3, total: 10)), "Sending your room")
+        // The room screen's own steps (RoomStatusCopy), so the Lock Screen and
+        // the app name one room's state the same way.
+        XCTAssertEqual(RoomActivityVoice.title(.sending(sent: 3, total: 10)),
+                       RoomStatusCopy.onItsWay(.sending, now: Date()).steps[0].title)
+        XCTAssertEqual(RoomActivityVoice.title(.analyzing),
+                       RoomStatusCopy.onItsWay(.working(anchor: nil, longRunning: false), now: Date()).steps[1].title)
+        XCTAssertEqual(RoomActivityVoice.title(.paused),
+                       RoomStatusCopy.onItsWay(.paused, now: Date()).steps[0].title)
         XCTAssertEqual(RoomActivityVoice.title(.queued), "Getting in line")
-        XCTAssertEqual(RoomActivityVoice.title(.analyzing), "Making sense of your room")
-        // DoorwayView's arrival line.
+        // The ready screen's title.
         XCTAssertEqual(RoomActivityVoice.title(.ready), "Your room is ready.")
-        // FailureView's own headlines, verbatim.
-        XCTAssertEqual(RoomActivityVoice.title(.failed(.upload)), "I couldn't get it up to the desk.")
-        XCTAssertEqual(RoomActivityVoice.title(.failed(.processing)), "The scan didn't survive the trip.")
-        XCTAssertEqual(RoomActivityVoice.title(.failed(.incomplete)), "The room didn't all make it up")
+        // The room screen's failure steps.
+        XCTAssertEqual(RoomActivityVoice.title(.failed(.upload)),
+                       RoomStatusCopy.needsYou(.uploadFailed(reason: nil)).steps[0].title)
+        XCTAssertEqual(RoomActivityVoice.title(.failed(.processing)),
+                       RoomStatusCopy.needsYou(.processingFailed).steps[1].title)
+        XCTAssertEqual(RoomActivityVoice.title(.failed(.incomplete)), "Some files didn\u{2019}t arrive")
     }
 
     // MARK: - Voice rules
@@ -97,7 +104,7 @@ final class LiveActivityVoiceTests: XCTestCase {
     /// complete, so it must not itself read as an upload still in flight, and it
     /// must carry no count — `counter` is nil here, which is the point.
     func test_finalizingDoesNotReadAsStillSending() {
-        XCTAssertEqual(RoomActivityVoice.title(.finalizing), "Signing it in")
+        XCTAssertEqual(RoomActivityVoice.title(.finalizing), "Sent from your phone")
         XCTAssertNil(RoomActivityVoice.counter(.finalizing),
                      "a count here would be the completed-count-labelled-in-progress bug again")
         XCTAssertNil(RoomActivityStage.finalizing.fraction,
@@ -154,18 +161,23 @@ final class LiveActivityVoiceTests: XCTestCase {
 
     // MARK: - The rule of gold
 
-    func test_goldIsLightSemanticOnly() {
-        // Gold is the doorway/"enough" moment — never a generic accent, and never
-        // success/error decoration. Only `.ready` may carry it.
-        XCTAssertEqual(RoomActivityVoice.tint(.ready), .rsGold)
-        for stage in allStages where stage != .ready {
-            XCTAssertNotEqual(RoomActivityVoice.tint(stage), .rsGold,
-                              "\(stage) must not use gold")
+    func test_theLightCardIsInkAndNeverTerracotta() {
+        // Terracotta is the brand's mark, not a status, and the words carry the
+        // state: on the Lock Screen's light card every stage is ink.
+        for stage in allStages {
+            XCTAssertEqual(RoomActivityVoice.tint(stage), .rsInk, "\(stage)")
+            XCTAssertNotEqual(RoomActivityVoice.tint(stage, onDusk: true), .rsTerracotta, "\(stage)")
         }
     }
 
-    func test_failureIsInkNotRed() {
+    func test_lamplightIsLightOnlyAndOnlyOnDusk() {
+        // On the island, lamplight is the one lit thing: a room moving or ready.
+        // A stopped room is plain light text, never lit.
+        XCTAssertEqual(RoomActivityVoice.tint(.analyzing, onDusk: true), .rsLamp)
+        XCTAssertEqual(RoomActivityVoice.tint(.ready, onDusk: true), .rsLamp)
+        XCTAssertEqual(RoomActivityVoice.tint(.paused, onDusk: true), .rsOnDusk)
         for failure: RoomActivityFailure in [.upload, .processing, .incomplete] {
+            XCTAssertEqual(RoomActivityVoice.tint(.failed(failure), onDusk: true), .rsOnDusk)
             XCTAssertEqual(RoomActivityVoice.tint(.failed(failure)), .rsInk)
         }
     }
@@ -174,7 +186,7 @@ final class LiveActivityVoiceTests: XCTestCase {
 
     func test_accessibilityLabelReadsAsOneSentenceAndIncludesTheCount() {
         let label = RoomActivityVoice.accessibilityLabel(.sending(sent: 128, total: 385))
-        XCTAssertTrue(label.contains("Sending your room"))
+        XCTAssertTrue(label.contains("Sending from your phone"))
         XCTAssertTrue(label.contains("128 of 385"))
         XCTAssertTrue(label.contains("On its way up"))
         // Stages without a count must not manufacture one.

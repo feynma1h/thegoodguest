@@ -195,6 +195,12 @@ def test_routes_run_the_whole_chain_and_publish_once(scene, monkeypatch):
     merge = [t for t in tasks.tasks if t["path"] == "/furniture-merge" and t["delay_s"] == 0][0]
     assert http.post(merge["path"], json=merge["payload"]).json()["wrote"] == ["furniture.json", "finish.json"]
     assert [o["key"] for o in scene.read_json("furniture.json")["objects"]] == ["box_0"]
+    # The published room looks different, so its still is drawn again; a later
+    # merge publishes nothing and asks for no second picture.
+    still = lambda: [t["payload"] for t in tasks.tasks if t["path"] == "/still"]  # noqa: E731
+    assert still() == [{"scene_id": "scene-x"}]
+    assert http.post(merge["path"], json=merge["payload"]).json() == {"published": True, "noop": True}
+    assert still() == [{"scene_id": "scene-x"}]
     assert http.post(piece["path"], json=piece["payload"]).json() == {"status": "already published"}
 
 

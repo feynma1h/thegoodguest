@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/guide-assets.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/guide-assets.mjs",
     "build": "next build && node scripts/third-party-notices.mjs",
     "start": "next start",
     "lint": "eslint",

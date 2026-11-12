@@ -1,7 +1,7 @@
 # 0057 — Good Guest design language: warm hospitality supersedes 0056's visual specifics
 
 **Date:** 2026-07-20
-**Status:** Decided (supersedes 0056's design-language section; 0056's 3D-stack
+**Status:** Amended by 0361 and 0366 — its palette and faces are replaced on the website (0361) and in the iOS app (0366); a serif for the guest's voice carries into both. Was: Decided (supersedes 0056's design-language section; 0056's 3D-stack
 gating and conversation sequencing stand)
 
 ## Context

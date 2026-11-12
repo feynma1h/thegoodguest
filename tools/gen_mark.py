@@ -241,10 +241,13 @@ class Appearance:
     field: str | None  # None => transparent (the mark sits on the page)
 
 
-#: Absolute, and shared with the web's design tokens: --accent, --paper, --ink.
+#: The brand ink is shared with the web's --accent. The two icon tiles are the
+#: iOS app's own ground and ink (RSColor's rsGround and rsInk, pinned by
+#: test_gen_mark.py): the cream and warm-brown tiles left with the rest of
+#: cream in the 2026-11-10 redesign.
 BRAND_INK = "#c04d3e"
-LIGHT_GROUND = "#f9f2ec"
-DARK_GROUND = "#282723"
+LIGHT_GROUND = "#f5f6f8"
+DARK_GROUND = "#121a23"
 #: The mark when it sits ON terracotta, and the tab icon in a dark UA.
 REVERSE_INK = "#fbf5f2"
 

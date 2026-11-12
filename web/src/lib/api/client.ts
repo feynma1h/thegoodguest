@@ -10,6 +10,9 @@
  * throws typed pre-stream errors (429/409/400/401) BEFORE returning the
  * iterable; the iterable covers only the stream phase, yielding normalized
  * GuestEvents. SSE parsing lives HERE and nowhere else.
+ *
+ * The room guide (decision 0376) follows the same shape: sendGuideTurn
+ * throws its pre-stream errors before its iterable of GuideEvents exists.
  */
 
 import type {
@@ -22,6 +25,15 @@ import type {
   SceneStatus,
   SceneSummary,
 } from "./types";
+import type {
+  GuideCard,
+  GuideEvent,
+  GuideFocus,
+  GuideMove,
+  GuideSnapshot,
+  GuideState,
+  MotionPlan,
+} from "../guide/types";
 
 /** Structured API failure: HTTP status + the server's error code. */
 export class ApiError extends Error {
@@ -95,6 +107,27 @@ export interface ApiClient {
    * Irreversible on success.
    */
   deleteAccount(confirmUserId: string): Promise<AccountDeletionResult>;
+  /**
+   * The room guide (decision 0376), for a scene whose assets carry a
+   * scene_url: the conversation so far and the room as it stands. 404
+   * no_guide for a room without a diorama scene.
+   */
+  getGuide(sceneId: string): Promise<GuideSnapshot>;
+  /**
+   * One guide turn: the person's words, or `{ opening: true }` for the
+   * guide's first read of the room. Resolves once the stream is OPEN;
+   * pre-stream failures throw (BudgetExhaustedError, TurnInFlightError,
+   * ApiError) before any iterable exists. The iterable ends after done/error.
+   */
+  sendGuideTurn(
+    sceneId: string,
+    turn: { text?: string; opening?: boolean },
+    clientMsgId: string,
+  ): Promise<AsyncIterable<GuideEvent>>;
+  /** "Show me" on a card: the checked plan to play, and the room after it. */
+  showGuideCard(sceneId: string, proposalId: string): Promise<GuideMove>;
+  /** "Put it back": one step back. */
+  undoGuide(sceneId: string): Promise<GuideMove>;
 }
 
 export type TokenProvider = () => Promise<string | null>;
@@ -133,15 +166,64 @@ function parseSseBlock(block: string): GuestEvent | null {
   return null; // unknown event name — the vocabulary may grow
 }
 
+/** Parse one SSE block of a room-guide turn (decision 0376) into a
+ * GuideEvent. Comments and unknown event names return null. */
+export function parseGuideSseBlock(block: string): GuideEvent | null {
+  let name: string | null = null;
+  let data: string | null = null;
+  for (const line of block.split("\n")) {
+    if (line.startsWith(":")) continue;
+    if (line.startsWith("event: ")) name = line.slice("event: ".length);
+    else if (line.startsWith("data: ")) data = line.slice("data: ".length);
+  }
+  if (!name || data === null) return null;
+  try {
+    const p = JSON.parse(data) as Record<string, unknown>;
+    switch (name) {
+      case "delta":
+        return typeof p.text === "string" ? { type: "delta", text: p.text } : null;
+      case "card":
+        return typeof p.id === "string" ? { type: "card", card: p as unknown as GuideCard } : null;
+      case "play":
+        return {
+          type: "play",
+          plan: (p.plan ?? null) as MotionPlan | null,
+          state: p.state as GuideState,
+        };
+      case "focus":
+        return { type: "focus", focus: p as GuideFocus };
+      case "note":
+        return typeof p.text === "string" ? { type: "note", text: p.text } : null;
+      case "done": {
+        const turn = (p.turn ?? {}) as { turn_index?: number; client_msg_id?: string };
+        return {
+          type: "done",
+          turnIndex: Number(turn.turn_index ?? -1),
+          clientMsgId: String(turn.client_msg_id ?? ""),
+          state: p.state as GuideState,
+        };
+      }
+      case "error":
+        return { type: "error", code: String(p.code ?? "unknown") };
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 /**
  * hand-parse text/event-stream from a fetch body (native EventSource is
  * GET-only and cannot carry the Authorization header — decision 0058).
  * A stream that dies without a terminal event yields connection_lost so
  * the composer can move to its confirming state.
  */
-async function* parseSseStream(
+async function* readSseStream<T extends { type: string }>(
   body: ReadableStream<Uint8Array>,
-): AsyncGenerator<GuestEvent> {
+  parse: (block: string) => T | null,
+  lost: T,
+): AsyncGenerator<T> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -151,14 +233,14 @@ async function* parseSseStream(
       try {
         chunk = await reader.read();
       } catch {
-        yield { type: "error", code: "connection_lost" };
+        yield lost;
         return;
       }
       if (chunk.done) break;
       buffer += decoder.decode(chunk.value, { stream: true });
       let sep = buffer.indexOf("\n\n");
       while (sep !== -1) {
-        const event = parseSseBlock(buffer.slice(0, sep));
+        const event = parse(buffer.slice(0, sep));
         buffer = buffer.slice(sep + 2);
         sep = buffer.indexOf("\n\n");
         if (event) {
@@ -168,10 +250,19 @@ async function* parseSseStream(
       }
     }
     // Clean end without done/error: the turn's fate is unknown.
-    yield { type: "error", code: "connection_lost" };
+    yield lost;
   } finally {
     reader.releaseLock();
   }
+}
+
+function parseSseStream(body: ReadableStream<Uint8Array>): AsyncGenerator<GuestEvent> {
+  return readSseStream<GuestEvent>(body, parseSseBlock, { type: "error", code: "connection_lost" });
+}
+
+/** A room-guide turn's stream (decision 0376), by the same reader. */
+export function parseGuideSseStream(body: ReadableStream<Uint8Array>): AsyncGenerator<GuideEvent> {
+  return readSseStream<GuideEvent>(body, parseGuideSseBlock, { type: "error", code: "connection_lost" });
 }
 
 export class LiveApiClient implements ApiClient {
@@ -273,6 +364,60 @@ export class LiveApiClient implements ApiClient {
         files: counts.files ?? 0,
       },
     };
+  }
+
+  private async postJson(path: string, body?: unknown): Promise<Response> {
+    return fetch(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: await this.authHeader(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  private async postForJson(path: string, body?: unknown): Promise<unknown> {
+    const resp = await this.postJson(path, body);
+    const parsed = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      this.throwTyped(resp.status, parsed as Record<string, string>);
+    }
+    return parsed;
+  }
+
+  async getGuide(sceneId: string): Promise<GuideSnapshot> {
+    return (await this.request(`/scenes/${sceneId}/guide`)) as GuideSnapshot;
+  }
+
+  async sendGuideTurn(
+    sceneId: string,
+    turn: { text?: string; opening?: boolean },
+    clientMsgId: string,
+  ): Promise<AsyncIterable<GuideEvent>> {
+    const resp = await this.postJson(`/scenes/${sceneId}/guide/turns`, {
+      client_msg_id: clientMsgId,
+      text: turn.opening ? "" : (turn.text ?? ""),
+      opening: Boolean(turn.opening),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      this.throwTyped(resp.status, body as Record<string, string>);
+    }
+    if (!resp.body) {
+      throw new ApiError(0, "no_stream", "response had no readable body");
+    }
+    return parseGuideSseStream(resp.body);
+  }
+
+  async showGuideCard(sceneId: string, proposalId: string): Promise<GuideMove> {
+    return (await this.postForJson(`/scenes/${sceneId}/guide/show`, {
+      proposal_id: proposalId,
+    })) as GuideMove;
+  }
+
+  async undoGuide(sceneId: string): Promise<GuideMove> {
+    return (await this.postForJson(`/scenes/${sceneId}/guide/undo`)) as GuideMove;
   }
 
   async sendMessage(

@@ -223,6 +223,11 @@ def test_favicon_carries_the_three_legacy_sizes():
 
 
 def test_mark_colours_match_the_web_design_tokens():
+    """The mark's ink is the web's --accent, everywhere and exactly.
+
+    The app icon's tiles (LIGHT_GROUND, DARK_GROUND) no longer equal the web's
+    grounds: the web left cream in decision 0361, and the icon's tiles are the
+    iOS redesign's to decide. Only the ink is shared."""
     css = (REPO / "web/src/app/globals.css").read_text()
 
     def token(name: str) -> str:
@@ -231,8 +236,6 @@ def test_mark_colours_match_the_web_design_tokens():
         return match.group(1).lower()
 
     assert gen_mark.BRAND_INK == token("accent")
-    assert gen_mark.LIGHT_GROUND == token("paper")
-    assert gen_mark.DARK_GROUND == token("ink")
 
 
 def test_mark_colours_match_the_ios_design_tokens():
@@ -243,10 +246,11 @@ def test_mark_colours_match_the_ios_design_tokens():
         assert match, f"{name} not found in RSColor.swift"
         return "#" + match.group(1).lower()
 
-    assert gen_mark.BRAND_INK == token("rsAction")
-    assert gen_mark.REVERSE_INK == token("rsOnDark")
-    # The icon's two tile fields are the app's own surfaces, not new colours.
-    assert gen_mark.ICON_LIGHT.field == token("rsSurface")
+    assert gen_mark.BRAND_INK == token("rsTerracotta")
+    # The icon's two tile fields are the app's own ground and ink, not new
+    # colours. The app draws no reverse mark (the mark is terracotta on dusk
+    # too), so REVERSE_INK is the web's alone and is not pinned here.
+    assert gen_mark.ICON_LIGHT.field == token("rsGround")
     assert gen_mark.ICON_DARK.field == token("rsInk")
 
 
@@ -284,15 +288,23 @@ def test_no_surface_sets_the_mark_beside_the_name():
     Checked as a string proximity rather than by reading each layout, because
     the failure mode is someone adding the name back next to an existing mark
     without knowing the rule -- which is exactly what these files used to do.
+
+    Every Swift file in the app is checked, not a list: a hand-kept list named
+    two screens the iOS redesign deleted (0365), and a new screen that draws
+    the mark is covered without anyone remembering to add it.
     """
     name = "The Good Guest"
+    ios_sources = sorted(
+        str(path.relative_to(REPO))
+        for path in (REPO / "ios" / "TheGoodGuest").rglob("*.swift")
+        if "/build/" not in str(path)
+    )
+    drawing = []
     for relative in (
         "web/src/components/Wordmark.tsx",
         "web/src/components/SiteNav.tsx",
         "web/src/app/room/page.tsx",
-        "ios/TheGoodGuest/TheGoodGuest/DesignSystem/Wordmark.swift",
-        "ios/TheGoodGuest/TheGoodGuest/Home/HomeView.swift",
-        "ios/TheGoodGuest/TheGoodGuest/Gating/UnsupportedDeviceView.swift",
+        *ios_sources,
     ):
         text = (REPO / relative).read_text()
         # Strip comments and docstrings, which discuss the rule by name.
@@ -318,6 +330,10 @@ def test_no_surface_sets_the_mark_beside_the_name():
             f"{relative} draws the mark AND renders the name -- see the rule in "
             "web/src/components/Wordmark.tsx"
         )
+        if draws_mark:
+            drawing.append(relative)
+    # Not a vacuous pass: home's navigation bar carries the mark.
+    assert "ios/TheGoodGuest/TheGoodGuest/Home/HomeScreen.swift" in drawing, drawing
 
 
 # ------------------------------------------------------------------ wordmark --
