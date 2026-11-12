@@ -208,6 +208,8 @@ from thegoodguest_api_core.scene_read_repo import (  # noqa: E402
     InMemorySceneReadRepository,
     SceneNotFoundError,
 )
+import numpy as np  # noqa: E402
+
 from thegoodguest_room_guide.analyzer import room_line  # noqa: E402
 from thegoodguest_room_guide.gateway import ALLOWED_MODELS, Gateway  # noqa: E402
 from thegoodguest_room_guide.motion import NoPath  # noqa: E402
@@ -2535,7 +2537,7 @@ def get_guide(scene_id: str, authorization: str = Header(...)) -> Response:
     """The caller's conversation with the room guide on this scene.
 
     Response (200):
-      {scene_id, room: <the room in one line>, turn_count,
+      {scene_id, room: <the room in one line>, floor_m2: <its floor area>, turn_count,
        transcript: [{turn_index, client_msg_id, opening, person: <text>|null,
                      items: [{kind: "say", text} | {kind: "note", text} |
                              {kind: "card", card: {id, words, fixes, adds, leaves,
@@ -2570,9 +2572,12 @@ def get_guide(scene_id: str, authorization: str = Header(...)) -> Response:
     rested = repo.spent_today(user_id, now) >= GUIDE_DAILY_USD
     active = record.active if record else None
     busy = bool(active and (now - active["started_at"]).total_seconds() < GUIDE_LEASE_TTL_S)
+    xs, zs = inputs.room.footprint[:, 0], inputs.room.footprint[:, 1]
+    floor_m2 = abs(float((xs * np.roll(zs, -1) - np.roll(xs, -1) * zs).sum())) / 2
     return _guide_json(200, {
         "scene_id": scene_id,
         "room": room_line(inputs.room),
+        "floor_m2": round(floor_m2, 2),
         "turn_count": record.turn_count if record else 0,
         "transcript": guide_transcript(turns, state),
         "state": state.view(),

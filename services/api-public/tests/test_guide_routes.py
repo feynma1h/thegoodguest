@@ -148,6 +148,7 @@ class TestGates:
         assert body["state"] == {"poses": {}, "can_undo": False, "cards": {}}
         assert body["rested_until"] is None and body["busy"] is False
         assert body["room"].startswith("Study, ")
+        assert body["floor_m2"] == 14.4
 
     @pytest.mark.parametrize("path,method", [("/guide", "get"), ("/guide/turns", "post"),
                                              ("/guide/show", "post"), ("/guide/undo", "post")])
