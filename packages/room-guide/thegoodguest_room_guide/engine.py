@@ -499,9 +499,14 @@ class Engine:
 
     def _explore(self, goal: str, *, locked: Iterable[str], max_pieces: int) -> list[Proposal]:
         locked = set(locked)
+        # A piece held by a hard bond moves only with its anchor; one held by soft
+        # bonds alone may go its own way, and the broken bond is scored as a cost.
+        # (A heater wanted "beside" a sofa must still be free to leave it: its heat
+        # can't keep clear of anything that close.)
+        bound = {f for a in self.room.pieces for f in self.needs.followers(a, hard_only=True)}
         movable = [pid for pid, p in self.room.pieces.items()
                    if p.support == "floor" and pid not in self.fixed and pid not in locked and laws.collides(p)
-                   and pid not in {f for a in self.room.pieces for f in self.needs.followers(a)}]
+                   and pid not in bound]
         poses = laws.all_poses(self.room, self.base)
         cands = [(pid, to, meta) for pid in movable for to, meta in self.all_slots(pid, poses)]
         # A follower may move on its own only in its own relation: one standing away

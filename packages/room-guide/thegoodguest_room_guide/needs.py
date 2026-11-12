@@ -141,10 +141,11 @@ class RoomNeeds:
         p = self.pieces.get(piece_id)
         return p.moves if p else "fixed"
 
-    def followers(self, anchor: str) -> list[str]:
-        """Pieces that go with `anchor` and follow it when it moves."""
+    def followers(self, anchor: str, hard_only: bool = False) -> list[str]:
+        """Pieces that go with `anchor` and follow it when it moves (only hard bonds, if asked)."""
         return [pid for pid, p in self.pieces.items()
-                if any(b.piece == anchor and b.how in FOLLOW for b in p.bonds)]
+                if any(b.piece == anchor and b.how in FOLLOW and (b.strength == "hard" or not hard_only)
+                       for b in p.bonds)]
 
     def bonded(self, piece_id: str, hows: tuple[str, ...] = HOWS) -> set[str]:
         """Every piece bonded to this one either way, by one of `hows`."""

@@ -67,6 +67,30 @@ def _study():
     return b, data
 
 
+def test_a_piece_held_only_by_a_soft_bond_may_leave_its_anchor():
+    """A heater wanted beside the sofa it warms must still find a place clear of it."""
+    b = SceneBuilder(width=4.0, depth=3.5, kind="living room")
+    b.door("door", "wall_+z", 0.3, 1.1)
+    b.window("window", "wall_-z", 1.5, 2.5, 0.9, 2.1)
+    b.against("sofa", "sofa", "wall_+x", 1.75, (1.8, 0.85, 0.9))
+    b.add("heater", "heater", (0.75, 0.0), (0.6, 0.65, 0.25), yaw=math.pi / 2)
+    data = {"pieces": {
+        "door": door_needs(), "window": copy.deepcopy(WINDOW),
+        "sofa": {"moves": "heavy", "why": "a sofa", "needs": [
+            {"need": "get_in", "side": "front", "posture": "seated", "strength": "hard", "why": "sat on"}]},
+        "heater": {"moves": "yes", "needs": [{"need": "heat", "side": "all", "strength": "hard", "why": "hot"}],
+                   "with": [{"piece": "sofa", "how": "beside", "strength": "soft", "why": "it warms the sofa"}]},
+    }}
+    e = engine(b, data)
+    assert "zone:heater:heat:front" in [f.key for f in e.current_findings]
+    proposals = e.explore("fix:zone:heater:heat:front")
+    assert proposals and proposals[0].moves[0].piece == "heater"
+    data["pieces"]["heater"]["with"][0]["strength"] = "hard"
+    held = engine(b, data).explore("fix:zone:heater:heat:front")
+    assert all(m.piece != "heater" or m.role == "follower" for p in held for m in p.moves), \
+        "a hard bond still moves it only with the sofa"
+
+
 def test_search_turns_a_desk_side_on_to_the_window():
     e = engine(*_study())
     proposals = e.explore("light:desk")
