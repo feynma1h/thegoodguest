@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from evals.compare import comparison
 from evals.judge import combine, judge
 from evals.rooms import all_rooms, matches
 from evals.run import MORE, NOTHING, SHOW, key_findings, problems, run
@@ -87,3 +88,7 @@ def test_the_judge_reads_both_conversations_both_ways(tmp_path):
     assert doc["wins"] == {"claude-opus-5-5": 1, "claude-sonnet-5-5": 0} and doc["split"] == 0
     assert len(seen) == 2 and "The planted problem: An electric heater" in seen[0]
     assert "The sofa is about 0.2 m in front of the oil-filled heater." in seen[0]
+
+    table = comparison(tmp_path, "claude-opus-5-5", "claude-sonnet-5-5", ["judge"])
+    assert "| heater_close | yes | yes | no | no | Opus 5.5 |" in table
+    assert (tmp_path / "comparison.md").read_text() == table

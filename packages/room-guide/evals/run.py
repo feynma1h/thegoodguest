@@ -75,14 +75,22 @@ def _play(d: dict) -> dict | None:
             "methods": doc.get("methods")}
 
 
+def _parsed(content):
+    try:
+        return json.loads(content) if isinstance(content, str) else content
+    except ValueError:
+        return content
+
+
 def take_turn(s: Session, text: str) -> dict:
     events: list[tuple[str, dict]] = []
     start = len(s.messages)
     t = time.time()
     said = run_turn(s, text, lambda kind, data: events.append((kind, data)))
-    tools = [{"name": b["name"], "input": b["input"]}
-             for m in s.messages[start:] if m["role"] == "assistant" and isinstance(m["content"], list)
-             for b in m["content"] if b.get("type") == "tool_use"]
+    blocks = [b for m in s.messages[start:] if isinstance(m["content"], list) for b in m["content"]]
+    results = {b["tool_use_id"]: b["content"] for b in blocks if b.get("type") == "tool_result"}
+    tools = [{"name": b["name"], "input": b["input"], "result": _parsed(results.get(b["id"]))}
+             for b in blocks if b.get("type") == "tool_use"]
     done = next((d for k, d in reversed(events) if k == "done"), {})
     return {"person": None if text == OPENING else text, "said": said, "tools": tools,
             "cards": [_card(s, d) for k, d in events if k == "card"],

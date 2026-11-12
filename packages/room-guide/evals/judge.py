@@ -30,10 +30,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from evals.rooms import all_rooms
-from evals.run import key_findings, ledger_totals, problems
-from thegoodguest_room_guide.analyzer import room_line
+from evals.run import ledger_totals
+from thegoodguest_room_guide.analyzer import findings
+from thegoodguest_room_guide.assess import assess
+from thegoodguest_room_guide.brief import brief
 from thegoodguest_room_guide.gateway import ALLOWED_MODELS, Gateway, JsonRequest
 from thegoodguest_room_guide.model import room_from_scene
+from thegoodguest_room_guide.needs import parse_needs
 
 JUDGE_VERSION = "judge/1"
 CRITERIA = ("found", "truthful", "useful", "voice")
@@ -88,17 +91,20 @@ def conversation(result: dict) -> str:
 
 
 def facts(r) -> str:
+    """The room as the guide is told it, read with the answer key: the truth to judge against."""
     room = room_from_scene(r.scene())
-    pieces = [f"- {p.name}" + (f": {p.description}" if p.description else "")
-              for p in room.pieces.values() if p.support != "wall" or p.opening is None]
-    measured = [f"- {f.text}" for f in problems(key_findings(r))] or ["- Nothing measured is wrong."]
-    return "\n".join([room_line(room), "", "In the room:", *pieces, "",
-                      "What the measurements say is wrong:", *measured, "",
+    needs = parse_needs(room, r.key)
+    fs = findings(room, needs, assess(room, needs))
+    told = brief(room, needs, {}, fs, [], []).split("\nON THEIR SCREEN NOW")[0]
+    told = told.replace("WHAT THE ROOM SHOWS (worked out by the room; quote these words)",
+                        "WHAT THE MEASUREMENTS SHOW (with a careful designer's reading of the room)")
+    looks = [f"- {p.name}: {p.description}" for p in room.pieces.values() if p.description]
+    return "\n".join([told.strip(), "", "What the pieces look like:", *looks, "",
                       f"The planted problem: {r.problem}"])
 
 
 def judge_request(r, first: dict, second: dict, model: str) -> JsonRequest:
-    text = "\n".join(["THE ROOM", facts(r), "", "CONVERSATION A", conversation(first), "",
+    text = "\n".join([facts(r), "", "CONVERSATION A", conversation(first), "",
                       "CONVERSATION B", conversation(second), "", "Score A and B, then pick the better one."])
     return JsonRequest(stage="judge", prompt_version=JUDGE_VERSION, system=JUDGE_SYSTEM, text=text,
                        schema=SCHEMA, model=model, effort="medium")

@@ -3,9 +3,10 @@
   rooms.py   the rooms, each with its planted problem, the finding that problem
              should raise, and an answer key (a needs file a careful designer
              would write) that proves the problem can be found at all
-  run.py     runs the rules pass and two guide turns on every room, on one model,
-             and records what was found, said, offered, flagged and spent
+  run.py     runs the rules pass and three guide turns on every room, on one
+             model, and records what was found, said, offered, flagged and spent
   judge.py   compares two models' answers room by room, both ways round
+  compare.py puts two runs and their judges side by side, as a table
 
 The rooms are built from numbers, like the tests' rooms: the repository holds
 no room data. Their furniture names and descriptions read like the diorama's
