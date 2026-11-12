@@ -79,7 +79,7 @@ def test_the_judge_reads_both_conversations_both_ways(tmp_path):
 
     def judge_stub(req):
         seen.append(req.text)
-        a = req.text.split("CONVERSATION A")[1].split("CONVERSATION B")[0]
+        a = req.text.split("CONVERSATION A")[1].split("CONVERSATION B")[0].split("What the person saw:")[1]
         score = {"found": 2, "truthful": 2, "useful": 2, "voice": 2, "notes": ""}
         return {"a": score, "b": score, "better": "A" if "heater" in a else "B", "why": "it found the heater"}
 
@@ -88,6 +88,7 @@ def test_the_judge_reads_both_conversations_both_ways(tmp_path):
     assert doc["wins"] == {"claude-opus-5-5": 1, "claude-sonnet-5-5": 0} and doc["split"] == 0
     assert len(seen) == 2 and "The planted problem: An electric heater" in seen[0]
     assert "The sofa is about 0.2 m in front of the oil-filled heater." in seen[0]
+    assert seen[0].count("What guide") == 2 and "could not be rebuilt" not in seen[0]
 
     table = comparison(tmp_path, "claude-opus-5-5", "claude-sonnet-5-5", ["judge"])
     assert "| heater_close | yes | yes | no | no | Opus 5.5 |" in table

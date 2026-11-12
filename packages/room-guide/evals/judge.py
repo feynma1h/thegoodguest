@@ -4,11 +4,15 @@
 
 Run it from packages/room-guide, after run.py has run both models.
 
-The judge reads three things for each room:
+The judge reads, for each room:
   - the room's measured facts: what the answer key lets the analyzer find;
   - the planted problem;
   - the two conversations as the person saw them (words, cards, moves),
-    labelled A and B.
+    labelled A and B, each with what that guide was told: the room read with
+    its own model's needs, and what the room said each card and move does.
+A claim that matches what the guide was told is not invented, even where its
+model read the room differently from the answer key; that difference shows in
+"found" and "useful", not in "truthful".
 It scores each conversation 0 to 2 on four things and picks the better one, or
 a tie. Each room is asked twice, once with each model as A. A model wins a room
 only when both readings pick it; otherwise the room is a tie. That cancels the
@@ -36,9 +40,9 @@ from thegoodguest_room_guide.assess import assess
 from thegoodguest_room_guide.brief import brief
 from thegoodguest_room_guide.gateway import ALLOWED_MODELS, Gateway, JsonRequest
 from thegoodguest_room_guide.model import room_from_scene
-from thegoodguest_room_guide.needs import parse_needs
+from thegoodguest_room_guide.needs import NeedsError, parse_needs
 
-JUDGE_VERSION = "judge/1"
+JUDGE_VERSION = "judge/2"
 CRITERIA = ("found", "truthful", "useful", "voice")
 
 JUDGE_SYSTEM = """\
@@ -53,9 +57,13 @@ Score each conversation 0, 1 or 2 on:
   2 it named it clearly and early; 1 it touched on it, or got to it late;
   0 it missed it. In a room with no planted problem: 2 it said plainly what
   works and invented nothing; 0 it invented a problem.
-- truthful: does everything it said match the measured facts and the room?
+- truthful: does everything it said match what it was told and the room?
   2 nothing wrong; 1 a slip that wouldn't mislead; 0 a wrong or invented claim
   (a piece, a number, a problem that isn't there, a benefit a move doesn't bring).
+  Each guide read the room's needs its own way, and its notes on the room
+  come with its conversation. A claim that matches those notes is not
+  invented, even where it differs from the careful designer's reading: count
+  that difference under found and useful instead.
 - useful: would the person act on what it offered? 2 a change that fixes the
   real problem, or an honest "nothing better" where nothing is better; 1 a
   change that helps less than it could; 0 a change that makes things worse, or
@@ -76,18 +84,35 @@ SCHEMA = {"type": "object", "additionalProperties": False, "required": ["a", "b"
                          "why": {"type": "string"}}}
 
 
+def _said(label: str, items: list[str]) -> str:
+    return f"; {label}: " + " / ".join(items) if items else ""
+
+
 def conversation(result: dict) -> str:
-    """A conversation as the person saw it."""
+    """A conversation as the person saw it, with what the room said each card and move does."""
     lines = []
     for t in result["turns"]:
         if t["person"]:
             lines.append(f"Person: {t['person']}")
         lines.append(f"Guide: {t['said'].strip() or '(said nothing)'}")
         for c in t["cards"]:
-            lines.append(f"  [card offered: {' '.join(c['words'])}]")
+            lines.append(f"  [card offered: {' / '.join(c['words'])}"
+                         f"{_said('the room says it fixes', c['fix_texts'])}"
+                         f"{_said('leaves', c['leaves'])}{_said('brings', c['adds'])}]")
         for p in t["played"]:
             lines.append(f"  [on screen, moved: {', '.join(p['pieces'])}]")
     return "\n".join(lines)
+
+
+def told(r, result: dict) -> str:
+    """The room as this guide was told it at the start: read with its own model's needs."""
+    room = room_from_scene(r.scene())
+    try:
+        needs = parse_needs(room, result["rules"]["needs"])
+    except NeedsError:
+        return "(its notes could not be rebuilt)"
+    fs = findings(room, needs, assess(room, needs))
+    return brief(room, needs, {}, fs, [], []).split("\nON THEIR SCREEN NOW")[0].replace("THE ROOM\n", "", 1)
 
 
 def facts(r) -> str:
@@ -104,8 +129,12 @@ def facts(r) -> str:
 
 
 def judge_request(r, first: dict, second: dict, model: str) -> JsonRequest:
-    text = "\n".join([facts(r), "", "CONVERSATION A", conversation(first), "",
-                      "CONVERSATION B", conversation(second), "", "Score A and B, then pick the better one."])
+    text = "\n".join([facts(r), "",
+                      "CONVERSATION A", "What guide A was told about the room:", told(r, first), "",
+                      "What the person saw:", conversation(first), "",
+                      "CONVERSATION B", "What guide B was told about the room:", told(r, second), "",
+                      "What the person saw:", conversation(second), "",
+                      "Score A and B, then pick the better one."])
     return JsonRequest(stage="judge", prompt_version=JUDGE_VERSION, system=JUDGE_SYSTEM, text=text,
                        schema=SCHEMA, model=model, effort="medium")
 
