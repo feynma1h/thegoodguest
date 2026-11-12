@@ -14,6 +14,8 @@ Covers:
     failure
   - finish_url / furniture_url (decision 0313): signed links to optional
     siblings, null when absent or when anything about them fails
+  - scene_url (decision 0376): the diorama scene.json, the same kind of
+    sibling, which turns the room guide on for the room
 
 InMemoryManifestFetcher + a fake signer are injected; no GCS.
 
@@ -100,6 +102,7 @@ _SHELL_URI = "gs://outputs/scenes/s1/shell.json"
 _COMPRESSED_URI = "gs://outputs/scenes/s1/compressed.json"
 _FINISH_URI = "gs://outputs/scenes/s1/finish.json"
 _FURNITURE_URI = "gs://outputs/scenes/s1/furniture.json"
+_SCENE_JSON_URI = "gs://outputs/scenes/s1/scene.json"
 
 
 def _material(family: str | None = "painted") -> dict:
@@ -555,6 +558,55 @@ class TestAssetsFinishAndFurnitureSiblings:
         body = resp.json()
         assert body["finish_url"] is None
         assert set(body["asset_urls"])  # the room's own splats were still signed
+
+
+class TestAssetsSceneSibling:
+    """scene_url (decision 0376): the diorama pipeline's scene.json, signed when
+    it is there, null when it is not, and never able to take the room down."""
+
+    def _get(self, client, fetcher=None, signer=None):
+        return _get_assets(
+            client,
+            _scene(),
+            manifest_bytes=json.dumps(_manifest()).encode(),
+            fetcher=fetcher,
+            signer=signer,
+        )
+
+    def test_absent_is_null(self, client) -> None:
+        assert self._get(client).json()["scene_url"] is None
+
+    def test_present_is_signed_and_not_read(self, client) -> None:
+        class ReadCounting(InMemoryManifestFetcher):
+            reads: list[str] = []
+
+            def fetch_optional(self, gs_uri: str):
+                self.reads.append(gs_uri)
+                return super().fetch_optional(gs_uri)
+
+        fetcher = ReadCounting({_SCENE_JSON_URI: b"{}"})
+        body = self._get(client, fetcher).json()
+        assert body["scene_url"] == "https://signed.example/scenes/s1/scene.json?sig=abc"
+        assert _SCENE_JSON_URI not in fetcher.reads
+        assert not any("scene.json" in u for u in body["asset_urls"])
+
+    def test_a_failure_degrades_to_null(self, client) -> None:
+        class Flaky(InMemoryManifestFetcher):
+            def exists(self, gs_uri: str) -> bool:
+                raise server.ManifestFetchError("gcs flaked")
+
+        resp = self._get(client, Flaky({_SCENE_JSON_URI: b"{}"}))
+        assert resp.status_code == 200 and resp.json()["scene_url"] is None
+
+        class SceneBreaks(FakeSigner):
+            def sign(self, gs_uri: str, ttl_seconds: int) -> str:
+                if gs_uri.endswith("scene.json"):
+                    raise RuntimeError("signblob unavailable")
+                return super().sign(gs_uri, ttl_seconds)
+
+        resp = self._get(client, InMemoryManifestFetcher({_SCENE_JSON_URI: b"{}"}), SceneBreaks())
+        assert resp.status_code == 200 and resp.json()["scene_url"] is None
+        assert set(resp.json()["asset_urls"])
 
 
 class TestAssetsUpstreamFailures:

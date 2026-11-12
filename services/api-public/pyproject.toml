@@ -13,6 +13,8 @@ dependencies = [
     # Install them first: pip install -e packages/schemas packages/api-core
     "thegoodguest-schemas",
     "thegoodguest-api-core",
+    # The room guide (decision 0376), also local: pip install -e packages/room-guide
+    "thegoodguest-room-guide",
 ]
 
 [project.optional-dependencies]
