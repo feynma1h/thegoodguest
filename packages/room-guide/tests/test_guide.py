@@ -118,6 +118,17 @@ def test_a_note_changes_the_rooms_needs(study, tmp_path):
     assert s.told == ["the door is never used, we go through the other room"]
 
 
+def test_a_finding_named_by_its_piece_is_searched_for(study, tmp_path):
+    """Asked to fix "desk", the room searches its daylight finding the way that finding is scored."""
+    from thegoodguest_room_guide.guide import Turn
+    s = session_with(study, tmp_path, [])
+    t = Turn(s, lambda kind, data: None)
+    assert "pref:task_light:desk" in [f.key for f in s.engine.current_findings]
+    assert t._finding_key("desk") == "pref:task_light:desk"
+    assert t.t_look_for_changes("fix", finding="desk")["proposals"]
+    assert "no finding 'piano'" in t.t_look_for_changes("fix", finding="piano")["why"]
+
+
 def test_a_number_from_nowhere_is_flagged():
     assert foreign_numbers("It has about 0.7 m in front.", ["there's about 0.7 m before the bed"]) == []
     assert foreign_numbers("It needs 1.2 m.", ["there's about 0.7 m before the bed"]) == ["1.2 m"]

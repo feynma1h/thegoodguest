@@ -117,11 +117,26 @@ class Turn:
     def _proposals(self, props) -> list[dict]:
         return self.s.offer(props)
 
+    def _finding_key(self, finding: str) -> str | None:
+        """The finding meant: its exact key, else the most serious one naming that piece or need."""
+        keys = [f.key for f in self.s.engine.current_findings if f.kind not in ("good", "question")]
+        if finding in keys:
+            return finding
+        named = [k for k in keys if finding in k.split(":") or k.endswith(finding)]
+        return named[0] if named else None
+
     def t_look_for_changes(self, goal: str, finding: str | None = None, piece: str | None = None,
                            keep_still: list[str] | None = None):
-        key = {"general": "general", "open_floor": "open_floor",
-               "fix": f"fix:{finding}" if finding else "general",
+        key = {"general": "general", "open_floor": "open_floor", "fix": "general",
                "light": f"light:{piece}" if piece else "general"}[goal]
+        if goal == "fix" and finding:
+            found = self._finding_key(finding)
+            if found is None:
+                return {"proposals": [], "why": f"there is no finding {finding!r} in the room now; "
+                                               "use a key from WHAT THE ROOM SHOWS"}
+            # A daylight or open-floor finding is a preference: its own search scores it.
+            key = ("light:" + found.split(":", 2)[2] if found.startswith("pref:task_light:")
+                   else "open_floor" if found == "pref:open_floor" else f"fix:{found}")
         self.emit("note", {"text": "Looking at every place each piece could go…"})
         props = self._proposals(self.s.engine.explore(key, locked=keep_still or []))
         if not props:
