@@ -196,7 +196,9 @@ def clear_profile(room: Room, zone: Zone, poses: dict[str, Pose],
     us = np.linspace(-half - ext, half + ext, n)
     clear = np.full(len(us), top)
     who: list[set[str]] = [set() for _ in us]
-    outside = ~point_in_polygon(origin + us[:, None] * u_axis + v_axis * 0.01, room.footprint)
+    # Walls don't burn: heat is kept from pieces, not from the room's edge.
+    walled = zone.need != "heat"
+    outside = ~point_in_polygon(origin + us[:, None] * u_axis + v_axis * 0.01, room.footprint) & walled
     clear[outside] = 0.0
     for k in np.nonzero(outside)[0]:
         who[k] = {"wall"}
@@ -204,7 +206,7 @@ def clear_profile(room: Room, zone: Zone, poses: dict[str, Pose],
     # The room's edge, straight out from each point along the side.
     starts = origin + us[:, None] * u_axis
     poly = room.footprint
-    for i in range(len(poly)):
+    for i in range(len(poly) if walled else 0):
         p, q = poly[i], poly[(i + 1) % len(poly)]
         e = q - p
         denom = v_axis[0] * e[1] - v_axis[1] * e[0]
@@ -349,8 +351,44 @@ def assess(room: Room, needs: RoomNeeds, arrangement: Arrangement | None = None,
             shortfalls += s
 
     shortfalls += bond_shortfalls(room, needs, poses)
+    breaks, shortfalls = _either_side(all_zones, breaks, shortfalls, path_widths, depths)
     prefs = preferences(room, needs, poses, grid) if paths else []
     return Assessment(breaks, shortfalls, path_widths, prefs, poses, depths, reach_dist)
+
+
+def _either_side(all_zones, breaks, shortfalls, path_widths, depths):
+    """Where one of two sides is enough, only the better side counts.
+
+    A side with nothing wrong settles it, and the other side's troubles are
+    dropped. With both in trouble, the side with fewer breaks, then more room,
+    is the one reported. `path_widths` loses the dropped side too.
+    """
+    groups: dict[tuple[str, str], list[str]] = {}
+    for z in all_zones:
+        if z.either:
+            groups.setdefault((z.piece, z.need), []).append(z.side)
+
+    def trouble(pid, need, side):
+        nb = sum(1 for b in breaks if b.pieces and b.pieces[0] == pid and b.need == need and b.side == side)
+        ns = sum(1 for s in shortfalls if s.piece == pid and s.need in (need, "pass") and s.side == side)
+        return nb, ns
+
+    drop: set[tuple[str, str, str]] = set()
+    for (pid, need), sides in groups.items():
+        if len(sides) < 2:
+            continue
+        ranked = sorted(sides, key=lambda s: (trouble(pid, need, s)[0], trouble(pid, need, s)[1] > 0,
+                                              -depths.get((pid, need, s), (0.0,))[0],
+                                              -path_widths.get((pid, need, s), 0.0)))
+        drop.update((pid, need, s) for s in ranked[1:])
+    if not drop:
+        return breaks, shortfalls
+    for key in drop:
+        path_widths.pop(key, None)
+    kept_b = [b for b in breaks if not (b.pieces and (b.pieces[0], b.need, b.side) in drop)]
+    kept_s = [s for s in shortfalls if (s.piece, s.need, s.side) not in drop
+              and not (s.need == "pass" and any((s.piece, n, s.side) in drop for n in ("use", "get_in")))]
+    return kept_b, kept_s
 
 
 def bond_holds(room: Room, follower: str, anchor: str, how: str, poses: dict[str, Pose]) -> bool:
@@ -441,6 +479,8 @@ def _reach(room: Room, needs: RoomNeeds, t: Target, poses, grid: FloorGrid, walk
     covering = _intruders(front, solids)
     if covering and t.strength == "hard":
         breaks.append(Break("covered", (t.piece, *covering), need="reach"))
+    elif covering:
+        shorts.append(Shortfall(t.piece, "reach", "covered", 0.0, 1.0, tuple(covering), t.strength))
     dist = math.inf
     c, _, _, _, _ = _face(room, t.piece, pose)
     if walk is not None:

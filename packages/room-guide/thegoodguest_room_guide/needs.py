@@ -38,7 +38,7 @@ from .model import Piece, Pose, Room
 from .rulebook import BODY_TOP, size_for
 
 NEED_TYPES = ("open", "use", "get_in", "reach", "air", "heat", "see", "light", "pass", "other")
-SIDES = ("front", "back", "left", "right", "sides", "all")
+SIDES = ("front", "back", "left", "right", "sides", "either", "all")
 STRENGTHS = ("hard", "soft")
 POSTURES = ("standing", "seated", "lying")
 MECHANISMS = ("hinged", "drawers", "sliding")
@@ -56,11 +56,13 @@ NEEDS_POSTURE = ("use", "get_in", "see")
 ZONE_NEEDS = ("open", "use", "get_in", "air", "heat", "pass", "other")
 PERSON_NEEDS = ("use", "get_in")
 
-# A companion used with a piece may stand in the room a person needs to use it:
-# a chair at a desk, a table beside a bed, a mirror over a dresser. A seat at a
-# piece is pulled away to open it. Nothing may stand where a piece heats,
-# breathes, lets daylight in or lets people through, companion or not.
-COMPANION_ROOM = {"use": FOLLOW, "get_in": FOLLOW, "see": FOLLOW, "reach": FOLLOW, "open": ("at",)}
+# What a companion may stand in. A seat set at a piece stands where it is used
+# from, and is pulled away to open it (a chair at a desk). Something hung over a
+# piece stands above whatever it is seen or reached from (a mirror over a
+# dresser). Nothing else is excused: not the room to get into a seat or a bed
+# (that is the knee room a low table must leave), and never where a piece
+# heats, breathes, lets daylight in or lets people through.
+COMPANION_ROOM = {"use": ("at",), "open": ("at",), "see": ("over",), "reach": ("over",)}
 
 MAX_NEEDS_PER_PIECE = 8
 MAX_BONDS_PER_PIECE = 4
@@ -130,7 +132,7 @@ class RoomNeeds:
     preferences: tuple[Preference, ...] = ()
     questions: tuple[Question, ...] = ()
     origin: str = "rules pass"
-    ignored: tuple[str, ...] = ()      # what was read but set aside, and why
+    settled: tuple[str, ...] = ()      # bonds set aside or turned round after reading, and why
 
     def fixed_ids(self) -> set[str]:
         return {pid for pid, p in self.pieces.items() if p.moves in ("fixed", "rehang")}
@@ -398,10 +400,12 @@ class Zone:
     estimate: bool = False
     say: str = ""
     mechanism: str | None = None
+    either: bool = False         # one of left and right is enough
 
 
 def concrete_sides(side: str) -> tuple[str, ...]:
-    return {"sides": ("left", "right"), "all": ("front", "back", "left", "right")}.get(side, (side,))
+    return {"sides": ("left", "right"), "either": ("left", "right"),
+            "all": ("front", "back", "left", "right")}.get(side, (side,))
 
 
 def _exempt(room: Room, needs: RoomNeeds, piece_id: str, need: str) -> frozenset[str]:
@@ -450,7 +454,8 @@ def zones(room: Room, needs: RoomNeeds) -> list[Zone]:
             for side in sides:
                 width = sx if side in ("front", "back") else sz
                 out.append(Zone(pid, n.need, side, n.strength, hard, comfortable, width, y0, y1,
-                                floor_based, n.posture, exempt, n.why, estimate, say, n.mechanism))
+                                floor_based, n.posture, exempt, n.why, estimate, say, n.mechanism,
+                                either=n.side == "either" and piece.opening is None))
     return out
 
 

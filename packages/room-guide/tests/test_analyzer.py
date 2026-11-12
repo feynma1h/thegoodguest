@@ -102,3 +102,25 @@ def test_the_demo_room_reads_like_a_designer_would():
     assert "Sitting at the white desk, the window is behind you, so daylight falls on the screen." in said
     assert "The office chair isn't at the white desk." in said
     assert any(f.key == "path:bed:get_in:left" and f.kind == "problem" for f in fs)
+
+
+def test_a_soft_view_or_switch_that_is_covered_is_still_said():
+    b = bedroom()
+    b.on_wall("switches", "switch_panel", "wall_+z", 2.6, 1.1, (0.3, 0.2, 0.02))
+    b.on_wall("mirror", "mirror", "wall_+z", 1.0, 0.6, (0.6, 1.4, 0.02))
+    b.objects = [o for o in b.objects if o["id"] != "dresser"]
+    b.against("wardrobe", "wardrobe", "wall_+z", 1.0, (1.2, 2.0, 0.6), gap=0.04)
+    b.against("cabinet", "cabinet", "wall_+z", 2.6, (0.8, 1.8, 0.45))
+    data = bedroom_needs()
+    del data["pieces"]["dresser"]
+    data["pieces"]["wardrobe"] = {"moves": "heavy", "why": "tall"}
+    data["pieces"]["cabinet"] = {"moves": "heavy", "why": "tall"}
+    data["pieces"]["switches"] = {"moves": "fixed", "why": "wired", "needs": [
+        {"need": "reach", "strength": "soft", "why": "the lights"}]}
+    data["pieces"]["mirror"] = {"moves": "fixed", "why": "hung", "needs": [
+        {"need": "see", "posture": "standing", "strength": "soft", "why": "dressing"}]}
+    room, fs = run(b, data)
+    said = {f.key: f for f in fs}
+    assert said["covered:switches"].kind == "tight"
+    assert said["covered:switches"].text == "The cabinet stands in front of the switches."
+    assert said["unseen:mirror"].severity == 2

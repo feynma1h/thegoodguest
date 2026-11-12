@@ -213,3 +213,37 @@ def test_where_the_light_falls_at_a_desk():
     turned = {"desk": replace(room.pieces["desk"].pose, x=0.0, z=-1.19, yaw=0.0)}
     light = next(p for p in assess(room, needs, turned).preferences if p.pref == "task_light")
     assert light.detail["light"] == "side" and light.value == 1.0
+
+
+def _box_room(side: str):
+    """A single bed pushed against the wall of a small room."""
+    b = SceneBuilder(width=2.4, depth=2.6, kind="small bedroom")
+    b.door("door", "wall_+z", 1.5, 2.3)
+    b.against("bed", "bed", "wall_-z", 1.94, (0.9, 0.45, 2.0))
+    data = {"pieces": {"door": door_needs(), "bed": {"moves": "heavy", "why": "a bed", "needs": [
+        {"need": "get_in", "side": side, "posture": "lying", "strength": "hard", "why": "slept in"}]}}}
+    return setup(b, data)
+
+
+def test_a_single_bed_against_a_wall_needs_one_free_side_when_either_will_do():
+    room, needs = _box_room("sides")
+    assert [(b.need, b.side) for b in assess(room, needs).breaks if b.pieces[0] == "bed"]
+    room, needs = _box_room("either")
+    a = assess(room, needs)
+    assert not [b for b in a.breaks if b.pieces[0] == "bed"]
+    assert not [s for s in a.shortfalls if s.piece == "bed" and s.side == "left"]
+    assert ("bed", "get_in", "left") not in a.paths, "the side that doesn't count isn't walked to either"
+
+
+def test_heat_is_kept_from_pieces_not_from_walls():
+    b = SceneBuilder(width=4.0, depth=3.5, kind="living room")
+    b.door("door", "wall_+z", 0.3, 1.1)
+    b.against("heater", "heater", "wall_-x", 1.75, (0.6, 0.65, 0.25))
+    data = {"pieces": {"door": door_needs(), "heater": {"moves": "yes", "needs": [
+        {"need": "heat", "side": "all", "strength": "hard", "why": "it gets hot"}]}}}
+    room, needs = setup(b, data)
+    assert not [x for x in assess(room, needs).breaks if x.need == "heat"]
+    b.add("sofa", "sofa", (-1.1, 0.0), (1.8, 0.85, 0.9), yaw=math.pi / 2)
+    data["pieces"]["sofa"] = {"moves": "heavy", "why": "a sofa"}
+    room, needs = setup(b, data)
+    assert ("zone", "heat", ("heater", "sofa")) in kinds(assess(room, needs))

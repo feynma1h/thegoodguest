@@ -6,8 +6,9 @@ when one is given, a plan of the room drawn from the model (never a camera
 frame). The answer is JSON in the needs vocabulary, checked by
 `needs.parse_needs`. An answer that doesn't fit is asked once more with the
 problems listed; if that fails too, the room falls back to the defaults (laws
-only), and says so. Bonds that can't be true of any arrangement are set aside
-and listed (`settle_bonds`).
+only), and says so. Bonds that can't be true of any arrangement are set aside,
+and bonds written the wrong way round are turned; both are listed
+(`settle_bonds`).
 
 The answer is cached by the gateway, so the same room and prompt cost nothing
 the second time.
@@ -20,7 +21,7 @@ from dataclasses import replace
 
 from .gateway import DEFAULT_MODEL, Gateway, Image, JsonRequest
 from .model import Room
-from .needs import (HOWS, MECHANISMS, MOVES, NEED_TYPES, POSTURES, PREFERENCES, SIDES, STRENGTHS, TASKS,
+from .needs import (FOLLOW, HOWS, MECHANISMS, MOVES, NEED_TYPES, POSTURES, PREFERENCES, SIDES, STRENGTHS, TASKS,
                     VIEWERS, WEIGHTS, NeedsError, RoomNeeds, default_needs, parse_needs)
 from .prompts import RULES_SYSTEM, RULES_VERSION
 
@@ -112,29 +113,55 @@ def run_rules_pass(room: Room, gateway: Gateway, images: list[Image] | None = No
             return default_needs(room)
 
 
-def settle_bonds(room: Room, needs: RoomNeeds) -> RoomNeeds:
-    """The bonds that could be true of this room, without the ones that can't.
+HANG_SLACK = 0.05      # how far a hung piece may dip below the top of what it hangs over
 
-    A bond between pieces in one stack (a television on its unit) says nothing
-    the scan doesn't already keep, and would pull the one off the other. Only
-    something that hangs can hang `over` another piece. Kept, either would have
-    the engine chase it and the guide report it. A bond the scan doesn't
-    satisfy is kept: a chair left away from its desk still belongs at it.
-    Both kinds set aside are listed in `ignored`.
+
+def settle_bonds(room: Room, needs: RoomNeeds) -> RoomNeeds:
+    """The bonds that could be true of this room, each pointing the right way.
+
+    Set aside:
+      - a bond between pieces in one stack (a television on its unit): the scan
+        already keeps them together, and the bond would pull one off the other;
+      - `over` from something that doesn't hang, or that hangs lower than the
+        top of the piece it would be over (a mirror behind a tall wardrobe).
+    Turned round: `at` or `beside` written from the larger piece to the smaller
+    one (a desk "at" its stool, a bed "beside" its table). The smaller piece is
+    the one that goes with the larger, and the engine moves it, not the other.
+    Kept: a bond the scan doesn't satisfy. A chair left away from its desk
+    still belongs at it.
+    Everything set aside or turned is listed in `settled`.
     """
-    ignored = list(needs.ignored)
-    pieces = {}
+    settled = list(needs.settled)
+    bonds: dict[str, list] = {pid: [] for pid in needs.pieces}
+
+    def area(pid: str) -> float:
+        sx, _, sz = room.pieces[pid].size
+        return sx * sz
+
+    def add(pid, b):
+        if not any(o.piece == b.piece for o in bonds[pid]) and not any(
+                o.piece == pid and o.how in FOLLOW for o in bonds.get(b.piece, [])):
+            bonds[pid].append(b)
+
     for pid, entry in needs.pieces.items():
-        kept = []
         for b in entry.bonds:
+            p, other = room.pieces[pid], room.pieces[b.piece]
             if room.base_of(pid) == room.base_of(b.piece):
-                ignored.append(f"{pid} {b.how} {b.piece}: one rests on the other, so they already move together")
-            elif b.how == "over" and room.pieces[pid].support not in ("wall", "ceiling"):
-                ignored.append(f"{pid} over {b.piece}: only something that hangs can hang over a piece")
+                settled.append(f"{pid} {b.how} {b.piece}: set aside, one rests on the other, so they move together")
+            elif b.how == "over" and p.support not in ("wall", "ceiling"):
+                settled.append(f"{pid} over {b.piece}: set aside, only something that hangs can hang over a piece")
+            elif b.how == "over" and p.pose.y < other.pose.y + other.size[1] - HANG_SLACK:
+                settled.append(f"{pid} over {b.piece}: set aside, it hangs lower than the top of {b.piece}")
+            elif (b.how in ("at", "beside") and area(pid) > area(b.piece) and b.piece in bonds
+                  and needs.moves(b.piece) in ("yes", "heavy") and other.opening is None
+                  and other.support not in ("wall", "ceiling")):
+                settled.append(f"{pid} {b.how} {b.piece}: turned round, the smaller piece goes with the larger")
+                add(b.piece, replace(b, piece=pid))
             else:
-                kept.append(b)
-        pieces[pid] = entry if len(kept) == len(entry.bonds) else replace(entry, bonds=tuple(kept))
-    return replace(needs, pieces=pieces, ignored=tuple(ignored))
+                add(pid, b)
+    pieces = {pid: entry if list(entry.bonds) == bonds[pid] else replace(entry, bonds=tuple(bonds[pid]))
+              for pid, entry in needs.pieces.items()}
+    return replace(needs, pieces=pieces, settled=tuple(settled))
 
 
 def needs_to_json(needs: RoomNeeds) -> dict:
@@ -152,5 +179,5 @@ def needs_to_json(needs: RoomNeeds) -> dict:
     return {"pieces": pieces,
             "preferences": [clean(dict(p.__dict__)) for p in needs.preferences],
             "questions": [dict(q.__dict__) for q in needs.questions],
-            "ignored": list(needs.ignored)}
+            "settled": list(needs.settled)}
 

@@ -79,10 +79,13 @@ def test_zone_depths_come_from_the_piece_or_the_rulebook():
     assert {s for (p, n, s) in by if p == "bed"} == {"left", "right"}
 
 
-def test_bonded_pieces_may_stand_in_each_others_zones():
-    needs = parse_needs(room(), bedroom_needs())
-    bed_zone = next(z for z in zones(room(), needs) if z.piece == "bed")
-    assert {"bedside", "bedside_2", "lamp"} <= bed_zone.exempt
+def test_a_seat_set_at_a_piece_may_stand_where_it_is_used_from():
+    data = bedroom_needs()
+    data["pieces"]["bedside_2"]["with"] = [{"piece": "dresser", "how": "at", "strength": "soft", "why": "its seat"}]
+    zs = {(z.piece, z.need): z for z in zones(room(), parse_needs(room(), data))}
+    assert "bedside_2" in zs["dresser", "use"].exempt and "bedside_2" in zs["dresser", "open"].exempt
+    bed = [z for z in zones(room(), parse_needs(room(), bedroom_needs())) if z.piece == "bed"]
+    assert all(z.exempt == {"bed"} for z in bed), "the room to get into bed excuses no companion"
 
 
 def test_no_bond_excuses_what_stands_in_heat_air_or_a_doorway():
@@ -94,7 +97,14 @@ def test_no_bond_excuses_what_stands_in_heat_air_or_a_doorway():
     zs = {(z.piece, z.need): z for z in zones(room(), parse_needs(room(), data))}
     assert "bed" not in zs["dresser", "heat"].exempt
     assert "bed" not in zs["dresser", "open"].exempt, "only a seat at a piece is pulled away to open it"
-    assert "dresser" in zs["bed", "get_in"].exempt
+    assert "dresser" not in zs["bed", "get_in"].exempt
+
+
+def test_either_side_makes_two_zones_one_of_which_is_enough():
+    data = bedroom_needs()
+    data["pieces"]["bed"]["needs"][0]["side"] = "either"
+    bed = [z for z in zones(room(), parse_needs(room(), data)) if z.piece == "bed"]
+    assert sorted(z.side for z in bed) == ["left", "right"] and all(z.either for z in bed)
 
 
 def test_bonds_that_cannot_be_true_are_set_aside_and_listed():
@@ -106,7 +116,36 @@ def test_bonds_that_cannot_be_true_are_set_aside_and_listed():
     needs = settle_bonds(room(), parse_needs(room(), data))
     assert needs.pieces["lamp"].bonds == () and needs.pieces["dresser"].bonds == ()
     assert [b.how for b in needs.pieces["bedside_2"].bonds] == ["at"]
-    assert len(needs.ignored) == 2 and needs_to_json(needs)["ignored"] == list(needs.ignored)
+    assert len(needs.settled) == 2 and needs_to_json(needs)["settled"] == list(needs.settled)
+
+
+def test_bonds_written_from_the_larger_piece_are_turned_round():
+    from thegoodguest_room_guide.rules_pass import settle_bonds
+    data = bedroom_needs()
+    data["pieces"]["bed"]["with"] = [{"piece": "bedside", "how": "beside", "strength": "soft", "why": "a table"}]
+    data["pieces"]["dresser"]["with"] = [{"piece": "bedside_2", "how": "at", "strength": "soft", "why": "its seat"}]
+    needs = settle_bonds(room(), parse_needs(room(), data))
+    assert needs.pieces["bed"].bonds == () and needs.pieces["dresser"].bonds == ()
+    assert [(b.piece, b.how) for b in needs.pieces["bedside"].bonds] == [("bed", "beside")], "not twice"
+    assert ("dresser", "at") in [(b.piece, b.how) for b in needs.pieces["bedside_2"].bonds]
+    assert sorted(needs.followers("bed")) == ["bedside", "bedside_2"]
+    assert len([s for s in needs.settled if "turned round" in s]) == 2
+
+
+def test_nothing_hangs_over_a_piece_taller_than_where_it_hangs():
+    from thegoodguest_room_guide.rules_pass import settle_bonds
+    b = bedroom()
+    b.on_wall("mirror", "mirror", "wall_+z", 1.0, 0.6, (0.6, 1.4, 0.03))
+    b.objects = [o for o in b.objects if o["id"] != "dresser"]
+    b.against("wardrobe", "wardrobe", "wall_+z", 1.0, (1.2, 2.0, 0.6), gap=0.04)
+    data = bedroom_needs()
+    del data["pieces"]["dresser"]
+    data["pieces"]["wardrobe"] = {"moves": "heavy", "why": "tall"}
+    data["pieces"]["mirror"] = {"moves": "rehang", "why": "hung", "needs": [], "with": [
+        {"piece": "wardrobe", "how": "over", "strength": "soft", "why": "by the wardrobe"}]}
+    r = room_from_scene(b.scene())
+    needs = settle_bonds(r, parse_needs(r, data))
+    assert needs.pieces["mirror"].bonds == () and "hangs lower than the top of wardrobe" in needs.settled[0]
 
 
 def test_defaults_fix_the_shell_and_let_everything_else_move():

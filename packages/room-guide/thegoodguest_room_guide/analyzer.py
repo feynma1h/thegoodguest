@@ -227,6 +227,13 @@ def findings(room: Room, needs: RoomNeeds, a: Assessment) -> list[Finding]:
     for s in a.shortfalls:
         if s.need == "with":
             out.append(_bond_finding(room, s))
+        elif s.need == "reach" and s.side == "covered":     # a soft reach, covered
+            out.append(Finding(f"covered:{s.piece}", "tight", 2, (s.piece, *s.intruders),
+                               f"{_cap(_list([the(room, p) for p in s.intruders]))} "
+                               f"{'stand' if len(s.intruders) > 1 else 'stands'} in front of {the(room, s.piece)}."))
+        elif s.need == "see" and s.strength == "soft":       # a hard one is said above, as a break
+            out.append(Finding(f"unseen:{s.piece}", "tight", 2, (s.piece,),
+                               f"There's nowhere to stand in front of {the(room, s.piece)} with a clear view of it."))
         elif s.need == "light" and s.piece not in dark:     # a dark window is said once, above
             share = int(round((1.0 - s.free) * 100 / 5) * 5)
             if share >= 10 and s.intruders:
