@@ -149,6 +149,9 @@ def test_nothing_hangs_over_a_piece_taller_than_where_it_hangs():
     r = room_from_scene(b.scene())
     needs = settle_bonds(r, parse_needs(r, data))
     assert needs.pieces["mirror"].bonds == () and "hangs lower than the top of wardrobe" in needs.settled[0]
+    assert needs.pieces["mirror"].moves == "fixed", "nothing left to hang over, so it stays where it hangs"
+    from thegoodguest_room_guide.rules_pass import needs_to_json
+    assert parse_needs(r, needs_to_json(needs)).pieces["mirror"].moves == "fixed", "and the file reads back"
 
 
 def test_defaults_fix_the_shell_and_let_everything_else_move():

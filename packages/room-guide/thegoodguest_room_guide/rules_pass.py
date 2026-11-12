@@ -161,6 +161,12 @@ def settle_bonds(room: Room, needs: RoomNeeds) -> RoomNeeds:
                 add(pid, b)
     pieces = {pid: entry if list(entry.bonds) == bonds[pid] else replace(entry, bonds=tuple(bonds[pid]))
               for pid, entry in needs.pieces.items()}
+    # Something re-hung only over a piece it goes `over`: with no such bond left,
+    # it stays where it hangs.
+    for pid, entry in pieces.items():
+        if entry.moves == "rehang" and not any(b.how == "over" for b in entry.bonds):
+            pieces[pid] = replace(entry, moves="fixed")
+            settled.append(f"{pid}: fixed, it has nothing left to hang over")
     return replace(needs, pieces=pieces, settled=tuple(settled))
 
 
