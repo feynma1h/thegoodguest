@@ -1,6 +1,6 @@
 # Decision notes
 
-325 notes. **270 of them are `Decided`** -- those govern code that
+326 notes. **271 of them are `Decided`** -- those govern code that
 ships today and are the ones worth reading before you change something. The
 other 55 record decisions that were carried out, replaced, or
 measured and refuted; they are kept because source comments cite them, not
@@ -21,7 +21,7 @@ The status vocabulary and the numbering rule live in
 | `Superseded` | 11 | replaced by a later note |
 | `Amended` | 12 | partly corrected by a later note |
 | `Spent` | 16 | carried out; nothing left to comply with |
-| `Decided` | 270 | governs code that ships today |
+| `Decided` | 271 | governs code that ships today |
 
 ## Refuted (16)
 
@@ -106,7 +106,7 @@ The status vocabulary and the numbering rule live in
 | [0218](0218-the-bridge-was-never-waiting-on-the-fetch.md) | the bridge was never waiting on the fetch | Spent |
 | [0256](0256-when-only-one-thing-fits-the-one-that-changes-wins.md) | when only one thing fits, the one that changes wins | Spent |
 
-## Decided (270)
+## Decided (271)
 
 | # | title | status |
 |---|---|---|
@@ -380,3 +380,4 @@ The status vocabulary and the numbering rule live in
 | [0371](0371-collision-uses-the-shapes-the-viewer-draws.md) | Collision uses the shapes the viewer draws | Decided |
 | [0372](0372-the-guide-offers-only-solved-changes-and-the-server-writes-every-motion.md) | The guide offers only solved changes, and the server writes every motion | Decided |
 | [0373](0373-the-guide-sees-the-semantic-room-and-quotes-every-number.md) | The guide sees the semantic room, and quotes every number it says | Decided |
+| [0376](0376-the-room-guide-is-in-the-product-behind-one-switch.md) | The room guide is in the product behind one switch | Decided |
