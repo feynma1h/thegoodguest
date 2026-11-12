@@ -4,6 +4,7 @@ import copy
 import math
 from dataclasses import replace
 
+import numpy as np
 import pytest
 
 from needs_fixtures import WINDOW, bedroom_needs, door_needs
@@ -213,6 +214,33 @@ def test_where_the_light_falls_at_a_desk():
     turned = {"desk": replace(room.pieces["desk"].pose, x=0.0, z=-1.19, yaw=0.0)}
     light = next(p for p in assess(room, needs, turned).preferences if p.pref == "task_light")
     assert light.detail["light"] == "side" and light.value == 1.0
+
+
+def test_near_is_measured_between_edges_not_centres():
+    from thegoodguest_room_guide.assess import bond_holds
+    from thegoodguest_room_guide.laws import all_poses
+    b = SceneBuilder(width=4.5, depth=4.0, kind="living room")
+    b.against("sofa", "sofa", "wall_-z", 2.25, (2.0, 0.85, 0.9))
+    b.add("coffee", "coffee_table", (0.0, -0.29), (1.2, 0.42, 0.6))        # 0.5 m off the sofa's front
+    b.add("pouf", "pouf", (0.0, 1.2), (0.5, 0.4, 0.5))                       # well over a metre off
+    room = room_from_scene(b.scene())
+    poses = all_poses(room, {})
+    assert bond_holds(room, "coffee", "sofa", "near", poses)
+    assert not bond_holds(room, "pouf", "sofa", "near", poses)
+
+
+def test_only_a_window_nearly_straight_ahead_is_in_front():
+    from thegoodguest_room_guide.assess import light_direction
+    room = room_from_scene(bedroom().scene())          # its one window is on wall_-x, centred on z = 0
+    at = np.array([0.0, 0.0])
+
+    def facing(deg):                                   # degrees away from looking straight at the window
+        r = math.radians(deg)
+        return np.array([-math.cos(r), math.sin(r)])
+
+    assert light_direction(room, at, facing(20))[0] == "front"
+    assert light_direction(room, at, facing(48))[0] == "side"
+    assert light_direction(room, at, facing(160))[0] == "behind"
 
 
 def _box_room(side: str):

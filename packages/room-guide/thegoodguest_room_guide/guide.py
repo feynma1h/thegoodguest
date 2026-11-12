@@ -86,7 +86,15 @@ TOOLS = [
 ]
 
 
-SAY_AFTER = ("offer", "show", "put_back", "note")
+# A card or a move with no words beside it reaches the person as a silent
+# change, so the room asks for the words. A card's words start from the problem:
+# "I've put up a card" alone leaves the person asking what for.
+SAY_AFTER = {
+    "offer": "now tell them what you found, in the room's words, and what this would change",
+    "show": "now tell them what changed on their screen and what it fixed",
+    "put_back": "now tell them it is back as it was",
+    "note": "now tell them what you noted and what it changes",
+}
 
 
 class Turn:
@@ -106,10 +114,8 @@ class Turn:
             out = {"refused": f"there's no clear way to move it there ({e.piece})"}
         except (KeyError, TypeError, ValueError) as e:
             out = {"error": f"{type(e).__name__}: {e}"}
-        if name in SAY_AFTER and isinstance(out, dict) and "error" not in out:
-            # A card or a move with no words beside it reaches the person as a
-            # silent change; the room asks for the sentence.
-            out["then"] = "tell them in a sentence or two what you did and why"
+        if name in SAY_AFTER and isinstance(out, dict) and "error" not in out and "refused" not in out:
+            out["then"] = SAY_AFTER[name]
         text = json.dumps(out, ensure_ascii=False)
         self.tool_texts.append(text)
         return text
@@ -220,12 +226,10 @@ def foreign_numbers(reply: str, allowed: list[str]) -> list[str]:
 
 def run_turn(session, text: str, emit) -> str:
     """One turn of the conversation. Returns the guide's reply; emits events as it goes."""
-    room, needs = session.room, session.needs
-    fs = session.engine.current_findings
     first = not session.messages
     start = len(session.messages)
     try:
-        return _turn(session, text, emit, room, fs, first)
+        return _turn(session, text, emit, session.room, first)
     except BaseException:
         # A turn that didn't finish leaves no half of itself behind, so asking
         # again sends the same request (and an answered one replays free).
@@ -233,7 +237,7 @@ def run_turn(session, text: str, emit) -> str:
         raise
 
 
-def _turn(session, text, emit, room, fs, first) -> str:
+def _turn(session, text, emit, room, first) -> str:
     content = [{"type": "text", "text": text}]
     if first:
         content = [plan_image(room, {}).block(),
@@ -242,11 +246,14 @@ def _turn(session, text, emit, room, fs, first) -> str:
     session.messages.append({"role": "user", "content": content})
     turn = Turn(session, emit)
     reply = []
+    briefs = session.__dict__.setdefault("briefs", [])     # every room brief the guide has been sent
     for _ in range(MAX_ROUNDS):
+        told = brief(room, session.needs, session.arrangement, session.engine.current_findings,
+                     session.told, session.changes)
+        if not briefs or briefs[-1] != told:
+            briefs.append(told)
         system = [{"type": "text", "text": GUIDE_SYSTEM, "cache_control": {"type": "ephemeral"}},
-                  {"type": "text", "text": brief(room, session.needs, session.arrangement,
-                                                 session.engine.current_findings, session.told, session.changes),
-                   "cache_control": {"type": "ephemeral"}}]
+                  {"type": "text", "text": told, "cache_control": {"type": "ephemeral"}}]
         req = TurnRequest(stage="guide", prompt_version=GUIDE_VERSION, system=system,
                           messages=session.messages, tools=TOOLS, model=getattr(session, "model", MODEL),
                           effort=EFFORT)
@@ -261,9 +268,11 @@ def _turn(session, text, emit, room, fs, first) -> str:
                    for c in calls]
         session.messages.append({"role": "user", "content": results})
     said = " ".join(reply)
-    allowed = [brief(room, session.needs, session.arrangement, fs, session.told, session.changes), text,
-               *turn.tool_texts, *[m["content"] for m in session.messages if m["role"] == "user"
-                                   and isinstance(m["content"], str)]]
+    # A number may come from any brief the guide was sent, any tool result in the
+    # conversation, or anything the person said; never from the guide's own replies.
+    heard = [b.get("text") or b.get("content") for m in session.messages if m["role"] == "user"
+             for b in (m["content"] if isinstance(m["content"], list) else [{"text": m["content"]}])]
+    allowed = [*briefs, *turn.tool_texts, *[h for h in heard if isinstance(h, str)]]
     stray = foreign_numbers(said, allowed)
     if stray:
         log.warning("guide said numbers from nowhere: %s", stray)

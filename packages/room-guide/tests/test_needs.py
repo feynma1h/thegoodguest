@@ -117,6 +117,9 @@ def test_bonds_that_cannot_be_true_are_set_aside_and_listed():
     assert needs.pieces["lamp"].bonds == () and needs.pieces["dresser"].bonds == ()
     assert [b.how for b in needs.pieces["bedside_2"].bonds] == ["at"]
     assert len(needs.settled) == 2 and needs_to_json(needs)["settled"] == list(needs.settled)
+    again = parse_needs(room(), needs_to_json(needs))
+    assert again.settled == needs.settled and again.pieces["bedside_2"].bonds == needs.pieces["bedside_2"].bonds, \
+        "a needs file written out reads back the same"
 
 
 def test_bonds_written_from_the_larger_piece_are_turned_round():

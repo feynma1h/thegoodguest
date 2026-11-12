@@ -161,6 +161,13 @@ PERSON_SPAN = 0.6
 ZONE_INSET = 0.03
 PROFILE_STEP = 0.02
 STRIP_NEEDS = ("use", "get_in", "pass")
+# "Near" is within reach of someone at the piece: an arm's length from its edge,
+# so a coffee table half a metre from a deep sofa is near it.
+NEAR_GAP = 0.6
+# A window lights you from in front (or behind) only when it sits within this
+# many degrees of straight ahead (or straight behind); anything wider is side
+# light. At 50 degrees a window off to one side of a sofa read as "you face it".
+FRONT_LIGHT = 40
 
 
 def _side_frame(piece, zone: Zone, pose: Pose) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -408,8 +415,8 @@ def bond_holds(room: Room, follower: str, anchor: str, how: str, poses: dict[str
             return False
         w = room.wall(wall)
         return abs(w.u_of((pf.x, pf.z)) - w.u_of((pa.x, pa.z))) <= sx / 2
-    if how == "near":
-        return math.hypot(pf.x - pa.x, pf.z - pa.z) <= 1.2
+    if how == "near":          # within reach: the gap between them, not their centres
+        return footprint_gap(ab, f.box(pf)) <= NEAR_GAP
     if how == "facing":
         d = np.array([pa.x - pf.x, pa.z - pf.z])
         n = float(np.hypot(*d))
@@ -632,7 +639,8 @@ def light_direction(room: Room, user: np.ndarray, facing: np.ndarray) -> tuple[s
     if best is None:
         return None, None
     cos = float(best[1] @ facing)
-    kind = "front" if cos > math.cos(math.radians(50)) else "behind" if cos < math.cos(math.radians(130)) else "side"
+    kind = ("front" if cos > math.cos(math.radians(FRONT_LIGHT)) else
+            "behind" if cos < math.cos(math.radians(180 - FRONT_LIGHT)) else "side")
     return kind, best[0]
 
 

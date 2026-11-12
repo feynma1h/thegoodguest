@@ -129,6 +129,33 @@ def test_a_finding_named_by_its_piece_is_searched_for(study, tmp_path):
     assert "no finding 'piano'" in t.t_look_for_changes("fix", finding="piano")["why"]
 
 
+def test_after_a_card_the_guide_is_asked_for_the_problem_first(study, tmp_path):
+    from thegoodguest_room_guide.guide import Turn
+    s = session_with(study, tmp_path, [])
+    t = Turn(s, lambda kind, data: None)
+    props = t.t_look_for_changes("light", piece="desk")["proposals"]
+    out = json.loads(t.call("offer", {"proposal": props[0]["id"]}))
+    assert out["then"].startswith("now tell them what you found")
+    assert "then" not in json.loads(t.call("move", {"piece": "door", "how": "wall", "target": "wall_-z"}))
+
+
+def test_a_number_quoted_from_an_earlier_turn_is_not_flagged(study, tmp_path):
+    heard = {}
+
+    def quote(req):
+        heard["gap"] = last_tool_result(req)["said"]
+        return [{"type": "text", "text": f"It's {heard['gap']}."}]
+
+    s = session_with(study, tmp_path, [
+        tool("measure", {"a": "desk", "b": "door"}, 1), quote,
+        lambda req: [{"type": "text", "text": f"As I said, {heard['gap']}."}],
+    ])
+    _, first = run(s, "How far is the door from the desk?")
+    _, second = run(s, "Say that again?")
+    assert any(ch.isdigit() for ch in heard["gap"]), heard
+    assert first[-1][1]["flags"] == [] and second[-1][1]["flags"] == []
+
+
 def test_a_number_from_nowhere_is_flagged():
     assert foreign_numbers("It has about 0.7 m in front.", ["there's about 0.7 m before the bed"]) == []
     assert foreign_numbers("It needs 1.2 m.", ["there's about 0.7 m before the bed"]) == ["1.2 m"]

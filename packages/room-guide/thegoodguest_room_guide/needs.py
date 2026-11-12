@@ -222,7 +222,7 @@ def parse_needs(room: Room, data: dict) -> RoomNeeds:
     problems: list[str] = []
     if not isinstance(data, dict):
         raise NeedsError(["the file is not an object"])
-    unknown_keys = set(data) - {"rules_version", "pieces", "preferences", "questions"}
+    unknown_keys = set(data) - {"rules_version", "pieces", "preferences", "questions", "settled"}
     if unknown_keys:
         problems.append(f"unknown keys: {', '.join(sorted(unknown_keys))}")
     raw_pieces = data.get("pieces")
@@ -327,9 +327,15 @@ def parse_needs(room: Room, data: dict) -> RoomNeeds:
         questions.append(Question(about, _text(q.get("ask"), problems, f"{where}.ask"),
                                   _text(q.get("why"), problems, f"{where}.why")))
 
+    # A file written back out (needs_to_json) lists what settling set aside or turned.
+    settled = data.get("settled") or []
+    if not isinstance(settled, list) or not all(isinstance(x, str) for x in settled):
+        problems.append("settled: a list of notes")
+        settled = []
+
     if problems:
         raise NeedsError(problems)
-    return RoomNeeds(pieces, tuple(prefs), tuple(questions), "rules pass")
+    return RoomNeeds(pieces, tuple(prefs), tuple(questions), "rules pass", tuple(settled))
 
 
 def default_needs(room: Room) -> RoomNeeds:
