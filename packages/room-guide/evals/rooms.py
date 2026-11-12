@@ -332,9 +332,14 @@ def box_room() -> EvalRoom:
         "bed": _moves("a single bed", "heavy", [_need("get_in", side="right", posture="lying")]),
         "desk": _moves(needs=[_need("use", "soft", side="front", posture="seated")]),
         "stool": _moves(with_=[{"piece": "desk", "how": "at", "strength": "soft", "why": "its seat"}]),
-    }}
+    }, "preferences": [{"pref": "task_light", "piece": "desk", "task": "work", "viewer": "facing_piece",
+                        "weight": "medium", "why": "worked at"}]}
+    # Not "nothing could be better": the first runs found a small slide of the desk
+    # that takes the window off its front, and judged against "nothing is better"
+    # both models were marked down for offering it.
     return EvalRoom("box_room", b, key,
-                    "Nothing is planted: this box room is too small for any arrangement to be clearly better.", [])
+                    "Nothing serious is planted: a small room that works. Its small desk faces the window, "
+                    "so a designer may slide it a little to take the glare off, or leave it.", [])
 
 
 ROOMS = [door_blocked, glare_desk, bed_no_way_in, wardrobe_blocked, window_covered, chair_cramped,

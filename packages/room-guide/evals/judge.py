@@ -28,6 +28,7 @@ Read by: a developer comparing models or prompts; tests/test_evals.py.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -107,8 +108,13 @@ def conversation(result: dict) -> str:
 def told(r, result: dict) -> str:
     """The room as this guide was told it at the start: read with its own model's needs."""
     room = room_from_scene(r.scene())
+    data = copy.deepcopy(result["rules"]["needs"])
+    for p in data.get("pieces", []):
+        # Written before settling fixed a re-hung piece left with nothing to hang over.
+        if p.get("moves") == "rehang" and not any(b.get("how") == "over" for b in p.get("with", [])):
+            p["moves"] = "fixed"
     try:
-        needs = parse_needs(room, result["rules"]["needs"])
+        needs = parse_needs(room, data)
     except NeedsError:
         return "(its notes could not be rebuilt)"
     fs = findings(room, needs, assess(room, needs))
