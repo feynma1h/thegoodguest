@@ -56,6 +56,12 @@ NEEDS_POSTURE = ("use", "get_in", "see")
 ZONE_NEEDS = ("open", "use", "get_in", "air", "heat", "pass", "other")
 PERSON_NEEDS = ("use", "get_in")
 
+# A companion used with a piece may stand in the room a person needs to use it:
+# a chair at a desk, a table beside a bed, a mirror over a dresser. A seat at a
+# piece is pulled away to open it. Nothing may stand where a piece heats,
+# breathes, lets daylight in or lets people through, companion or not.
+COMPANION_ROOM = {"use": FOLLOW, "get_in": FOLLOW, "see": FOLLOW, "reach": FOLLOW, "open": ("at",)}
+
 MAX_NEEDS_PER_PIECE = 8
 MAX_BONDS_PER_PIECE = 4
 MAX_PREFERENCES = 12
@@ -124,6 +130,7 @@ class RoomNeeds:
     preferences: tuple[Preference, ...] = ()
     questions: tuple[Question, ...] = ()
     origin: str = "rules pass"
+    ignored: tuple[str, ...] = ()      # what was read but set aside, and why
 
     def fixed_ids(self) -> set[str]:
         return {pid for pid, p in self.pieces.items() if p.moves in ("fixed", "rehang")}
@@ -137,11 +144,11 @@ class RoomNeeds:
         return [pid for pid, p in self.pieces.items()
                 if any(b.piece == anchor and b.how in FOLLOW for b in p.bonds)]
 
-    def bonded(self, piece_id: str) -> set[str]:
-        """Every piece bonded to this one, either way."""
-        out = {b.piece for b in self.pieces.get(piece_id, PieceNeeds("fixed", "")).bonds}
+    def bonded(self, piece_id: str, hows: tuple[str, ...] = HOWS) -> set[str]:
+        """Every piece bonded to this one either way, by one of `hows`."""
+        out = {b.piece for b in self.pieces.get(piece_id, PieceNeeds("fixed", "")).bonds if b.how in hows}
         for pid, p in self.pieces.items():
-            if any(b.piece == piece_id for b in p.bonds):
+            if any(b.piece == piece_id and b.how in hows for b in p.bonds):
                 out.add(pid)
         return out
 
@@ -397,9 +404,10 @@ def concrete_sides(side: str) -> tuple[str, ...]:
     return {"sides": ("left", "right"), "all": ("front", "back", "left", "right")}.get(side, (side,))
 
 
-def _exempt(room: Room, needs: RoomNeeds, piece_id: str) -> frozenset[str]:
+def _exempt(room: Room, needs: RoomNeeds, piece_id: str, need: str) -> frozenset[str]:
+    """What may stand in this need's room: the piece, what rests on it, and its companions."""
     out = {piece_id, *room.riders(piece_id)}
-    for other in needs.bonded(piece_id):
+    for other in needs.bonded(piece_id, COMPANION_ROOM.get(need, ())):
         out.add(other)
         out.update(room.riders(other))
     return frozenset(out)
@@ -412,11 +420,11 @@ def zones(room: Room, needs: RoomNeeds) -> list[Zone]:
         piece = room.pieces.get(pid)
         if piece is None:
             continue
-        exempt = _exempt(room, needs, pid)
         sx, sy, sz = piece.size
         for n in entry.needs:
             if n.need not in ZONE_NEEDS:
                 continue
+            exempt = _exempt(room, needs, pid, n.need)
             if n.need == "open":
                 if n.mechanism == "sliding":
                     continue
@@ -480,10 +488,9 @@ def targets(room: Room, needs: RoomNeeds) -> list[Target]:
     for pid, entry in needs.pieces.items():
         if pid not in room.pieces:
             continue
-        exempt = _exempt(room, needs, pid)
         for n in entry.needs:
             if n.need in ("reach", "see", "light"):
-                out.append(Target(pid, n.need, n.strength, n.posture, exempt, n.why))
+                out.append(Target(pid, n.need, n.strength, n.posture, _exempt(room, needs, pid, n.need), n.why))
     return out
 
 

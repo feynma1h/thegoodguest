@@ -85,6 +85,30 @@ def test_bonded_pieces_may_stand_in_each_others_zones():
     assert {"bedside", "bedside_2", "lamp"} <= bed_zone.exempt
 
 
+def test_no_bond_excuses_what_stands_in_heat_air_or_a_doorway():
+    """A heater 'near' a sofa warms it; the sofa still mustn't stand in its heat."""
+    data = bedroom_needs()
+    data["pieces"]["dresser"]["needs"].append({"need": "heat", "side": "front", "strength": "hard", "why": "a radiator"})
+    data["pieces"]["bed"]["with"] = [{"piece": "dresser", "how": "near", "strength": "soft", "why": "warmth"}]
+    data["pieces"]["dresser"]["with"] = [{"piece": "bed", "how": "beside", "strength": "soft", "why": "close by"}]
+    zs = {(z.piece, z.need): z for z in zones(room(), parse_needs(room(), data))}
+    assert "bed" not in zs["dresser", "heat"].exempt
+    assert "bed" not in zs["dresser", "open"].exempt, "only a seat at a piece is pulled away to open it"
+    assert "dresser" in zs["bed", "get_in"].exempt
+
+
+def test_bonds_that_cannot_be_true_are_set_aside_and_listed():
+    from thegoodguest_room_guide.rules_pass import needs_to_json, settle_bonds
+    data = bedroom_needs()
+    data["pieces"]["lamp"]["with"] = [{"piece": "bedside", "how": "at", "strength": "hard", "why": "stands on it"}]
+    data["pieces"]["dresser"]["with"] = [{"piece": "bed", "how": "over", "strength": "soft", "why": "faces it"}]
+    data["pieces"]["bedside_2"]["with"][0]["how"] = "at"         # not where it stands, but it could be
+    needs = settle_bonds(room(), parse_needs(room(), data))
+    assert needs.pieces["lamp"].bonds == () and needs.pieces["dresser"].bonds == ()
+    assert [b.how for b in needs.pieces["bedside_2"].bonds] == ["at"]
+    assert len(needs.ignored) == 2 and needs_to_json(needs)["ignored"] == list(needs.ignored)
+
+
 def test_defaults_fix_the_shell_and_let_everything_else_move():
     needs = default_needs(room())
     assert needs.fixed_ids() == {"door", "window"}

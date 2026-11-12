@@ -6,7 +6,8 @@ when one is given, a plan of the room drawn from the model (never a camera
 frame). The answer is JSON in the needs vocabulary, checked by
 `needs.parse_needs`. An answer that doesn't fit is asked once more with the
 problems listed; if that fails too, the room falls back to the defaults (laws
-only), and says so.
+only), and says so. Bonds that can't be true of any arrangement are set aside
+and listed (`settle_bonds`).
 
 The answer is cached by the gateway, so the same room and prompt cost nothing
 the second time.
@@ -14,6 +15,8 @@ the second time.
 Read by: the harness, the analyzer's callers, the engine's callers.
 """
 from __future__ import annotations
+
+from dataclasses import replace
 
 from .gateway import DEFAULT_MODEL, Gateway, Image, JsonRequest
 from .model import Room
@@ -100,13 +103,38 @@ def run_rules_pass(room: Room, gateway: Gateway, images: list[Image] | None = No
     """This room's needs from Claude, checked; the defaults if Claude's answer won't fit twice."""
     data = gateway.ask_json(rules_request(room, images, model=model, effort=effort))
     try:
-        return parse_needs(room, data)
+        return settle_bonds(room, parse_needs(room, data))
     except NeedsError as first:
         data = gateway.ask_json(rules_request(room, images, model=model, effort=effort, feedback=first.problems))
         try:
-            return parse_needs(room, data)
+            return settle_bonds(room, parse_needs(room, data))
         except NeedsError:
             return default_needs(room)
+
+
+def settle_bonds(room: Room, needs: RoomNeeds) -> RoomNeeds:
+    """The bonds that could be true of this room, without the ones that can't.
+
+    A bond between pieces in one stack (a television on its unit) says nothing
+    the scan doesn't already keep, and would pull the one off the other. Only
+    something that hangs can hang `over` another piece. Kept, either would have
+    the engine chase it and the guide report it. A bond the scan doesn't
+    satisfy is kept: a chair left away from its desk still belongs at it.
+    Both kinds set aside are listed in `ignored`.
+    """
+    ignored = list(needs.ignored)
+    pieces = {}
+    for pid, entry in needs.pieces.items():
+        kept = []
+        for b in entry.bonds:
+            if room.base_of(pid) == room.base_of(b.piece):
+                ignored.append(f"{pid} {b.how} {b.piece}: one rests on the other, so they already move together")
+            elif b.how == "over" and room.pieces[pid].support not in ("wall", "ceiling"):
+                ignored.append(f"{pid} over {b.piece}: only something that hangs can hang over a piece")
+            else:
+                kept.append(b)
+        pieces[pid] = entry if len(kept) == len(entry.bonds) else replace(entry, bonds=tuple(kept))
+    return replace(needs, pieces=pieces, ignored=tuple(ignored))
 
 
 def needs_to_json(needs: RoomNeeds) -> dict:
@@ -123,5 +151,6 @@ def needs_to_json(needs: RoomNeeds) -> dict:
                        "with": [dict(b.__dict__) for b in p.bonds]})
     return {"pieces": pieces,
             "preferences": [clean(dict(p.__dict__)) for p in needs.preferences],
-            "questions": [dict(q.__dict__) for q in needs.questions]}
+            "questions": [dict(q.__dict__) for q in needs.questions],
+            "ignored": list(needs.ignored)}
 

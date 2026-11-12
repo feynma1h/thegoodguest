@@ -223,10 +223,11 @@ def findings(room: Room, needs: RoomNeeds, a: Assessment) -> list[Finding]:
                                f"{_cap(the(room, pid))} is {about(d, down=False)} from the nearest place to stand.",
                                size.say, {"distance": round(d, 2)}))
 
+    dark = {b.pieces[0] for b in a.breaks if b.kind == "dark"}
     for s in a.shortfalls:
         if s.need == "with":
             out.append(_bond_finding(room, s))
-        elif s.need == "light":
+        elif s.need == "light" and s.piece not in dark:     # a dark window is said once, above
             share = int(round((1.0 - s.free) * 100 / 5) * 5)
             if share >= 10 and s.intruders:
                 out.append(Finding(f"light:{s.piece}", "tight", 1, (s.piece, *s.intruders),
@@ -349,7 +350,7 @@ def _bond_finding(room: Room, s: Shortfall) -> Finding:
     text = {
         "at": f"{_cap(follower)} isn't at {anchor}.",
         "beside": f"{_cap(follower)} isn't beside {anchor}.",
-        "over": f"{_cap(follower)} no longer hangs over {anchor}.",
+        "over": f"{_cap(follower)} doesn't hang over {anchor}.",
         "near": f"{_cap(follower)} is a long way from {anchor}.",
         "facing": f"{_cap(follower)} doesn't face {anchor}.",
     }[s.side]
