@@ -8,11 +8,13 @@ Claude calls behind them) are added to this app by the Claude-layer track.
   POST /render   draw frames of a room from given camera poses and return the
                  PNGs. The room's documents travel in the request; nothing is
                  read from or written to a bucket.
+  POST /still    a Cloud Tasks route: draw a scene's still picture for the app
+                 and write it beside the scene (routes_still.py, decision 0363).
 
 Access is the platform's: the service is deployed --no-allow-unauthenticated
 and only the Cloud Tasks invoker holds run.invoker (infra/deploy_scene_finish.sh),
-the posture decision 0106 set for perception-obj. The routes the queue calls add
-app-side OIDC checks with the same per-route audience pattern when they land.
+the posture decision 0106 set for perception-obj. The routes the queue calls also
+check the task's OIDC token, per route (task_auth.py).
 
 Read by: infra/deploy_scene_finish.sh (startup probe), the Dockerfile (CMD: finish_server:app).
 """
@@ -37,6 +39,8 @@ from render_client import (
     RenderError,
     Renderer,
 )
+from routes_still import StillDeps
+from routes_still import router as still_router
 
 log = logging.getLogger("scene-finish")
 
@@ -60,8 +64,23 @@ class RenderRequest(BaseModel):
     width: int = Field(default=DEFAULT_WIDTH_PX, ge=MIN_WIDTH_PX, le=MAX_WIDTH_PX)
 
 
-def create_app(renderer_factory: Callable[[], Renderer] = Renderer) -> FastAPI:
-    state: dict[str, Renderer] = {}
+def still_deps_from_env() -> StillDeps:
+    """The outputs bucket, the scenes collection and the task check, from the environment."""
+    from still_ports import FirestoreStillMarker, GcsStillStore
+    from task_auth import authorizer_from_env
+
+    return StillDeps(
+        store=GcsStillStore(os.environ["PERCEPTION_OUTPUTS_BUCKET"]),
+        marker=FirestoreStillMarker(os.environ.get("FIRESTORE_PROJECT") or None),
+        authorize=authorizer_from_env(),
+    )
+
+
+def create_app(
+    renderer_factory: Callable[[], Renderer] = Renderer,
+    still_deps_factory: Callable[[], StillDeps] = still_deps_from_env,
+) -> FastAPI:
+    state: dict = {}
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -76,6 +95,16 @@ def create_app(renderer_factory: Callable[[], Renderer] = Renderer) -> FastAPI:
         if "r" not in state:
             state["r"] = renderer_factory()
         return state["r"]
+
+    def still_deps() -> StillDeps:
+        # Built on first use too: the cloud clients are not needed for /health.
+        if "still" not in state:
+            state["still"] = still_deps_factory()
+        return state["still"]
+
+    app.state.renderer = renderer
+    app.state.still_deps = still_deps
+    app.include_router(still_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

@@ -17,7 +17,7 @@
  */
 
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CallingCardSheet, {
   CallingCardButton,
@@ -28,7 +28,8 @@ import type { FurnitureBundle } from "@/lib/furniture";
 import type { ShellFinish } from "@/lib/shellFinish";
 import { loadShellExtras } from "@/lib/shellExtras";
 import { PillButton, SPRING } from "@/components/ui/spring";
-import { DisabledComposer, Eyebrow, GuestLine } from "@/components/ui/voice";
+import { GuestLine } from "@/components/ui/voice";
+import { Mark } from "@/components/Wordmark";
 import { getApiClient } from "@/lib/api";
 import { ApiError, SceneNotReadyError } from "@/lib/api/client";
 import {
@@ -46,6 +47,7 @@ import {
   orphanNote,
   type ProposedScene,
 } from "@/lib/designSpec";
+import { measureRoom, type RoomMeasure } from "@/lib/card/measure";
 import { hasSeenReveal, markRevealSeen } from "@/lib/seen";
 import { statusMeta } from "@/lib/status";
 import {
@@ -91,10 +93,14 @@ export default function RoomStage({
   sceneId,
   status,
   createdAt,
+  onMeasure,
 }: {
   sceneId: string;
   status: string;
   createdAt: string;
+  /** The room's measurement, once its shell has arrived (null when there
+   * is no measured floor) — the top bar prints its floor area. */
+  onMeasure?: (measure: RoomMeasure | null) => void;
 }) {
   const [result, setResult] = useState<AssetsResult | null>(null);
   // Reading localStorage in the initializer is safe here: this component
@@ -180,6 +186,17 @@ export default function RoomStage({
     };
   }, [sceneId]);
 
+  // The measured floor, for the top bar. Read at call time, so a new
+  // callback identity never re-measures.
+  const onMeasureRef = useRef(onMeasure);
+  useEffect(() => {
+    onMeasureRef.current = onMeasure;
+  });
+  useEffect(() => {
+    if (assets.phase !== "ready") return;
+    onMeasureRef.current?.(measureRoom(assets.shellDoc, assets.manifest));
+  }, [assets]);
+
   // --- The proposed arrangement (decision 0131). The spec is a SIBLING
   // document, so it is fetched separately and overlaid; a room nobody has
   // rearranged pays for exactly one extra GET and renders identically.
@@ -263,85 +280,106 @@ export default function RoomStage({
 
   return (
     <div className="absolute inset-0">
-      {/* The room itself. */}
-      {assets.phase === "ready" && phase !== "hold" && (
-        <SplatViewer
-          splats={proposed.splats}
-          shell={assets.shell}
-          finish={assets.finish}
-          furniture={assets.furniture}
-          outlines={proposed.outlines}
-          frameless
-          reveal={phase === "assembling"}
-          onRevealStep={(_, label) => setArrival(label)}
-          onRevealCaptionsDone={() => setArrival(null)}
-          onRevealDone={onRevealDone}
-          className="h-full"
-        />
-      )}
+      {/* The room itself, left of the conversation rail on wide screens
+          (decision 0361). The finish rig puts its view control at the foot
+          of this region, where nothing sits on top of it. */}
+      <div className="absolute inset-0 lg:right-[460px]">
+        {assets.phase === "ready" && phase !== "hold" && (
+          <SplatViewer
+            splats={proposed.splats}
+            shell={assets.shell}
+            finish={assets.finish}
+            furniture={assets.furniture}
+            outlines={proposed.outlines}
+            frameless
+            reveal={phase === "assembling"}
+            onRevealStep={(_, label) => setArrival(label)}
+            onRevealCaptionsDone={() => setArrival(null)}
+            onRevealDone={onRevealDone}
+            className="h-full"
+          />
+        )}
 
-      {/* Stage-level notices (assets still loading / unavailable). */}
-      {phase !== "hold" && assets.phase !== "ready" && (
-        <div className="flex h-full items-center justify-center px-6">
-          <p className="max-w-sm text-center text-sm leading-relaxed text-paper/60">
-            {assets.phase === "loading"
-              ? "Opening the door…"
-              : assets.message}
-          </p>
+        {/* Stage-level notices (assets still loading / unavailable). */}
+        {phase !== "hold" && assets.phase !== "ready" && (
+          <div className="flex h-full items-center justify-center px-6">
+            <p className="max-w-sm text-center text-sm leading-relaxed text-on-dusk-2">
+              {assets.phase === "loading"
+                ? "Opening the door…"
+                : assets.message}
+            </p>
+          </div>
+        )}
+
+        {/* Naming each piece as it lands (§4's assembly captions). */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-24 flex justify-center">
+          <AnimatePresence mode="wait">
+            {phase === "assembling" && arrival && (
+              <motion.div
+                key={arrival}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={SPRING}
+                className="rounded-full bg-dusk-3 px-4 py-1.5 shadow-float"
+              >
+                <GuestLine tone="cream" className="text-[14px]">the {arrival}</GuestLine>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      )}
 
-      {/* Naming each piece as it lands (§4's assembly captions). */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-24 flex justify-center">
-        <AnimatePresence mode="wait">
-          {phase === "assembling" && arrival && (
-            <motion.div
-              key={arrival}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={SPRING}
-              className="rounded-full bg-paper/95 px-4 py-1.5 shadow-float"
-            >
-              <GuestLine className="text-[13.5px]">the {arrival}</GuestLine>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Stage 1, settled: the conversation (card + live composer), or the
-          non-conversational layout when the conversation layer is down. */}
-      {phase === "settled" && (
-        <>
-          {/* The card a person can take away (social-layer.md §6). Quiet
-              and under the chrome: the room is still the hero. */}
-          <div className="absolute right-6 top-16 z-20">
+        {phase === "settled" && (
+          /* The card a person can take away (social-layer.md §6). Quiet and
+             under the chrome: the room is still the hero. */
+          <div className="absolute right-5 top-[72px] z-20 sm:right-7">
             <CallingCardButton onClick={() => setCardOpen(true)} />
           </div>
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-6 pb-7">
-            <div className="pointer-events-auto w-full max-w-2xl">
-              {/* What this room is showing that the scan did not (0131).
-                  Chrome, not the guest's voice: a plain statement about what
-                  is on screen, with the way back always one control away —
-                  0133 makes "back to measured" an invariant, not a feature. */}
-              {changed && (
-                <div className="mb-2.5 flex items-center justify-between gap-4 rounded-[12px] border border-ink/15 bg-paper/[0.96] px-4 py-2.5 shadow-float">
-                  <p className="text-[12px] leading-snug text-ink/70">{changed}</p>
-                  {rearranged > 0 && (
-                    <button
-                      onClick={revertAll}
-                      className="shrink-0 rounded-full border border-ink/20 px-3 py-1 text-[11px] text-ink/70 transition-colors hover:bg-ink/[0.06]"
-                    >
-                      {corrections ? "back to the scan" : "back to measured"}
-                    </button>
-                  )}
-                </div>
-              )}
-              {orphans && (
-                <div className="mb-2.5 rounded-[12px] border border-ink/15 bg-paper/[0.96] px-4 py-2.5 shadow-float">
-                  <p className="text-[12px] leading-snug text-ink/60">{orphans}</p>
-                </div>
-              )}
+        )}
+      </div>
+
+      {/* Stage 1, settled: the conversation rail (or the non-conversational
+          layout when the conversation layer is down), and the inventory. */}
+      {phase === "settled" && (
+        <>
+          <aside
+            aria-label="Conversation with the guest"
+            className="absolute inset-x-3 bottom-3 z-20 flex max-h-[48%] flex-col overflow-hidden rounded-3xl border border-on-dusk/[0.08] bg-dusk-2 lg:inset-x-auto lg:bottom-4 lg:right-4 lg:top-4 lg:max-h-none lg:w-[428px]"
+          >
+            <div className="flex items-center justify-between gap-3 px-6 pb-3 pt-5">
+              <div className="flex items-center gap-2.5">
+                <Mark height="13px" />
+                <h2 className="text-[15px] font-semibold text-on-dusk">The guest</h2>
+              </div>
+              <span className="text-[13px] text-on-dusk-2">Answers from what it measured</span>
+            </div>
+            {/* What this room is showing that the scan did not (0131).
+                Chrome, not the guest's voice: a plain statement about what is
+                on screen, with the way back always one control away — 0133
+                makes "back to measured" an invariant, not a feature. */}
+            {(changed || orphans) && (
+              <div className="space-y-2 px-4 pb-2">
+                {changed && (
+                  <div className="flex items-center justify-between gap-4 rounded-[14px] bg-dusk-3 px-4 py-2.5">
+                    <p className="text-[13px] leading-snug text-on-dusk">{changed}</p>
+                    {rearranged > 0 && (
+                      <button
+                        onClick={revertAll}
+                        className="shrink-0 cursor-pointer rounded-full px-3 py-1.5 text-[12.5px] font-medium text-on-dusk ring-1 ring-inset ring-on-dusk/25 transition-colors hover:bg-dusk"
+                      >
+                        {corrections ? "Back to the scan" : "Back to measured"}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {orphans && (
+                  <div className="rounded-[14px] bg-dusk-3 px-4 py-2.5">
+                    <p className="text-[13px] leading-snug text-on-dusk-2">{orphans}</p>
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="min-h-0 flex-1">
               {assets.phase === "ready" && !convDown ? (
                 <Conversation
                   sceneId={sceneId}
@@ -353,29 +391,36 @@ export default function RoomStage({
                   onArrangementChanged={refreshSpec}
                 />
               ) : (
-                <>
-                  <div className="rounded-[14px] border border-ink/15 bg-paper/[0.96] px-5 py-4 shadow-deep">
-                    <GuestLine className="text-[15px]">
-                      {freshReveal
-                        ? arrivalLine(placed, hasShell)
-                        : settledQuietLine(placed)}
-                    </GuestLine>
-                    {assets.phase === "ready" && (
-                      <p className="mt-2 text-[11.5px] text-ink/55">
-                        {countsLine(placed, seen)}
-                      </p>
-                    )}
-                  </div>
-                  <DisabledComposer className="mx-auto mt-3 max-w-xl" />
-                </>
+                <div className="flex h-full flex-col justify-end gap-2 px-6 pb-6">
+                  <GuestLine tone="cream" className="text-[19px] leading-[1.45]">
+                    {freshReveal
+                      ? arrivalLine(placed, hasShell)
+                      : settledQuietLine(placed)}
+                  </GuestLine>
+                  {assets.phase === "ready" && (
+                    <p className="text-[13.5px] text-on-dusk-2">
+                      {countsLine(placed, seen)}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
-          </div>
+          </aside>
 
           {assets.phase === "ready" && scanned + seen > 0 && (
-            <div className="pointer-events-auto absolute bottom-7 left-6 hidden w-60 rounded-xl bg-paper/95 p-4 shadow-float lg:block">
-              <Eyebrow>In this room — {scanned + seen}</Eyebrow>
-              <ul className="mt-2.5 max-h-[34vh] space-y-1.5 overflow-y-auto">
+            <section
+              aria-labelledby="inventory-heading"
+              className="pointer-events-auto absolute bottom-5 left-5 z-10 hidden w-[288px] rounded-[20px] border border-on-dusk/[0.08] bg-dusk-2 px-5 pb-3 pt-[18px] lg:block"
+            >
+              <div className="mb-2 flex items-baseline justify-between">
+                <h2 id="inventory-heading" className="text-[15px] font-semibold text-on-dusk">
+                  In this room
+                </h2>
+                <span className="text-[13px] text-on-dusk-2">
+                  {scanned + seen} {scanned + seen === 1 ? "piece" : "pieces"}
+                </span>
+              </div>
+              <ul className="max-h-[34vh] overflow-y-auto">
                 {proposed.splats.map((s, i) => {
                   // State reads as words, not a badge (0057 deleted
                   // StatusBadge): "placed" is the measurement, "moved" and
@@ -388,25 +433,25 @@ export default function RoomStage({
                   return (
                     <li
                       key={`${s.label}-${i}`}
-                      className="flex items-baseline justify-between gap-3 text-[13px]"
+                      className="flex items-baseline justify-between gap-3 border-t border-on-dusk/[0.07] py-[9px] text-[14.5px]"
                     >
                       <span
                         className={
                           state === "removed"
-                            ? "capitalize text-ink/40 line-through"
-                            : "capitalize text-ink/85"
+                            ? "capitalize text-on-dusk-2 line-through"
+                            : "capitalize text-on-dusk"
                         }
                       >
                         {s.label}
                       </span>
-                      <span className="text-[10.5px] text-ink/40">
+                      <span className={`text-[13px] ${state === "measured" ? "text-on-dusk-2" : "text-sun"}`}>
                         {state === "removed"
-                          ? "taken out"
+                          ? "Taken out"
                           : state === "moved"
-                            ? "moved"
+                            ? "Moved"
                             : state === "turned"
-                              ? "turned round"
-                              : "placed"}
+                              ? "Turned round"
+                              : "Placed"}
                       </span>
                     </li>
                   );
@@ -414,15 +459,15 @@ export default function RoomStage({
                 {assets.unrenderable.map((o) => (
                   <li
                     key={o.object_id}
-                    className="flex items-baseline justify-between gap-3 text-[13px]"
+                    className="flex items-baseline justify-between gap-3 border-t border-on-dusk/[0.07] py-[9px] text-[14.5px]"
                     title={`Seen but not yet placed (${o.reason ?? "no transform"})`}
                   >
-                    <span className="capitalize text-ink/45">{o.label}</span>
-                    <span className="text-[10.5px] text-ink/40">seen</span>
+                    <span className="capitalize text-on-dusk-2">{o.label}</span>
+                    <span className="text-[13px] text-on-dusk-2">Seen, not placed</span>
                   </li>
                 ))}
               </ul>
-            </div>
+            </section>
           )}
         </>
       )}
@@ -442,17 +487,20 @@ export default function RoomStage({
           <motion.div
             initial={false}
             exit={{ opacity: 0, transition: { duration: 0.5 } }}
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-ink px-6 text-center"
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-dusk px-6 text-center"
           >
-            <GuestLine tone="cream" className="max-w-md text-[19px]">
+            <GuestLine
+              tone="cream"
+              className="max-w-[620px] text-[clamp(26px,2.8vw,34px)] leading-[1.3] tracking-[-0.01em]"
+            >
               It&rsquo;s ready. Come in when you have a minute — this is worth
               your full attention.
             </GuestLine>
-            <PillButton variant="cream" onClick={comeIn} className="mt-9">
-              come in
+            <PillButton variant="cream" size="lg" onClick={comeIn} className="mt-9 px-7">
+              Come in
             </PillButton>
-            <p className="mt-5 text-xs text-paper/45">
-              in your own time — it holds still until you&rsquo;re ready
+            <p className="mt-[22px] text-[14.5px] text-on-dusk-2">
+              It holds still until you&rsquo;re ready.
             </p>
           </motion.div>
         )}

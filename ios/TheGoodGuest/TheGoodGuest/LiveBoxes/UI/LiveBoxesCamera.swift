@@ -116,9 +116,9 @@ struct LiveBoxesCamera: View {
                         Button { toggleStrip() } label: {
                             Text(LiveBoxesPresentation.countLabel(visible.count))
                                 .font(RSFont.ui(.footnote, weight: .semibold))
-                                .foregroundStyle(Color.rsOnDark)
+                                .foregroundStyle(Color.rsOnDusk)
                                 .padding(.horizontal, 14).padding(.vertical, 9)
-                                .background(Capsule().fill(Color.rsBlack.opacity(stripOpen ? 0.8 : 0.55)))
+                                .background(Capsule().fill(Color.rsDusk.opacity(stripOpen ? 0.8 : 0.55)))
                         }
                     }
                     Spacer()
@@ -128,16 +128,16 @@ struct LiveBoxesCamera: View {
                         if needsWalkAround {
                             Text(LiveBoxesPresentation.walkAroundHint)
                                 .font(RSFont.ui(.footnote, weight: .semibold))
-                                .foregroundStyle(Color.rsOnDark)
+                                .foregroundStyle(Color.rsOnDusk)
                                 .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(Capsule().fill(Color.rsBlack.opacity(0.62)))
+                                .background(Capsule().fill(Color.rsDusk.opacity(0.62)))
                                 .transition(.opacity)
                         }
                         HStack(spacing: 10) {
                             Button { settleCurrent(id) } label: {
                                 Label("Looks good", systemImage: "checkmark")
                                     .font(RSFont.ui(.footnote, weight: .semibold))
-                                    .foregroundStyle(Color.rsBlack)
+                                    .foregroundStyle(Color.rsDusk)
                                     .padding(.horizontal, 16).padding(.vertical, 9)
                                     .background(Capsule().fill(BoxInk.white))
                             }
@@ -145,9 +145,9 @@ struct LiveBoxesCamera: View {
                             Button { remove(id) } label: {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(Color.rsOnDark)
+                                    .foregroundStyle(Color.rsOnDusk)
                                     .frame(width: 34, height: 34)
-                                    .background(Circle().fill(Color.rsBlack.opacity(0.62)))
+                                    .background(Circle().fill(Color.rsDusk.opacity(0.62)))
                             }
                             .accessibilityLabel("Discard this box")
                         }
@@ -166,9 +166,9 @@ struct LiveBoxesCamera: View {
                 Button { undo(toast) } label: {
                     Text(toast.label)
                         .font(RSFont.ui(.footnote, weight: .semibold))
-                        .foregroundStyle(Color.rsOnDark)
+                        .foregroundStyle(Color.rsOnDusk)
                         .padding(.horizontal, 14).padding(.vertical, 9)
-                        .background(Capsule().fill(Color.rsBlack.opacity(0.62)))
+                        .background(Capsule().fill(Color.rsDusk.opacity(0.62)))
                 }
                 Spacer()
             }
@@ -299,7 +299,7 @@ private struct BoxStrip: View {
             }
             .padding(10)
         }
-        .background(RoundedRectangle(cornerRadius: 22).fill(Color.rsBlack.opacity(0.5)))
+        .background(RoundedRectangle(cornerRadius: 22).fill(Color.rsDusk.opacity(0.5)))
     }
 
     private func card(_ id: UUID, inView: Bool) -> some View {
@@ -308,7 +308,7 @@ private struct BoxStrip: View {
             if let image = thumbs.images[id] {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
-                Color.rsOnDark.opacity(0.18)
+                Color.rsOnDusk.opacity(0.18)
             }
         }
         .frame(width: 72, height: 72)
@@ -320,10 +320,10 @@ private struct BoxStrip: View {
                 Button { remove(id) } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color.rsBlack)
+                        .foregroundStyle(Color.rsDusk)
                         .frame(width: 24, height: 24)
                         .background(Circle().fill(BoxInk.white))
-                        .shadow(color: Color.rsBlack.opacity(0.3), radius: 2)
+                        .shadow(color: Color.rsDusk.opacity(0.3), radius: 2)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -349,7 +349,7 @@ private struct CheckLayer: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 44))
                     .foregroundStyle(BoxInk.white)
-                    .shadow(color: Color.rsBlack.opacity(0.35), radius: 4)
+                    .shadow(color: Color.rsDusk.opacity(0.35), radius: 4)
                     .position(dot.point)
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }

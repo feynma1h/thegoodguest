@@ -12,9 +12,13 @@
  * mechanism); under prefers-reduced-motion, flushes wait for sentence
  * boundaries. All entrances ride the single SPRING. Nothing here is gold.
  *
- * The card carries the current exchange; earlier exchanges collapse to
- * stubs labeled with the user's own truncated words, tap-to-expand. No
- * truncation note is ever shown — the record is exactly what was said.
+ * It fills the room page's rail (decision 0361): the current exchange above
+ * the composer, the person's words in a bubble, the guest's in its italic.
+ * Earlier exchanges fold under one "Two earlier questions" control; open,
+ * they are shown in full — the record is exactly what was said. Thinking
+ * is three breathing dots, an answer arriving carries a lamplight caret,
+ * and a failed turn says what went wrong with the person's words kept in
+ * the composer.
  *
  * Conversation is an enhancement layer: if the initial GET fails
  * (403/404/network), onUnavailable() fires and the room page falls back to
@@ -45,12 +49,12 @@ import {
   splitAtSentenceBoundary,
   type ComposerState,
 } from "@/lib/conversation/reducer";
+import { capitalize, smallCount } from "@/lib/voice";
 
 const FLUSH_MS = 200;
 const CONFIRM_POLL_MS = 4_000;
 const BLOCKED_POLL_MS = 5_000;
 const REST_POLL_MS = 15_000;
-const STUB_CHARS = 44;
 
 /** Quiet, non-voice notes (sans, never italic serif — the guest didn't say
  * these; the interface did). */
@@ -68,9 +72,24 @@ function noteFor(code: string): string {
   return NOTES[code] ?? NOTES.turn_failed;
 }
 
-function stubLabel(text: string): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length <= STUB_CHARS ? oneLine : `${oneLine.slice(0, STUB_CHARS)}…`;
+/** "Two earlier questions": the fold's label, counted in words. */
+function earlierLabel(n: number): string {
+  if (n === 1) return "One earlier question";
+  return `${capitalize(smallCount(n))} earlier questions`;
+}
+
+/** A kept-words note: what went wrong leads, in lamplight; what to do
+ * follows in the plain ink. Interface words, never the guest's italic. */
+function NoteCard({ text }: { text: string }) {
+  const cut = text.indexOf(". ");
+  const lead = cut === -1 ? text : text.slice(0, cut + 1);
+  const rest = cut === -1 ? "" : text.slice(cut + 2);
+  return (
+    <div role="status" className="rounded-[14px] bg-[#1a232e] px-4 py-3.5 text-[14.5px] leading-[1.5] text-on-dusk">
+      <span className="font-semibold text-sun">{lead}</span>
+      {rest && ` ${rest}`}
+    </div>
+  );
 }
 
 function prefersReducedMotion(): boolean {
@@ -99,7 +118,7 @@ export default function Conversation({
 }) {
   const [state, dispatch] = useReducer(composerReducer, COMPOSER_IDLE);
   const [turns, setTurns] = useState<ConversationTurn[] | null>(null);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [showEarlier, setShowEarlier] = useState(false);
   const mounted = useRef(true);
   const stateRef = useRef<ComposerState>(COMPOSER_IDLE);
   // Read at call time so a changing callback identity never re-creates the
@@ -308,8 +327,8 @@ export default function Conversation({
   if (turns === null) {
     // Snapshot still loading: hold the layout without claiming anything.
     return (
-      <div className="rounded-[14px] border border-ink/15 bg-paper/[0.96] px-5 py-4 shadow-deep">
-        <GuestLine className="text-[15px] opacity-50">{greeting}</GuestLine>
+      <div className="flex h-full flex-col justify-end px-6 pb-6">
+        <GuestLine tone="cream" className="text-[19px] opacity-50">{greeting}</GuestLine>
       </div>
     );
   }
@@ -328,142 +347,160 @@ export default function Conversation({
   const draft =
     state.phase === "idle" || state.phase === "reoffer" ? state.draft : "";
 
-  return (
-    <div className="w-full">
-      {/* Earlier exchanges: the user's own words, truncated, tap-to-expand. */}
-      {stubs.length > 0 && (
-        <ul className="mb-2 max-h-[26vh] space-y-1 overflow-y-auto pr-1">
-          {stubs.map((turn) => (
-            <li key={turn.turn_index}>
-              <button
-                type="button"
-                onClick={() =>
-                  setExpanded(expanded === turn.turn_index ? null : turn.turn_index)
-                }
-                className="w-full rounded-lg bg-paper/80 px-3.5 py-1.5 text-left shadow-float transition-colors hover:bg-paper/95"
-              >
-                <span className="block truncate text-[12px] text-ink/60">
-                  {stubLabel(turn.user_text)}
-                </span>
-                {expanded === turn.turn_index && (
-                  <span className="mt-1.5 block border-t border-ink/10 pt-1.5">
-                    <span className="block text-[12.5px] text-ink/75">
-                      {turn.user_text}
-                    </span>
-                    <GuestLine className="mt-1 text-[13px]">
-                      {turn.assistant_text}
-                    </GuestLine>
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+  // The person's own words sit in a bubble; the guest speaks in its italic.
+  const you =
+    "ml-auto max-w-[86%] rounded-[18px_18px_6px_18px] bg-dusk-3 px-4 py-2.5 text-[15px] leading-[1.45] text-on-dusk";
+  const guest = "text-[19px] leading-[1.45]";
 
-      {/* The card: the current exchange. Entrance-only springs — exit
-          choreography would hold the card hostage to animation completion
-          (mode="wait" freezes under throttled rAF), and the design only
-          asks entrances to ride the SPRING. */}
-      <div className="rounded-[14px] border border-ink/15 bg-paper/[0.96] px-5 py-4 shadow-deep">
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col justify-end gap-3 overflow-y-auto px-6 pb-4 pt-2">
+        {/* Earlier exchanges fold under one control (decision 0361); open,
+            they are exactly what was said, in full. */}
+        {stubs.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <button
+              type="button"
+              onClick={() => setShowEarlier((v) => !v)}
+              aria-expanded={showEarlier}
+              className="inline-flex h-[34px] cursor-pointer items-center gap-2 self-start rounded-full px-3.5 text-[14px] font-medium text-on-dusk ring-1 ring-inset ring-on-dusk/[0.18] transition-colors hover:bg-dusk-3"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={showEarlier ? "rotate-180" : ""}>
+                <path d="M6 15l6-6 6 6" />
+              </svg>
+              {showEarlier ? "Hide earlier questions" : earlierLabel(stubs.length)}
+            </button>
+            {showEarlier &&
+              stubs.map((turn) => (
+                <div key={turn.turn_index} className="flex flex-col gap-3 opacity-80">
+                  <p className={you}>{turn.user_text}</p>
+                  <GuestLine tone="cream" className="text-[17px] leading-[1.45]">
+                    {turn.assistant_text}
+                  </GuestLine>
+                </div>
+              ))}
+          </div>
+        )}
+
+        {/* The current exchange. Entrance-only springs — exit choreography
+            would hold it hostage to animation completion (mode="wait"
+            freezes under throttled rAF), and the design only asks entrances
+            to ride the SPRING. */}
         <motion.div
           key={`${state.phase}-${latest?.turn_index ?? "none"}`}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={SPRING}
+          className="flex flex-col gap-3"
         >
-            {inFlight ? (
-              <>
-                <p className="text-[12.5px] text-ink/60">{state.draft}</p>
-                {state.phase === "streaming" && state.partial ? (
-                  <GuestLine className="mt-2 text-[15px]">
-                    {state.partial}
-                  </GuestLine>
-                ) : state.phase === "confirming" ? (
-                  <p className="mt-2 text-[12.5px] text-ink/50">
-                    Making sure that reached the room…
-                  </p>
-                ) : (
-                  <p className="mt-2 text-[15px] text-ink/40" aria-label="the guest is thinking">
-                    <span className="breathe inline-block">…</span>
-                  </p>
-                )}
-              </>
-            ) : state.phase === "reoffer" ? (
-              <>
-                {latest && (
-                  <GuestLine className="mb-2 text-[14px] opacity-70">
-                    {latest.assistant_text}
-                  </GuestLine>
-                )}
-                <p className="text-[12.5px] text-ink/60">{noteFor(state.code)}</p>
-              </>
-            ) : state.phase === "rested" ? (
-              state.guestLine ? (
-                <GuestLine className="text-[15px]">{state.guestLine}</GuestLine>
-              ) : (
-                <p className="text-[13px] text-ink/60">
-                  The guest is resting for now — the room stays open, and the
-                  conversation picks back up a little later.
+          {inFlight ? (
+            <>
+              <p className={you}>{state.draft}</p>
+              {state.phase === "streaming" && state.partial ? (
+                <GuestLine tone="cream" className={guest}>
+                  {state.partial}
+                  <span aria-hidden className="gg-caret ml-0.5 inline-block h-[1.05em] w-0.5 bg-sun align-[-2px]" />
+                </GuestLine>
+              ) : state.phase === "confirming" ? (
+                <p className="text-[13.5px] text-on-dusk-2">
+                  Making sure that reached the room…
                 </p>
-              )
-            ) : state.phase === "blocked" ? (
-              <p className="text-[13px] text-ink/60">
-                This room is mid-thought in another window. When that reply
-                lands, this one frees up on its own.
-              </p>
-            ) : latest ? (
-              <>
-                <p className="text-[12.5px] text-ink/60">{latest.user_text}</p>
-                <GuestLine className="mt-2 text-[15px]">
+              ) : (
+                <p role="status" aria-label="The guest is thinking" className="flex h-[27px] items-center gap-1.5">
+                  {[0, 1, 2].map((i) => (
+                    <span key={i} aria-hidden className="gg-dot h-[7px] w-[7px] rounded-full bg-on-dusk" />
+                  ))}
+                </p>
+              )}
+            </>
+          ) : state.phase === "reoffer" ? (
+            <>
+              {latest && (
+                <GuestLine tone="cream" className="text-[17px] opacity-70">
                   {latest.assistant_text}
                 </GuestLine>
-              </>
+              )}
+              <NoteCard text={noteFor(state.code)} />
+            </>
+          ) : state.phase === "rested" ? (
+            state.guestLine ? (
+              <GuestLine tone="cream" className={guest}>
+                {state.guestLine}
+              </GuestLine>
             ) : (
-              <>
-                <GuestLine className="text-[15px]">{greeting}</GuestLine>
-                {countsNote && (
-                  <p className="mt-2 text-[11.5px] text-ink/55">{countsNote}</p>
-                )}
-              </>
-            )}
-          </motion.div>
+              <p className="text-[14px] leading-[1.5] text-on-dusk-2">
+                The guest is resting for now — the room stays open, and the
+                conversation picks back up a little later.
+              </p>
+            )
+          ) : state.phase === "blocked" ? (
+            <p className="text-[14px] leading-[1.5] text-on-dusk-2">
+              This room is mid-thought in another window. When that reply
+              lands, this one frees up on its own.
+            </p>
+          ) : latest ? (
+            <>
+              <p className={you}>{latest.user_text}</p>
+              <GuestLine tone="cream" className={guest}>
+                {latest.assistant_text}
+              </GuestLine>
+            </>
+          ) : (
+            <>
+              <GuestLine tone="cream" className={guest}>
+                {greeting}
+              </GuestLine>
+              {countsNote && (
+                <p className="text-[13.5px] text-on-dusk-2">{countsNote}</p>
+              )}
+            </>
+          )}
+        </motion.div>
       </div>
 
       {/* The composer — alive. */}
-      <form
-        className={`mx-auto mt-3 flex max-w-xl items-center gap-3 rounded-full bg-white/95 py-2.5 pl-5 pr-2.5 shadow-float transition-opacity ${
-          composerDisabled ? "opacity-60" : ""
-        }`}
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => dispatch({ type: "EDIT", draft: e.target.value })}
-          disabled={composerDisabled}
-          maxLength={2000}
-          placeholder={
-            state.phase === "rested"
-              ? "resting"
-              : state.phase === "blocked"
-                ? "one voice at a time"
-                : "ask about this room"
-          }
-          className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink/40 disabled:cursor-not-allowed"
-        />
-        <button
-          type="submit"
-          disabled={composerDisabled || !draft.trim()}
-          aria-label={state.phase === "reoffer" ? "send again" : "send"}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent font-semibold text-paper transition-colors hover:bg-accent-deep disabled:bg-ink/10 disabled:text-ink/30"
+      <div className="border-t border-on-dusk/[0.07] px-4 pb-4 pt-3.5">
+        <form
+          className={`flex items-center gap-2 rounded-full border border-on-dusk/[0.12] bg-dusk py-1.5 pl-5 pr-1.5 transition-opacity ${
+            composerDisabled ? "opacity-60" : ""
+          }`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
         >
-          ↑
-        </button>
-      </form>
+          <label htmlFor="ask-room" className="sr-only">
+            Ask about this room
+          </label>
+          <input
+            id="ask-room"
+            type="text"
+            value={draft}
+            onChange={(e) => dispatch({ type: "EDIT", draft: e.target.value })}
+            disabled={composerDisabled}
+            maxLength={2000}
+            placeholder={
+              state.phase === "rested"
+                ? "Resting for now"
+                : state.phase === "blocked"
+                  ? "One voice at a time"
+                  : "Ask about this room"
+            }
+            className="h-10 min-w-0 flex-1 bg-transparent text-[15px] text-on-dusk outline-none placeholder:text-[#97a3b1] disabled:cursor-not-allowed"
+          />
+          <button
+            type="submit"
+            disabled={composerDisabled || !draft.trim()}
+            aria-label={state.phase === "reoffer" ? "Send again" : "Send"}
+            className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-full bg-on-dusk text-dusk transition-colors hover:bg-white disabled:cursor-default disabled:bg-on-dusk/15 disabled:text-on-dusk/40"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 19V5" />
+              <path d="M6 11l6-6 6 6" />
+            </svg>
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

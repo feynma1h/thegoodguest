@@ -1,65 +1,39 @@
 "use client";
 
 /**
- * The account surface: who am I, what mode is this, how do I leave. In live
- * mode this is decision 0051's web half: sign in with the Apple ID that was
- * linked on the iPhone (the web never creates accounts — see lib/firebase),
- * see who you are, sign out. Mock/local show what the identity actually is
- * instead of a dead button — honest about the current state, per the
- * no-fake-UI rule.
+ * The account menu (decision 0361): who you are, the places the site has,
+ * and how to leave. In live mode this is decision 0051's web half — the web
+ * never creates accounts (see lib/firebase), so it names the account the
+ * iPhone signed in with, signs out, and carries deletion, the one account
+ * operation iOS cannot offer (0064: no sign-out there). Mock and live-local
+ * say what the identity actually is instead of showing a dead button, and
+ * keep the dev viewer one click away.
  *
- * UID renders in mono (machine data, decision 0056).
+ * A signed-out visitor never sees this: the nav offers "Sign in" instead.
+ * The legal documents live here as well as in the footer, because the footer
+ * stands down on /room — exactly where someone is looking at a scan of their
+ * bedroom and may want to know what happens to it.
  */
 
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
-import DeleteAccountPanel from "@/components/DeleteAccountPanel";
-import SignInPanel from "@/components/SignInPanel";
+import DeleteAccountDialog from "@/components/DeleteAccountPanel";
+import { openNewRoomSheet } from "@/components/NewRoomSheet";
+import { signedInWith, type Account } from "@/components/useAccount";
 import { SPRING } from "@/components/ui/spring";
-import { apiMode } from "@/lib/api";
 
-type LiveAuth =
-  | { phase: "checking" }
-  | { phase: "signedOut" }
-  | { phase: "signedIn"; uid: string; email: string | null };
+const ITEM =
+  "flex h-11 w-full cursor-pointer items-center rounded-xl px-3.5 text-left text-[15px] font-medium text-ink transition-colors hover:bg-paper";
 
-export default function AccountMenu() {
-  const mode = apiMode();
+export default function AccountMenu({ account }: { account: Account }) {
   const [open, setOpen] = useState(false);
-  const [liveAuth, setLiveAuth] = useState<LiveAuth>({ phase: "checking" });
   const [deleting, setDeleting] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const panelId = useId();
 
-  useEffect(() => {
-    if (mode !== "live") return;
-    let cancelled = false;
-    // Deferred import keeps the Firebase SDK out of mock/local bundles.
-    import("@/lib/firebase").then(({ getCurrentUser }) =>
-      getCurrentUser().then((user) => {
-        if (cancelled) return;
-        setLiveAuth(
-          user
-            ? { phase: "signedIn", uid: user.uid, email: user.email }
-            : { phase: "signedOut" },
-        );
-      }),
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [mode]);
-
-  // Closing the menu abandons a half-finished delete confirmation rather than
-  // leaving it armed for the next open. This is a property of the close
-  // ACTION, so it lives in the one function every close path calls — an
-  // effect watching `open` would be a cascading render for a decision no
-  // render needs to make (react-hooks/set-state-in-effect).
-  const closeMenu = useCallback(() => {
-    setOpen(false);
-    setDeleting(false);
-  }, []);
+  const closeMenu = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
     if (!open) return;
@@ -78,15 +52,13 @@ export default function AccountMenu() {
   }, [open, closeMenu]);
 
   const identity =
-    mode === "mock"
-      ? { title: "Demo workspace", detail: "Sample rooms, no account" }
-      : mode === "live-local"
-        ? { title: "Local dev", detail: "test-uid:dev-user" }
-        : liveAuth.phase === "signedIn"
-          ? { title: "Signed in", detail: liveAuth.email ?? liveAuth.uid }
-          : liveAuth.phase === "signedOut"
-            ? { title: "Not signed in", detail: null }
-            : { title: "One moment…", detail: null };
+    account.phase === "demo"
+      ? account.mode === "mock"
+        ? { title: "Demo workspace", detail: "Sample rooms, no account." }
+        : { title: "Local dev", detail: "Rooms from your local backend." }
+      : account.phase === "signedIn"
+        ? { title: signedInWith(account) ?? "Signed in", detail: "Your rooms follow this account." }
+        : { title: "One moment…", detail: null };
 
   const onSignOut = async () => {
     const { signOutUser } = await import("@/lib/firebase");
@@ -99,121 +71,95 @@ export default function AccountMenu() {
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        onClick={() => (open ? closeMenu() : setOpen(true))}
-        aria-label="Account"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Your account"
         aria-expanded={open}
-        className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-ink/25 text-ink/60 transition-colors hover:border-ink/50 hover:text-ink"
+        aria-controls={panelId}
+        className="grid h-10 w-10 cursor-pointer place-items-center rounded-full bg-parchment text-ink transition-colors hover:bg-[#d8dee4]"
       >
-        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden>
-          <circle cx="7.5" cy="5.2" r="2.4" stroke="currentColor" strokeWidth="1.2" />
-          <path
-            d="M2.8 12.6c.9-2 2.6-3.1 4.7-3.1s3.8 1.1 4.7 3.1"
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-          />
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21a8 8 0 0 1 16 0" />
         </svg>
       </button>
 
       <AnimatePresence>
         {open && (
           <motion.div
+            id={panelId}
             initial={{ opacity: 0, y: 6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.98 }}
             transition={SPRING}
-            className="absolute right-0 top-11 z-40 w-64 overflow-hidden rounded-2xl border border-ink/15 bg-white shadow-float"
+            className="absolute right-0 top-12 z-40 w-[300px] origin-top-right rounded-3xl bg-white p-2.5 shadow-deep"
           >
-            <div className="border-b border-ink/10 px-4 py-3.5">
-              <p className="text-sm font-medium text-ink">{identity.title}</p>
+            <div className="mb-1.5 border-b border-ink/[0.08] px-3.5 pb-4 pt-3.5">
+              <p className="text-[15px] font-semibold text-ink">{identity.title}</p>
               {identity.detail && (
-                <p className="mt-1 truncate font-mono text-[10px] text-ink/45">
-                  {identity.detail}
-                </p>
+                <p className="mt-1 text-[13.5px] text-ink-2">{identity.detail}</p>
+              )}
+              {account.phase === "signedIn" && account.email && (
+                <p className="mt-1 truncate text-[13.5px] text-ink-2">{account.email}</p>
               )}
             </div>
 
-            {mode !== "live" && (
-              <div className="border-b border-ink/10 px-4 py-3">
-                <p className="text-xs leading-relaxed text-ink/55">
-                  Sign-in arrives with accounts — rooms currently come from{" "}
-                  {mode === "mock" ? "built-in demo data" : "your local backend"}.
-                </p>
-              </div>
-            )}
+            <Link href="/rooms" onClick={closeMenu} className={ITEM}>
+              Your house
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                closeMenu();
+                openNewRoomSheet();
+              }}
+              className={ITEM}
+            >
+              Scan a room
+            </button>
+            <Link href="/privacy" onClick={closeMenu} className={ITEM}>
+              Privacy
+            </Link>
+            <Link href="/terms" onClick={closeMenu} className={ITEM}>
+              Terms
+            </Link>
 
-            {mode !== "live" && (
-              <Link
-                href="/viewer"
-                onClick={closeMenu}
-                className="block px-4 py-3 text-sm text-ink/70 transition-colors hover:bg-ink/[0.04] hover:text-ink"
-              >
+            <div className="mx-1 my-1.5 h-px bg-ink/[0.08]" />
+
+            {account.phase === "demo" && (
+              <Link href="/viewer" onClick={closeMenu} className={`${ITEM} justify-between`}>
                 Dev viewer
-                <span className="ml-2 font-mono text-[10px] text-ink/40">workbench</span>
+                <span className="text-[13px] font-normal text-ink-2">Workbench</span>
               </Link>
             )}
 
-            {mode === "live" && liveAuth.phase === "signedOut" && (
-              <div className="px-4 py-4">
-                <p className="mb-3 text-xs leading-relaxed text-ink/55">
-                  Sign in with the account from your iPhone — the rooms you
-                  scanned there follow it here.
-                </p>
-                <SignInPanel compact />
-              </div>
-            )}
-
-            {mode === "live" && liveAuth.phase === "signedIn" && !deleting && (
+            {account.phase === "signedIn" && (
               <>
-                <button
-                  type="button"
-                  onClick={onSignOut}
-                  className="block w-full cursor-pointer px-4 py-3 text-left text-sm text-ink/70 transition-colors hover:bg-ink/[0.04] hover:text-ink"
-                >
+                <button type="button" onClick={onSignOut} className={ITEM}>
                   Sign out
                 </button>
-                {/* Deletion is the only account operation iOS cannot offer
-                    (0064: no sign-out there), so the web carries it. */}
                 <button
                   type="button"
-                  onClick={() => setDeleting(true)}
-                  className="block w-full cursor-pointer border-t border-ink/10 px-4 py-3 text-left text-sm text-ink/55 transition-colors hover:bg-ink/[0.04] hover:text-accent-deep"
+                  onClick={() => {
+                    closeMenu();
+                    setDeleting(true);
+                  }}
+                  className={`${ITEM} text-accent-deep`}
                 >
                   Delete account
                 </button>
               </>
             )}
-
-            {mode === "live" && liveAuth.phase === "signedIn" && deleting && (
-              <DeleteAccountPanel
-                uid={liveAuth.uid}
-                onCancel={() => setDeleting(false)}
-              />
-            )}
-
-            {/* The legal documents' second home. SiteFooter carries them
-                everywhere else, but it stands down on /room — and the room
-                page is exactly where someone is looking at a scan of their
-                bedroom and may want to know what happens to it. */}
-            <div className="flex gap-4 border-t border-ink/10 px-4 py-2.5 text-[11px] text-ink/40">
-              <Link
-                href="/privacy"
-                onClick={closeMenu}
-                className="transition-colors hover:text-ink"
-              >
-                Privacy
-              </Link>
-              <Link
-                href="/terms"
-                onClick={closeMenu}
-                className="transition-colors hover:text-ink"
-              >
-                Terms
-              </Link>
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {account.phase === "signedIn" && (
+        <DeleteAccountDialog
+          open={deleting}
+          uid={account.uid}
+          onClose={() => setDeleting(false)}
+        />
+      )}
     </div>
   );
 }

@@ -767,34 +767,42 @@ export function buildFurniture(
     });
     if (bgEl) {
       bgEl.style.transition = "background 0.4s";
-      bgEl.style.background = day ? bgWas : "radial-gradient(120% 90% at 50% 42%, #2b2a2c 0%, #1b1a1c 55%, #0e0e10 100%)";
+      bgEl.style.background = day ? bgWas : "radial-gradient(120% 90% at 50% 42%, #16202b 0%, #0f1720 55%, #090e14 100%)";
     }
     renderer.toneMappingExposure = day ? exposureWas : params.night.exposure;
     toggleLabel();
     if (notify) opts.onChange?.(); // not at build time: the viewer's redraw clock does not exist yet
   };
-  // The little control beside the view pill: ☀ day / ☾ night.
+  // The little control beside the view pill, in the room page's dusk register
+  // (decision 0361): a drawn sun or moon and the word for the light it shows.
   let toggle: HTMLButtonElement | null = null;
+  const SUN =
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  const MOON =
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
   const toggleLabel = () => {
-    if (toggle) toggle.textContent = mode === "day" ? "☀ day" : "☾ night";
+    if (toggle) toggle.innerHTML = mode === "day" ? `${SUN}<span>Day</span>` : `${MOON}<span>Evening</span>`;
   };
   if (diorama && opts.domParent) {
     toggle = document.createElement("button");
+    toggle.type = "button";
     Object.assign(toggle.style, {
       position: "absolute",
       right: "22px",
       bottom: "22px",
-      padding: "8px 14px",
-      border: "0",
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "7px",
+      height: "44px",
+      padding: "0 16px",
+      border: "1px solid rgba(238,242,246,0.08)",
       borderRadius: "999px",
-      background: "rgba(255,255,255,0.62)",
-      backdropFilter: "blur(10px)",
-      boxShadow: "0 1px 10px rgba(80,70,55,0.12)",
-      font: "14px system-ui",
-      color: "#4a4339",
+      background: "#18222e",
+      font: "500 14px var(--font-albert-sans), system-ui, sans-serif",
+      color: "#eef2f6",
       cursor: "pointer",
       userSelect: "none",
-      zIndex: "5",
+      zIndex: "15",
     } as CSSStyleDeclaration);
     toggle.setAttribute("aria-label", "Switch between day and night");
     toggle.onclick = () => applyMode(mode === "day" ? "night" : "day");

@@ -179,12 +179,22 @@ export function createViewRig(
   const onChangeEvt = () => a.onChange();
   controls.addEventListener("change", onChangeEvt);
 
-  // --- The small control: ‹ ● ○ ○ ○ ›
+  // --- The small control: ‹ ● ○ ○ ○ ›, in the dusk register of the room page
+  // (decision 0361). Every target is 34px so a dot is easy to hit; the room
+  // page keeps the control's region clear (RoomStage's rail sits beside it).
   let root: HTMLDivElement | null = null;
   const dots: HTMLButtonElement[] = [];
-  const paint = () => dots.forEach((d, i) => (d.style.opacity = i === index ? "1" : "0.32"));
+  const paint = () =>
+    dots.forEach((d, i) => {
+      const on = i === index;
+      d.setAttribute("aria-pressed", String(on));
+      const dot = d.firstElementChild as HTMLElement | null;
+      if (dot) dot.style.background = on ? "#eef2f6" : "transparent";
+    });
   if (a.domParent && views.length > 1) {
     root = document.createElement("div");
+    root.setAttribute("role", "group");
+    root.setAttribute("aria-label", "Views of the room");
     Object.assign(root.style, {
       position: "absolute",
       left: "50%",
@@ -192,33 +202,56 @@ export function createViewRig(
       transform: "translateX(-50%)",
       display: "flex",
       alignItems: "center",
-      gap: "6px",
-      padding: "6px 10px",
+      gap: "2px",
+      padding: "4px",
       borderRadius: "999px",
-      background: "rgba(255,255,255,0.62)",
-      backdropFilter: "blur(10px)",
-      boxShadow: "0 1px 10px rgba(80,70,55,0.12)",
+      background: "#18222e",
+      border: "1px solid rgba(238,242,246,0.08)",
       userSelect: "none",
-      zIndex: "5",
+      zIndex: "15",
     } as CSSStyleDeclaration);
-    const btn = (label: string, fn: () => void, aria: string) => {
+    const hit = {
+      width: "34px",
+      height: "34px",
+      display: "grid",
+      placeItems: "center",
+      border: "0",
+      borderRadius: "999px",
+      background: "transparent",
+      cursor: "pointer",
+      padding: "0",
+      color: "#eef2f6",
+    } as CSSStyleDeclaration;
+    const btn = (path: string, fn: () => void, aria: string) => {
       const b = document.createElement("button");
-      b.textContent = label;
+      b.type = "button";
       b.setAttribute("aria-label", aria);
-      Object.assign(b.style, { border: "0", background: "transparent", cursor: "pointer", font: "16px system-ui", color: "#4a4339", padding: "0 6px" } as CSSStyleDeclaration);
+      b.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+      Object.assign(b.style, hit);
       b.onclick = fn;
       return b;
     };
-    root.appendChild(btn("‹", () => goTo(index - 1), "Previous view"));
+    root.appendChild(btn("M15 6l-6 6 6 6", () => goTo(index - 1), "Previous view"));
     views.forEach((_, i) => {
       const d = document.createElement("button");
+      d.type = "button";
       d.setAttribute("aria-label", `View ${i + 1}`);
-      Object.assign(d.style, { width: "8px", height: "8px", borderRadius: "50%", border: "0", background: "#4a4339", cursor: "pointer", padding: "0" } as CSSStyleDeclaration);
+      Object.assign(d.style, hit);
+      const dot = document.createElement("span");
+      Object.assign(dot.style, {
+        display: "block",
+        width: "9px",
+        height: "9px",
+        borderRadius: "50%",
+        border: "1.5px solid #eef2f6",
+        boxSizing: "border-box",
+      } as CSSStyleDeclaration);
+      d.appendChild(dot);
       d.onclick = () => goTo(i);
       dots.push(d);
       root!.appendChild(d);
     });
-    root.appendChild(btn("›", () => goTo(index + 1), "Next view"));
+    root.appendChild(btn("M9 6l6 6-6 6", () => goTo(index + 1), "Next view"));
     a.domParent.appendChild(root);
     paint();
   }

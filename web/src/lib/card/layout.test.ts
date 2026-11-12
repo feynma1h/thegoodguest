@@ -8,7 +8,7 @@ import { roomTitle } from "@/lib/voice";
 import { measureRoom, type RoomMeasure } from "./measure";
 import { WORDMARK_ASPECT } from "@/components/wordmarkGeometry";
 import { PALETTE } from "./palette";
-import { CARD_FRAMES, CARD_SUBTITLE, formatM, layoutCard, type CardLayout, type CardVariant, type XY, DOMAIN } from "./layout";
+import { CARD_FRAMES, CARD_SUBTITLE, formatM, layoutCard, layoutPlan, type CardLayout, type CardVariant, type XY, DOMAIN } from "./layout";
 
 function heroAssets(): SceneAssets {
   return JSON.parse(
@@ -296,4 +296,45 @@ describe("both frames", () => {
       expect(layout.claims.floorText).toBe(`${measure.floorAreaM2.toFixed(1)} m²`);
     },
   );
+});
+
+/* ------------------------------------------------------------------ *
+ * The plan travels on its own (the house draws it on each room's card)
+ * ------------------------------------------------------------------ */
+
+describe("the plan on its own", () => {
+  it("is exactly the card's plan when given the card's box", () => {
+    const { measure, layout } = heroCard();
+    const frame = CARD_FRAMES.landscape;
+    const plan = layoutPlan(measure, { x: 500, y: 48, w: frame.w - 540, h: frame.h - 96 });
+    // The card is its background, then the plan, then the words; the
+    // wordmark opens the words.
+    const firstWord = layout.ops.findIndex((o) => o.kind === "wordmark");
+    expect(layout.ops.slice(1, firstWord)).toEqual(plan.ops);
+    expect(plan.scalePxPerM).toBe(layout.claims.scalePxPerM);
+    expect(plan.datumText).toBe(layout.claims.datum!.text);
+  });
+
+  it("stays inside whatever box it is given, callout included", () => {
+    const { measure } = heroCard();
+    const box = { x: 0, y: 0, w: 760, h: 480 };
+    const plan = layoutPlan(measure, box, 60);
+    for (const op of plan.ops) {
+      const pts = op.kind === "stroke" || op.kind === "fill" ? op.points : op.kind === "text" ? [op.at] : [];
+      for (const [x, y] of pts) {
+        expect(x).toBeGreaterThanOrEqual(box.x);
+        expect(x).toBeLessThanOrEqual(box.x + box.w);
+        expect(y).toBeGreaterThanOrEqual(box.y);
+        expect(y).toBeLessThanOrEqual(box.y + box.h);
+      }
+    }
+  });
+
+  it("prints only the measured wall and carries no words of its own", () => {
+    const { measure } = heroCard();
+    const plan = layoutPlan(measure, { x: 0, y: 0, w: 760, h: 480 }, 60);
+    const texts = plan.ops.filter((o) => o.kind === "text").map((o) => o.text);
+    expect(texts).toEqual([formatM(measure.datum!.lengthM)]);
+    expect(plan.ops.some((o) => o.kind === "wordmark" || o.kind === "rect")).toBe(false);
+  });
 });

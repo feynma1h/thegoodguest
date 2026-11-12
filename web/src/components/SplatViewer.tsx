@@ -122,6 +122,13 @@ interface SplatViewerProps {
    * paper tone, which in this room MEANS measurement. Renderer-agnostic
    * world geometry; null/absent draws nothing. */
   outlines?: MeasuredOutline[] | null;
+  /** The headless still renderer only (services/scene-finish /still, through
+   * the flagged preview page's `?still=1`): open exactly on the diorama's
+   * first corner view with no on-canvas controls, and raise
+   * `__shellFinishView.ready` for a bare shell too — a bare shell otherwise
+   * gets neither the corner view nor the signal. Read once, when the renderer
+   * is built. The product never sets it. */
+  still?: boolean;
 }
 
 /** One measured footprint: a yaw-oriented rectangle on the floor. Same
@@ -409,6 +416,7 @@ export default function SplatViewer({
   onRevealDone,
   labels = null,
   outlines = null,
+  still = false,
 }: SplatViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // The renderer key carries only what needs a NEW RENDERER — which files
@@ -454,6 +462,9 @@ export default function SplatViewer({
   // would tear down and reload the room the user just watched assemble —
   // a blink at exactly the moment the reveal is supposed to have landed.
   const revealRef = useRef(reveal);
+  // `still` is read once at build for the same reason: it never changes on
+  // the one page that sets it.
+  const stillRef = useRef(still);
 
   // --- The transform seam (decision 0133). The renderer effect below owns
   // structure; these three refs own placement, so a proposal moves furniture
@@ -700,7 +711,13 @@ export default function SplatViewer({
               furniture ? import("three/addons/geometries/RoundedBoxGeometry.js") : null,
             ])
           : null;
+        // A still of a bare shell: the finished room's corner rig, over the
+        // flat shell (a finished room stages it through finishCtl below).
+        const stillView = stillRef.current;
+        const bareStillRig = stillView && !dressShell ? await import("@/components/shellFinishViewRig") : null;
         if (disposed) return;
+        // No view pill and no day/night button in a still.
+        const chromeParent = stillView ? null : container.parentElement;
         const finishCtl = finishMods
           ? finishMods[0].applyShellFinish(THREE, scene, shellMeshes, finish as ShellFinish, renderer)
           : null;
@@ -715,7 +732,7 @@ export default function SplatViewer({
                 finish,
                 renderer,
                 shellMeshes.find((m) => m.plane.kind === "floor")?.mesh ?? null,
-                { domParent: container.parentElement, onChange: () => { lastDirty = performance.now(); } },
+                { domParent: chromeParent, onChange: () => { lastDirty = performance.now(); } },
               )
             : null;
 
@@ -834,7 +851,7 @@ export default function SplatViewer({
         // few frames drawn since). A headless driver waits for it before its
         // first measured render: before that, the id pass can still catch a
         // surface mid-transition.
-        const finishView: { ready: boolean } | null = finishMods ? { ready: false } : null;
+        const finishView: { ready: boolean } | null = finishMods || stillView ? { ready: false } : null;
         if (finishMods) {
           (window as unknown as { __shellFinishView?: unknown }).__shellFinishView = Object.assign(finishView!, {
             furniture: furn,
@@ -847,6 +864,15 @@ export default function SplatViewer({
               furn?.update(c);
             }),
           });
+        } else if (stillView) {
+          // A bare shell's still: the signal and the live view, no harness.
+          (window as unknown as { __shellFinishView?: unknown }).__shellFinishView = Object.assign(finishView!, {
+            furniture: null,
+            camera,
+            controls,
+            renderer,
+            scene,
+          });
         }
         controls.enableDamping = true;
         controls.dampingFactor = 0.08;
@@ -856,20 +882,45 @@ export default function SplatViewer({
         controls.minDistance = radius * 0.5;
         controls.maxDistance = fitDistance * 3;
         // Finished room: the fixed diorama camera (lib/shellFinishViews).
+        const clipBoxes = splats.flatMap((s) =>
+          s.clip
+            ? [{ center: s.clip.center_world, half: s.clip.half_extents_m, yaw: s.clip.yaw_rad }]
+            : [],
+        );
         const staged = finishCtl?.stage({
           camera,
           controls,
-          domParent: container.parentElement,
-          boxes: splats.flatMap((s) =>
-            s.clip
-              ? [{ center: s.clip.center_world, half: s.clip.half_extents_m, yaw: s.clip.yaw_rad }]
-              : [],
-          ),
+          domParent: chromeParent,
+          boxes: clipBoxes,
           onChange: () => {
             lastDirty = performance.now();
           },
         });
         if (staged) finalOffset.copy(staged);
+        // A bare shell's still stands where a finished room's first view
+        // would: the same rig (lens, angle, aim, distance) over the flat planes,
+        // with the wall height measured the way shellFinishScene's stage does.
+        let stillRig: { dispose: () => void } | null = null;
+        const stillWalls = shellPlanes.filter((p) => p.kind === "wall");
+        const stillFloor = shellPlanes.find((p) => p.kind === "floor");
+        if (bareStillRig && stillFloor && stillWalls.length > 0) {
+          const rig = bareStillRig.createViewRig(THREE, {
+            camera,
+            controls,
+            domParent: null,
+            walls: stillWalls.map((p) => ({ corners: p.corners, openings: p.openings })),
+            boxes: clipBoxes,
+            floor: stillFloor.corners,
+            wallHeight: Math.max(...stillWalls.flatMap((p) => p.corners.map((c) => c[1]))) - stillFloor.corners[0][1],
+            onChange: () => {
+              lastDirty = performance.now();
+            },
+          });
+          if (rig) {
+            stillRig = rig;
+            finalOffset.copy(rig.initialOffset);
+          }
+        }
 
         controls.autoRotate = idleOrbit;
         controls.autoRotateSpeed = 0.5;
@@ -1144,7 +1195,7 @@ export default function SplatViewer({
         // --- Entrance: a short dolly-in from farther out, interruptible by
         // the first grab. Runs on an eased clock inside the render loop.
         const ENTRANCE_MS = 1400;
-        let entranceStart: number | null = performance.now();
+        let entranceStart: number | null = stillView ? null : performance.now();
         const fromOffset = finalOffset.clone().multiplyScalar(1.3).add(
           new THREE.Vector3(0, fitDistance * 0.12, 0),
         );
@@ -1152,7 +1203,10 @@ export default function SplatViewer({
           entranceStart = null;
         };
         renderer.domElement.addEventListener("pointerdown", cancelEntrance);
-        camera.position.copy(target).add(fromOffset);
+        // A still has no entrance: it stands exactly on its view, around the
+        // aim the rig set (the dolly ends around the viewer's own aim).
+        if (stillView) camera.position.copy(controls.target).add(finalOffset);
+        else camera.position.copy(target).add(fromOffset);
 
         let raf = 0;
         let settledFrames = 0;
@@ -1314,6 +1368,7 @@ export default function SplatViewer({
             mesh.material.dispose();
           }
           finishCtl?.dispose();
+          stillRig?.dispose();
           furn?.dispose();
           ground.geometry.dispose();
           (ground.material as { map?: { dispose(): void } }).map?.dispose();
@@ -1408,15 +1463,11 @@ export default function SplatViewer({
         frameless ? "" : "rounded-xl border border-ink/15"
       } ${className ?? ""}`}
       style={{
-        // The stage's atmosphere: warm lamplight dark (the palette's
-        // ambient register — §11's family, dimmed). CSS, not clear-color,
-        // so it can be a gradient.
-        // Finished room: a seamless warm studio grey (the diorama
-        // look), not the dark stage.
-        background:
-          finish && shellFinishEnabled()
-            ? "radial-gradient(120% 95% at 50% 40%, #f1eee9 0%, #e2ddd5 60%, #cfc9c0 100%)"
-            : "radial-gradient(120% 90% at 50% 42%, #36342f 0%, #23221e 55%, #181715 100%)",
+        // The stage's atmosphere: the dusk register of decision 0361, for
+        // the finished room and the scanned one alike, so the room page's
+        // light-on-dark chrome reads over either. CSS, not clear-color, so
+        // it can be a gradient.
+        background: "radial-gradient(120% 95% at 50% 40%, #1a2531 0%, #121b25 55%, #0d141c 100%)",
       }}
     >
       <div ref={containerRef} className="absolute inset-0" />
@@ -1424,28 +1475,23 @@ export default function SplatViewer({
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
-        style={{
-          boxShadow:
-            finish && shellFinishEnabled()
-              ? "inset 0 0 120px 30px rgba(110, 100, 85, 0.16)"
-              : "inset 0 0 110px 32px rgba(18, 12, 6, 0.5)",
-        }}
+        style={{ boxShadow: "inset 0 0 120px 30px rgba(5, 9, 14, 0.45)" }}
       />
       {showLoadingNotice && (
         <Overlay>
-          <p className="animate-pulse text-sm text-paper/60">Assembling the room…</p>
+          <p className="breathe text-[15px] text-on-dusk-2">Assembling the room…</p>
         </Overlay>
       )}
       {phase === "empty" && (
         <Overlay>
-          <p className="text-sm text-paper/45">Nothing to render yet.</p>
+          <p className="text-[15px] text-on-dusk-2">Nothing to show here yet.</p>
         </Overlay>
       )}
       {phase === "error" && (
         <Overlay>
           <div className="max-w-sm text-center">
-            <p className="text-sm font-medium text-[#e0a9a1]">Viewer error</p>
-            <p className="mt-1 break-words text-xs text-paper/50">{error}</p>
+            <p className="text-[15px] font-semibold text-sun">The room couldn&rsquo;t be drawn</p>
+            <p className="mt-1.5 break-words text-[13px] text-on-dusk-2">{error}</p>
           </div>
         </Overlay>
       )}

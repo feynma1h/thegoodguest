@@ -13,6 +13,9 @@
  *     &look=photo     keep the light the render-vs-photo loop is calibrated in
  *     &plain=1        the flat measured shell, for an A/B
  *     &exposure=1.6   override the finish's colour gain while calibrating
+ *     &still=1        the room's still picture (services/scene-finish /still):
+ *                     the first corner view, edge to edge, with no controls
+ *                     or note — a bare shell included
  *
  * Inert unless NEXT_PUBLIC_SHELL_FINISH=1 (set it for `next dev`; a
  * production build leaves it unset, so this page renders nothing useful).
@@ -43,7 +46,8 @@ function Preview() {
   const exposure = params.get("exposure");
   const look = params.get("look");
   const mode = params.get("mode");
-  const key = `${shellUrl}|${finishUrl}|${assetsUrl}|${furnitureUrl}|${look}|${mode}`;
+  const still = params.get("still") === "1";
+  const key =`${shellUrl}|${finishUrl}|${assetsUrl}|${furnitureUrl}|${look}|${mode}`;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
 
   useEffect(() => {
@@ -113,10 +117,20 @@ function Preview() {
   if (state.phase === "error") return <p className="p-8 text-sm text-ink/55">{state.note}</p>;
   return (
     <div className="fixed inset-0 z-50">
-      <SplatViewer splats={state.splats} shell={state.shell} finish={finish} furniture={state.furniture} className="h-full w-full" />
-      <span className="pointer-events-none absolute left-3 top-3 font-mono text-[10px] text-ink/35">
-        {plain ? "flat shell (plain=1)" : state.note}
-      </span>
+      <SplatViewer
+        splats={state.splats}
+        shell={state.shell}
+        finish={finish}
+        furniture={state.furniture}
+        className="h-full w-full"
+        frameless={still}
+        still={still}
+      />
+      {!still && (
+        <span className="pointer-events-none absolute left-3 top-3 font-mono text-[10px] text-ink/35">
+          {plain ? "flat shell (plain=1)" : state.note}
+        </span>
+      )}
     </div>
   );
 }

@@ -421,42 +421,9 @@ export function layoutCard(input: CardInput): CardLayout {
   const planBox = wide
     ? { x: 500, y: 48, w: frame.w - 500 - 40, h: frame.h - 96 }
     : { x: M, y: 300, w: frame.w - 2 * M, h: frame.h - 300 - 108 };
-  // The inset is where the dimension callout lives: it is measured in
-  // pixels, not meters, so it cannot be part of the world-space fit.
-  const proj = project(measure.contour, planBox, 50, orientation(measure.datum));
-  const contourPx = measure.contour.map(proj.p);
-
-  ops.push({
-    kind: "fill",
-    points: contourPx,
-    // The floor's measured colour, laid on as the plan's own tone — the
-    // precedent's move, and the honest one: a measured colour shown as
-    // colour rather than named as a word. An unobserved floor gets the
-    // neutral ink wash and never an invented hue (0069).
-    fill: measure.floorAlbedoHex
-      ? alpha(measure.floorAlbedoHex, 0.09)
-      : alpha(INK, 0.05),
-  });
-
-  const { glows, solids, marks } = drawWalls(measure.walls, proj, contourPx);
-  // Light under the ink; the measured contour under the walls that stand
-  // on it; jambs and glazing last.
-  ops.push(...glows);
-  ops.push({
-    kind: "stroke",
-    points: contourPx,
-    closed: true,
-    // Measured floor with no measured wall standing on it — the alcove
-    // openings in the hero room are exactly this. Lighter, never absent.
-    stroke: alpha(INK, 0.35),
-    width: 1,
-  });
-  ops.push(...solids, ...marks);
-
-  const datumText = measure.datum ? formatM(measure.datum.lengthM) : null;
-  if (measure.datum && datumText) {
-    drawDimension(ops, measure.datum, proj, datumText);
-  }
+  const plan = layoutPlan(measure, planBox);
+  ops.push(...plan.ops);
+  const datumText = plan.datumText;
 
   // --- the words ---------------------------------------------------
   const colW = wide ? 406 : frame.w - 2 * M;
@@ -593,7 +560,7 @@ export function layoutCard(input: CardInput): CardLayout {
     height: frame.h,
     ops,
     claims: {
-      scalePxPerM: proj.s,
+      scalePxPerM: plan.scalePxPerM,
       title,
       ceilingText,
       floorText,
@@ -604,4 +571,61 @@ export function layoutCard(input: CardInput): CardLayout {
       floorAlbedoHex: measure.floorAlbedoHex,
     },
   };
+}
+
+/**
+ * The plan alone: the measured contour, the walls standing on it and the one
+ * dimension, fitted into `box`. The card draws it beside its words; the
+ * house draws it on each room's card (decision 0361), so a room looks the
+ * same wherever its plan appears and every number on it is a measurement.
+ *
+ * The inset is where the dimension callout lives: it is measured in pixels,
+ * not meters, so it cannot be part of the world-space fit.
+ */
+export function layoutPlan(
+  measure: RoomMeasure,
+  box: { x: number; y: number; w: number; h: number },
+  inset = 50,
+): { ops: CardOp[]; scalePxPerM: number; datumText: string | null } {
+  const ops: CardOp[] = [];
+  const proj = project(measure.contour, box, inset, orientation(measure.datum));
+  const contourPx = measure.contour.map(proj.p);
+
+  ops.push({
+    kind: "fill",
+    points: contourPx,
+    // The floor's measured colour, laid on as the plan's own tone — the
+    // precedent's move, and the honest one: a measured colour shown as
+    // colour rather than named as a word. An unobserved floor gets the
+    // neutral ink wash and never an invented hue (0069).
+    fill: measure.floorAlbedoHex
+      ? alpha(measure.floorAlbedoHex, 0.09)
+      : alpha(INK, 0.05),
+  });
+
+  const { glows, solids, marks } = drawWalls(measure.walls, proj, contourPx);
+  // Light under the ink; the measured contour under the walls that stand
+  // on it; jambs and glazing last.
+  ops.push(...glows);
+  ops.push({
+    kind: "stroke",
+    points: contourPx,
+    closed: true,
+    // Measured floor with no measured wall standing on it — the alcove
+    // openings in the hero room are exactly this. Lighter, never absent.
+    stroke: alpha(INK, 0.35),
+    width: 1,
+  });
+  ops.push(...solids, ...marks);
+
+  const datumText = measure.datum ? formatM(measure.datum.lengthM) : null;
+  if (measure.datum && datumText) {
+    drawDimension(ops, measure.datum, proj, datumText);
+  }
+  return { ops, scalePxPerM: proj.s, datumText };
+}
+
+/** A room's floor area as the card prints it: one decimal, never more. */
+export function floorAreaText(measure: RoomMeasure): string {
+  return formatM2(measure.floorAreaM2);
 }

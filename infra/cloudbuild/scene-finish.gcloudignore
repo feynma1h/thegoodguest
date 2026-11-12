@@ -1,0 +1,32 @@
+# What `gcloud builds submit` uploads for scene-finish (deploy_scene_finish.sh
+# passes this file with --ignore-file, in place of the repo's .gcloudignore).
+#
+# The repo's .gcloudignore leaves out web/ because no other service's image is
+# built from it; scene-finish's is: its Dockerfile builds the viewer from web/
+# (services/scene-finish/Dockerfile, stage `viewer`). So this file uploads only
+# what that Dockerfile COPYs — web/, packages/schemas/, packages/room-look/ and
+# services/scene-finish/ — and none of the dependency or build folders inside
+# them, which the image makes for itself (the nested .gitignore files that
+# list them are not read by gcloud).
+
+/*
+!/web/
+!/packages/
+!/services/
+
+/packages/*
+!/packages/schemas/
+!/packages/room-look/
+
+/services/*
+!/services/scene-finish/
+
+node_modules/
+web/.next/
+web/out/
+web/public/dev-fixtures/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.DS_Store

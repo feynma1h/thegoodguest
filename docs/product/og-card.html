@@ -1,8 +1,13 @@
 <!DOCTYPE html>
 <!--
-  og-card.html — the source for web/public/og-card.png, the site-wide Open
-  Graph share image (1200×630). Read by a human re-exporting the card; no
-  build step consumes it.
+  og-card.html — the hand-drawn share image the site used until decision
+  0361. It is NO LONGER the source of web/public/og-card.png: the site now
+  draws that itself, at web/src/app/share-card/page.tsx, and the re-export
+  command below would overwrite it with the old cream card. Do not run it.
+
+  It stays because web/src/lib/card/measure.test.ts reproduces its hand-placed
+  #roomclip polygon, and tools/test_gen_mark.py checks its inline wordmark.
+  No build step consumes it.
 
   Provenance: drawn from the Good Guest tokens (web/src/app/globals.css) and
   real geometry.

@@ -1,22 +1,20 @@
-/// The three Good Guest type roles, translated to SwiftUI (design spec §10,
-/// decision 0072). Every screen reaches for one of these three — never a bare
-/// `.font(.system(...))`.
+/// The Good Guest type roles, translated to SwiftUI. Every screen reaches for
+/// one of these — never a bare `.font(.system(...))`.
 ///
-///   • GUEST voice   — the guest speaking: greetings, narration, confessions,
-///                     the doorway. Source Serif 4, *italic*. Warmth.
-///   • DISPLAY       — the same serif, upright, for large arrival titles
-///                     ("Your room is ready."). Not italic.
-///   • UI            — Instrument Sans: buttons, labels, controls.
-///   • MONO (machine)— IBM Plex Mono: IDs, capture metrics, the elapsed clock,
-///                     byte counts. Never prose.
+///   • GUEST voice   — the guest speaking. Newsreader *italic*.
+///   • DISPLAY       — titles. Newsreader upright, light, set tight.
+///   • UI            — Albert Sans: everything you read to operate the app,
+///                     buttons, labels, status, body copy.
+///   • MONO          — JetBrains Mono, for MEASUREMENTS only (4.40 × 3.60 m).
+///                     Not for IDs, times, counts or labels.
 ///
-/// FONT BUNDLING SEAM: the branded faces (Source Serif 4 / Instrument Sans /
-/// IBM Plex Mono) are not yet in the app bundle, so these fall back to the
-/// spec's specified system substitutes — New York (`.serif`), SF Pro
-/// (`.default`), and `.monospaced`. When the `.ttf`/`.otf` files are added and
-/// registered, change ONLY the private face helpers at the bottom of this file
-/// to `Font.custom(_:size:relativeTo:)`; every call site keeps working (and the
-/// `relativeTo:` scaling below becomes Font.custom's own, so behaviour matches).
+/// The faces are the website's (approved 2026-11-10), bundled as variable
+/// fonts under `TheGoodGuestShared/Fonts/` and registered by `RSFontFiles`.
+/// The fixed-size path below sets the weight axis directly, and Newsreader's
+/// optical-size axis to the size it is drawn at, so a 40pt title gets the
+/// display cut and a 15pt line the text cut. The semantic variants use the
+/// faces' named instances through `Font.custom(_:size:relativeTo:)`, which
+/// scales with Dynamic Type exactly as the system styles did.
 ///
 /// DYNAMIC TYPE: `Font.system(size:)` is inert, so fixed point sizes are applied
 /// through the `.rsFont(...)` VIEW MODIFIER (bottom of this file), never through a
@@ -157,10 +155,10 @@ extension View {
 
 enum RSFont {
 
-    // MARK: Guest voice — serif italic (the guest speaking)
+    // MARK: Guest voice — Newsreader italic (the guest speaking)
 
     static func guest(_ style: Font.TextStyle = .body) -> Font {
-        serif(style).italic()
+        .custom(Face.serifItalic(.regular), size: baseSize(style), relativeTo: style)
     }
 
     /// Resolve a fixed point size for an ALREADY-KNOWN type size. Internal to the
@@ -178,45 +176,191 @@ enum RSFont {
         var points = UIFontMetrics(forTextStyle: uiTextStyle(relativeTo))
             .scaledValue(for: size, compatibleWith: traits)
         if let maxSize { points = min(points, maxSize) }
-
-        let base: Font = switch role {
-        case .guest:   .system(size: points, design: .serif)
-        case .display: .system(size: points, design: .serif)
-        case .ui:      .system(size: points, design: .default)
-        case .mono:    .system(size: points, design: .monospaced)
-        }
-        let weighted = weight.map { base.weight($0) } ?? base
-        return role == .guest ? weighted.italic() : weighted
+        return Font(uiFont(role: role, size: points, weight: weight))
     }
 
-    // MARK: Display — serif upright (arrival titles)
+    /// The face for a role at an exact point size, with its variation axes set.
+    ///
+    /// Display defaults to Light, which is how the language sets titles; the
+    /// guest and the interface default to Regular, measurements to Medium.
+    static func uiFont(role: RSFontRole, size: CGFloat, weight: Font.Weight?) -> UIFont {
+        let weight = weight ?? defaultWeight(role)
+        switch role {
+        case .guest:
+            return Face.variable(Face.serifItalicDefault, size: size,
+                                 weight: Face.axisWeight(weight, range: 200...800),
+                                 opticalSize: size)
+        case .display:
+            return Face.variable(Face.serifDefault, size: size,
+                                 weight: Face.axisWeight(weight, range: 200...800),
+                                 opticalSize: size)
+        case .ui:
+            return Face.variable(Face.sansDefault, size: size,
+                                 weight: Face.axisWeight(weight, range: 100...900))
+        case .mono:
+            return Face.variable(Face.monoDefault, size: size,
+                                 weight: Face.axisWeight(weight, range: 100...800))
+        }
+    }
+
+    /// A role's weight when the call site names none.
+    static func defaultWeight(_ role: RSFontRole) -> Font.Weight {
+        switch role {
+        case .guest, .ui: .regular
+        case .display:    .light
+        case .mono:       .medium
+        }
+    }
+
+    /// The weight a style takes with Bold Text on: a step heavier, as the
+    /// system's own faces go (Regular to Semibold, Semibold to Bold). The
+    /// bundled faces are variable, so every step exists. Without this the
+    /// setting changed nothing in the app: its faces are set at explicit
+    /// weights, and only the system's fonts follow the setting by themselves.
+    static func bolder(_ weight: Font.Weight) -> Font.Weight {
+        switch weight {
+        case .ultraLight, .thin: .light
+        case .light:             .medium
+        case .medium, .semibold: .bold
+        case .bold:              .heavy
+        case .heavy, .black:     .black
+        default:                 .semibold
+        }
+    }
+
+    // MARK: Display — Newsreader upright (titles)
 
     static func display(_ style: Font.TextStyle = .title) -> Font {
-        serif(style)
+        .custom(Face.serif(.light), size: baseSize(style), relativeTo: style)
     }
 
-    // MARK: UI sans — buttons, labels, controls
+    // MARK: UI sans — Albert Sans, everything you operate
 
     static func ui(_ style: Font.TextStyle = .body, weight: Font.Weight = .regular) -> Font {
-        sans(style).weight(weight)
+        .custom(Face.sans(weight), size: baseSize(style), relativeTo: style)
     }
 
-    // MARK: Mono — machine data only
+    // MARK: Mono — JetBrains Mono, measurements only
 
     static func mono(_ style: Font.TextStyle = .caption, weight: Font.Weight = .medium) -> Font {
-        monospaced(style).weight(weight)
+        .custom(Face.mono(weight), size: baseSize(style), relativeTo: style)
     }
 
-    // MARK: - Face helpers (the bundling seam — change these three, nothing else)
+    // MARK: - Faces
 
-    private static func serif(_ style: Font.TextStyle) -> Font {
-        .system(style, design: .serif)
+    /// PostScript names of the bundled faces' named instances, and the
+    /// variable-axis builder the fixed-size path uses. The names are the ones
+    /// Core Text reports for the files in `Fonts/`; FontRegistrationTests pins
+    /// that every one of them resolves.
+    enum Face {
+        static let serifDefault = "Newsreader16pt-Regular"
+        static let serifItalicDefault = "Newsreader16pt-Italic"
+        static let sansDefault = "AlbertSans-Regular"
+        static let monoDefault = "JetBrainsMono-Regular"
+
+        static func serif(_ weight: Font.Weight) -> String {
+            switch weight {
+            case .ultraLight, .thin: return "NewsreaderRoman-ExtraLight"
+            case .light:             return "NewsreaderRoman-Light"
+            case .medium:            return "NewsreaderRoman-Medium"
+            case .semibold:          return "NewsreaderRoman-SemiBold"
+            case .bold:              return "NewsreaderRoman-Bold"
+            case .heavy, .black:     return "NewsreaderRoman-ExtraBold"
+            default:                 return serifDefault
+            }
+        }
+
+        static func serifItalic(_ weight: Font.Weight) -> String {
+            switch weight {
+            case .ultraLight, .thin: return "NewsreaderItalic-ExtraLight"
+            case .light:             return "NewsreaderItalic-Light"
+            case .medium:            return "NewsreaderItalic-Medium"
+            case .semibold:          return "NewsreaderItalic-SemiBold"
+            case .bold:              return "NewsreaderItalic-Bold"
+            case .heavy, .black:     return "NewsreaderItalic-ExtraBold"
+            default:                 return serifItalicDefault
+            }
+        }
+
+        static func sans(_ weight: Font.Weight) -> String {
+            switch weight {
+            case .ultraLight: return "AlbertSansRoman-ExtraLight"
+            case .thin:       return "AlbertSansRoman-Thin"
+            case .light:      return "AlbertSansRoman-Light"
+            case .medium:     return "AlbertSansRoman-Medium"
+            case .semibold:   return "AlbertSansRoman-SemiBold"
+            case .bold:       return "AlbertSansRoman-Bold"
+            case .heavy:      return "AlbertSansRoman-ExtraBold"
+            case .black:      return "AlbertSansRoman-Black"
+            default:          return sansDefault
+            }
+        }
+
+        static func mono(_ weight: Font.Weight) -> String {
+            switch weight {
+            case .ultraLight: return "JetBrainsMonoRoman-ExtraLight"
+            case .thin:       return "JetBrainsMonoRoman-Thin"
+            case .light:      return "JetBrainsMonoRoman-Light"
+            case .regular:    return monoDefault
+            case .bold:       return "JetBrainsMonoRoman-Bold"
+            case .heavy, .black: return "JetBrainsMonoRoman-ExtraBold"
+            default:          return "JetBrainsMonoRoman-Medium"
+            }
+        }
+
+        /// The OpenType weight a SwiftUI weight stands for, inside a face's range.
+        static func axisWeight(_ weight: Font.Weight, range: ClosedRange<CGFloat>) -> CGFloat {
+            let value: CGFloat = switch weight {
+            case .ultraLight: 200
+            case .thin:       100
+            case .light:      300
+            case .medium:     500
+            case .semibold:   600
+            case .bold:       700
+            case .heavy:      800
+            case .black:      900
+            default:          400
+            }
+            return min(max(value, range.lowerBound), range.upperBound)
+        }
+
+        private static let wght = NSNumber(value: 0x7767_6874 as UInt32)
+        private static let opsz = NSNumber(value: 0x6F70_737A as UInt32)
+
+        /// A variable face at `size`, with the weight axis set and — for a face
+        /// that has one — the optical-size axis matched to the size it is drawn
+        /// at (Newsreader's runs 6 to 72). An unregistered face resolves to the
+        /// system font rather than crashing; FontRegistrationTests is what
+        /// keeps that from shipping.
+        static func variable(_ name: String, size: CGFloat, weight: CGFloat, opticalSize: CGFloat? = nil) -> UIFont {
+            var axes: [NSNumber: CGFloat] = [wght: weight]
+            if let opticalSize { axes[opsz] = min(max(opticalSize, 6), 72) }
+            let descriptor = UIFontDescriptor(fontAttributes: [
+                .name: name,
+                UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): axes,
+            ])
+            return UIFont(descriptor: descriptor, size: size)
+        }
     }
-    private static func sans(_ style: Font.TextStyle) -> Font {
-        .system(style, design: .default)
-    }
-    private static func monospaced(_ style: Font.TextStyle) -> Font {
-        .system(style, design: .monospaced)
+
+    /// The size each text style starts from at the default Dynamic Type step,
+    /// so `Font.custom(_:size:relativeTo:)` scales from the same place the
+    /// system styles did.
+    static func baseSize(_ style: Font.TextStyle) -> CGFloat {
+        switch style {
+        case .largeTitle:  return 34
+        case .title:       return 28
+        case .title2:      return 22
+        case .title3:      return 20
+        case .headline:    return 17
+        case .body:        return 17
+        case .callout:     return 16
+        case .subheadline: return 15
+        case .footnote:    return 13
+        case .caption:     return 12
+        case .caption2:    return 11
+        @unknown default:  return 17
+        }
     }
     // MARK: - Dynamic Type
 
@@ -263,6 +407,8 @@ enum RSFont {
 /// at the top of this file for why a plain `Font` cannot do this.
 private struct RSScaledFont: ViewModifier {
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// Bold Text, as SwiftUI reports it.
+    @Environment(\.legibilityWeight) private var legibilityWeight
 
     let role: RSFontRole
     let size: CGFloat
@@ -271,7 +417,10 @@ private struct RSScaledFont: ViewModifier {
     let maxSize: CGFloat?
 
     func body(content: Content) -> some View {
-        content.font(RSFont.resolved(
+        let weight = legibilityWeight == .bold
+            ? RSFont.bolder(weight ?? RSFont.defaultWeight(role))
+            : weight
+        return content.font(RSFont.resolved(
             role: role, size: size, weight: weight,
             relativeTo: relativeTo, maxSize: maxSize, typeSize: typeSize
         ))

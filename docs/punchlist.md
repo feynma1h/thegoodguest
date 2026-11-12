@@ -132,6 +132,11 @@ count (0114) has no remedy.
 `web/src/app/privacy/page.tsx` §5c and §6 describe the furniture step (decision 0360), which is built and not deployed. Deploying the web app first would make the live Privacy Policy describe something that does not run yet. Deploy the web app and the pipeline together, or not the web app.
 **Check:** manual — whoever deploys the web.
 
+### G2-07 · perception-obj is behind main: the still trigger and 0322/0323 wait on one deploy
+**State:** open · deferred by the operator 2026-11-11 ("later, when we are in a better state") · **Blocks:** a new room getting its still picture without an operator
+The serving image is `main` as of 2026-08-31 (`8135ab1e`). A deploy from main brings the still trigger (0363), and it is also the first cloud run of 0322/0323's `/process` rewrite: no SAM 3D objects, `boxes.json` from the person's boxes. New rooms then show no object splats until the furniture step is live. Until that deploy, a new room's still is queued by hand with `tools/enqueue_still.py <scene_id>`. Deploy with `CANDIDATE_TAG=<lane> ./infra/deploy_perception.sh obj --candidate`. Prove it with a new scan: a replayed `/shell` on a ready room noops and never asks for a still.
+**Check:** automated — the revision serving perception-obj carries `SCENE_FINISH_URL`.
+
 ## Gate 3 — what users are told must be true
 
 ### G3-01 · The Privacy Policy overstates upload-bookkeeping retention

@@ -1,7 +1,7 @@
 # 0302 — the Scan screen may show a camera behind the boxes
 
 **Date:** 2026-11-05
-**Status:** Decided — only while live boxes are on, and so only in Debug builds (0295, 0301)
+**Status:** Amended by 0365 — every scan now shows the camera, in every build, with the floor plan as a small card on LiDAR phones; what this says about live boxes (Debug only, 0295, 0301) stands
 
 Amends 0072 and 0077 in one respect each.
 

@@ -149,6 +149,7 @@ class FirestoreSceneReadRepository(SceneReadRepository):
             missing_paths=data.get("missing_paths"),
             invalid_blobs=data.get("invalid_blobs"),
             expire_at=data.get("expire_at"),
+            still=data.get("still"),
         )
 
     def get(self, scene_id: str) -> Scene:

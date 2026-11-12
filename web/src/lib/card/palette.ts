@@ -7,18 +7,18 @@
  * `palette.test.ts` parses globals.css and fails if the two ever diverge,
  * which is the only thing that makes a second copy safe.
  *
- * Type roles are decision 0057's: serif is display, sans is UI, mono is
- * eyebrow labels and machine data. A dimension is machine data.
+ * Type roles are decision 0361's: serif is display, sans is UI, mono is
+ * measurements. A dimension is a measurement.
  */
 
 /** The Good Guest tokens. Mirrors `:root` in app/globals.css. */
 export const PALETTE = {
-  paper: "#f9f2ec",
-  parchment: "#ebe5df",
-  ink: "#282723",
+  paper: "#f5f6f8",
+  parchment: "#e4e9ed",
+  ink: "#121a23",
   accent: "#c04d3e",
   accentDeep: "#a54235",
-  sun: "#c9a25e",
+  sun: "#f0b26a",
 } as const;
 
 /** `rgba()` for one of the palette's hexes at a given alpha. */

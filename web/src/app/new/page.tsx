@@ -1,14 +1,15 @@
 "use client";
 
 /**
- * The Bridge (design §2): capture is iOS-only; this desk is where the
- * room arrives. The page frames the handoff — and the desk genuinely
- * waits: it polls the scene list, and when a scan it hasn't seen before
- * lands, the listening panel swells, the guest takes the room in, and
- * the page walks into the wait in place (no filename ever shows).
+ * The Bridge (design §2, decision 0361): capture is iOS-only; this desk is
+ * where the room arrives. The page says how the handoff goes, and the desk
+ * genuinely waits: it polls the scene list, and when a scan it hasn't seen
+ * before lands, the listening panel says so and the page walks into the
+ * wait in place (no filename ever shows).
  *
- * The QR block is a DECLARED placeholder — no deep link exists yet, and
- * the caption says so. Nothing on this page pretends to work.
+ * Nothing here pretends to work: the old QR placeholder is gone, and the
+ * panel names the account it is listening for, because that is the one
+ * thing that decides whether a scan will land here.
  */
 
 import { motion } from "motion/react";
@@ -16,8 +17,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import SignInPanel from "@/components/SignInPanel";
+import { signedInWith, useAccount } from "@/components/useAccount";
 import { SPRING } from "@/components/ui/spring";
-import { Eyebrow, GuestLine } from "@/components/ui/voice";
 import { getApiClient } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 
@@ -29,8 +30,39 @@ type Listening =
   | { phase: "signed-out" }
   | { phase: "heard"; bundleId: string | null };
 
+const STEPS = [
+  {
+    text: "Open The Good Guest on your iPhone and tap Scan a room.",
+    icon: (
+      <>
+        <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+        <path d="M11 18.5h2" />
+      </>
+    ),
+  },
+  {
+    text: "Walk the room slowly, corners included. A minute or two is enough.",
+    icon: (
+      <>
+        <path d="M4 20V9l8-5 8 5v11" />
+        <path d="M9 20v-6h6v6" />
+      </>
+    ),
+  },
+  {
+    text: "Leave this page open. The room lands here on its own.",
+    icon: (
+      <>
+        <rect x="3" y="4.5" width="18" height="12" rx="1.5" />
+        <path d="M8 20h8M12 16.5V20" />
+      </>
+    ),
+  },
+] as const;
+
 export default function BridgePage() {
   const router = useRouter();
+  const account = useAccount();
   const [state, setState] = useState<Listening>({
     phase: "listening",
     trouble: false,
@@ -94,88 +126,82 @@ export default function BridgePage() {
     return () => clearTimeout(timer);
   }, [state, router]);
 
-  const heard = state.phase === "heard";
+  const live = state.phase === "listening" && !state.trouble;
+  const status =
+    state.phase === "heard"
+      ? "It’s here"
+      : state.phase === "signed-out"
+        ? "Not listening yet"
+        : state.trouble
+          ? "Can’t reach the server — still trying"
+          : "Listening for your scan";
+  const line =
+    state.phase === "heard"
+      ? "It’s here. Give me a few minutes with it."
+      : state.phase === "signed-out"
+        ? "Sign in with the account from your iPhone, and I’ll listen for its rooms."
+        : "I’ll know the moment it arrives, and I’ll start getting to know the room.";
+  const foot =
+    state.phase === "heard"
+      ? "Opening the room…"
+      : account.phase === "demo"
+        ? "Demo workspace. Sample rooms stand in for yours."
+        : account.phase === "signedIn"
+          ? `${signedInWith(account)}. Rooms you scan on that account appear here.`
+          : null;
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-16">
-      <Eyebrow>The bridge — phone to desk</Eyebrow>
-
-      <div className="mt-10 grid gap-12 lg:grid-cols-[auto_1fr] lg:gap-16">
-        <div className="w-[180px]">
-          <div className="flex h-[180px] w-[180px] items-center justify-center rounded-[14px] border-2 border-ink bg-white">
-            <div
-              aria-hidden
-              className="h-[124px] w-[124px] rounded-[4px] opacity-85"
-              style={{
-                background:
-                  "repeating-conic-gradient(var(--ink) 0% 25%, #fff 0% 50%) 0 0 / 24px 24px",
-              }}
-            />
-          </div>
-          <p className="mt-3 max-w-[180px] text-center text-[11.5px] leading-relaxed text-ink/55">
-            one day you&rsquo;ll point your phone here — the shortcut
-            isn&rsquo;t wired yet
-          </p>
-        </div>
-
-        <div className="max-w-xl">
-          <h1 className="font-serif text-[clamp(1.5rem,2.4vw,1.7rem)] font-normal leading-[1.4]">
-            Your phone does the walking. This desk is where the room arrives.
-          </h1>
-          <p className="mt-4 text-sm leading-relaxed text-ink/70">
-            Open the iOS app and walk the room slowly — a minute or two,
-            corners included. The moment you finish, the scan travels here on
-            its own; leave this window open and watch it land.
-          </p>
-
-          <motion.div
-            animate={{ scale: heard ? 1.03 : 1 }}
-            transition={SPRING}
-            className="mt-9 rounded-xl border-[1.5px] border-dashed border-ink/35 bg-white/50 px-5 py-4"
-          >
-            {state.phase === "heard" ? (
-              <GuestLine className="text-[15px]">
-                It&rsquo;s here. Give me a few minutes with it.
-              </GuestLine>
-            ) : state.phase === "signed-out" ? (
-              <>
-                <p className="text-[13.5px] font-medium">
-                  The desk listens for the rooms of an account — sign in with
-                  the one from your iPhone.
-                </p>
-                <div className="mt-3">
-                  <SignInPanel compact />
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-2.5">
-                  <span
-                    className={`h-2.5 w-2.5 rounded-full ${
-                      state.trouble
-                        ? "bg-ink/30"
-                        : "animate-pulse bg-sun shadow-[0_0_0_5px_rgba(201,162,94,0.2)]"
-                    }`}
-                  />
-                  <span className="text-[13.5px] font-medium">
-                    {state.trouble
-                      ? "The desk can’t hear the server right now — still trying."
-                      : "This desk is listening for your scan…"}
-                  </span>
-                </div>
-                <p className="mt-2 text-xs leading-relaxed text-ink/55">
-                  finish a scan on your iPhone and the room lands here on its
-                  own — no upload buttons, no files
-                </p>
-              </>
-            )}
-          </motion.div>
-
-          <p className="mt-8 text-xs text-ink/45">
-            LiDAR-equipped iPhones give the most faithful rooms.
-          </p>
-        </div>
+    <div className="mx-auto grid max-w-[1280px] items-center gap-12 px-6 pb-20 pt-12 sm:px-10 lg:grid-cols-2 lg:gap-[72px] lg:pt-16">
+      <div>
+        <h1 className="font-serif text-[clamp(40px,4.6vw,64px)] font-light leading-[1.02] tracking-[-0.03em] text-ink">
+          Your phone does the walking. This desk is where the room arrives.
+        </h1>
+        <ol className="mt-11 flex flex-col gap-[22px]">
+          {STEPS.map((step) => (
+            <li key={step.text} className="flex items-start gap-4">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="mt-0.5 shrink-0 text-ink">
+                {step.icon}
+              </svg>
+              <span className="text-[18px] leading-normal text-ink">{step.text}</span>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-9 text-[15px] leading-normal text-ink-2">
+          Works on any iPhone. Pro models give the best scans.
+        </p>
       </div>
+
+      <motion.section
+        aria-label={status}
+        aria-live="polite"
+        animate={{ scale: state.phase === "heard" ? 1.02 : 1 }}
+        transition={SPRING}
+        className="flex min-h-[460px] flex-col justify-between gap-10 rounded-[28px] bg-dusk p-8 text-on-dusk sm:p-10"
+      >
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden
+            className={`h-3 w-3 rounded-full ${
+              live
+                ? "breathe bg-sun shadow-[0_0_22px_rgba(240,178,106,0.7)]"
+                : state.phase === "heard"
+                  ? "bg-sun"
+                  : "bg-on-dusk/30"
+            }`}
+          />
+          <span className="text-[15px] font-semibold">{status}</span>
+        </div>
+        <p className="max-w-[22ch] font-serif text-[clamp(24px,2.3vw,30px)] italic leading-[1.3] tracking-[-0.01em]">
+          {line}
+        </p>
+        {state.phase === "signed-out" ? (
+          <div className="max-w-sm">
+            <SignInPanel compact tone="dark" />
+          </div>
+        ) : (
+          foot && <p className="text-[14px] text-on-dusk-2">{foot}</p>
+        )}
+      </motion.section>
     </div>
   );
 }

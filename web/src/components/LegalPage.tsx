@@ -8,15 +8,20 @@
  * from a template, and where the system's behaviour is imperfect the document
  * says so rather than rounding up to a promise.
  *
- * Design: the Good Guest system (decision 0057) at reading width — serif for
- * the document voice, sans for structure, mono for the machine-checkable
- * facts (bucket names, retention windows, endpoints).
+ * Design (decision 0361): a reading page. The display face for the title and
+ * the section heads, the summary as the document's italic lede, the body in
+ * the interface face at a long-form measure, and the sections listed down
+ * the side so a long policy can be walked rather than scrolled. Mono stays
+ * for the machine-checkable facts (bucket names, retention windows,
+ * endpoints). The site footer carries the links between documents.
  */
 
-import Link from "next/link";
-import type { ReactNode } from "react";
+import { Children, isValidElement, type ReactNode } from "react";
 
-/** A section heading with a mono eyebrow — the document's spine. */
+import LegalToc from "@/components/LegalToc";
+
+/** One numbered section. The number is its anchor (#s3), and the side
+ * list reads its title from here, so the two can never disagree. */
 export function Section({
   n,
   title,
@@ -27,12 +32,14 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="mt-10 scroll-mt-20">
-      <h2 className="flex items-baseline gap-3 text-[17px] font-semibold text-ink">
-        <span className="font-mono text-[11px] text-ink/40">{n}</span>
+    <section id={`s${n}`} aria-labelledby={`s${n}-h`} className="scroll-mt-28">
+      <h2
+        id={`s${n}-h`}
+        className="mb-4 mt-14 font-serif text-[30px] font-normal leading-[1.15] tracking-[-0.015em] text-ink"
+      >
         {title}
       </h2>
-      <div className="mt-3 space-y-3 text-[15px] leading-relaxed text-ink/75">
+      <div className="space-y-4 text-[17px] leading-[1.7] text-[#2b3542] [&_strong]:text-ink [&_ul]:space-y-2 [&_ul]:pl-5 [&_ul]:marker:text-ink-3">
         {children}
       </div>
     </section>
@@ -41,7 +48,7 @@ export function Section({
 
 /** Machine data inline — bucket names, windows, endpoints. */
 export function M({ children }: { children: ReactNode }) {
-  return <code className="font-mono text-[0.87em] text-ink/90">{children}</code>;
+  return <code className="font-mono text-[0.87em] text-ink">{children}</code>;
 }
 
 export default function LegalPage({
@@ -55,38 +62,29 @@ export default function LegalPage({
   summary: ReactNode;
   children: ReactNode;
 }) {
+  // The side list, read from the sections themselves.
+  const sections = Children.toArray(children)
+    .filter(
+      (child): child is React.ReactElement<{ n: string; title: string }> =>
+        isValidElement(child) && child.type === Section,
+    )
+    .map((child) => ({ id: `s${child.props.n}`, title: child.props.title }));
+
   return (
-    <div className="mx-auto max-w-2xl px-6 pb-24 pt-12">
-      <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink/40">
-        {title === "Privacy Policy" ? "What happens to your room" : "The agreement"}
-      </p>
-      <h1 className="mt-2 font-serif text-4xl text-ink">{title}</h1>
-      <p className="mt-2 font-mono text-[11px] text-ink/45">Last updated {updated}</p>
+    <div className="mx-auto max-w-[1280px] px-6 pb-28 pt-12 sm:px-10 sm:pt-16">
+      <h1 className="font-serif text-[clamp(48px,6vw,72px)] font-light leading-none tracking-[-0.03em] text-ink">
+        {title}
+      </h1>
+      <p className="mt-[18px] text-[15px] text-ink-2">Last updated {updated}</p>
 
-      <div className="mt-7 rounded-2xl border border-ink/12 bg-parchment/60 px-5 py-4">
-        <p className="font-serif text-[15px] italic leading-relaxed text-ink/80">
-          {summary}
-        </p>
-      </div>
-
-      {children}
-
-      <hr className="mt-14 border-ink/10" />
-      <div className="mt-5 flex items-center justify-between text-[13px]">
-        <Link href="/" className="text-accent-deep transition-colors hover:text-ink">
-          ← Back
-        </Link>
-        <div className="flex gap-4 text-ink/50">
-          <Link href="/privacy" className="transition-colors hover:text-ink">
-            Privacy
-          </Link>
-          <Link href="/terms" className="transition-colors hover:text-ink">
-            Terms
-          </Link>
-          <a href="/third-party-notices.txt" className="transition-colors hover:text-ink">
-            Licences
-          </a>
-        </div>
+      <div className="mt-12 grid items-start gap-20 lg:mt-14 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <LegalToc sections={sections} />
+        <article className="max-w-[680px]">
+          <p className="font-serif text-[clamp(20px,1.9vw,23px)] italic leading-[1.5] text-ink">
+            {summary}
+          </p>
+          {children}
+        </article>
       </div>
     </div>
   );

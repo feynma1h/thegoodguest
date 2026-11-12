@@ -47,14 +47,19 @@ RUN apt-get update \
     && python3 -m venv /venv
 ENV PATH=/venv/bin:$PATH
 
-# Python deps. Local packages last: thegoodguest-schemas pins protobuf>=7.35
-# (see services/api-public/Dockerfile for the layer-order trap); nothing here
-# pulls an older protobuf, but keep them after the service deps anyway.
+# Python deps, in the order services/api-public/Dockerfile explains: the cloud
+# clients (/still reads and writes the outputs bucket and marks the scene's
+# Firestore document) pull proto-plus and with it protobuf 6.x, and
+# thegoodguest-schemas needs protobuf>=7.35 — so the service deps go first,
+# then protobuf is forced to 7.x, then the local packages. Nothing may follow
+# that re-resolves the dependency tree.
 COPY services/scene-finish/pyproject.toml services/scene-finish/pyproject.toml
-RUN pip install --no-cache-dir fastapi "uvicorn[standard]" numpy pillow
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" numpy pillow \
+        google-cloud-storage google-cloud-firestore
 COPY packages/schemas/ packages/schemas/
 COPY packages/room-look/ packages/room-look/
-RUN pip install --no-cache-dir packages/schemas/ packages/room-look/
+RUN pip install --no-cache-dir --no-deps --force-reinstall "protobuf>=7.35.0" \
+    && pip install --no-cache-dir packages/schemas/ packages/room-look/
 
 COPY --from=viewer /web/out /app/web-out
 COPY services/scene-finish/*.py services/scene-finish/render_driver.mjs ./

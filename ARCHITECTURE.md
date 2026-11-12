@@ -71,6 +71,7 @@ flowchart TB
     subgraph gated["Private: behind Cloud Run IAM, reached through Google's relays"]
         ing["api-internal"]
         gpu["perception-obj (L4 GPU)"]
+        still["scene-finish (CPU)"]
     end
     caps[("captures bucket")]
     outs[("outputs bucket")]
@@ -91,6 +92,10 @@ flowchart TB
     gpu -->|"8 read capture"| caps
     gpu -->|"8 splats, manifest; 9 shell"| outs
     gpu -->|"8 claim, mark ready"| fs
+    gpu -->|"9 enqueue /still"| tasks
+    tasks --> still
+    still -->|"9 still.jpg"| outs
+    still -->|"9 mark the still"| fs
     web -->|"11 sign in"| auth
     web -->|"12 rooms and assets, 13 chat"| pub
     pub --> fs
@@ -106,6 +111,7 @@ flowchart TB
 | `api-public` | ours; FastAPI on Cloud Run, public | `services/api-public/` | The only API the two apps call: upload URLs, room lists and assets, the conversation, the design spec, account deletion. |
 | `api-internal` | ours; FastAPI on Cloud Run, private | `services/api-internal/` | Receives the "upload finished" event, validates the bundle, creates the scene, queues the GPU job. |
 | `perception-obj` | ours; FastAPI on Cloud Run with one NVIDIA L4 GPU, private | `services/perception-obj/` | Finds, rebuilds and places every object; builds the room's walls and floor; compresses the 3D files. |
+| `scene-finish` | ours; FastAPI on Cloud Run, CPU only, private | `services/scene-finish/` | Draws each room's still picture by opening the web app's own room page in headless Chrome (0363). It is also the home of the language-model passes that dress the walls and furniture, which are built but not switched on (0332). |
 | captures bucket | Cloud Storage, `thegoodguest-captures` | none | Raw uploads from the phone, kept only briefly. |
 | outputs bucket | Cloud Storage, `thegoodguest-perception-outputs` | none | Everything perception produces: splats, manifests, shells. |
 | Firestore | Google's document database | `packages/api-core/` and each service's repository modules | Scenes, upload sessions, quotas, conversations, design specs. |
@@ -188,14 +194,20 @@ backend file sits in the service the step names.
 9. **Finish the room.** On success, `/process` queues two follow-up tasks:
    `/shell` builds the walls and floor (`shell.json`), and `/compress` writes
    a compressed `.spz` copy beside every `.ply` splat (`compressed.json`).
-   `shell_enqueue.py`, `compress_enqueue.py`.
+   Once `/shell` has written a ready shell, it queues one more task:
+   `POST /still` on `scene-finish`, which draws the room's still picture
+   (`still.jpg`) from the web app's first corner view and marks the scene as
+   having one (0363). `shell_enqueue.py`, `compress_enqueue.py`,
+   `still_enqueue.py`, and `routes_still.py` in `services/scene-finish/`.
 
 ### Results, on the phone and the web
 
 10. **The phone hears back.** The app polls `GET /scenes/by-bundle/{bundle_id}`
     and shows progress in a Live Activity on the Lock Screen. When the room is
     ready it offers a link to `/room?bundle={bundle_id}` on the web app.
-    `Scene/ScenePoller.swift`, `LiveActivity/`.
+    Every scene `api-public` returns also carries `still_url` and
+    `still_night_url`: short-lived signed links to the room's still picture,
+    or null when there is none. `Scene/ScenePoller.swift`, `LiveActivity/`.
 11. **Sign in on the web.** The web app signs in to the same Firebase account
     through Apple or Google. An account that was never linked stays anonymous
     and cannot be opened from a browser, so the phone offers the link only
@@ -246,8 +258,8 @@ relative to its own folder, so `bundle.pb` stays small.
 | Store | Layout | Written by | Read by |
 |---|---|---|---|
 | captures bucket | `captures/{bundle_id}/bundle.pb` and the files it names | the phone, through upload URLs | `api-internal`, `perception-obj` |
-| outputs bucket | `scenes/{scene_id}/manifest.json`, `shell.json`, `compressed.json`, and per-frame masks and splats under `frames/` | `perception-obj` | `api-public`; the browser, through signed URLs |
-| Firestore `scenes` | one document per capture | `api-internal`, `perception-obj` | all three services |
+| outputs bucket | `scenes/{scene_id}/manifest.json`, `shell.json`, `compressed.json`, `still.jpg`, and per-frame masks and splats under `frames/` | `perception-obj`; `scene-finish` writes the still | `api-public`, `scene-finish`; the browser, through signed URLs |
+| Firestore `scenes` | one document per capture | `api-internal`, `perception-obj`; `scene-finish` writes only its `still` field | every service |
 | Firestore `upload_sessions`, `upload_mint_quotas` | one session per bundle; one quota document per user, reset each UTC day | `api-public` | `api-public`, `api-internal` |
 | Firestore `conversations` (with `turns` inside), `design_specs` | one per scene and user | `api-public` | `api-public` |
 
@@ -321,8 +333,8 @@ reader-side types, including every `method`, are `FusedObject` and
 | Route | Called by | Purpose |
 |---|---|---|
 | `POST /captures/{bundle_id}/upload_session` | phone | Mint resumable upload URLs for one capture. |
-| `GET /scenes` | phone, web | The caller's rooms. |
-| `GET /scenes/by-bundle/{bundle_id}` | phone, web | One capture's scene and status. |
+| `GET /scenes` | phone, web | The caller's rooms, each with a signed link to its still picture, or null. |
+| `GET /scenes/by-bundle/{bundle_id}` | phone, web | One capture's scene and status, with the same still links. |
 | `GET /scenes/{scene_id}/assets` | web | Manifest, shell and signed URLs for the room's 3D files. |
 | `GET /scenes/{scene_id}/conversation` | web | The conversation so far. |
 | `POST /scenes/{scene_id}/conversation/messages` | web | One turn with the guest, streamed as server-sent events. |
@@ -332,7 +344,9 @@ reader-side types, including every `method`, are `FusedObject` and
 `api-internal` serves only `POST /ingest/eventarc`. `perception-obj` serves the
 three pipeline stages `POST /process`, `/shell` and `/compress`, and two
 operator probes, `/segment` and `/track`, that nothing in the pipeline calls.
-Every service also answers `GET /health`; `perception-obj`'s `GET /ready`
+`scene-finish` serves `POST /still`, which Cloud Tasks calls, and
+`POST /render`, the renderer itself; its language-model routes are built but
+not registered. Every service also answers `GET /health`; `perception-obj`'s `GET /ready`
 reports whether its models are loaded.
 
 ## 5. Inside the GPU service
@@ -439,12 +453,13 @@ tests pass.
    verifies a Firebase ID token on every user request (`auth.py`) and scopes
    every query to that user. A scene's owner comes from the upload session,
    never from the `user_id` inside the bundle.
-3. **The private services sit behind Cloud Run IAM.** Neither `api-internal`
-   nor `perception-obj` accepts an unauthenticated request. On `api-internal`
-   the invoker role goes to the Eventarc trigger's service account
-   (`infra/eventarc_setup.sh`). On `perception-obj` only `tasks-invoker`
-   holds it (0106), and `oidc.py` also checks that each token names that
-   account and was minted for the exact route it arrives at. Each service
+3. **The private services sit behind Cloud Run IAM.** `api-internal`,
+   `perception-obj` and `scene-finish` accept no unauthenticated request. On
+   `api-internal` the invoker role goes to the Eventarc trigger's service
+   account (`infra/eventarc_setup.sh`). On `perception-obj` and
+   `scene-finish` only `tasks-invoker` holds it (0106), and `oidc.py` (for
+   `scene-finish`'s `/still`, `task_auth.py`) also checks that each token
+   names that account and was minted for the exact route it arrives at. Each service
    runs as its own service account, and `perception-obj`'s is least-privilege
    by design (0090).
 4. **Check before spending GPU time.** Bad bundles stop in `api-internal`. A
@@ -459,7 +474,8 @@ tests pass.
 7. **People are never rebuilt.** `person` is segmented only so it can be
    suppressed. It is never reconstructed or shipped (0089).
 8. **Status moves only along `scene.py`'s transitions**, written only by
-   `api-internal` and `perception-obj`.
+   `api-internal` and `perception-obj`. `scene-finish` writes only the
+   scene's `still` field, so it can never change a room's status.
 9. **One web module talks to the renderer.** `SplatViewer.tsx` is the only
    file that imports three.js or Spark (0053), and it takes a
    renderer-agnostic list of positioned splats.
@@ -500,7 +516,7 @@ Firebase Hosting from `web/`. The procedure is `infra/RUNBOOK.md`.
 
 **Testing.** The Python suites must pass with no cloud credentials; a test
 that needs them is a bug in the test. The root suite (`pytest`) covers the
-packages, both APIs and some tools. `perception-obj` has its own suite, run
+packages, both APIs, `scene-finish` and some tools. `perception-obj` has its own suite, run
 separately because it pins `numpy<2`. The web app has vitest, lint, type
 check and build. The iOS project has one scheme, whose suite includes live
 tests against the deployed `api-public`. CI is in `.github/workflows/`:
@@ -532,6 +548,10 @@ They never run on their own.
   `upload_session_repo.py` (upload sessions and resumable-URL minting),
   `manifest_validation.py`, and `test_fixtures/` for building synthetic
   bundles.
+- `room-look/thegoodguest_room_look/` — the room's look as code (0330):
+  deriving and checking a wall-and-floor finish (`shell_finish.py`,
+  `finish_*`), and furniture geometry and placement (`furniture_*`).
+  `scene-finish` imports it.
 
 ### `services/` — one folder per Cloud Run service
 
@@ -560,10 +580,18 @@ root `conftest.py` puts them on the import path for tests.
     `room_planes.py`, `shell_geometry.py`, `shell_envelope.py`,
     `shell_observation.py`, `shell_material.py`;
   - follow-up jobs: `shell_enqueue.py`, `compress_enqueue.py`,
-    `compress_receiver.py`;
+    `compress_receiver.py`, and `still_enqueue.py`, which asks
+    `scene-finish` for the room's still;
   - probes: `segment_receiver.py`, `track_receiver.py`, `track_selection.py`;
   - `upstream/`: verbatim copies of the SAM 3 and SAM 3D entry points the
     wrappers call, for reading only. A test keeps them unimportable.
+- `scene-finish/` — `finish_server.py` (the app and `/render`),
+  `routes_still.py` (the still picture), `still_ports.py` (its bucket and
+  Firestore writes), `task_auth.py` (the token check), and `render_client.py`
+  with `render_driver.mjs`, the Python and Node halves of the headless Chrome
+  that opens the web app's own viewer, built into the image. The
+  language-model passes (`routes_finish.py`, `routes_furniture.py`,
+  `claude_layer/`) are built but not registered.
 
 ### `ios/TheGoodGuest/TheGoodGuest/` — the iPhone app's source
 
@@ -629,6 +657,7 @@ Beside it in `ios/TheGoodGuest/` are the Xcode project,
 | change how objects are found or placed | "Measured dead ends" in `PROJECT.md`, then `process_receiver.py`, `box_placement.py` and `fusion.py` |
 | work on the guest | `guest_prompt.py`, `guest_tools.py` and `spec_solver.py` in `services/api-public/`, and decision 0132 |
 | work on the viewer | `web/README.md`, `web/src/app/room/`, `web/src/lib/reveal.ts`, `web/src/components/SplatViewer.tsx` |
+| work on a room's still picture | decision 0363, then `routes_still.py` and `render_driver.mjs` in `services/scene-finish/`; `tools/enqueue_still.py` draws one by hand |
 | work on capture | `RootFlowView.swift`, `Capture/CaptureManager.swift` and `Upload/UploadCoordinator.swift` in `ios/TheGoodGuest/TheGoodGuest/` |
 | run something locally | `README.md`; the web app runs offline on mock data by default, and `tools/upload_test_bundle.py` stands in for the phone |
 | deploy | `docs/NOT-FINAL.md`, then `infra/RUNBOOK.md` |

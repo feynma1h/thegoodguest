@@ -269,3 +269,24 @@ class TestScenesByBundleNotFound:
         resp = _get(client, bundle_id, scene_repo=repo)
         assert resp.status_code == 404
         assert resp.json()["error"] == "not_found"
+
+
+class TestScenesByBundleStill:
+    """The poller sees the room's picture as soon as it is drawn (decision 0363)."""
+
+    def test_still_links_follow_the_marker(self, client: TestClient) -> None:
+        bundle_id = _make_bundle_id()
+        result = f"gs://thegoodguest-perception-outputs/scenes/{bundle_id}/manifest.json"
+        scene = _make_scene(bundle_id, status=SceneStatus.READY, result_uri=result)
+        repo = InMemorySceneReadRepository({scene.scene_id: scene})
+        body = _get(client, bundle_id, scene_repo=repo).json()
+        assert (body["still_url"], body["still_night_url"]) == (None, None)
+
+        scene.still = {"night": False, "rendered_at": datetime.now(timezone.utc)}
+        repo = InMemorySceneReadRepository({scene.scene_id: scene})
+        with patch.object(server, "_url_signer", server.UnsignedDevUrlSigner()):
+            body = _get(client, bundle_id, scene_repo=repo).json()
+        assert body["still_url"] == (
+            f"https://storage.googleapis.com/thegoodguest-perception-outputs/scenes/{bundle_id}/still.jpg"
+        )
+        assert body["still_night_url"] is None
