@@ -137,6 +137,11 @@ count (0114) has no remedy.
 The serving image is `main` as of 2026-08-31 (`8135ab1e`). A deploy from main brings the still trigger (0363), and it is also the first cloud run of 0322/0323's `/process` rewrite: no SAM 3D objects, `boxes.json` from the person's boxes. New rooms then show no object splats until the furniture step is live. Until that deploy, a new room's still is queued by hand with `tools/enqueue_still.py <scene_id>`. Deploy with `CANDIDATE_TAG=<lane> ./infra/deploy_perception.sh obj --candidate`. Prove it with a new scan: a replayed `/shell` on a ready room noops and never asks for a still.
 **Check:** automated — the revision serving perception-obj carries `SCENE_FINISH_URL`.
 
+### G2-08 · The room guide is built and switched off
+**State:** open · **Blocks:** any room getting the room guide instead of the guest
+The guide (0370–0373) and its product wiring (0376) are on main, and `ROOM_GUIDE_ENABLED` in `web/src/lib/guide/switch.ts` is false, so every room keeps the guest. In order: merge `claude/diorama`; add a cloud stage that publishes each room's `scene.json` and `solids.json` beside its results, with signed links for any photo maps or meshes a scene names; check `firebase.json`'s `/diorama/**` frame headers on a preview channel; watch api-public's other routes while a layout search runs (about 4 s of its single CPU); then set the switch and deploy api-public and the web app together, with the operator's approval.
+**Check:** manual — the operator, on a new scan: `/scenes/{id}/assets` carries a `scene_url`, and the room page opens the guide.
+
 ## Gate 3 — what users are told must be true
 
 ### G3-01 · The Privacy Policy overstates upload-bookkeeping retention

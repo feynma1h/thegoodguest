@@ -60,6 +60,11 @@ packages/api-core/                shared logic consumed by both API services
 packages/room-look/               the room's look as an importable package (0330), used by scene-finish
   thegoodguest_room_look/           shell_* (finish derivation, measurement), finish_* checks, furniture_*
 
+packages/room-guide/              the room guide (0370–0373), served by api-public behind a switch (0376)
+  thegoodguest_room_guide/          needs/assess/analyzer (what the room shows), engine/motion (solved,
+                                    checked moves), gateway/rules_pass/guide (Claude), harness + web/
+  evals/                            the planted-room eval: 13 rooms, run.py, judge.py, compare.py (0377)
+
 tools/                            local scripts (run from repo root)
   gen_proto.sh                      regenerate Python and Swift (ios/TheGoodGuest/TheGoodGuest/Generated/)
   gen_mark.py                       the identity's ONE source — regenerates the three app
@@ -722,6 +727,31 @@ only 4.44:1 on the daylight ground, so anything text-sized uses `--accent-deep`
 `resolveFonts`): change the site's faces there too, or the downloadable card
 silently paints at a 10px default.
 
+### The room guide — `packages/room-guide/`, on main, switched off
+
+The guest's successor for a room whose pipeline wrote a diorama `scene.json`
+(0370–0373). The laws live in code. Claude writes each room's needs once, in a
+closed vocabulary of human actions (the rules pass). The engine offers only
+changes it has solved, and every move the viewer plays is a plan the server
+checked frame by frame at 60 fps.
+
+- **In the product: built and off (0376).** api-public has
+  `GET /scenes/{id}/guide`, `POST …/guide/turns`, `…/guide/show` and
+  `…/guide/undo`, and `/scenes/{id}/assets` carries `scene_url`; none of it is
+  in the deployed image. The room page shows the guide only when
+  `ROOM_GUIDE_ENABLED` (`web/src/lib/guide/switch.ts`) is true, and it is
+  false. What switching on takes is punchlist G2-08.
+- **Measured (0377).** On 2026-11-12 a 13-room planted-problem eval ran live:
+  Opus 5.5 and Sonnet 5.5 both found all 11 planted problems, with no false
+  alarms. Opus 5.5 stays the guide's model; Sonnet 5.5 is the half-price
+  fallback. The report is `outputs/reports/guide-evals.md`.
+- **Locally.** `python -m thegoodguest_room_guide.harness` (its docstring says
+  how) runs one room in the browser, and `tools/guide_demo_api.py` runs the
+  product's room page against a local api-public. Neither needs the cloud.
+- **Tests.** `pytest packages/room-guide/tests`; the demo-room tests skip
+  without `outputs/guide/8cca44d4/`. The eval's free checks are
+  `tests/test_evals.py`.
+
 ### Infra and operations
 
 - **Deploy is candidate → smoke → flip** on every service, perception-obj
@@ -1251,6 +1281,17 @@ ever done or ruled, delete it — do not annotate it.
   secondary action `rescan` rather than "add more" to avoid implying otherwise.
   The append path itself is ruled out (0294), and the QR bridge was deleted
   with it.
+- **The room guide's recorded conversations no longer replay.** The harness's
+  (`outputs/guide/8cca44d4/live`) and the product demo's (`outputs/guide-demo`)
+  were recorded on 2026-11-07 under prompts `rules/3` and `guide/5`, and since
+  `rules/4` and `guide/6` (2026-11-12) neither replays. One live run with a key
+  (about $0.30) records them again.
+- **The room guide cannot say what a worse-scoring change costs.** A proposal
+  whose score drops with no problem added (a desk moved to the door wall
+  scored −0.72 with nothing listed) reaches the guide with no reason. The
+  engine should name the preference it loses, such as open floor.
+- **The guide's move words ignore plural names**: "the low cupboards goes
+  against the plain wall".
 
 ### Standing facts that look like bugs
 
@@ -1608,7 +1649,7 @@ evidence for a human deleting an entry, not authority to.
 (below). `docs/NOT-FINAL.md` lists what is unfinished and which parts of it go
 live on the next deploy.
 
-**`docs/punchlist.md` is the forward list** — 38 entries in six gates, in
+**`docs/punchlist.md` is the forward list** — 39 entries in six gates, in
 dependency order, each carrying a `Check:` line. Start there for "what should I
 do next", and run `python3 tools/punchlist_check.py` to have the checkable
 subset re-derived against the live system rather than believing any prose. An
