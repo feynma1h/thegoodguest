@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Copied in by scripts/guide-assets.mjs from code this app does not own
+    // (decision 0376): the guide's player and the diorama viewer.
+    "public/guide/**",
+    "public/diorama/**",
   ]),
 ]);
 

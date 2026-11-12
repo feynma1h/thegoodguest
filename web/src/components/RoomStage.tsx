@@ -14,6 +14,11 @@
  *
  * Mount with key={sceneId} so a different room resets the choreography.
  * All three.js stays behind SplatViewer's PositionedSplat contract.
+ *
+ * `initialAssets` is the assets response when the room page already holds it
+ * (it asked first, to see whether the room has the room guide, decision 0376),
+ * so the room's links are not signed twice. Everything after the first fetch is
+ * unchanged.
  */
 
 import { AnimatePresence, motion } from "motion/react";
@@ -37,6 +42,7 @@ import {
   type DesignSpecDoc,
   type FusedObject,
   type PositionedSplat,
+  type SceneAssets,
   type SceneManifest,
   type ShellDoc,
   type ShellPlane,
@@ -94,10 +100,13 @@ export default function RoomStage({
   status,
   createdAt,
   onMeasure,
+  initialAssets,
 }: {
   sceneId: string;
   status: string;
   createdAt: string;
+  /** The assets response, when the page already fetched it. */
+  initialAssets?: SceneAssets;
   /** The room's measurement, once its shell has arrived (null when there
    * is no measured floor) — the top bar prints its floor area. */
   onMeasure?: (measure: RoomMeasure | null) => void;
@@ -128,7 +137,7 @@ export default function RoomStage({
     let cancelled = false;
     (async () => {
       try {
-        let sceneAssets = await getApiClient().getSceneAssets(sceneId);
+        let sceneAssets = initialAssets ?? (await getApiClient().getSceneAssets(sceneId));
         // Absent shell (null/undefined) may just be a beat behind ready —
         // refetch briefly. A present doc (ready OR unavailable) settles
         // immediately; exhausted retries proceed with the grid.
@@ -184,7 +193,7 @@ export default function RoomStage({
     return () => {
       cancelled = true;
     };
-  }, [sceneId]);
+  }, [sceneId, initialAssets]);
 
   // The measured floor, for the top bar. Read at call time, so a new
   // callback identity never re-measures.

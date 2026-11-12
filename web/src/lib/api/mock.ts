@@ -26,6 +26,7 @@ import type {
   SpecEntry,
 } from "./types";
 import { specKey } from "@/lib/designSpec";
+import type { GuideEvent, GuideMove, GuideSnapshot } from "@/lib/guide/types";
 
 /** Fixed UUIDs so deep links are stable across reloads. */
 export const MOCK_READY_SCENE_ID = "11111111-1111-4111-8111-111111111111";
@@ -504,6 +505,32 @@ export class MockApiClient implements ApiClient {
    * account menu already hides the control outside live mode; this is the
    * backstop if that ever slips.
    */
+  /**
+   * The room guide (decision 0376) has no mock room: the mock scenes' assets
+   * carry no scene_url, so the room page never asks. If it ever does, the
+   * guide answers as a room without a diorama scene would, and the page keeps
+   * the guest.
+   */
+  async getGuide(): Promise<GuideSnapshot> {
+    await delay(null);
+    throw new ApiError(404, "no_guide", "mock rooms have no diorama scene");
+  }
+
+  async sendGuideTurn(): Promise<AsyncIterable<GuideEvent>> {
+    await delay(null);
+    throw new ApiError(404, "no_guide", "mock rooms have no diorama scene");
+  }
+
+  async showGuideCard(): Promise<GuideMove> {
+    await delay(null);
+    throw new ApiError(404, "no_guide", "mock rooms have no diorama scene");
+  }
+
+  async undoGuide(): Promise<GuideMove> {
+    await delay(null);
+    throw new ApiError(404, "no_guide", "mock rooms have no diorama scene");
+  }
+
   async deleteAccount(): Promise<never> {
     await delay(null);
     throw new ApiError(

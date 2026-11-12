@@ -18,6 +18,12 @@
  * progress bar), the partial failure (§8 — honest about missing files),
  * the terminal failure (§8 — a next step, never a stack trace), and the
  * room itself (RoomStage: threshold → reveal → stage 1).
+ *
+ * The room guide (decision 0376): when ROOM_GUIDE_ENABLED is on, a ready room
+ * whose assets carry a scene_url is shown in the diorama viewer with the
+ * guide (GuideRoom); every other room, and any room whose guide cannot be
+ * reached, is RoomStage exactly as before. With the switch off nothing here
+ * asks for anything new.
  */
 
 import Link from "next/link";
@@ -25,14 +31,16 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 
 import RoomStage from "@/components/RoomStage";
+import GuideRoom from "@/components/guide/GuideRoom";
 import SignInPanel from "@/components/SignInPanel";
 import { PillButton, PillLink } from "@/components/ui/spring";
 import { GuestLine } from "@/components/ui/voice";
 import { getApiClient } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
-import type { SceneSummary } from "@/lib/api/types";
+import type { SceneAssets, SceneSummary } from "@/lib/api/types";
 import { floorAreaText } from "@/lib/card/layout";
 import type { RoomMeasure } from "@/lib/card/measure";
+import { roomGuideEnabled } from "@/lib/guide/switch";
 import { statusMeta } from "@/lib/status";
 import {
   agoPhrase,
@@ -245,24 +253,76 @@ function TerminalRoom({ scene }: { scene: SceneSummary }) {
   );
 }
 
+/** Which stage a ready room gets, with the switch on: the assets are asked
+ * for once, here, and handed on, so a room without a diorama scene pays for no
+ * second signing round. */
+type Stage =
+  | { forScene: string; kind: "guide"; assets: SceneAssets; sceneUrl: string }
+  | { forScene: string; kind: "classic"; assets?: SceneAssets };
+
 function ReadyRoom({ scene }: { scene: SceneSummary }) {
   const [area, setArea] = useState<string | null>(null);
+  const [guideArea, setGuideArea] = useState<string | null>(null);
   const onMeasure = useCallback(
     (measure: RoomMeasure | null) => setArea(measure ? floorAreaText(measure) : null),
     [],
   );
+  const guide = roomGuideEnabled();
+  const [picked, setPicked] = useState<Stage | null>(null);
+  const stage = picked && picked.forScene === scene.scene_id ? picked : null;
+  useEffect(() => {
+    if (!guide) return;
+    let cancelled = false;
+    getApiClient()
+      .getSceneAssets(scene.scene_id)
+      .then((assets) => {
+        if (cancelled) return;
+        setPicked(
+          assets.scene_url
+            ? { forScene: scene.scene_id, kind: "guide", assets, sceneUrl: assets.scene_url }
+            : { forScene: scene.scene_id, kind: "classic", assets },
+        );
+      })
+      .catch(() => {
+        // RoomStage asks again and says what went wrong in its own words.
+        if (!cancelled) setPicked({ forScene: scene.scene_id, kind: "classic" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [guide, scene.scene_id]);
+  const onGuideUnavailable = useCallback(() => {
+    setPicked((p) => (p && p.kind === "guide" ? { forScene: p.forScene, kind: "classic", assets: p.assets } : p));
+    setGuideArea(null);
+  }, []);
+
+  if (guide && !stage) {
+    return <div className="min-h-dvh bg-dusk" aria-hidden />;
+  }
+  const withGuide = stage?.kind === "guide";
   return (
     <div className="relative min-h-dvh bg-dusk">
-      <RoomStage
-        key={scene.scene_id}
-        sceneId={scene.scene_id}
-        status={scene.status}
-        createdAt={scene.created_at}
-        onMeasure={onMeasure}
-      />
+      {stage?.kind === "guide" ? (
+        <GuideRoom
+          key={scene.scene_id}
+          sceneId={scene.scene_id}
+          sceneUrl={stage.sceneUrl}
+          onUnavailable={onGuideUnavailable}
+          onFloorArea={setGuideArea}
+        />
+      ) : (
+        <RoomStage
+          key={scene.scene_id}
+          sceneId={scene.scene_id}
+          status={scene.status}
+          createdAt={scene.created_at}
+          onMeasure={onMeasure}
+          initialAssets={stage?.assets}
+        />
+      )}
       <RoomChrome
         title={roomTitle(scene.created_at)}
-        subtitle={area}
+        subtitle={withGuide ? guideArea : area}
         measured
         right={<CapturedChip createdAt={scene.created_at} />}
         railGap
