@@ -50,5 +50,6 @@ testpaths = [
     "tools/test_punchlist_check.py",
     "tools/test_privacy_manifest.py",
     "tools/test_live_boxes_boundaries.py",
+    "tools/test_enqueue_still.py",
 ]
 addopts = "--import-mode=importlib"

@@ -57,6 +57,9 @@ packages/api-core/                shared logic consumed by both API services
     upload_session_repo.py           UploadSessionRepository ABC + Firestore/in-memory impls + gcs_mint_resumable_uri
   tests/                              unit tests for the scene model, repos, and manifest validation
 
+packages/room-look/               the room's look as an importable package (0330), used by scene-finish
+  thegoodguest_room_look/           shell_* (finish derivation, measurement), finish_* checks, furniture_*
+
 tools/                            local scripts (run from repo root)
   gen_proto.sh                      regenerate Python and Swift (ios/TheGoodGuest/TheGoodGuest/Generated/)
   gen_mark.py                       the identity's ONE source — regenerates the three app
@@ -72,6 +75,7 @@ tools/                            local scripts (run from repo root)
   track_map.py                      the object->frame map, and the id-stability measurement
   track_views.py                    per-instance contact sheets (candidate_views.py for tracked ids)
   track_select.py                   each tracked object's best frame, over a real capture
+  enqueue_still.py                  queue scene-finish /still by hand (rooms made before the trigger, candidate smokes)
 
 services/
   api-public/                     client-facing API (--allow-unauthenticated, Firebase JWT verify)
@@ -81,6 +85,8 @@ services/
                                     and track_receiver.py (0274; BUILT, in the serving image, not called by /process)
                                     and track_selection.py, per-object best-frame choice over the
                                     tracked segments (BUILT, no call site in the service yet)
+  scene-finish/                   headless Chrome drawing the website's own viewer (CPU, Cloud Tasks only, 0332);
+                                    deployed render-only: /health, /render, /still (0363)
 
 web/                              Next.js static-export web app (decision 0050); Spark splat viewer
                                   contained in src/components/SplatViewer.tsx (decision 0053)
@@ -122,7 +128,7 @@ the wipe.
 
 ## What works right now
 
-**Every Cloud Run revision number below other than the three service headers
+**Every Cloud Run revision number below other than the service headers
 refers to the RETIRED `roomstudio` project and no longer exists.** The stack
 moved to the `thegoodguest` project on 2026-08-31, where revision numbering
 restarted at 00001. Read revision numbers in the narrative as history, and
@@ -130,7 +136,7 @@ derive live state from `gcloud run services describe <svc> --region
 asia-southeast1 --project thegoodguest`.
 
 State, not history; the story of how it got this way is in `docs/decisions/`.
-The service headers and the suite counts below were re-verified 2026-09-19.
+The service headers were re-verified 2026-11-11, the suite counts 2026-09-19.
 
 ### The contract and shared packages
 
@@ -375,7 +381,7 @@ Suite **666**: 660 asserting offline tests + 2 boilerplate stubs + 4 live
 integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
-### api-public — `api-public-00003-dfq`, image `20260831-152649`
+### api-public — `api-public-00005-peg`, image `20261110-213446`
 
 Client-facing, `--allow-unauthenticated`, with in-app Firebase JWT verification
 as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
@@ -388,8 +394,13 @@ as the trust boundary (0016). CORS is gated on `CORS_ALLOWED_ORIGINS`.
   (0116).
 - `GET /scenes`, `GET /scenes/by-bundle/{bundle_id}`,
   `GET /scenes/{id}/assets` — the assets response carries the manifest and shell
-  verbatim, V4-signed splat URLs for placed objects, and an additive
-  `asset_urls_compressed` for the SPZ tier that never narrows the PLY fallback.
+  verbatim, V4-signed splat URLs for placed objects, an additive
+  `asset_urls_compressed` for the SPZ tier that never narrows the PLY fallback,
+  and `finish_url` / `furniture_url`, each null when the file is absent (0313).
+  Every scene in the two lists carries `still_url` / `still_night_url` (0363):
+  signed links to the room's still picture, decided from the scene document's
+  `still` field so a list never asks the bucket per room; null when there is
+  none.
 - `GET/POST /scenes/{id}/conversation` — the guest, at `FACTS_VERSION 4` and
   `PROMPT_VERSION 7`, SERVING since `api-public-00046-xig` (2026-08-25). SSE with a
   disconnect shield: the turn completes and persists even if the client stops
@@ -407,7 +418,7 @@ The guest has hands but not coordinates (0132): `propose`, `revert`, and `turn`
 carry no numeric field anywhere. A server-side solver owns geometry and refuses
 when it cannot ground an instruction.
 
-### api-internal — `api-internal-00001-hat`, image `20260831-144728`
+### api-internal — `api-internal-00002-jnm`, image `20260831-144728`
 
 `--no-allow-unauthenticated`, Cloud Run IAM gated. Hosts `/ingest/eventarc` and
 nothing else. Validates in order: `schema_version`, bundle_id cross-check
@@ -417,7 +428,7 @@ declared-blob presence (0105). A rejection is a `failed_invalid` or
 Terminal-failure scenes are stamped with `expire_at`; revival clears it; `ready`
 is never stamped.
 
-### perception-obj — `perception-obj-00001-dw6`, image `20260831-160150`
+### perception-obj — `perception-obj-00002-qv6`, image `20260831-160150`
 
 **Carries both ruled-on flags** (ruled 2026-08-25, 0243; verified from `gcloud`
 2026-09-19): the env has `PERCEPTION_MASK_REFINE=1` and `PERCEPTION_ARM_SELECT=1`,
@@ -430,6 +441,29 @@ rather than by recency.
 **A post-flip revision keeps the `candidate` tag it was deployed under** — the
 flip moves traffic and does not rename it. `tag: candidate` beside
 `percent: 100` is not a parked revision; read the traffic split, never the tag.
+
+**Two parked candidates carry a flag the serving revision does not** (checked
+2026-11-11). `00003-qaq` and `00004-vam` (tagged `candidate`, 0%) and the
+service template set `PERCEPTION_SAM3_INTERACTIVE=1`; the serving `00002-qv6`
+does not, and neither does `deploy_perception.sh`, whose `--set-env-vars`
+replaces the whole list. A deploy from the script matches what serves; under
+its own `CANDIDATE_TAG` it leaves `00004-vam` reachable. The two are the YC
+demo's hand-mask click tool (`/mask_edit`, `/mask_reconstruct`, built
+2026-11-02), whose code is not on main; the operator left `00004-vam` parked
+(2026-11-11). `services describe` shows the template, which is the newest
+revision's, so read a serving revision's env with `revisions describe`.
+
+**The serving image is `main` as of 2026-08-31, and main has moved since**
+(checked 2026-11-11). `20260831-160150` was built from `8135ab1e`: its Cloud
+Build source matches that commit's perception-obj, schemas and build config
+byte for byte. So the next deploy from main brings the still trigger (0363),
+and it is also the first cloud run of 0322/0323's `/process` rewrite: no SAM 3D,
+no `/compress` enqueue, `boxes.json` from the person's boxes. New rooms then
+show no object splats until the furniture step is live. The operator deferred
+that deploy on 2026-11-11 (punchlist G2-07); until it happens, a new room's
+still is queued by hand with `tools/enqueue_still.py`. Prove the trigger with a
+new scan: a replayed `/shell` on a ready room noops (`already_present`) and
+never asks for a still.
 
 Runs as `perception-obj-runtime@` under least privilege (0090) and is
 platform-gated — only `tasks-invoker@` holds `run.invoker` (0106). Scales to
@@ -478,7 +512,9 @@ Three pipeline stages plus a probe, all Cloud Tasks driven:
   geometry beside the rendered geometry, so closure never mutates measurement.
   Parametric materials come from a confidence-gated vision call over rectified
   evidence crops, with a load-bearing fallback: below the gate family is null
-  and the plane ships a clean matte in its measured albedo.
+  and the plane ships a clean matte in its measured albedo. After writing a
+  ready shell it asks scene-finish for the room's still (`still_enqueue.py`,
+  `SCENE_FINISH_URL`, 0363) — in the code, not yet in the serving revision.
 - **`/compress`** — transcodes each PLY to SPZ beside it plus a
   `compressed.json` index. ~5.8× smaller, Gaussian counts preserved exactly.
 - **Nested-mask collapse** rides association rather than being a stage:
@@ -569,6 +605,31 @@ Suite **1205 passed + 34 skipped** (`PYTHONPATH=<tree>/packages/schemas pytest
 services/perception-obj/tests`, `main`, 2026-09-19 — the PYTHONPATH is
 load-bearing, see the Python test policy).
 
+### scene-finish — `scene-finish-00001-poy`, image `20261110-213446`
+
+CPU only: 4 vCPU, 8 GiB, concurrency 1, scales to zero. Platform-gated like
+perception-obj (`--no-allow-unauthenticated`, `run.invoker` for
+`tasks-invoker@` only), and `/still` also checks the OIDC token's audience and
+email (`task_auth.py`): an operator's own identity token passes the gate and is
+refused by the route. `/render` has no check of its own beyond the gate. Runs as `scene-finish-runtime` (outputs
+bucket objectAdmin, captures objectViewer, `datastore.user`, queue enqueuer).
+The image holds the service, a Node driver, Playwright's Chromium headless
+shell and the website built with `NEXT_PUBLIC_SHELL_FINISH=1`; it draws with
+SwiftShader (0331, 0332).
+
+- **Deployed render-only (0363):** `/health`, `/render`, `/still`. The Claude
+  layer's routes (finish, furniture piece, furniture merge) are in the code but
+  not registered, and no Anthropic key is mounted.
+- **`/still {scene_id}`** opens the website's own room page at 1600 x 1200 from
+  its first corner view and writes `scenes/{id}/still.jpg`, plus
+  `still-night.jpg` only when twins are drawn; then it sets
+  `still: {night, rendered_at}` on the scene document with `update()`, never
+  `status`. A bare shell is drawn flat, as the room page draws it. Measured:
+  14 s on a fresh instance, 7 s warm.
+- **Who asks for a still:** perception-obj's `/shell` after a ready shell (once
+  it is deployed with `SCENE_FINISH_URL`), the furniture merge after it
+  publishes, and `tools/enqueue_still.py` by hand.
+
 ### Web app — `web/`, live at https://thegoodguest.web.app
 
 Next.js static export on Firebase Hosting. Routes: `/` (the landing, or a
@@ -654,12 +715,21 @@ silently paints at a 10px default.
 
 - **Deploy is candidate → smoke → flip** on every service, perception-obj
   included. `infra/RUNBOOK.md` carries the phases. `deploy_perception.sh` moves
-  the `serving` registry tag at the flip — do not skip it.
-- **Registry cleanup is a policy** (`infra/artifact-cleanup-policy.json`): keep
-  anything tagged `serving` or `buildcache`, keep the 3 newest `perception-obj`
-  and 10 newest `api-*`, delete the rest at any age.
+  the `serving` registry tag at the flip — do not skip it. Each lane deploys
+  under its own Cloud Run tag: `deploy_api_public.sh`,
+  `deploy_scene_finish.sh` and `deploy_perception.sh` take
+  `CANDIDATE_TAG=<lane>`; `deploy_api_internal.sh` still hardcodes
+  `candidate`. A brand-new service's first revision serves 100% whatever the
+  flags say.
+- **Registry cleanup is written, not applied.** `infra/artifact-cleanup-policy.json`
+  would keep anything tagged `serving` or `buildcache`, the 3 newest
+  `perception-obj` and the 10 newest `api-*`, and delete the rest of those at
+  any age; the `thegoodguest` repository has no cleanup policy (checked
+  2026-11-11, 45 GB). scene-finish images match none of its rules.
 - **Cloud Build carries a layer cache** (`--cache-from :buildcache`), measured
-  at 5.1× on a source-only perception build.
+  at 5.1× on a source-only perception build. scene-finish uploads with
+  `infra/cloudbuild/scene-finish.gcloudignore`, because the root
+  `.gcloudignore` leaves out `web/`, which its image is built from.
 - **Eventarc** trigger `captures-bundle-pb-finalized` delivers to
   `api-internal/ingest/eventarc`, with app-side path filtering.
 - **Retention** is configured and live, verified against the buckets and TTL
@@ -1162,6 +1232,10 @@ ever done or ruled, delete it — do not annotate it.
   207-entry tracker recorded nowhere else.
 - **`secondary_hex` is always null** — two-tone material separation was deferred
   as noisy.
+- **scene-finish's INFO logs never reach Cloud Logging.** `finish_server.py`
+  configures logging only when `LOG_LEVEL` is set, and `deploy_scene_finish.sh`
+  does not set it, so `/still`'s `still ok` line (render timings, GL renderer)
+  is dropped; warnings and errors still appear.
 - **The floor's rectangular stone pattern is real and detectable** and is the
   first candidate for `material.params` growth. Deliberately excluded from v1: a
   wrong pattern breaks recognition worse than a clean matte (0069).
@@ -1360,7 +1434,7 @@ It is a single checkbox in the console.
 
 **The SAM 3D clone must stay PINNED, and the reason is the layer cache as much as reproducibility.** The shared `:buildcache` is written from the pinned form, so an unpinned `git clone --depth 1` misses at layer 4 and rebuilds the mamba env and both sam3d pip installs — a ~50 minute build instead of ~10. Observed and cancelled on 2026-08-30.
 
-**Give every concurrent lane its own Cloud Run tag (0275).** `deploy_perception.sh --candidate` uses `--tag=candidate`, which is ONE mutable pointer: a second lane's deploy moves it off the first lane's revision silently, and probes still authenticate because `segment_frames.py` and `track_frames.py` pin the OIDC audience to the STABLE url. Pass your own tag and point `CANDIDATE_URL` at it. `/track` now records `K_REVISION` in its output so a mis-addressed probe is detectable after the fact.
+**Give every concurrent lane its own Cloud Run tag (0275).** `deploy_perception.sh --candidate` uses `--tag=candidate` unless `CANDIDATE_TAG` names another, and `candidate` is ONE mutable pointer: a second lane's deploy moves it off the first lane's revision silently, and probes still authenticate because `segment_frames.py` and `track_frames.py` pin the OIDC audience to the STABLE url. Pass your own tag (`CANDIDATE_TAG=<lane>`) and point `CANDIDATE_URL` at it. `/track` now records `K_REVISION` in its output so a mis-addressed probe is detectable after the fact.
 
 **Old registry images are deleted by policy, and the live one is kept BY NAME
 (decision 0190).** `infra/artifact-cleanup-policy.json` is the source of truth
