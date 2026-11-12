@@ -1,5 +1,5 @@
-/// Pins what a room row SAYS — the derivation from GET /scenes to the words on
-/// screen, as a table.
+/// Pins what the phone says about a room — the derivation from GET /scenes to
+/// a room's name and state, as a table.
 ///
 /// Two properties are worth naming. Nothing here invents a number: a scene whose
 /// `created_at` did not parse gets a name with no date in it, and a room still
@@ -26,7 +26,8 @@ private func scene(
     bundleId: String? = "b1",
     status: String = "ready",
     createdAt: Date? = nil,
-    rawCreatedAt: String? = nil
+    rawCreatedAt: String? = nil,
+    stillURL: String? = nil
 ) throws -> SceneResponse {
     let created: String
     if let rawCreatedAt {
@@ -35,7 +36,7 @@ private func scene(
         let formatter = ISO8601DateFormatter()
         created = formatter.string(from: createdAt ?? Date())
     }
-    let dict: [String: Any] = [
+    var dict: [String: Any] = [
         "scene_id": id,
         "bundle_id": bundleId as Any,
         "status": status,
@@ -44,6 +45,7 @@ private func scene(
         "created_at": created,
         "updated_at": created,
     ]
+    if let stillURL { dict["still_url"] = stillURL }
     let data = try JSONSerialization.data(withJSONObject: dict)
     return try JSONDecoder().decode(SceneResponse.self, from: data)
 }
@@ -55,12 +57,15 @@ final class RoomHistoryTests: XCTestCase {
     // MARK: - Title
 
     func testTitleTable() {
+        // The website's form, so one room reads the same on both. The year
+        // appears only when it is not this year's.
         let cases: [(Date?, Bool, String)] = [
-            (date(2026, 8, 21, 9, 5),  false, "today's room"),
-            (date(2026, 8, 20, 23, 59), false, "yesterday's room"),
-            (date(2026, 7, 12, 15, 40), false, "the July 12 room"),
-            (date(2026, 1, 3, 8, 0),   false, "the January 3 room"),
-            (nil,                       false, "a room you sent"),
+            (date(2026, 8, 21, 9, 5),  false, "The 21 August room"),
+            (date(2026, 8, 20, 23, 59), false, "The 20 August room"),
+            (date(2026, 7, 12, 15, 40), false, "The 12 July room"),
+            (date(2026, 1, 3, 8, 0),   false, "The 3 January room"),
+            (date(2025, 12, 30, 8, 0), false, "The 30 December 2025 room"),
+            (nil,                       false, "A room you sent"),
         ]
         for (sentAt, withTime, expected) in cases {
             XCTAssertEqual(
@@ -73,11 +78,11 @@ final class RoomHistoryTests: XCTestCase {
     func testTitleWithTimeAppendsLowercaseClock() {
         XCTAssertEqual(
             RoomHistory.title(sentAt: date(2026, 7, 12, 15, 40), now: now, withTime: true, calendar: calendar),
-            "the July 12 room, 3:40 pm"
+            "The 12 July room, 3:40 pm"
         )
         XCTAssertEqual(
             RoomHistory.title(sentAt: date(2026, 8, 21, 9, 5), now: now, withTime: true, calendar: calendar),
-            "today's room, 9:05 am"
+            "The 21 August room, 9:05 am"
         )
     }
 
@@ -86,21 +91,15 @@ final class RoomHistoryTests: XCTestCase {
         // a room whose timestamp did not parse.
         XCTAssertEqual(
             RoomHistory.title(sentAt: nil, now: now, withTime: true, calendar: calendar),
-            "a room you sent"
+            "A room you sent"
         )
     }
 
     // MARK: - Whole-list disambiguation
 
-    /// Two rooms from one day are told apart by the house's mono stamp column,
-    /// not by a time appended to the title.
-    ///
-    /// The title used to carry it, which made the disambiguation a fact about
-    /// the LIST — it needed to know whether any other room shared the day. It
-    /// is now a fact about the room: every summary carries the instant it was
-    /// sent, and the column decides what to print. So the titles are allowed to
-    /// repeat, and the thing that separates them is asserted below.
-    func testRoomsSharingADayRepeatTheirTitleAndAreSeparatedByTheirStamp() throws {
+    /// Two rooms from one day share a title here; `RoomCards` appends each
+    /// one's time on home (RoomCardsTests), from the instant asserted below.
+    func testRoomsSharingADayRepeatTheirTitleAndCarryTheirInstant() throws {
         let scenes = [
             try scene(id: "a", createdAt: date(2026, 8, 21, 16, 0)),
             try scene(id: "b", createdAt: date(2026, 8, 21, 11, 20)),
@@ -110,9 +109,9 @@ final class RoomHistoryTests: XCTestCase {
         let rows = RoomHistory.summaries(from: scenes, now: now, calendar: calendar)
 
         XCTAssertEqual(rows.map(\.title), [
-            "today's room",
-            "today's room",
-            "the July 12 room",
+            "The 21 August room",
+            "The 21 August room",
+            "The 12 July room",
         ])
         // What the column has to work with, and what makes the repeat legible.
         XCTAssertEqual(rows.compactMap(\.sentAt).count, 3)
@@ -127,7 +126,7 @@ final class RoomHistoryTests: XCTestCase {
             from: [try scene(id: "x", rawCreatedAt: "not-a-date")],
             now: now, calendar: calendar)
         XCTAssertNil(rows[0].sentAt)
-        XCTAssertEqual(rows[0].title, "a room you sent")
+        XCTAssertEqual(rows[0].title, "A room you sent")
     }
 
     func testServerOrderIsPreserved() throws {
@@ -148,7 +147,7 @@ final class RoomHistoryTests: XCTestCase {
             try scene(id: "b", rawCreatedAt: "also-not-a-date"),
         ]
         let rows = RoomHistory.summaries(from: scenes, now: now, calendar: calendar)
-        XCTAssertEqual(rows.map(\.title), ["a room you sent", "a room you sent"])
+        XCTAssertEqual(rows.map(\.title), ["A room you sent", "A room you sent"])
         XCTAssertEqual(rows.map(\.id), ["a", "b"])
     }
 
@@ -156,6 +155,16 @@ final class RoomHistoryTests: XCTestCase {
         let rows = RoomHistory.summaries(
             from: [try scene(id: "a", bundleId: "bundle-7")], now: now, calendar: calendar)
         XCTAssertEqual(rows.first?.bundleId, "bundle-7")
+    }
+
+    func testTheStillLinkIsCarriedWhenTheServerSendsOne() throws {
+        let rows = RoomHistory.summaries(
+            from: [try scene(id: "a", stillURL: "https://storage.example/still.jpg?sig=1"),
+                   try scene(id: "b")],
+            now: now, calendar: calendar)
+        XCTAssertEqual(rows[0].stillURL?.absoluteString, "https://storage.example/still.jpg?sig=1")
+        XCTAssertNil(rows[1].stillURL, "a server without stills sends none, and the room keeps its outline")
+        XCTAssertNil(rows[0].stillNightURL)
     }
 
     // MARK: - State
@@ -173,37 +182,6 @@ final class RoomHistoryTests: XCTestCase {
         for (status, expected) in cases {
             XCTAssertEqual(RoomHistory.state(for: status), expected, "\(status)")
         }
-    }
-
-    // MARK: - Status line
-
-    func testStatusLineTable() {
-        let sent = date(2026, 8, 21, 17, 0)   // 30 minutes before `now`
-        let cases: [(SceneStatus, String)] = [
-            (.ready,            "on your desk"),
-            (.queued,           "being rebuilt · 30 min so far"),
-            (.processing,       "being rebuilt · 30 min so far"),
-            (.unknown("x"),     "being rebuilt · 30 min so far"),
-            (.failedIncomplete, "needs one more send"),
-            (.failed,           "didn't make it to the desk"),
-            (.failedInvalid,    "didn't make it to the desk"),
-        ]
-        for (status, expected) in cases {
-            XCTAssertEqual(RoomHistory.statusLine(status: status, sentAt: sent, now: now), expected, "\(status)")
-        }
-    }
-
-    func testProcessingWithNoUsableStartSaysOnlyWhatItKnows() {
-        // No parseable start, or a start in the future (clock skew): report the
-        // state, not an elapsed time computed from a number we do not trust.
-        XCTAssertEqual(
-            RoomHistory.statusLine(status: .processing, sentAt: nil, now: now),
-            "being rebuilt"
-        )
-        XCTAssertEqual(
-            RoomHistory.statusLine(status: .processing, sentAt: now.addingTimeInterval(600), now: now),
-            "being rebuilt"
-        )
     }
 
     // MARK: - Elapsed phrasing
@@ -233,10 +211,10 @@ final class RoomHistoryTests: XCTestCase {
     // MARK: - Openability
 
     func testOnlyAReadyRoomWithABundleAndAWebOriginIsOpenable() {
-        let ready      = RoomSummary(id: "1", bundleId: "b", title: "t", statusLine: "s", state: .ready)
-        let processing = RoomSummary(id: "2", bundleId: "b", title: "t", statusLine: "s", state: .processing)
-        let failed     = RoomSummary(id: "3", bundleId: "b", title: "t", statusLine: "s", state: .failed)
-        let noBundle   = RoomSummary(id: "4", bundleId: nil, title: "t", statusLine: "s", state: .ready)
+        let ready      = RoomSummary(id: "1", bundleId: "b", title: "t", status: .ready)
+        let processing = RoomSummary(id: "2", bundleId: "b", title: "t", status: .processing)
+        let failed     = RoomSummary(id: "3", bundleId: "b", title: "t", status: .failed)
+        let noBundle   = RoomSummary(id: "4", bundleId: nil, title: "t", status: .ready)
 
         XCTAssertTrue(RoomHistory.isOpenable(ready, canOpenWeb: true))
         XCTAssertFalse(RoomHistory.isOpenable(ready, canOpenWeb: false))
@@ -263,7 +241,7 @@ final class RoomHistoryTests: XCTestCase {
         // not leave the phone, so following the link would reach a page asking
         // for an account that does not exist. A disabled row is the better
         // outcome, and this is what keeps it disabled.
-        let ready = RoomSummary(id: "1", bundleId: "b", title: "t", statusLine: "s", state: .ready)
+        let ready = RoomSummary(id: "1", bundleId: "b", title: "t", status: .ready)
         let lands = RoomHistory.webHandoffLands(hasWebOrigin: true, isLinked: false)
         XCTAssertFalse(RoomHistory.isOpenable(ready, canOpenWeb: lands))
     }

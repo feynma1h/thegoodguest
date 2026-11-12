@@ -32,7 +32,7 @@
 ///     not cache the returned string — it expires after 1 hour.
 ///
 /// Read by: CaptureManager (UID at stop-capture), UploadCoordinator (sign-in
-///          gate + token vending before upload session call), SignInSheet
+///          gate + token vending before upload session call), AccountSheet
 ///          (link/switch flow + published link state).
 
 import Combine
@@ -199,7 +199,7 @@ final class AuthManager: ObservableObject {
     /// uploaded).
     ///
     /// `idTokenString`/`rawNonce` come from the ASAuthorization flow in
-    /// SignInSheet; `fullName` is only non-nil on the FIRST authorization for
+    /// AccountSheet; `fullName` is only non-nil on the FIRST authorization for
     /// this Apple ID and is forwarded so Firebase records a display name.
     func linkAppleAccount(
         idTokenString: String,
@@ -212,7 +212,7 @@ final class AuthManager: ObservableObject {
 
     /// Upgrade the current (anonymous) user with a Google credential by
     /// LINKING — same core, same invariants as Apple (decision 0118). The
-    /// tokens come from the GIDSignIn flow in SignInSheet; no client nonce is
+    /// tokens come from the GIDSignIn flow in AccountSheet; no client nonce is
     /// involved (GIDSignIn owns its own replay protection).
     func linkGoogleAccount(idToken: String, accessToken: String) async -> LinkResult {
         await link(credential: GoogleAuthProvider.credential(
@@ -276,7 +276,7 @@ final class AuthManager: ObservableObject {
 
     /// Sign in to the account that already owns the provider identity (the
     /// Apple ID or Google account) — the one deliberate exception to the
-    /// no-UID-churn rule, and it only runs after SignInSheet has shown the
+    /// no-UID-churn rule, and it only runs after AccountSheet has shown the
     /// explicit warning and the user confirmed.
     /// Rooms scanned on this phone under the old anonymous UID stop being
     /// reachable from this install afterward.

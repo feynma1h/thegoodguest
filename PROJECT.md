@@ -178,11 +178,12 @@ regression.
 
 ### iOS capture app — `ios/TheGoodGuest/`
 
-Pro-only by design (decision 0071): non-LiDAR hardware lands on
-`UnsupportedDeviceView`. `RootFlowView` is the app root and the navigation
-coordinator, binding the Good Guest design system (decision 0072) to the real
-capture, auth, upload, and polling stack. Upload begins on the review screen's
-"Send it home", not on `stopCapture`.
+**Every iPhone scans** (0364): a LiDAR phone measures with LiDAR and RoomPlan,
+any other with the camera, and the guidance, the scan and review each say which
+— `LiDARGate.isSupported` is the one check. `RootFlowView` is the app root and
+the navigation coordinator, binding the design system (0366) to the real
+capture, auth, upload, and polling stack. Upload begins on review's "Send it",
+not on `stopCapture`.
 
 - **Capture.** ARKit world tracking, gravity-aligned, `.sceneDepth` where
   available, keyframes accumulated by pose delta (10 cm / 5°). RoomPlan runs
@@ -200,18 +201,18 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   nothing is dropped and nothing is gated on the reading**, deliberately, and
   the durable fix is an additive proto field carrying the statistic on the
   bundle, triggered by the next `capture_bundle.proto` change for any reason.
-- **Live floor plan** drawn from the RoomPlan delegate stream, replacing the old
-  placeholder sketch. Confidence gates naming: a low-confidence object renders
-  unlabelled and the guest hedges.
+- **Live floor plan** drawn from the RoomPlan delegate stream, in a small card
+  over the camera on LiDAR phones (0365). Confidence gates naming: a
+  low-confidence object renders unlabelled and the guest hedges.
 - **Live boxes (Debug builds only).** The Scan screen shows the camera with a
   dot on every object a prompt-free YOLOE-26 detector found; a tap boxes the
   object, and the box glides to each better fit as the person walks round it.
   The detector rides the capture's own ARSession (`CaptureManager.frameTap`), so
   the bundle is exactly what a scan without it records, and no box or still ever
   enters it (0301). Depth is LiDAR, or Depth Anything v2 Small on a phone without
-  it. One constant, `LiveBoxesFeature.isEnabled`, gates the camera layer and the
-  detector start, default ON; off, the Scan screen is stock and the floor plan
-  shows (0302). The code is compiled only under `#if DEBUG` and the AGPL model
+  it. One constant, `LiveBoxesFeature.isEnabled`, gates the boxes' camera layer
+  and the detector start, default ON; off, the Scan screen shows the plain
+  camera (0302, 0365). The code is compiled only under `#if DEBUG` and the AGPL model
   is never in git (0295); `tools/test_live_boxes_boundaries.py` pins both. How a
   mask becomes a box is 0296; glass, boxed from its outlines and the floor, 0299
   amended by 0300; Depth Anything v3 and the RoomPlan comparison, kept and off,
@@ -229,10 +230,10 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   exercised on a device (punchlist G1-06). There is deliberately no iOS
   sign-out. **Deletion is the account operation the phone offers instead**, and
   it is the one guideline 5.1.1(v) requires: `DeleteAccountView` reached from
-  the profile, `AccountDeletionClient` against `DELETE /account`, and an
+  the account sheet, `AccountDeletionClient` against `DELETE /account`, and an
   explicit local sign-out afterwards so the next launch is an honest first run
   rather than a token rejection discovering it. Its words are a pure table
-  (`DeleteAccountWording`) for the same reason home's sentence is.
+  (`DeleteAccountWording`) for the same reason the room screen's words are.
   **An Apple-linked account has its token revoked FIRST** — 5.1.1(v) wants both
   halves and Apple checks it (TN3194). `AppleAccountRevocation` re-authorizes
   at the moment of deletion rather than spending a code stored at sign-in,
@@ -253,8 +254,10 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   background OS-relaunch as well as on a foreground open, so no AppDelegate
   co-trigger is carried.
 - **Surfaces.** Scene-status polling with a server-anchored elapsed clock, a
-  Live Activity on Lock Screen and Dynamic Island, terminal-failure banners, and
-  a mint-429 screen that names the reset time rather than sleeping. Declaring a
+  Live Activity on Lock Screen and Dynamic Island, and one screen per room whose
+  every state — sending, being rebuilt, paused, the daily limit (naming the reset
+  time rather than sleeping), a stalled upload, missing files, a refusal — comes
+  from one pure table, `RoomStatusCopy` (0365). Declaring a
   new flight stands the previous room's status down, so no surface can narrate a
   finished room over a scan still going up (0217).
 - **The way to the web.** `NetworkConfig.webBaseURL` is
@@ -263,20 +266,24 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
   origin existing** (`RoomHistory.webHandoffLands`): rooms are scoped to the
   caller's token, an anonymous UID does not leave the phone, and Safari carries
   no session from the app — so an unlinked user following the link reaches a
-  page correctly asking them to sign in with an account they do not have. Every
-  surface that offers a room — the doorway CTA, the house's rows, the arrival
-  card — takes that one predicate, and for an unlinked identity they point at
-  signing in instead. **The doorway now takes ONE flag rather than two**: with an
-  origin configured, "is there a desk" and "will it recognise you" always agreed,
-  and the two states where they differed are not states the app has.
+  page correctly asking them to sign in with an account they do not have. The
+  one surface that offers a room on the web — the ready screen, reached from the
+  room just finished or from any ready room's card — takes that one predicate,
+  and for an unlinked identity it offers signing in instead.
 - **History.** `ScenesListClient` fetches `GET /scenes` — the caller's own
-  rooms, scoped to the token — and `RoomsStore` holds one answer for all three
-  surfaces that state a count: the returning-home strip, `RoomsListView`, and
-  `WhySignInSheet`'s invitation. The load state is four-way and its accessors
-  are Optional, so "no rooms" and "could not ask" cannot be collapsed (0206);
-  a failed fetch never renders as zero. Rows offer a tap only where one can
-  land — gated on `RoomHistory.webHandoffLands`, exactly as the doorway's CTA
-  is (see "The way to the web" above).
+  rooms, scoped to the token — and `RoomsStore` holds the one answer home's
+  cards are drawn from, through `RoomCards`, a pure table. The load state is
+  four-way and its accessors are Optional, so "no rooms" and "could not ask"
+  cannot be collapsed (0206); a failed fetch never renders as zero. Rooms are
+  named the way the website names them ("The 28 August room", with the time
+  added when two share a day).
+- **The room's picture** (`RoomPicture`) is scene-finish's still when the API
+  sends `still_url` / `still_night_url` (0363), and the measured floor outline
+  (`RoomOutline`, from the shell's floor polygon) until then. It is cached by
+  room, because the link is signed afresh on every call; asked for again when a
+  link arrives after the room did, because the still is drawn after ready; and
+  refreshed once per launch, because a furniture merge redraws it at the same
+  path.
 - **The mark.** `DesignSystem/Wordmark.swift` draws the same two interlocking
   rings as the app icon, from the generated `MarkGeometry.swift` (0193/0248).
   `RSBrand.name` stays the one-file swap for the name. **The mark and the name
@@ -291,38 +298,48 @@ capture, auth, upload, and polling stack. Upload begins on the review screen's
 - **Reclaim.** `CaptureReaper` frees a capture's record and files once the user
   has *seen* the outcome — never on mere upload success.
 
-**The screens were rebuilt to one shape (0254, 0257).** Home holds the claim,
-ONE sentence that reports, and the pinned action — nothing else. The sentence
-routes by priority (needs-you → Notes, arrival → the doorway, in flight → the
-desk, otherwise a standing fact → the house) and cannot stack, which is what
-stopped the claim being pushed down the page and what let it stop vanishing
-after the first scan. Everything home used to report moved to a screen of its
-own, reached from a **contents** screen behind the mark — a table of contents
-rather than a tab bar, so the four destinations are stated only when asked.
-`HomeLine`, `Contents` and `SurfacePlacement` are the three routing tables, all
-pure and table-tested; a test pins that the sentence and the contents sheet
-cannot disagree.
+**Home is your rooms, and each room has one screen (0365).** Home lists the
+rooms as cards, newest first, with the room on its way on top showing its three
+steps, Scan a room pinned and the account top right. A room's own screen
+replaces the desk, Notes and What's missing; ready is a dusk screen with the
+room's picture; account is one sheet; review takes in "I've got the room"; and
+capture shows the camera on every scan. `RoomCards`, `RoomStatusCopy` and
+`SurfacePlacement` are the routing tables, all pure and table-tested. The
+pinned action is opaque and full-bleed: content scrolls BEHIND it, so a
+transparent bar is one the body copy renders through (0287). `RSScreen`'s grid
+(0257) went with the screens it measured; one column came back as `RSLayout`
+(0367).
 
-**One grid, enforced and checkable.** `RSScreen` holds every shared
-measurement, `ScreenHeaderFrame` gives every header the same 44pt band, and
-`RSActions` fixes the action block's SHAPE — extras above, one filled button,
-then exactly one closing line — so a button's height off the bottom cannot
-depend on how many controls a screen has. A block pinned over a scroll region
-uses `rsPinnedActions`, which is opaque and full-bleed: `safeAreaInset` lets
-content scroll BEHIND what sits there, so a transparent bar is one the body
-copy renders through (0287).
+**One column, after the website (0367).** `RSLayout` holds the grid: every
+screen's title, lines, cards and pinned button start on one column, 16pt in on
+a phone (the website's `px-4`); on a wider window the column stops at 520pt,
+the website's paragraph measure, and centres (at 640 an iPad's lines ran to 94
+characters). `RSScreenTitle` sets every title in the content, home's included,
+with its last two words held together when they are short. `RSPinnedBar` is the
+one action bar, fading in over 22pt as the canvas's did. A hero picture is
+340pt, or 58% of what the screen shows. Cards take the website's 24pt corner
+and its card shadow (`rsCardShadow()`), hero pictures its 28. Sizes print to
+one decimal, as the website prints them. No Dark Mode (0366), enforced by
+`UIUserInterfaceStyle`.
 
-`tools/ios_screenshot_gallery.py` photographs **87 states** —
-one frame per distinct state rather than one per screen — at both the default
-text size and AX5, 174 frames, and `tools/ios_layout_audit.py` measures them and
-exits non-zero when an enforced screen deviates. `tools/ios_contact_sheet.py`
-turns a pass into one self-contained page for review. Last run 2026-08-28:
-**0 of 62 at both sizes**; default margin 25–29pt, header ink 81–89, first
-content 140–152, filled button 77–87pt off the bottom at left 26–28 and 346–350
-wide. **Two of the audit's five bounds are default-size only and are not
-enforced at AX5** — the first content line and the button's offset off the
-bottom both move legitimately when the header glyph above one and the closing
-line below the other grow (0252).
+`tools/ios_screenshot_gallery.py` photographs **70 states** — one frame per
+distinct state rather than one per screen — at any Dynamic Type size, light or
+dark, with or without Bold Text (`--bold`), on any simulator, and
+`tools/ios_contact_sheet.py` turns a pass into one page for review. **The
+layout audit (`tools/ios_layout_audit.py`) measures that column on any
+device**, reading each frame's size, scale and safe area from the image:
+titles, content and the pinned button's sides on the column, a title 34–39pt
+under the bar's centre, and the button's height above the safe area by what
+sits under it (nothing, a quiet action, a caption, or a caption over a quiet
+action). A frame shot blank, mid-transition or of something else is reported,
+never measured. Measured 2026-11-11 on an iPhone SE, 17 Pro, 17 Pro Max and
+iPad Pro 13 at default and AX5, and on the SE at AX5 with Bold Text: **every
+enforced state on the column except deletion's four that lose their bar**
+(open defects, iOS). **Two of its bounds are default-size only and are not
+enforced at AX5** — the title's top and the pill's offset off the bottom can
+both move legitimately when the type around them grows (0252). **The audit is
+a tripwire, not the judge** (0367): the frames, read against the design rules
+and the website, decide whether a screen is right.
 
 **Type stops at a CEILING, and tiers stop some of it earlier** (0258). The app
 holds Dynamic Type at `RSTypeSize.ceiling` — `.accessibility2`, body 17 → 33pt
@@ -331,54 +348,48 @@ between every pair of styles stays exactly where the default size has it: the
 accessibility layout is the same layout, larger. Within that, serif titles stop
 at **1.4×** (`RSTypeCap.display`), machine data at **1.6×** (`.mono`), and a
 control's label is clamped at `xxxLarge` by `rsControlLabel()` so a button keeps
-the shape its fixed padding gives it. Reading text scales freely to the ceiling
-and is capped by nothing else.
+the shape its fixed padding gives it, as is a label set on a picture (home's
+"An example room"). Reading text scales freely to the ceiling and is capped by
+nothing else. **With Bold Text on, every style steps a weight heavier**
+(`RSFont.bolder`: Regular to Semibold, Light to Medium, Semibold to Bold), as
+the system's faces do; the bundled faces are variable, so every step exists.
 
-**Machine truth is set in mono, uncontained — and the tracker now is too.**
-The capture screen's tracking indicator was a bordered capsule with a coloured
-status dot, the only element in the app in that shape; it is a mono readout in
-the same idiom as the coverage ticks below it and the desk's status line. Three
-things went with it: **the ordinary state is now the quiet one** (`.good` had
-carried the component's only glow, so nothing-is-wrong was the loudest thing on
-screen, and it is now set in the coverage labels' muted ink), the dot is gone
-and nothing replaces it (`.slowDown` and `.finding` share a colour, so it
-carried three values where the words carry four), and **the readout reports
-STATE while the guest's line keeps the instruction** — "Go a little slower"
-became `MOVING TOO FAST`, because an instruction in a status readout duplicates
-the channel the app already has for advice. All four strings sit in one switch
-in `LiveCaptureView.trackingReadout`.
+**Mono is for measurements only** (0366): sizes in JetBrains Mono, in
+text-sized terracotta. The capture screen's tracker is a glass pill that
+reports STATE — "Tracking", "Moving too fast", "Finding the room", "Too dark to
+see" — while the guest's line keeps the instruction, because an instruction in a
+status readout duplicates the channel the app already has for advice. Its dot
+is lit, in lamplight, only while tracking is good. All four strings sit in one
+switch in `LiveCaptureView.trackingPill`.
 
-**Nothing is dropped, reordered or restacked to fit.** The three
-`isAccessibilitySize` re-compositions are GONE — home's claim/sentence swap,
-the contents row stacking, the house's stamp dropping to its own line. Each was
-the right fix for unbounded type and each is dead weight under a ceiling: a
-second layout to verify, for no gain. `ContentsRowView` instead gives the title
-and the status `layoutPriority(1)` and lets the dot leaders yield, because a
-leader is filler — without that, "The house" wrapped to two lines at the ceiling
-while "The desk" did not.
+**Nothing is dropped, reordered or restacked to fit**, with one exception:
+the account ID goes on its own line under its label wherever the whole ID won't
+fit beside it, because data is never cut to keep a layout (0367). Under the
+ceiling each screen has one layout, larger; the `isAccessibilitySize`
+re-compositions that preceded it went with the screens they served, and the
+operator ruled against bringing any back for particular sizes (0367).
 
-**Measured across the 83 states that existed on 2026-08-29:** mean density 10.2% → 14.5%
-(**1.42×**), layout audit **0 of 62** at both sizes.
-`tools/ios_density_guard.py` bounds it by the arithmetic rather than by taste —
-ink area scales with the SQUARE of type size, so the same content at 1.94× is
-3.77× denser with nothing wrong, and **0 of 67** screens exceed that. A 2×
-target was arithmetically unreachable while showing everything: meeting it
-needed type below 1.41× or content removed, and both were ruled out. Read a
-ratio well BELOW the square as the interesting signal — it means content is
-falling off the bottom of the frame.
+`tools/ios_density_guard.py` bounds crowding by arithmetic rather than by taste
+— ink area scales with the SQUARE of type size, so the same content at 1.94× is
+3.77× denser with nothing wrong. On the redesigned screens **0 of 56** exceed it
+on any of four devices (SE, 17 Pro, 17 Pro Max, iPad Pro 13), and the mean
+screen is 1.26× (SE) to 1.43× (Pro Max) more inked at AX5 than at the default
+size. Read a ratio well BELOW the square as the interesting
+signal — it means content is falling off the bottom of the frame.
 
 **What it costs, plainly:** someone who sets the top step asks for 53pt body
 text and gets 33. That is a real reduction for the people the setting exists
 for, and it is why the ceiling is ONE constant.
 
 **The splash hands the mark over** rather than cutting to home (0255): the mark
-walks to the exact rectangle home publishes as an anchor preference, while home
-fades in behind it. Home's mark shows the way in by playing a dotted leader and
-the word MENU out from behind itself, once per launch — no caption, and the
-plate-and-chevron treatment that preceded it is gone.
+walks to home's own mark in the navigation bar while home fades in behind it. A
+bar item is hosted apart from the screen, so its anchor never reaches the
+splash's overlay; the bar mark reports its frame instead (`MarkSlotReport`). The
+launch screen is the same ground (`LaunchGround`), so nothing flashes white
+first.
 
-Suite **666**: 660 asserting offline tests + 2 boilerplate stubs + 4 live
-integration tests that require a reachable backend. See the iOS test policy
+Suite **953**: 941 asserting offline tests + 2 boilerplate stubs + 6 that skip
+by design + 4 live integration tests that require a reachable backend. See the iOS test policy
 section — it is the single source of truth for posture and how to run them.
 
 ### api-public — `api-public-00005-peg`, image `20261110-213446`
@@ -1014,36 +1025,6 @@ re-argued here.
   CONSUMERS — the generator warned, the test passed, and iOS's splash re-made the
   mistake anyway. All six other surfaces were audited and are correct, so this is
   a latent gap: the fix is a consumer-side pin. (0255)
-- **Notes has no past.** The design gives news an "EARLIER" list of observed
-  facts; that needs the phone to remember what it previously saw and diff
-  successive fetches. Deferred by operator ruling; the section does not render
-  rather than showing an empty shell. The arrival card is deferred with it, since
-  detecting an arrival is the same change detection.
-- **The menu peek's two greys are literal hexes**, given by the design brief and
-  named in one place in `MenuPeek.swift`. The only colours outside the token
-  system; they will not follow a brand repaint.
-- **The pinned-action rule reached ONE screen out of eleven when measured**, and
-  is now applied everywhere by `RSActions`. Kept for the finding: both named
-  screens are closed and **neither by a layout change to itself** — the rooms list
-  was replaced by `HouseView`, and `FailureView`'s buttons moved into a
-  `safeAreaInset`. Both were reachable by scrolling, which is why the suite was
-  green and why reading did not catch them. (0253, 0257)
-- **One filled button carries a glyph and two deliberately do not.** The guidance
-  sheet's denied CTA is `Label("Open Settings", systemImage: "gear")`; the two
-  buttons that START a capture ship bare, because at button size the product's
-  mark collapsed into a smudge and Apple's viewfinder was worse than nothing.
-  **This is a consistency question, not a layout one** — the label-wrap complaint
-  was fixed by the control-label clamp. Re-photograph before re-reporting it.
-  (0287)
-- **`WhySignInSheet` is presented by no call site** outside the screenshot
-  gallery, and its checklist reads "Your 1 rooms" where the sentence above reads
-  "one room". **Deliberately NOT fixed**: dead code accruing unverified fixes
-  rusts shut rather than staying ready. Give it a route or delete it; do not tidy
-  it. (0237)
-- **`RoomRow` centres its thumbnail against wrapped text.** At AX5 both lines wrap
-  and the tile rests between them. Exactly the `.center`-is-the-default form the
-  notice components were top-aligned to avoid; missed because the row is drawn in
-  a different file. (0253)
 - **A keyframe's manifest entry survives its JPEG failing to write.**
   `acceptFrame` appends synchronously while the encode happens later on
   `jpegQueue`, and both failure paths log and return without removing the entry.
@@ -1064,8 +1045,13 @@ re-argued here.
 - **Foreign-record stand-down drains one record per launch**, so N phantoms need
   N relaunch cycles. Deliberately not fixed: quieting the symptom before the
   churn's cause is known makes orphaning less visible, not less real. (0115)
-- **Terminal-failure UI has never rendered on hardware** — server-side scene
-  failure and blob-failure banners.
+- **The room screen's failure states have never rendered on hardware** — a
+  server-side scene failure, a stalled upload, missing files (0365).
+- **Deletion's last four states lose their navigation bar.** A bar with no item
+  and no title is dropped, so the title jumps 54pt; the layout audit reports
+  exactly these four on every device (4 of 56). `ready-guest`, with no share
+  button, drops its bar the same way and its picture sits 54pt higher than
+  `ready`'s. The canvas keeps a header on all of them. (0367)
 - **The 401 recovery-*success* leaf is untested.** The live test used a garbage
   token, exercising the give-up branch.
 - **Live boxes have not been walked on a phone in this form.** Offline: the
@@ -1191,10 +1177,11 @@ re-argued here.
   gaps copy, so it had become the identity function — and `ReviewCopyTests`'s
   five tests went with it, since every one pinned that precedence. Re-open
   triggers are in 0294 and are measured, not felt.
-- **ARKIT_ONLY placement and shell quality investment is parked.** The product is
-  Pro-only / LiDAR-first; the shipped path stays live and is strictly better than
-  before, but no further merge-knob grinding. The non-LiDAR device is not a test
-  target and must not shape decisions. (0071)
+- **ARKIT_ONLY placement and shell quality investment is parked — but no longer
+  moot.** Every iPhone scans now (0364), so camera-only captures will arrive, and
+  the camera-only shell path (0077's legacy v2) has never run on a real one. No
+  merge-knob grinding before the first real camera-only scan is measured.
+  (0071, 0364)
 - **There are no lockups, on either platform.** The fork between mono and serif is
   not resolved, it is DISSOLVED: the mark is the "oo" of the name, so setting the
   two together prints those letters twice. Chrome takes the mark alone; the card
@@ -1251,7 +1238,7 @@ ever done or ruled, delete it — do not annotate it.
   `didChange`/`didRemove` are deliberately unconsumed.
 - **Push is stubbed at a named seam** and waits on APNs. The QR bridge was the
   other one and is deleted (0294).
-  **The doorway handoff is LIVE and never needed an entitlement** — it is a
+  **The web handoff ("Open the room") is LIVE and never needed an entitlement** — it is a
   plain `open(_:)` of an https URL, and associated-domains governs only links
   an app CLAIMS, which this is not. "Pending associated-domains" was the wrong
   reading of why the link was missing; what was actually missing was a durable
@@ -1381,7 +1368,7 @@ The iOS suite is **667 tests total** (was 666; `BundleClockTests` added 1, the c
 
 **Posture: fail-closed-live, not fail-open.** Each integration test calls `XCTSkipIf(!RUN_INTEGRATION_TESTS)` — the fail-open default — but because the sole scheme always sets the flag, that skip path is never taken here. With the flag set they hit the live `/upload_session` contract and go **red if the backend is unreachable**. Running the suite therefore requires a reachable backend; an offline run will fail those 4 (expected, not a regression).
 
-**Honest count:** report as "661 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 4 live integration tests (require a reachable backend)", total 667 — not a bare total: the 2 stubs assert nothing and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-09-15, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **663**, and that suite holds exactly 4 tests, so the total is 667 and the offline set is 661 once the two stubs come out. **One of the 663 is skipped at runtime** — `AuthLinkingTests.test_appBundle_registersRedirectSchemeForLiveClientID`, which gates on the live Google client id — so 660 actually assert; it was skipping before this pass too and is not counted out above, to keep the arithmetic the same shape it has always had. The figures this replaced were 610 in one sentence and 620 in the next, and the second did not add up — 604 + 2 + 4 is 610, not 620 — so both were wrong and the arithmetic said so without anyone running anything.
+**Honest count:** report as "949 asserting offline unit tests + 2 boilerplate stubs (`testExample`/`testPerformanceExample`) + 6 that skip by design + 4 live integration tests (require a reachable backend)", total 961 — not a bare total: the 2 stubs assert nothing, the 6 skips need something the tree deliberately lacks, and the 4 integration tests carry an external dependency the unit tests don't. **Measured 2026-11-10, not carried forward**: `-skip-testing:TheGoodGuestTests/UploadSessionClientTests` executes **949** with 0 failures, and that suite holds exactly 4 tests, so the total is 953. **Six of the 949 skip at runtime**: `AuthLinkingTests.test_appBundle_registersRedirectSchemeForLiveClientID`, which gates on the live Google client id, and five `LiveBoxesModelTests`, which need the detector model that is never in git (0295). 949 − 2 − 6 = 941 assert. The figures this replaced (667 total, 2026-09-15) predate the live-boxes tests and the redesign.
 
 **No known flakes.** The one that was recorded here — `BlobUploadManagerTests.test_gate_lastDecrement_afterDrain_firesHandler` at roughly 1 run in 15 — was a production defect rather than a test defect, and is fixed (0239): the drain gate's last-decrement trigger hopped onto the actor through an unstructured `Task` that nothing held a handle on, so the test's `await Task.yield()` was a guess at how long the hop takes. The decrement is actor-isolated now and fires the gate inside `handleTaskCompletion`'s own defer, so awaiting that call IS the signal. Measured 2026-08-24 by holding the yield-less tests fixed and swapping only `BlobUploadManager.swift`: **2 failures in 16** with the hop, **0 in 22** without it. **A red suite is now a finding, not a re-run.**
 
@@ -1620,41 +1607,6 @@ evidence for a human deleting an entry, not authority to.
 **No board is kept in this file** — the forward list is `docs/punchlist.md`
 (below). `docs/NOT-FINAL.md` lists what is unfinished and which parts of it go
 live on the next deploy.
-
-### Owed: the operator's eyes on 20 screen states
-
-Twenty states across six screens were added or changed on 2026-09-01 and **no
-human has looked at any of them.** The list is here so the next session does not
-have to re-derive it. Photograph with `-rs.gallery.screen <id>`; the ids are
-exactly these.
-
-**SHOW ALL TWENTY. What is settled is the measurement, not the looking.** Every
-one of them was already shot at the default size and AX5 and measured by
-`tools/ios_layout_audit.py` — **0 of 15 enforced screens deviate at either
-size**, inside the app's usual ranges — so there is nothing to gain from running
-the audit again. That is the only thing this paragraph excuses. **What is owed
-is COPY and PROMINENCE**, which no instrument in this repo measures, and it is
-owed on all twenty.
-
-(The other five of the twenty are the doorway, which is full-bleed, and the
-states with no primary button. The audit abstains on those rather than inventing
-a reading — they are not screens to skip, and each still carries a reason below.)
-
-| screen | ids | why it needs an eye |
-|---|---|---|
-| **Delete everything** (NEW) | `delete-confirm`, `delete-working`, `delete-done`, `delete-done-empty`, `delete-done-notrevoked`, `delete-partial`, `delete-noid` | Every word is new and unreviewed. `DeleteAccountWording` is a pure table — read all seven side by side rather than one at a time, which is what it is a table for. |
-| **You** (changed) | `profile`, `profile-linked`, `profile-noid` | Gained the "Delete everything" row. **The judgment is prominence**: App Review must find it, and nobody should tap it by accident. It is deliberately quiet — a hairline and muted ink, not a button. |
-| **The doorway** (changed) | `doorway`, `doorway-noweb` | Was four states, now two, and both captions were rewritten. The unlinked one points at signing in rather than promising a desk that would turn the person away. |
-| **Review** (changed) | `review`, `review-sketch`, `review-preparing`, `review-cannot-send` | The thin-coverage branch was deleted (0294). Confirm nothing reads as though an "add more" path still exists. |
-| **The house** (changed) | `rooms-openable`, `rooms-list` | Rows now open on the web, but only for a linked identity. Pixels are unchanged; the behaviour is not. |
-| **Notes** (changed) | `notes-news-open`, `notes-news` | The arrival card inherits the same gate as the rows. |
-
-**Two worth looking at first.** `delete-done-notrevoked` at AX5 is where this
-pass found its one real defect — the manual Apple-revocation instruction sat
-below the fold under a fully visible button that ends the interaction, which a
-green suite and a passing audit both missed (0293). And the `doorway` /
-`doorway-noweb` pair reads best side by side, because the whole point is that
-the two can no longer disagree.
 
 **`docs/punchlist.md` is the forward list** — 38 entries in six gates, in
 dependency order, each carrying a `Check:` line. Start there for "what should I

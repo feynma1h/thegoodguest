@@ -24,9 +24,9 @@ struct RoomUploadLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RoomActivityAttributes.self) { context in
             LockScreenCard(stage: context.state.stage, startedAt: context.attributes.startedAt)
-                // Parchment, like every light surface in the app. The system
-                // supplies its own material behind this on some Lock Screens, so
-                // the tint is stated rather than assumed.
+                // White, like every card in the app. The system supplies its
+                // own material behind this on some Lock Screens, so the tint is
+                // stated rather than assumed.
                 .activityBackgroundTint(Color.rsSurface)
                 .activitySystemActionForegroundColor(Color.rsInk)
         } dynamicIsland: { context in
@@ -35,33 +35,34 @@ struct RoomUploadLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     Image(systemName: RoomActivityVoice.symbol(stage))
                         .font(.system(size: 20, weight: .regular))
-                        .foregroundStyle(RoomActivityVoice.tint(stage))
+                        .foregroundStyle(RoomActivityVoice.tint(stage, onDusk: true))
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     if let counter = RoomActivityVoice.counter(stage) {
                         Text(counter)
-                            .rsFont(.mono, size: 12)
-                            .foregroundStyle(Color.rsOnDark.opacity(0.7))
+                            .rsFont(.ui, size: 13, weight: .medium)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.rsOnDusk2)
                             .padding(.trailing, 4)
                     }
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(RoomActivityVoice.title(stage))
-                        .rsFont(.display, size: 15, weight: .medium)
-                        .foregroundStyle(Color.rsOnDark)
+                        .rsFont(.ui, size: 16, weight: .semibold)
+                        .foregroundStyle(Color.rsOnDusk)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(spacing: 8) {
                         if let fraction = stage.fraction {
-                            ProgressBar(fraction: fraction, tint: RoomActivityVoice.tint(stage),
-                                        track: Color.rsOnDark.opacity(0.18))
+                            ProgressBar(fraction: fraction, tint: RoomActivityVoice.tint(stage, onDusk: true),
+                                        track: Color.rsOnDusk.opacity(0.18))
                         }
                         Text(RoomActivityVoice.line(stage))
-                            .rsFont(.guest, size: 13)
-                            .foregroundStyle(Color.rsOnDark.opacity(0.75))
+                            .rsFont(.guest, size: 15)
+                            .foregroundStyle(Color.rsOnDusk)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -69,18 +70,19 @@ struct RoomUploadLiveActivity: Widget {
                 }
             } compactLeading: {
                 Image(systemName: RoomActivityVoice.symbol(stage))
-                    .foregroundStyle(RoomActivityVoice.tint(stage))
+                    .foregroundStyle(RoomActivityVoice.tint(stage, onDusk: true))
             } compactTrailing: {
                 Text(RoomActivityVoice.compact(stage))
-                    .rsFont(.mono, size: 12)
-                    .foregroundStyle(Color.rsOnDark.opacity(0.8))
+                    .rsFont(.ui, size: 13, weight: .medium)
+                    .monospacedDigit()
+                    .foregroundStyle(RoomActivityVoice.tint(stage, onDusk: true))
             } minimal: {
                 Image(systemName: RoomActivityVoice.symbol(stage))
-                    .foregroundStyle(RoomActivityVoice.tint(stage))
+                    .foregroundStyle(RoomActivityVoice.tint(stage, onDusk: true))
             }
             // The island is dark chrome by nature, so its accent stays inside the
             // stage's own tint rather than introducing a second accent colour.
-            .keylineTint(RoomActivityVoice.tint(stage))
+            .keylineTint(RoomActivityVoice.tint(stage, onDusk: true))
         }
     }
 }
@@ -94,37 +96,38 @@ private struct LockScreenCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: RoomActivityVoice.symbol(stage))
-                .font(.system(size: 19, weight: .regular))
-                .foregroundStyle(RoomActivityVoice.tint(stage))
-                .frame(width: 38, height: 38)
-                .background(RoomActivityVoice.tint(stage).opacity(0.12),
-                            in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(Color.rsInk)
+                .frame(width: 40, height: 40)
+                .background(Color.rsInset, in: Circle())
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(RoomActivityVoice.title(stage))
-                        .rsFont(.display, size: 15, weight: .medium)
+                        .rsFont(stage == .ready ? .display : .ui, size: stage == .ready ? 22 : 16,
+                                weight: stage == .ready ? .light : .semibold)
                         .foregroundStyle(Color.rsInk)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     if let counter = RoomActivityVoice.counter(stage) {
                         Text(counter)
-                            .rsFont(.mono, size: 11)
-                            .foregroundStyle(Color.rsInkFaint)
+                            .rsFont(.ui, size: 13, weight: .medium)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.rsInk2)
                             .layoutPriority(1)
                     }
                 }
 
                 Text(RoomActivityVoice.line(stage))
-                    .rsFont(.guest, size: 13.5)
-                    .foregroundStyle(Color.rsInkMuted)
+                    .rsFont(.guest, size: 15)
+                    .foregroundStyle(Color.rsInk)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let fraction = stage.fraction {
                     ProgressBar(fraction: fraction,
-                                tint: RoomActivityVoice.tint(stage),
-                                track: Color.rsHairline)
+                                tint: Color.rsInk,
+                                track: Color.rsInset)
                         .padding(.top, 3)
                 }
             }

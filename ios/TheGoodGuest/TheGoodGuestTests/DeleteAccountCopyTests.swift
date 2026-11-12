@@ -217,8 +217,8 @@ final class DeleteAccountCopyTests: XCTestCase {
     }
 
     func test_closingIsAlwaysOneLine() {
-        // RSActions holds the primary at one height by giving the closing slot
-        // exactly one line. A newline here moves the button.
+        // The pinned block is one filled button and one closing line, so the
+        // button sits at one height. A newline here moves the button.
         for state in allStates {
             XCTAssertFalse(
                 copy(state).closing.contains("\n"),

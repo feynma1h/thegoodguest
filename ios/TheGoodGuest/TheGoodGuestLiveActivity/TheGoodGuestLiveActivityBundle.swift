@@ -15,6 +15,12 @@ import WidgetKit
 
 @main
 struct TheGoodGuestLiveActivityBundle: WidgetBundle {
+    /// The extension is its own process, so it registers the shared faces
+    /// itself; the files ship in its bundle through `TheGoodGuestShared/Fonts`.
+    init() {
+        RSFontFiles.registerAll()
+    }
+
     var body: some Widget {
         RoomUploadLiveActivity()
     }

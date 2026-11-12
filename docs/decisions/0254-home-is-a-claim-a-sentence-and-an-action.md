@@ -1,7 +1,7 @@
 # 0254 — home is a claim, a sentence, and an action
 
 **Date:** 2026-08-28
-**Status:** Decided
+**Status:** Superseded by 0365 — home is a list of your rooms, and each room has one screen; the claim, the routed sentence and the contents screen are gone
 
 ## Context
 

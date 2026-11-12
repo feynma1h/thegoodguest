@@ -1,7 +1,7 @@
 # 0072 — iOS app design locked; LiDAR-only client pivot
 
 **Date:** 2026-07-24
-**Status:** Amended by 0302 — the Scan screen may show a camera while live boxes are on; the rest stands
+**Status:** Superseded by 0366 — the design it locked is replaced (0366), its spine by one home of rooms and one screen per room (0365), and its LiDAR-only client is reversed (0364). Was: Amended by 0302 — the Scan screen may show a camera while live boxes are on
 
 ## Context
 

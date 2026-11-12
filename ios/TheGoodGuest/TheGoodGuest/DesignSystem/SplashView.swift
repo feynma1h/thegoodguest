@@ -42,6 +42,7 @@
 /// it cross-fades to the mark in place. The information is identical; only the
 /// movement is gone.
 
+import Combine
 import SwiftUI
 
 /// The two ring pairs, interpolated. See the note above on why lerping these
@@ -111,7 +112,7 @@ private struct MorphingMark: View {
             ForEach(0..<min(start.count, end.count, slot.count), id: \.self) { i in
                 MorphingRing(gather: gather, landing: landing,
                              start: start[i], end: end[i], slot: slot[i])
-                    .fill(Color.rsAction, style: FillStyle(eoFill: true))
+                    .fill(Color.rsTerracotta, style: FillStyle(eoFill: true))
             }
         }
     }
@@ -149,8 +150,10 @@ private struct LetterPiece: View {
         let midX = (span.lowerBound + span.upperBound) / 2
         let home = CGPoint(x: midX, y: anchorStart.y)
 
+        // The letters are ink and only the rings are terracotta, as in the
+        // website's wordmark: the brand colour is the mark's, not the name's.
         FullScript(scale: scale, offset: offset)
-            .fill(Color.rsAction, style: FillStyle(eoFill: true))
+            .fill(Color.rsInk, style: FillStyle(eoFill: true))
             .clipShape(
                 Rectangle().path(
                     in: CGRect(
@@ -201,6 +204,11 @@ struct SplashView: View {
     @State private var scriptOpacity: CGFloat = 0
     @State private var markOpacity: CGFloat = 0
     @State private var veil: CGFloat = 1
+    /// Whether a slot has arrived, held as state because the timeline runs in
+    /// a task that captured this view when it started: home's mark lives in
+    /// the navigation bar now, which reports its frame a layout pass AFTER the
+    /// splash begins, and the captured `slot` would still say nil.
+    @State private var slotKnown = false
 
     /// How wide the name is set, and how tall the mark ends up. The wordmark
     /// floor is the binding constraint: the script's x-height is 16% of its
@@ -273,10 +281,11 @@ struct SplashView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .rsParchmentScreen()
+        .rsGroundScreen()
         .opacity(veil)
         .accessibilityElement()
         .accessibilityLabel(RSBrand.name)
+        .onChange(of: slot, initial: true) { _, new in slotKnown = new != nil }
         .task { await play() }
     }
 
@@ -375,7 +384,7 @@ struct SplashView: View {
     /// is not a motion decision — only how it gets there is.
     private func land() async {
         onSettle()
-        if slot != nil, !reduceMotion {
+        if slotKnown, !reduceMotion {
             withAnimation(.timingCurve(0.4, 0, 0.15, 1, duration: Timing.travel)) {
                 landing = 1
             }
@@ -440,6 +449,7 @@ extension View {
 private struct SplashOverlay: ViewModifier {
     @State private var showing = true
     @State private var contentIn: CGFloat = 0
+    @ObservedObject private var barSlot = MarkSlotReport.shared
 
     func body(content: Content) -> some View {
         content
@@ -452,7 +462,10 @@ private struct SplashOverlay: ViewModifier {
                 GeometryReader { proxy in
                     if showing {
                         SplashView(
-                            slot: anchor.map { proxy[$0] },
+                            slot: anchor.map { proxy[$0] } ?? barSlot.frame.map { global in
+                                let origin = proxy.frame(in: .global).origin
+                                return global.offsetBy(dx: -origin.x, dy: -origin.y)
+                            },
                             onSettle: {
                                 withAnimation(.easeOut(duration: 0.5)) { contentIn = 1 }
                             },
@@ -478,6 +491,19 @@ struct MarkSlotKey: PreferenceKey {
     static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
         value = value ?? nextValue()
     }
+}
+
+/// Where home's mark sits when it lives in the navigation bar, in window
+/// coordinates.
+///
+/// The bar is hosted apart from the screen's content, so an anchor preference
+/// set on a toolbar item never reaches the overlay the splash draws in. Home's
+/// bar mark reports its frame here instead, and the overlay converts it into
+/// its own space. `MarkSlotKey` still wins when a screen publishes one.
+@MainActor
+final class MarkSlotReport: ObservableObject {
+    static let shared = MarkSlotReport()
+    @Published var frame: CGRect?
 }
 
 private struct SplashIsPlayingKey: EnvironmentKey {

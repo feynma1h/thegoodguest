@@ -1,7 +1,7 @@
-/// LiDAR-only device gate (decision 0072). The app ships LiDAR-only for now, so
-/// there is one capture path and the tier split collapses on the client. This is
-/// the single runtime capability check; the spine integration shows
-/// `UnsupportedDeviceView` at the root when `isSupported` is false.
+/// Whether this phone measures with LiDAR. It used to be a gate (decisions 0071,
+/// 0072: LiDAR-only, with `UnsupportedDeviceView` at the root); every iPhone
+/// scans now, and this is the single runtime check that decides which way —
+/// LiDAR and RoomPlan, or the camera — and which words the screens use.
 ///
 /// Scene reconstruction (`.mesh`) is available only on LiDAR-equipped devices, so
 /// it is the canonical "is this a LiDAR device" signal and also exactly the
@@ -11,10 +11,8 @@
 ///  • The iOS Simulator reports false here (no LiDAR), so a hard root gate would
 ///    hide the flow during development — the spine treats the simulator as
 ///    supported via `#if targetEnvironment(simulator)`. Not a release path.
-///  • The App Store install-time hard gate is `UIRequiredDeviceCapabilities`
-///    (add `arkit` + a LiDAR capability) in the app's Info.plist — a RELEASE step,
-///    deliberately not set yet because it would also block the simulator and the
-///    non-LiDAR dev device. The backend keeps all tiers; this is a client gate only.
+///  • There is no install-time gate (`UIRequiredDeviceCapabilities`) and there
+///    must not be one: a camera-only iPhone is a supported phone.
 
 import ARKit
 

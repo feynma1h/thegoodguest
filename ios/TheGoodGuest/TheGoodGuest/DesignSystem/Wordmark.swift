@@ -23,12 +23,11 @@
 /// mark rather than an ellipse — is gone.
 ///
 /// The mark's colour is absolute rather than a `color` parameter, and it is the
-/// app's own token: `rsAction`. A mark that took the tint of whatever it sat
-/// next to would be a different mark on every screen; this one is the same
-/// object the person already met on their home screen. `tone` picks the ink and
-/// nothing else — terracotta on light chrome, and the reverse cream on the
-/// capture and failure surfaces, where terracotta on near-black reaches only
-/// 3.11:1 and reads too quiet at chrome sizes.
+/// app's own token: `rsTerracotta`. A mark that took the tint of whatever it
+/// sat next to would be a different mark on every screen; this one is the same
+/// object the person already met on their home screen. Terracotta on dusk
+/// reaches 3.9:1, enough for a graphic, so the mark is terracotta everywhere;
+/// `tone` keeps a light reverse for the rare place a mark sits on a photo.
 
 import SwiftUI
 
@@ -47,13 +46,13 @@ enum RSBrand {
 enum MarkTone {
     /// Terracotta, for light chrome. The mark as drawn.
     case ink
-    /// Cream, for the dark capture and failure surfaces.
+    /// Light, for a mark that has to sit on a photograph.
     case reverse
 
     var color: Color {
         switch self {
-        case .ink: .rsAction
-        case .reverse: .rsOnDark
+        case .ink: .rsTerracotta
+        case .reverse: .rsOnDusk
         }
     }
 }
@@ -167,8 +166,8 @@ struct Mark: View {
     VStack(spacing: 40) {
         Mark(height: 44)
         Mark(height: 20)
-        Mark(height: 34, tone: .reverse).padding(24).background(Color.rsCaptureBase)
+        Mark(height: 34, tone: .reverse).padding(24).background(Color.rsDusk)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color.rsBackground)
+    .background(Color.rsGround)
 }

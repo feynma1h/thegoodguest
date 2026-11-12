@@ -1,110 +1,65 @@
-/// Reusable Good Guest building blocks (design spec §10, decision 0072): the two
-/// button treatments, the guest line, the mono eyebrow, and the cream card
-/// surface. Screens compose from these so the language stays consistent and the
-/// rule of gold is enforced structurally — the gold CTA has its own style and is
-/// reached for only at light-semantic peaks (Pro-capture start, the doorway).
+/// The shared controls and text pieces, in the website's language.
+///
+/// ONE FILLED PILL PER SCREEN: ink on light screens, light on dusk ones. It is
+/// the action the screen exists for. Everything else is a quiet text action or
+/// a system button in the navigation bar. Terracotta never fills a control.
+///
+/// Labels are clamped by `rsControlLabel()` (decision 0258): a button keeps
+/// the shape its fixed padding gives it at every text size.
 
 import SwiftUI
 
-// MARK: - Buttons
-
-/// The primary action: rust fill, cream label, full-width, soft rust shadow.
-/// The everyday CTA — "Scan a room", "Send it home", "Scan the room again".
+/// The filled pill. Ink on light screens; on dusk, a light pill with dusk text.
 struct RSPrimaryButtonStyle: ButtonStyle {
+    var onDusk = false
+    /// Bold Text: the label's face is named, so it follows the setting only
+    /// when asked to.
+    @Environment(\.legibilityWeight) private var legibilityWeight
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(RSFont.ui(.headline, weight: .semibold))
+            .font(RSFont.ui(.headline, weight: legibilityWeight == .bold ? RSFont.bolder(.semibold) : .semibold))
             .rsControlLabel()
-            .foregroundStyle(Color.rsSurface)
-            // WRAPS, NEVER TRUNCATES. A filled button's label is the only
-            // statement of what the button does, and under vertical pressure
-            // Text's default is to truncate it: at AX5, review's dormant
-            // thin-coverage branch — the one arrangement with a quiet button
-            // ABOVE the primary — squeezed "Scan again from scratch" down to
-            // "Scan again fr…", which names no action at all. The same label
-            // wraps to two lines correctly in every other arrangement, so
-            // nothing about the label was the problem.
+            .foregroundStyle(onDusk ? Color.rsDusk : Color.white)
             .fixedSize(horizontal: false, vertical: true)
             .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 17)
-            .background(Color.rsAction, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: Color.rsAction.opacity(0.26), radius: 20, y: 8)
-            .opacity(configuration.isPressed ? 0.82 : 1)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .padding(.vertical, 2)
+            .padding(.horizontal, 22)
+            .background(onDusk ? Color.rsOnDusk : Color.rsInk, in: Capsule())
+            .contentShape(Capsule())
+            .opacity(configuration.isPressed ? 0.8 : 1)
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
-/// The light-semantic peak CTA: gold fill, ink label. Reserved for the
-/// light-quality moments — Pro-capture start and the doorway. NOT a generic
-/// accent button (see the rule of gold in RSColor).
-struct RSGoldButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(RSFont.ui(.headline, weight: .semibold))
-            .rsControlLabel()
-            .foregroundStyle(Color.rsInk)
-            // Same rule as the primary: a filled button's label wraps.
-            .fixedSize(horizontal: false, vertical: true)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 17)
-            .background(Color.rsGold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: Color.rsGold.opacity(0.4), radius: 24, y: 8)
-            .opacity(configuration.isPressed ? 0.85 : 1)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-/// A light primary for DARK surfaces — cream fill, ink label. The primary action
-/// on the ink-dark screens (terminal failure's "Scan the room again"), where a
-/// rust fill would recede into the warmth.
-struct RSLightButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(RSFont.ui(.headline, weight: .semibold))
-            .rsControlLabel()
-            .foregroundStyle(Color.rsInk)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .opacity(configuration.isPressed ? 0.85 : 1)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-/// A quiet secondary choice — text only, muted ink. "Not now", "Later".
+/// The quiet action: words in ink, no shape, a full-width 50pt target.
 struct RSQuietButtonStyle: ButtonStyle {
     var onDark = false
+    @Environment(\.legibilityWeight) private var legibilityWeight
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(RSFont.ui(.callout, weight: .medium))
+            .font(RSFont.ui(.callout, weight: legibilityWeight == .bold ? RSFont.bolder(.semibold) : .semibold))
             .rsControlLabel()
-            .foregroundStyle(onDark ? Color.rsOnDark.opacity(0.75) : Color.rsInkMuted)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .opacity(configuration.isPressed ? 0.6 : 1)
+            .foregroundStyle(onDark ? Color.rsOnDusk : Color.rsInk)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.55 : 1)
     }
 }
 
-// MARK: - Text roles
-
-/// A line in the guest's voice — serif italic. The default color reads on light
-/// surfaces; pass `onDark` for capture/failure screens.
+/// The guest speaking: Newsreader italic, in full ink. Reading text, so it
+/// scales to the ceiling and is capped by nothing else.
 struct GuestLine: View {
     let text: String
-    var size: CGFloat = 16
+    var size: CGFloat = 19
     var onDark = false
     var textAlignment: TextAlignment = .leading
-    /// Optional growth ceiling, for guest copy sitting between FIXED elements (the
-    /// capture overlay, where the mesh above and the shutter below don't move).
-    /// Body copy elsewhere scales uncapped.
     var maxSize: CGFloat?
 
-    init(_ text: String, size: CGFloat = 16, onDark: Bool = false, alignment: TextAlignment = .leading, maxSize: CGFloat? = nil) {
+    init(_ text: String, size: CGFloat = 19, onDark: Bool = false, alignment: TextAlignment = .leading, maxSize: CGFloat? = nil) {
         self.text = text
         self.size = size
         self.onDark = onDark
@@ -115,44 +70,61 @@ struct GuestLine: View {
     var body: some View {
         Text(text)
             .rsFont(.guest, size: size, maxSize: maxSize)
-            .foregroundStyle(onDark ? Color.rsOnDark.opacity(0.82) : Color.rsInkMuted)
+            .foregroundStyle(onDark ? Color.rsOnDusk : Color.rsInk)
             .multilineTextAlignment(textAlignment)
-            .lineSpacing(2)
+            .lineSpacing(3)
     }
 }
 
-/// A mono eyebrow — small, upper, tracked. Section labels, "YOUR ID", state tags.
-struct Eyebrow: View {
+/// The guest, under its own label, as on the website: the mark beside the
+/// words "The guest" (never beside the product's name, decision 0248), then
+/// what it says.
+struct GuestVoice: View {
     let text: String
+    var size: CGFloat = 19
     var onDark = false
 
-    init(_ text: String, onDark: Bool = false) {
+    init(_ text: String, size: CGFloat = 19, onDark: Bool = false) {
         self.text = text
+        self.size = size
         self.onDark = onDark
     }
 
     var body: some View {
-        Text(text.uppercased())
-            .rsFont(.mono, size: 10, weight: .semibold, cap: .mono)
-            .tracking(1.4)
-            .foregroundStyle(onDark ? Color.rsOnDark.opacity(0.5) : Color.rsInkFaint)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Mark(height: 11)
+                Text("The guest")
+                    .rsFont(.ui, size: 14, weight: .semibold, cap: .display)
+                    .foregroundStyle(onDark ? Color.rsOnDusk : Color.rsInk)
+            }
+            .accessibilityHidden(true)
+            GuestLine(text, size: size, onDark: onDark)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("The guest: \(text)")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-// MARK: - Surfaces
+/// A measurement, set the one way measurements are set: JetBrains Mono in
+/// text-sized terracotta. Nothing else in the app uses mono.
+struct MeasureText: View {
+    let text: String
+    var size: CGFloat = 13
+    var onDusk = false
 
-/// The cream card surface — hairline border, continuous corners, standard inset.
-struct RSCard<Content: View>: View {
-    var padding: CGFloat = 18
-    @ViewBuilder var content: Content
+    init(_ text: String, size: CGFloat = 13, onDusk: Bool = false) {
+        self.text = text
+        self.size = size
+        self.onDusk = onDusk
+    }
 
     var body: some View {
-        content
-            .padding(padding)
-            .background(Color.rsSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.rsHairline, lineWidth: 1)
-            )
+        Text(text)
+            .rsFont(.mono, size: size, weight: .medium, cap: .mono)
+            // On dusk the number is light; terracotta stays in the leader
+            // lines, where it is a graphic and 3:1 is enough.
+            .foregroundStyle(onDusk ? Color.rsOnDusk : Color.rsTerracottaText)
     }
 }

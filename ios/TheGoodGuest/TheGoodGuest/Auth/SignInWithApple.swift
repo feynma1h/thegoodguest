@@ -11,7 +11,7 @@
 /// AccountLinking.classifyLinkError when Google became a second link provider
 /// (decision 0118) — one classifier for both providers' link paths.
 ///
-/// Read by: SignInSheet (request/nonce wiring), AuthLinkingTests (pins).
+/// Read by: AccountSheet (request/nonce wiring), AuthLinkingTests (pins).
 
 import CryptoKit
 import Foundation
